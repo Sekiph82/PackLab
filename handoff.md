@@ -4,6 +4,11 @@
 
 **NEW**
 
+## Local Workspace
+
+- Canonical Windows path: C:\\Users\\sekip\\Desktop\\PackLab
+- GitHub repository: Sekiph82/PackLab
+
 ## Current Position
 
 - Current Milestone: M00 - Governance & Architecture
