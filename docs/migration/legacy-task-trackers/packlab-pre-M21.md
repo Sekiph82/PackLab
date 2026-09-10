@@ -1,19 +1,3 @@
-# PackLab — Canonical GitHub Task State
-
-This root TASKS.md is the only authoritative project-status tracker consumed by H!veAI. GitHub repository metadata and the latest commit are the remaining project-truth inputs. Hidden .hiveai control-plane files are historical only and are not read for current project state.
-
-## Project Status
-
-- Current Milestone: M00
-- Current Sprint: M00-S01
-- Current Task: PL-0001 — Create canonical repository structure specification and ownership rules.
-- Current Task Status: READY
-- Next Task/Action: Implement PL-0001, then request audit before advancing to PL-0002.
-- Required Actor: BUILDER
-- Tracking Repository: Sekiph82/PackLab
-- Tracking Branch: main
-
-## Tasks
 # PackLab - Master Task Plan
 
 > Canonical execution tracker.
@@ -745,5 +729,3 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 8. Never mark a Milestone complete until every non-deferred task inside it is checked.
 9. Never delete failed evidence. Summarize it in handoff.md and preserve relevant logs outside Git when large/sensitive.
 10. No secret, private key, Apple credential, provisioning private material or private Kenya scan is committed to this public repository.
-
-
