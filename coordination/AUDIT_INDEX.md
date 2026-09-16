@@ -74,7 +74,18 @@ Each reusable finding uses a permanent `AL-PL-xxxx` ID and records:
 
 **Origin:** `PL-0002-C001 / CHATGPT_AUDIT_V01.md`.
 
+### AL-PL-0007 — Do not self-reference the future log commit SHA
+
+**Applies to:** all Codex implementation logs.
+
+**Finding:** a `CODEX_LOG_VNN.md` file cannot truthfully contain the SHA of the commit that contains that same final log content before that commit exists. Treating a pre-log implementation SHA as `finalCommit` creates misleading metadata even when the actual GitHub ancestry is correct.
+
+**Required behavior:** Codex logs should record the synchronized starting commit and the implementation commit. They should not predeclare the future log-containing commit SHA. ChatGPT records the actual log commit / audited head from GitHub in the independent audit artifact after the log is pushed.
+
+**Origin:** `PL-0003-C001 / CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
 - `PL-0001-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. Repository structure/ownership specification accepted. Local first-bootstrap commands remain Codex E1/E2 evidence; actual GitHub scope, document content, commit ancestry, push state, and protected-file isolation were independently inspected.
 - `PL-0002-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. PackLab glossary accepted against all 88 frozen criteria. Actual GitHub range contained only `GLOSSARY.md` plus the matching Codex log. Local Git/PowerShell commands remain Codex E1/E2; glossary semantics and final diff were independently inspected.
+- `PL-0003-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. ADR process and ADR-0001 accepted against all 123 frozen criteria. Actual GitHub range contained only the two authorized ADR documents plus the matching Codex log. A reusable log-metadata rule was added to avoid self-referential future commit SHAs.
