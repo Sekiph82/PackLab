@@ -1,40 +1,47 @@
-# PackLab Claude Instructions
+# PackLab Auxiliary Agent Instructions
 
-PackLab uses the current H!veAI GitHub-first tracking architecture.
+PackLab uses a GitHub-first H!veAI tracking and session-coordination architecture.
 
-## Project authority
+## Authority
 
 - Canonical repository: `Sekiph82/PackLab`
 - Canonical branch: `main`
-- Root `TASKS.md` is the **only authoritative project-status tracker**.
-- GitHub `main` is project truth; a local checkout is only an execution workspace.
+- GitHub `main` is repository truth.
+- Root `TASKS.md` is the **only live project-status tracker**.
+- ChatGPT is the sole writer of root `TASKS.md` lifecycle/progress/task-closure state.
+- Session artifacts under `coordination/sessions/` are work orders/evidence, not live state.
 
-Do not read, create, restore, or update `.hiveai/*` files as current project state. The former `.hiveai` control-plane architecture is superseded.
+## Current implementation actor
 
-Do not maintain current milestone, sprint, task, progress, next action, or required actor in this file or any other competing ledger.
+Codex is the default implementation/test actor unless the owner or root `TASKS.md` explicitly assigns another actor.
 
-## Start of work
+Codex work is governed primarily by `AGENTS.md`, `coordination/README.md`, and `coordination/AUDIT_POLICY.md`.
 
-1. Safely synchronize with `origin/main` using fetch plus fast-forward-only behavior.
-2. Read root `TASKS.md` first.
-3. Use the explicit `## Project Status` fields as authoritative; never infer the current task from the first unchecked checkbox.
-4. Read only the extra files required by the explicitly active task.
+## Work-order model
 
-Do not use reset, rebase, force-push, destructive checkout, or silent stash to resolve divergence.
+For an authorized task, the implementer reads the active:
 
-## Supporting files
+- `coordination/sessions/<CYCLE_ID>/CODEX_PROMPT_VNN.md`
+- `coordination/sessions/<CYCLE_ID>/CHATGPT_AUDIT_CRITERIA_VNN.md`
 
-- `AUDIT.md` is audit evidence, not current project state.
-- `handoff.md` is a non-authoritative workflow aid.
-- `IMPLEMENTATION_GUIDE.md` is reference material and should be opened only as needed for the active task.
-- A root `README.md` does not yet exist because its creation is planned as `PL-0020`; do not repeatedly search for it or create it early.
+The implementer writes only the matching implementation evidence:
 
-## Task discipline
+- `coordination/sessions/<CYCLE_ID>/CODEX_LOG_VNN.md`
 
-- Work only on the task explicitly declared in root `TASKS.md` or directly assigned by the owner.
-- Preserve permanent `PL-xxxx` task IDs.
-- Do not invent project state or completion percentages.
-- Do not mark a task complete without the audit/acceptance required by the PackLab task plan.
-- Do not opportunistically implement later tasks.
+The implementer never writes the ChatGPT audit file and never edits `TASKS.md`.
 
-When work changes repository files, run the required checks, review the diff, commit, push to `origin/main`, and verify remote synchronization before claiming completion.
+After handoff `AWAITING_AUDIT`, ChatGPT audits the actual GitHub state, writes `CHATGPT_AUDIT_VNN.md`, updates `TASKS.md`, and either closes/advances the task or issues the next remediation prompt version.
+
+## Synchronization
+
+Local workspace: `C:\Users\sekip\Desktop\PackLab`.
+
+The owner has authorized one initial GitHub-authoritative alignment. Only the active prompt may invoke that bootstrap exception. After bootstrap, normal synchronization is fetch/compare/fast-forward-only and unexpected divergence must stop the session unless the owner explicitly authorizes replacement.
+
+## Supporting documents
+
+- `IMPLEMENTATION_GUIDE.md` contains architecture and implementation guidance; it is not a state tracker.
+- `coordination/AUDIT_INDEX.md` contains reusable audit learnings; it is not a state tracker.
+- `AUDIT.md` and `handoff.md` are non-authoritative compatibility/reference files.
+
+Never create a competing current milestone/task/progress/next-action ledger.
