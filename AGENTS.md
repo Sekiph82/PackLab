@@ -2,17 +2,29 @@
 
 ## Canonical project truth
 
-PackLab follows the current H!veAI GitHub-first, root-`TASKS.md` tracking contract.
+PackLab is GitHub-first.
 
 - Repository: `Sekiph82/PackLab`
 - Canonical branch: `main`
-- GitHub `main` is the authoritative repository state.
-- Root `TASKS.md` is the **only authoritative project-status and task-tracking source**.
-- Local folders are execution workspaces, not project truth.
+- GitHub `main` is authoritative repository truth.
+- Root `TASKS.md` is the **only live project-status tracker** and only H!veAI current-state surface.
+- Local workspace: `C:\Users\sekip\Desktop\PackLab`
+- Local files are execution workspace, not project truth.
 
-Do not create, restore, or use `.hiveai/PROJECT.json`, `.hiveai/TASKS.md`, `.hiveai/RULES.md`, `.hiveai/EVENTS.jsonl`, `.hiveai/STATE.json`, `.hiveai/HANDOFF.md`, or any other `.hiveai` control-plane file as live project state. That architecture is superseded.
+Do not create or use a second current-task/progress/milestone/actor ledger.
 
-Do not maintain a competing current-task, progress, milestone, sprint, next-action, or handoff ledger in another file.
+## Role ownership
+
+Codex is the implementation/test actor.
+
+ChatGPT is the independent auditor, Codex prompt/criteria author, audit-memory owner, and **sole writer of root `TASKS.md` lifecycle/progress/task-closure state**.
+
+Codex must not edit root `TASKS.md`, must not create ChatGPT audit verdicts, and must not advance to a new task after implementation.
+
+Full policy:
+- `coordination/README.md`
+- `coordination/AUDIT_POLICY.md`
+- `coordination/AUDIT_INDEX.md`
 
 ## H!veAI parser contract
 
@@ -29,62 +41,113 @@ Preserve these fields and their meanings:
 - `Tracking Repository`
 - `Tracking Branch`
 
-Task rows in `TASKS.md` use the repository's permanent `PL-xxxx` IDs and checkbox/status markers. Do not infer the current task by scanning for the first unchecked checkbox; the explicit Project Status section is authoritative.
+Never infer the current task by scanning for the first unchecked checkbox.
 
-Do not derive live project state from README files, prose, historical prompts, audit logs, builder logs, `IMPLEMENTATION_GUIDE.md`, `AUDIT.md`, `handoff.md`, or arbitrary Markdown discovery.
+`TASKS.md` is the only live state. `AUDIT.md`, `handoff.md`, `IMPLEMENTATION_GUIDE.md`, coordination artifacts, logs and historical prompts are evidence/reference only.
 
-## Session start and synchronization
+## Session-based execution
 
-Before project work:
+Codex does not invent its own work order.
 
-1. Confirm the Git root is this PackLab repository.
-2. Run `git fetch origin main`.
-3. Compare local HEAD with `origin/main` using `git rev-list --left-right --count HEAD...origin/main`.
-4. If local HEAD is behind and the tracked worktree is safe to fast-forward, run `git merge --ff-only origin/main`.
-5. Read root `TASKS.md` first.
-6. Read only the additional project files that the active task actually requires.
+For the task authorized by `TASKS.md`, Codex must execute the active versioned prompt under:
 
-Never use reset, force-push, destructive checkout, automatic rebase, or silent stash to manufacture synchronization. If a safe fast-forward is not possible, stop and report the exact divergence or conflicting tracked changes.
+`coordination/sessions/<CYCLE_ID>/CODEX_PROMPT_VNN.md`
+
+and read the matching:
+
+`coordination/sessions/<CYCLE_ID>/CHATGPT_AUDIT_CRITERIA_VNN.md`
+
+The prompt defines exact scope, allowed files, validation commands and expected log path.
+
+After implementation Codex writes exactly the matching:
+
+`coordination/sessions/<CYCLE_ID>/CODEX_LOG_VNN.md`
+
+then commits/pushes authorized implementation/evidence, returns `AWAITING_AUDIT`, and stops.
+
+Codex must never create or edit:
+
+`coordination/sessions/<CYCLE_ID>/CHATGPT_AUDIT_VNN.md`
+
+ChatGPT creates the audit after inspecting the log and actual GitHub state.
+
+## Synchronization
+
+### One-time owner-authorized bootstrap
+
+The owner has explicitly declared GitHub `origin/main` correct for the first alignment of `C:\Users\sekip\Desktop\PackLab`.
+
+Only when the active Codex prompt explicitly authorizes the bootstrap:
+
+1. confirm the Git root is PackLab;
+2. confirm `origin` points to `Sekiph82/PackLab`;
+3. fetch `origin/main`;
+4. align tracked local state exactly to `origin/main` using the prompt's commands;
+5. remove only non-ignored untracked files when explicitly instructed;
+6. never use `git clean -fdx`.
+
+This bootstrap exception ends once the local checkout is proven equal to GitHub `main`.
+
+### Normal sessions after bootstrap
+
+1. `git fetch origin main`
+2. compare local HEAD with `origin/main`;
+3. fast-forward only when safe;
+4. stop and report unexpected local divergence or conflicting tracked changes.
+
+Do not reset, rebase, force-push, destructive-checkout or silently stash in normal sessions unless a later owner-authorized prompt explicitly permits it.
 
 ## Scope discipline
 
-Work only on the task explicitly declared by `TASKS.md` or explicitly assigned by the owner.
-
-- Preserve permanent `PL-xxxx` task IDs.
-- Do not silently skip blocked tasks.
-- Do not mark a task `[x]` merely because code was written. PackLab's task plan requires the applicable independent audit/acceptance gate before validated completion.
-- Do not invent project progress percentages or state.
+- Work only on the frozen active prompt.
+- Preserve permanent `PL-xxxx` IDs.
 - Do not implement future tasks opportunistically.
+- Do not mark tasks complete.
+- Do not invent progress percentages.
+- Do not rewrite governance/audit files unless the active prompt explicitly authorizes the exact file.
+- If actual repository state contradicts the prompt or TASKS.md, stop and report the mismatch.
 
-The absence of a root `README.md` is currently intentional: creating it is planned as task `PL-0020`. Do not search repeatedly for a missing README or create it early unless the active task is `PL-0020` or the owner explicitly asks for it.
+## Evidence requirements
 
-`IMPLEMENTATION_GUIDE.md` is a reference document, not an automatic session-start input. It is large; open only the sections relevant to the active task.
+Codex runtime checks are implementer evidence, not independent audit proof.
 
-## Evidence and supporting documents
+The matching `CODEX_LOG_VNN.md` must include:
+- starting and final commit;
+- synchronization result;
+- prompt/criteria read;
+- files changed;
+- implementation details;
+- exact commands/tests;
+- expected result and failure condition for material checks;
+- actual results;
+- failures/fixes;
+- negative/boundary/regression coverage;
+- known limitations/unverified assumptions;
+- secrets/privacy review;
+- commit/push evidence;
+- `AWAITING_AUDIT` handoff.
 
-`AUDIT.md`, `handoff.md`, documentation, implementation guides, prompts, and logs may provide evidence or implementation context, but they do not override root `TASKS.md` as current project state.
+## Completion
 
-- `AUDIT.md` records audit evidence/results.
-- `handoff.md` is a non-authoritative workflow aid.
-- Historical documents remain historical evidence and must not become a second tracker.
+A Codex implementation pass is not project completion.
 
-## Completion and GitHub synchronization
-
-When repository work changes tracked files:
-
-1. Run the task's required tests/checks.
-2. Review the diff for scope and safety.
-3. Commit the intended changes.
-4. Push to `origin/main` unless the owner explicitly requested a different workflow.
-5. Verify the remote state before claiming completion.
-
-A local-only change is not a synchronized H!veAI project update.
-
-If task state legitimately changes, root `TASKS.md` must remain truthful and parser-compatible. Do not create any parallel state store.
+After `AWAITING_AUDIT`:
+1. Codex stops.
+2. ChatGPT audits GitHub source/diff/evidence against the frozen criteria.
+3. ChatGPT writes `CHATGPT_AUDIT_VNN.md`.
+4. ChatGPT updates root `TASKS.md` to audited truth after every audit.
+5. PASS advances/closes only proven tasks.
+6. CHANGES_REQUIRED keeps the task open and causes ChatGPT to issue VNN+1 prompt/criteria.
 
 ## Safety
 
-- Never commit secrets, credentials, signing material, local caches, user data, generated reconstruction intermediates, or machine-specific runtime state.
-- Do not overwrite unrelated user changes.
-- Do not delete history or branches as a shortcut to resolve divergence.
-- Prefer bounded, reversible changes and explicit failure reporting.
+Never commit:
+- secrets or credentials;
+- Apple signing private material;
+- GitHub/API tokens;
+- private Kenya scans;
+- confidential supplier files;
+- local caches/environments;
+- generated reconstruction intermediates unless a specific task explicitly defines a safe fixture.
+
+Prefer bounded, reversible implementation changes and explicit failure reporting.
