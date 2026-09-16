@@ -1,34 +1,27 @@
-# PackLab Audit Evidence
+# PackLab Audit Compatibility Note
 
-> **Evidence only.** Root `TASKS.md` on GitHub `main` is the sole authoritative project-status tracker consumed by H!veAI.
+> **Non-authoritative compatibility file.** Root `TASKS.md` is the only live H!veAI/project-status tracker.
 
-`AUDIT.md` records independent audit findings and acceptance evidence. It must not become a competing source for current milestone, sprint, task, next action, required actor, or project progress.
+PackLab independent audit artifacts are stored per cycle under:
 
-## Audit workflow
+`coordination/sessions/<CYCLE_ID>/CHATGPT_AUDIT_VNN.md`
 
-A PackLab implementation task may be marked validated complete in root `TASKS.md` only after the audit/acceptance gate required by the task plan has passed.
+Audit policy:
 
-For each audit, record at minimum:
+`coordination/AUDIT_POLICY.md`
 
-- task ID;
-- audited commit SHA or commit range;
-- files/symbols inspected;
-- commands/tests executed and their results;
-- acceptance criteria checked;
-- defects/findings with severity;
-- residual risks or unverified items;
-- final verdict: `PASS`, `CONDITIONAL`, or `FAIL`.
+Reusable audit learnings:
 
-Builder claims are not audit proof. Prefer repository source, configuration, tests, committed artifacts, and reproducible runtime evidence.
+`coordination/AUDIT_INDEX.md`
 
-A passing test suite does not override a direct contract violation. Missing evidence remains `UNVERIFIED`; never manufacture a PASS.
+## Ownership
 
-## Current audit queue
+- Codex writes only matching `CODEX_LOG_VNN.md` implementation evidence plus files authorized by the active prompt.
+- ChatGPT writes `CHATGPT_AUDIT_VNN.md`, audit criteria/prompts, reusable audit learnings, and root `TASKS.md` lifecycle/progress/task closure.
+- Codex must never assign itself an audit PASS or edit root `TASKS.md`.
 
-No PackLab implementation task has been independently accepted yet.
+## Live state
 
-The canonical current task and next action must be read from root `TASKS.md`; they are intentionally not duplicated here.
+Do not record current milestone, sprint, task, actor, progress, next action or audit queue here.
 
-## History
-
-Append future audit records below this line or move to task-specific audit artifacts if the project later adopts that structure. Historical audit records must remain evidence, not live tracker state.
+Always read the explicit `## Project Status` section in root `TASKS.md` for current project truth.
