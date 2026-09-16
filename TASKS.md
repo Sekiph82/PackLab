@@ -6,10 +6,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M00
 - Current Sprint: M00-S01
-- Current Task: PL-0001 — Create canonical repository structure specification and ownership rules.
+- Current Task: PL-0002 — Create project glossary covering Scan Mesh, Design Model, Digital Twin, PackScan, Label Zone, BREP, SfM and MVS.
 - Current Task Status: READY
-- Next Task/Action: Implement PL-0001, then request audit before advancing to PL-0002.
-- Required Actor: BUILDER
+- Next Task/Action: Execute `coordination/sessions/PL-0002-C001/CODEX_PROMPT_V01.md` with its matching audit criteria, then return `AWAITING_AUDIT` for independent ChatGPT audit.
+- Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
 
@@ -18,15 +18,17 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 > Canonical execution tracker.
 > Every implementation task has a permanent PL-xxxx ID.
-> A task may be checked [x] only after an independent AI audit returns PASS in AUDIT.md.
+> A task may be checked [x] only after the matching independent `coordination/sessions/<CYCLE_ID>/CHATGPT_AUDIT_VNN.md` returns `AUDITED_PASS` and ChatGPT updates this file.
 
 ## Status Legend
 
 - [ ] Not completed / not audit-approved
 - [x] Implemented, independently audited, and accepted
 - BLOCKED - dependency or external requirement is missing
-- DEFERRED - intentionally postponed with reason recorded in handoff.md
-- AUDIT-PENDING - implementation exists but remains unchecked until audit PASS
+- DEFERRED - intentionally postponed with reason recorded by ChatGPT in this tracker and supporting evidence
+- AUDIT-PENDING - implementation/log exists but independent ChatGPT audit has not yet closed the task
+- CHANGES_REQUIRED - independent audit found mandatory corrections; task remains unchecked
+- OWNER_REQUIRED - human-controlled decision/evidence is required before closure
 
 ## Milestones
 
@@ -59,7 +61,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M00-S01 - Repository governance
 
-- [ ] **PL-0001** Create canonical repository structure specification and ownership rules.
+- [x] **PL-0001** Create canonical repository structure specification and ownership rules.
 - [ ] **PL-0002** Create project glossary covering Scan Mesh, Design Model, Digital Twin, PackScan, Label Zone, BREP, SfM and MVS.
 - [ ] **PL-0003** Create Architecture Decision Record (ADR) process and first ADR for the monorepo.
 - [ ] **PL-0004** Document supported host/device baseline: Windows Acer laptop + iPhone 16 Standard, no LiDAR assumption.
@@ -72,11 +74,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M00-S02 - AI execution protocol
 
-- [ ] **PL-0011** Validate handoff.md -> IMPLEMENTATION_GUIDE.md -> task -> AUDIT.md -> TASKS.md workflow with a no-code dry run.
+- [ ] **PL-0011** Validate the canonical session workflow: TASKS.md -> CODEX_PROMPT/AUDIT_CRITERIA -> CODEX_LOG -> CHATGPT_AUDIT -> ChatGPT TASKS.md update.
 - [ ] **PL-0012** Define builder-AI responsibilities and forbidden actions.
 - [ ] **PL-0013** Define independent auditor-AI responsibilities, minimum checks and PASS/FAIL criteria.
 - [ ] **PL-0014** Define audit evidence format including commands, test output, inspected files and residual risks.
-- [ ] **PL-0015** Define handoff update format for current task, changed files, tests, blockers and next action.
+- [ ] **PL-0015** Define Codex implementation-log and `AWAITING_AUDIT` handoff format for current task, changed files, tests, blockers and next audit action.
 - [ ] **PL-0016** Add protocol for failed audits: reopen same task, preserve checkbox, remediate findings, re-audit.
 - [ ] **PL-0017** Add protocol for blocked tasks and dependency escalation without silently skipping work.
 - [ ] **PL-0018** Add protocol for architecture changes that require an ADR before implementation.
@@ -735,15 +737,15 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 # Execution Rules
 
-1. Work strictly in task-ID order unless handoff.md explicitly records an approved exception.
-2. Before implementation, read handoff.md, then the exact task section in IMPLEMENTATION_GUIDE.md, then relevant repository files.
-3. The builder AI must not check its own task in this file.
-4. After implementation, builder updates handoff.md to AUDIT-PENDING with evidence.
-5. A second independent AI audits the exact task and writes the verdict to AUDIT.md.
-6. Only after AUDIT.md says PASS may the coordinator/builder change the matching checkbox from [ ] to [x].
-7. A FAIL keeps the task unchecked; remediation remains on the same task ID until PASS.
-8. Never mark a Milestone complete until every non-deferred task inside it is checked.
-9. Never delete failed evidence. Summarize it in handoff.md and preserve relevant logs outside Git when large/sensitive.
-10. No secret, private key, Apple credential, provisioning private material or private Kenya scan is committed to this public repository.
-
-
+1. GitHub `Sekiph82/PackLab` branch `main` is repository truth. Root `TASKS.md` is the only live H!veAI/project-status tracker.
+2. ChatGPT is the sole writer of task lifecycle/progress/closure state in this file.
+3. Codex reads this file to confirm authorization but must not edit it.
+4. Exact implementation scope is frozen in `coordination/sessions/<CYCLE_ID>/CODEX_PROMPT_VNN.md` with matching `CHATGPT_AUDIT_CRITERIA_VNN.md`.
+5. Codex implements only that frozen scope, runs every required check, writes the matching `CODEX_LOG_VNN.md`, commits/pushes authorized changes, returns `AWAITING_AUDIT`, and stops.
+6. ChatGPT independently audits actual GitHub source/diff/evidence and writes the matching `CHATGPT_AUDIT_VNN.md`.
+7. After every Codex log/audit cycle, ChatGPT updates this file to the audited truth whether the result is PASS, CHANGES_REQUIRED, BLOCKED, or OWNER_REQUIRED.
+8. Only `AUDITED_PASS` permits ChatGPT to check the matching task `[x]` and advance the H!veAI frontier.
+9. A failed audit keeps the task unchecked and produces the next versioned remediation prompt/criteria in the same cycle; prior evidence is never overwritten.
+10. Session artifacts, `AUDIT.md`, `handoff.md`, `AUDIT_INDEX.md`, dashboards, and historical `.hiveai/*` files are evidence/guidance only and never competing live trackers.
+11. Work proceeds in task-ID order unless the owner explicitly reprioritizes or an audited ADR records an approved dependency-safe exception.
+12. No secret, private key, Apple credential, provisioning private material, private Kenya scan, confidential supplier asset, or other protected data may be committed to this public repository.
