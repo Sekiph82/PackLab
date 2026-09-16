@@ -1,76 +1,34 @@
-# AUDIT.md - PackLab Independent Audit Inbox
+# PackLab Audit Evidence
 
-> This file is written by the SECOND, INDEPENDENT auditor AI.
-> The Builder AI must never give itself a PASS.
+> **Evidence only.** Root `TASKS.md` on GitHub `main` is the sole authoritative project-status tracker consumed by H!veAI.
 
-## Current Audit
+`AUDIT.md` records independent audit findings and acceptance evidence. It must not become a competing source for current milestone, sprint, task, next action, required actor, or project progress.
 
-- Task ID: NONE
-- Task Title: NONE
-- Builder Revision/Commit: NONE
-- Auditor Identity/Context: NONE
-- Audit Date: NONE
-- Verdict: PENDING
+## Audit workflow
 
-## Acceptance Criteria Review
+A PackLab implementation task may be marked validated complete in root `TASKS.md` only after the audit/acceptance gate required by the task plan has passed.
 
-- Criterion 1: NOT REVIEWED
-- Criterion 2: NOT REVIEWED
-- Criterion 3: NOT REVIEWED
+For each audit, record at minimum:
 
-## Files Inspected
+- task ID;
+- audited commit SHA or commit range;
+- files/symbols inspected;
+- commands/tests executed and their results;
+- acceptance criteria checked;
+- defects/findings with severity;
+- residual risks or unverified items;
+- final verdict: `PASS`, `CONDITIONAL`, or `FAIL`.
 
-NONE
+Builder claims are not audit proof. Prefer repository source, configuration, tests, committed artifacts, and reproducible runtime evidence.
 
-## Commands / Tests Independently Run
+A passing test suite does not override a direct contract violation. Missing evidence remains `UNVERIFIED`; never manufacture a PASS.
 
-NONE
+## Current audit queue
 
-## Results
+No PackLab implementation task has been independently accepted yet.
 
-NONE
+The canonical current task and next action must be read from root `TASKS.md`; they are intentionally not duplicated here.
 
-## Findings
+## History
 
-### Critical
-
-NONE
-
-### High
-
-NONE
-
-### Medium
-
-NONE
-
-### Low
-
-NONE
-
-## Security / Privacy Review
-
-- Secrets found: NOT REVIEWED
-- Private data found: NOT REVIEWED
-- Public-repository safety: NOT REVIEWED
-
-## Architecture Review
-
-- Architecture contract respected: NOT REVIEWED
-- ADR required: NOT REVIEWED
-- Unapproved dependency/technology substitution: NOT REVIEWED
-
-## Auditor Conclusion
-
-PENDING
-
-## Required Remediation Before PASS
-
-NONE YET
-
-## Instructions For Coordinator
-
-- If Verdict = PASS and Task ID/revision match handoff.md, tick only that task in TASKS.md and advance handoff.md.
-- If Verdict = FAIL, do not tick the task; copy remediation into handoff.md and repair the same task.
-- If Verdict = BLOCKED, do not tick the task; record blocker in handoff.md.
-- If Verdict = PENDING, take no completion action.
+Append future audit records below this line or move to task-specific audit artifacts if the project later adopts that structure. Historical audit records must remain evidence, not live tracker state.
