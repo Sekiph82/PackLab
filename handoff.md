@@ -1,65 +1,30 @@
-# handoff.md - PackLab Current State
+# PackLab Handoff Notes
 
-## Project State
+> **Non-authoritative workflow aid.** Current project state is defined only by root `TASKS.md` on GitHub `main`.
 
-**NEW**
+This file may contain short human handoff notes when useful, but H!veAI, Codex, Claude, OpenCode, and other agents must not parse it as the source of current milestone, sprint, task, status, next action, required actor, or project progress.
 
-## Local Workspace
+## Canonical state
 
-- Canonical Windows path: C:\\Users\\sekip\\Desktop\\PackLab
-- GitHub repository: Sekiph82/PackLab
+For the live project state, always read:
 
-## Current Position
+`TASKS.md`
 
-- Current Milestone: M00 - Governance & Architecture
-- Current Sprint: M00-S01 - Repository governance
-- Current Task ID: PL-0001
-- Current Task: Create canonical repository structure specification and ownership rules.
-- Task Status: NOT STARTED
-- Last Completed Task: NONE
-- Last Audit Verdict: NONE
-- Next Task After PASS: PL-0002
+The explicit `## Project Status` section in that file is authoritative.
 
-## Required Startup Sequence
+Do not mirror the current task here. Avoid duplicated state that can drift.
 
-1. Read this file.
-2. Because Project State is NEW, begin at PL-0001.
-3. Read TASKS.md entry PL-0001.
-4. Read IMPLEMENTATION_GUIDE.md entry PL-0001.
-5. Implement PL-0001 only.
-6. Run required checks.
-7. Update this file and set Project State = AUDIT-PENDING.
-8. Send the result to a second independent AI for audit.
-9. Auditor writes AUDIT.md.
-10. Read AUDIT.md.
-11. Only if PASS, tick PL-0001 in TASKS.md and advance to PL-0002.
+## Recommended execution flow
 
-## Builder Evidence
+1. Safely synchronize the local checkout with GitHub `main`.
+2. Read root `TASKS.md`.
+3. Work only on the explicitly active/assigned task.
+4. Read `IMPLEMENTATION_GUIDE.md` or other docs only when relevant to that task.
+5. Run required tests/checks and collect evidence.
+6. Record independent audit evidence in `AUDIT.md` when the PackLab workflow requires it.
+7. Update root `TASKS.md` only when the canonical project state legitimately changes.
+8. Commit and push the synchronized result to `main` before claiming GitHub/H!veAI project completion.
 
-- Changed files: NONE
-- New files: Initial planning/control files only
-- Deleted files: NONE
-- Commands/tests run: NONE
-- Test results: NONE
-- Manual verification: NONE
-- Known limitations: Project implementation has not started.
-- ADRs touched: NONE
-- Security/privacy check: Planning files contain no secrets or private Kenya scan data.
-- Suggested audit focus: N/A until PL-0001 is implemented.
-- Builder revision/commit: NONE
+## Notes policy
 
-## Active Blockers
-
-NONE
-
-## Audit Findings To Resolve
-
-NONE
-
-## Approved Exceptions
-
-NONE
-
-## Notes
-
-This repository was initialized from a clean empty PackLab repository. The previous PackLab-3D repository is legacy/reference material only and is not the architecture baseline for this project unless a future task deliberately reuses a component after review.
+If a temporary handoff note is added here, keep it descriptive rather than state-defining. Do not create a second task ledger, progress counter, or next-task queue in this file.
