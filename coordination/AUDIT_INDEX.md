@@ -64,6 +64,17 @@ Each reusable finding uses a permanent `AL-PL-xxxx` ID and records:
 
 **Origin:** PackLab architecture contract.
 
+### AL-PL-0006 — Review newly created untracked files with a diff that can see them
+
+**Applies to:** documentation, schema, source and test tasks that create new files.
+
+**Finding:** plain `git diff -- <path>` returns no content for a brand-new untracked file, so a prompt can appear to request a meaningful pre-commit review while the command is actually blind to the new file.
+
+**Required behavior:** when a task creates a new file, prompts should require one of: `git add -N <path>` then `git diff -- <path>`, deliberate staging followed by `git diff --cached`, or another explicit content-review command. The audit must not treat an empty unstaged diff of an untracked file as proof of content review.
+
+**Origin:** `PL-0002-C001 / CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
 - `PL-0001-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. Repository structure/ownership specification accepted. Local first-bootstrap commands remain Codex E1/E2 evidence; actual GitHub scope, document content, commit ancestry, push state, and protected-file isolation were independently inspected.
+- `PL-0002-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. PackLab glossary accepted against all 88 frozen criteria. Actual GitHub range contained only `GLOSSARY.md` plus the matching Codex log. Local Git/PowerShell commands remain Codex E1/E2; glossary semantics and final diff were independently inspected.
