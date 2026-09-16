@@ -66,4 +66,4 @@ Each reusable finding uses a permanent `AL-PL-xxxx` ID and records:
 
 ## Audit history pointers
 
-No implementation audit has been completed yet.
+- `PL-0001-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. Repository structure/ownership specification accepted. Local first-bootstrap commands remain Codex E1/E2 evidence; actual GitHub scope, document content, commit ancestry, push state, and protected-file isolation were independently inspected.
