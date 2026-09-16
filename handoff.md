@@ -2,29 +2,41 @@
 
 > **Non-authoritative workflow aid.** Current project state is defined only by root `TASKS.md` on GitHub `main`.
 
-This file may contain short human handoff notes when useful, but H!veAI, Codex, Claude, OpenCode, and other agents must not parse it as the source of current milestone, sprint, task, status, next action, required actor, or project progress.
+This file must not contain the canonical current milestone, sprint, task, status, next action, required actor, project progress, or audit verdict.
 
-## Canonical state
+## Canonical live state
 
-For the live project state, always read:
+Always read:
 
 `TASKS.md`
 
-The explicit `## Project Status` section in that file is authoritative.
+The explicit `## Project Status` section is authoritative for H!veAI and all agents.
 
-Do not mirror the current task here. Avoid duplicated state that can drift.
+## Canonical implementation/audit evidence
 
-## Recommended execution flow
+Versioned work orders and evidence live under:
 
-1. Safely synchronize the local checkout with GitHub `main`.
-2. Read root `TASKS.md`.
-3. Work only on the explicitly active/assigned task.
-4. Read `IMPLEMENTATION_GUIDE.md` or other docs only when relevant to that task.
-5. Run required tests/checks and collect evidence.
-6. Record independent audit evidence in `AUDIT.md` when the PackLab workflow requires it.
-7. Update root `TASKS.md` only when the canonical project state legitimately changes.
-8. Commit and push the synchronized result to `main` before claiming GitHub/H!veAI project completion.
+`coordination/sessions/<CYCLE_ID>/`
+
+Normal bundle:
+
+```text
+CODEX_PROMPT_VNN.md
+CHATGPT_AUDIT_CRITERIA_VNN.md
+CODEX_LOG_VNN.md
+CHATGPT_AUDIT_VNN.md
+```
+
+- Codex writes implementation/test evidence in the matching `CODEX_LOG_VNN.md`.
+- ChatGPT performs the independent audit, writes `CHATGPT_AUDIT_VNN.md`, and updates root `TASKS.md` after every audit cycle.
+- Failed audits receive a new versioned remediation prompt/criteria pair; prior versions remain history.
+
+## Local workspace
+
+`C:\Users\sekip\Desktop\PackLab`
+
+GitHub `main` is repository truth. The owner has authorized one initial GitHub-authoritative local bootstrap; afterwards normal sessions use safe fetch/compare/fast-forward and stop on unexpected divergence unless the owner explicitly authorizes replacement.
 
 ## Notes policy
 
-If a temporary handoff note is added here, keep it descriptive rather than state-defining. Do not create a second task ledger, progress counter, or next-task queue in this file.
+Temporary human notes may be added here only when they do not duplicate live state. Do not turn this file into a second tracker, queue or audit ledger.
