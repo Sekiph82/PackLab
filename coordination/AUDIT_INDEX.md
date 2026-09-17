@@ -84,8 +84,19 @@ Each reusable finding uses a permanent `AL-PL-xxxx` ID and records:
 
 **Origin:** `PL-0003-C001 / CHATGPT_AUDIT_V01.md`.
 
+### AL-PL-0008 — Integrated GPU AdapterRAM is not dedicated VRAM
+
+**Applies to:** Windows diagnostics, capability probing, performance planning, CUDA/GPU decisions.
+
+**Finding:** `Win32_VideoController.AdapterRAM` can report a memory field for integrated graphics that does not represent dedicated VRAM and does not establish CUDA capability.
+
+**Required behavior:** diagnostics may record the field with provenance, but must label it as reported/possibly shared for integrated GPUs. CUDA support must be detected independently from actual GPU/vendor/runtime capability, and performance requirements must not be inferred from the CIM AdapterRAM field alone.
+
+**Origin:** `PL-0004-C001 / CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
 - `PL-0001-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. Repository structure/ownership specification accepted. Local first-bootstrap commands remain Codex E1/E2 evidence; actual GitHub scope, document content, commit ancestry, push state, and protected-file isolation were independently inspected.
 - `PL-0002-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. PackLab glossary accepted against all 88 frozen criteria. Actual GitHub range contained only `GLOSSARY.md` plus the matching Codex log. Local Git/PowerShell commands remain Codex E1/E2; glossary semantics and final diff were independently inspected.
 - `PL-0003-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. ADR process and ADR-0001 accepted against all 123 frozen criteria. Actual GitHub range contained only the two authorized ADR documents plus the matching Codex log. A reusable log-metadata rule was added to avoid self-referential future commit SHAs.
+- `PL-0004-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. Supported host/device baseline accepted against all 128 frozen criteria. Current Acer host facts remain local E1/E2 evidence; GitHub scope/privacy/architecture and contemporary Apple device/ARKit facts were independently checked. Integrated-GPU AdapterRAM handling was retained as a reusable diagnostic caution.
