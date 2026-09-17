@@ -12,6 +12,7 @@
 - startingCommit: `e2cb8567e606b2f828b155e7631a27386b1ef83c`
 - synchronizedValidationBase: `88eb82baf9984f547bb10aa6822505035111d2a5`
 - registerChange: None; the accepted V01 register was not rewritten.
+- logEvidenceCommit: `fec5054490752d49bd1a2ce1062444d90ef4510b` (first V02 log-only commit pushed and remotely verified below)
 - The future commit containing the final V02 log is intentionally not predeclared, per AL-PL-0007.
 
 ## V02 authorization
@@ -154,11 +155,13 @@ No substantive register defect was discovered. No dependency selection, installa
 
 ## Commit and push evidence
 
-The V02 log is the only authorized tracked addition. The first log-only evidence commit and its remote visibility will be recorded after that commit exists. The final commit containing the completed log is intentionally not predeclared, per AL-PL-0007.
+The V02 log is the only authorized tracked addition. The first log-only evidence commit was `fec5054490752d49bd1a2ce1062444d90ef4510b`; its remote visibility was verified before this final log metadata update. The final commit containing the completed log is intentionally not predeclared, per AL-PL-0007.
 
-Commands to execute after committing this log: `git rev-list --left-right --count HEAD...origin/main`, `git push origin main`, and `git ls-remote origin refs/heads/main`.
+Commands executed for the first evidence push: `git rev-list --left-right --count HEAD...origin/main`, `git push origin main`, and `git ls-remote origin refs/heads/main`.
 
-Expected result: local is exactly one commit ahead before push (`1 0`), push succeeds without force, and the remote `main` ref resolves to the pushed V02 evidence commit. The actual result will be appended to this same authorized log metadata before the final push if needed; no unauthorized file may be included.
+Expected result: local is exactly one commit ahead before push (`1 0`), push succeeds without force, and the remote `main` ref resolves to the pushed V02 evidence commit. Actual result: `PRE_PUSH_RELATION=1 0`; push succeeded from `88eb82b` to `fec5054`; `git ls-remote origin refs/heads/main` returned `fec5054490752d49bd1a2ce1062444d90ef4510b refs/heads/main`. No unauthorized file was included.
+
+The final metadata update is also log-only. Its future containing SHA is intentionally not self-declared; after it is committed, the same safe push/remote-verification sequence will be rerun and ChatGPT can identify the final audited head from GitHub.
 
 ## Known limitations
 
