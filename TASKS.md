@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M00
 - Current Sprint: M00-S01
-- Current Task: PL-0004 — Document supported host/device baseline: Windows Acer laptop + iPhone 16 Standard, no LiDAR assumption.
+- Current Task: PL-0005 — Create dependency/license register for NextLevel, COLMAP, OpenMVS, Open3D, OpenCV, PyTorch, OpenCascade bindings, Blender and PySide6.
 - Current Task Status: READY
-- Next Task/Action: Execute `coordination/sessions/PL-0004-C001/CODEX_PROMPT_V01.md` with its matching audit criteria, then return `AWAITING_AUDIT` for independent ChatGPT audit.
+- Next Task/Action: Execute `coordination/sessions/PL-0005-C001/CODEX_PROMPT_V01.md` with its matching audit criteria, then return `AWAITING_AUDIT` for independent ChatGPT audit.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -64,7 +64,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0001** Create canonical repository structure specification and ownership rules.
 - [x] **PL-0002** Create project glossary covering Scan Mesh, Design Model, Digital Twin, PackScan, Label Zone, BREP, SfM and MVS.
 - [x] **PL-0003** Create Architecture Decision Record (ADR) process and first ADR for the monorepo.
-- [ ] **PL-0004** Document supported host/device baseline: Windows Acer laptop + iPhone 16 Standard, no LiDAR assumption.
+- [x] **PL-0004** Document supported host/device baseline: Windows Acer laptop + iPhone 16 Standard, no LiDAR assumption.
 - [ ] **PL-0005** Create dependency/license register for NextLevel, COLMAP, OpenMVS, Open3D, OpenCV, PyTorch, OpenCascade bindings, Blender and PySide6.
 - [ ] **PL-0006** Define semantic versioning rules for PackLab Studio, PackLab Capture and PackScan schema.
 - [ ] **PL-0007** Define source-control conventions: branches, commits, task IDs, pull-request naming and generated-file policy.
