@@ -7,8 +7,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Current Milestone: M00
 - Current Sprint: M00-S01
 - Current Task: PL-0005 — Create dependency/license register for NextLevel, COLMAP, OpenMVS, Open3D, OpenCV, PyTorch, OpenCascade bindings, Blender and PySide6.
-- Current Task Status: READY
-- Next Task/Action: Execute `coordination/sessions/PL-0005-C001/CODEX_PROMPT_V01.md` with its matching audit criteria, then return `AWAITING_AUDIT` for independent ChatGPT audit.
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute `coordination/sessions/PL-0005-C001/CODEX_PROMPT_V02.md` with `CHATGPT_AUDIT_CRITERIA_V02.md`, then return `AWAITING_AUDIT` for independent ChatGPT re-audit.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
