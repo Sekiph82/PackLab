@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M00
 - Current Sprint: M00-S01
-- Current Task: PL-0005 — Create dependency/license register for NextLevel, COLMAP, OpenMVS, Open3D, OpenCV, PyTorch, OpenCascade bindings, Blender and PySide6.
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute `coordination/sessions/PL-0005-C001/CODEX_PROMPT_V02.md` with `CHATGPT_AUDIT_CRITERIA_V02.md`, then return `AWAITING_AUDIT` for independent ChatGPT re-audit.
+- Current Task: PL-0006 — Define semantic versioning rules for PackLab Studio, PackLab Capture and PackScan schema.
+- Current Task Status: READY
+- Next Task/Action: Execute `coordination/sessions/PL-0006-C001/CODEX_PROMPT_V01.md` with its matching audit criteria, then return `AWAITING_AUDIT` for independent ChatGPT audit.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -65,7 +65,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0002** Create project glossary covering Scan Mesh, Design Model, Digital Twin, PackScan, Label Zone, BREP, SfM and MVS.
 - [x] **PL-0003** Create Architecture Decision Record (ADR) process and first ADR for the monorepo.
 - [x] **PL-0004** Document supported host/device baseline: Windows Acer laptop + iPhone 16 Standard, no LiDAR assumption.
-- [ ] **PL-0005** Create dependency/license register for NextLevel, COLMAP, OpenMVS, Open3D, OpenCV, PyTorch, OpenCascade bindings, Blender and PySide6.
+- [x] **PL-0005** Create dependency/license register for NextLevel, COLMAP, OpenMVS, Open3D, OpenCV, PyTorch, OpenCascade bindings, Blender and PySide6.
 - [ ] **PL-0006** Define semantic versioning rules for PackLab Studio, PackLab Capture and PackScan schema.
 - [ ] **PL-0007** Define source-control conventions: branches, commits, task IDs, pull-request naming and generated-file policy.
 - [ ] **PL-0008** Define secrets policy so Apple credentials, signing certificates and tokens never enter Git.
