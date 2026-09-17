@@ -318,4 +318,3 @@ Future implementation and release work must use this precedence:
 H!veAI and root `TASKS.md` describe project workflow and lifecycle state. They
 are not sources of StudioVersion, CaptureVersion, or
 PackScanSchemaVersion truth.
-
