@@ -1,0 +1,108 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000010000000000000001 /* PackLabCaptureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000001 /* PackLabCaptureApp.swift */; };
+		A10000010000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000002 /* ContentView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A10000100000000000000001 /* PackLabCapture.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PackLabCapture.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000110000000000000001 /* PackLabCaptureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PackLabCaptureApp.swift; sourceTree = "<group>"; };
+		A10000110000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000200000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A10000300000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A10000300000000000000002 /* PackLabCapture */,
+				A10000300000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000300000000000000002 /* PackLabCapture */ = {
+			isa = PBXGroup;
+			children = (
+				A10000110000000000000001 /* PackLabCaptureApp.swift */,
+				A10000110000000000000002 /* ContentView.swift */,
+			);
+			path = PackLabCapture;
+			sourceTree = "<group>";
+		};
+		A10000300000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000100000000000000001 /* PackLabCapture.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A10000400000000000000001 /* PackLabCapture */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000600000000000000002 /* Build configuration list for PBXNativeTarget "PackLabCapture" */;
+			buildPhases = (
+				A10000200000000000000002 /* Sources */,
+				A10000200000000000000001 /* Frameworks */,
+				A10000200000000000000003 /* Resources */,
+			);
+			buildRules = ();
+			dependencies = ();
+			name = PackLabCapture;
+			productName = PackLabCapture;
+			productReference = A10000100000000000000001 /* PackLabCapture.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A10000500000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = { LastUpgradeCheck = 1600; ORGANIZATIONNAME = PackLab; TargetAttributes = { A10000400000000000000001 = { CreatedOnToolsVersion = 16.0; }; }; };
+			buildConfigurationList = A10000600000000000000001 /* Build configuration list for PBXProject "PackLabCapture" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base,);
+			mainGroup = A10000300000000000000001;
+			productRefGroup = A10000300000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A10000400000000000000001 /* PackLabCapture */);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A10000200000000000000003 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A10000200000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000010000000000000001 /* PackLabCaptureApp.swift in Sources */, A10000010000000000000002 /* ContentView.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A10000700000000000000001 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.packlab.capture; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1"; }; name = Debug; };
+		A10000700000000000000002 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = com.packlab.capture; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1"; }; name = Release; };
+		A10000700000000000000003 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; }; name = Debug; };
+		A10000700000000000000004 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A10000600000000000000001 /* Build configuration list for PBXProject "PackLabCapture" */ = {isa = XCConfigurationList; buildConfigurations = (A10000700000000000000003 /* Debug */, A10000700000000000000004 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A10000600000000000000002 /* Build configuration list for PBXNativeTarget "PackLabCapture" */ = {isa = XCConfigurationList; buildConfigurations = (A10000700000000000000001 /* Debug */, A10000700000000000000002 /* Release */,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = A10000500000000000000001 /* Project object */;
+}
