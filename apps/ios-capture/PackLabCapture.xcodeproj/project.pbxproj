@@ -9,12 +9,24 @@
 /* Begin PBXBuildFile section */
 		A10000010000000000000001 /* PackLabCaptureApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000001 /* PackLabCaptureApp.swift */; };
 		A10000010000000000000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000002 /* ContentView.swift */; };
+		A10000010000000000000003 /* CameraService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000003 /* CameraService.swift */; };
+		A10000010000000000000004 /* ARTrackingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000004 /* ARTrackingService.swift */; };
+		A10000010000000000000005 /* MotionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000005 /* MotionService.swift */; };
+		A10000010000000000000006 /* CaptureQualityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000006 /* CaptureQualityService.swift */; };
+		A10000010000000000000007 /* StorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000007 /* StorageService.swift */; };
+		A10000010000000000000008 /* TransferService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000008 /* TransferService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A10000100000000000000001 /* PackLabCapture.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PackLabCapture.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000110000000000000001 /* PackLabCaptureApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PackLabCaptureApp.swift; sourceTree = "<group>"; };
 		A10000110000000000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A10000110000000000000003 /* CameraService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraService.swift; sourceTree = "<group>"; };
+		A10000110000000000000004 /* ARTrackingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ARTrackingService.swift; sourceTree = "<group>"; };
+		A10000110000000000000005 /* MotionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MotionService.swift; sourceTree = "<group>"; };
+		A10000110000000000000006 /* CaptureQualityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureQualityService.swift; sourceTree = "<group>"; };
+		A10000110000000000000007 /* StorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StorageService.swift; sourceTree = "<group>"; };
+		A10000110000000000000008 /* TransferService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -35,8 +47,22 @@
 			children = (
 				A10000110000000000000001 /* PackLabCaptureApp.swift */,
 				A10000110000000000000002 /* ContentView.swift */,
+				A10000300000000000000004 /* Services */,
 			);
 			path = PackLabCapture;
+			sourceTree = "<group>";
+		};
+		A10000300000000000000004 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				A10000110000000000000003 /* CameraService.swift */,
+				A10000110000000000000004 /* ARTrackingService.swift */,
+				A10000110000000000000005 /* MotionService.swift */,
+				A10000110000000000000006 /* CaptureQualityService.swift */,
+				A10000110000000000000007 /* StorageService.swift */,
+				A10000110000000000000008 /* TransferService.swift */,
+			);
+			path = Services;
 			sourceTree = "<group>";
 		};
 		A10000300000000000000003 /* Products */ = {
@@ -103,7 +129,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A10000200000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000010000000000000001 /* PackLabCaptureApp.swift in Sources */, A10000010000000000000002 /* ContentView.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000200000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000010000000000000001 /* PackLabCaptureApp.swift in Sources */, A10000010000000000000002 /* ContentView.swift in Sources */, A10000010000000000000003 /* CameraService.swift in Sources */, A10000010000000000000004 /* ARTrackingService.swift in Sources */, A10000010000000000000005 /* MotionService.swift in Sources */, A10000010000000000000006 /* CaptureQualityService.swift in Sources */, A10000010000000000000007 /* StorageService.swift in Sources */, A10000010000000000000008 /* TransferService.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
