@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ARTrackingServiceState: Sendable {
+public enum ARTrackingServiceState: Sendable, Equatable {
     case idle
     case tracking
     case unavailable

@@ -11,3 +11,7 @@ Project settings are source-controlled and contain no personal Apple team identi
 ## Evidence boundary
 
 On this Windows checkout, static source/project inspection and text checks are available. Native `xcodebuild`, simulator, physical iPhone, signing, and camera validation require the authorized macOS GitHub Actions boundary and are not claimed here.
+
+## Test-target evidence boundary
+
+PL-0043 adds the `PackLabCaptureTests` XCTest target with deterministic foundation smoke tests that do not require camera hardware. Windows validation can inspect the target graph, source membership, strict-concurrency settings, and absence of team/signing secrets. `xcodebuild test` on a simulator or macOS CI runner remains required once the authorized M16 runner exists; no physical-device or camera test pass is claimed in this checkout.
