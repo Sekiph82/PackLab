@@ -1,0 +1,75 @@
+# PackLab cross-platform local environments and caches.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.hiveai/
+.cache/
+
+# Local credentials and environment values. Safe example templates remain trackable.
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.p12
+*.key
+*.mobileprovision
+
+# Xcode and Swift Package Manager generated state.
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.build/
+build/
+*.xcarchive
+
+# Blender temporary/recovery state and render scratch output.
+*.blend1
+*.blend2
+*.blend@*
+blender_tmp/
+blender_cache/
+renders/_tmp/
+
+# Reconstruction intermediates are regenerable and may contain private evidence.
+reconstruction-work/
+reconstruction-output/
+colmap-work/
+openmvs-work/
+*.db
+*.sqlite
+*.sqlite3
+
+# PackLab local/private data; public fixtures must use the tracked assets/tests areas.
+local/
+private/
+data/private/
+scans/
+*.packscan
+*.packlab-cache/
+packlab-cache/
+packlab-work/
+!assets/**/*.packscan
+!tests/fixtures/**/*.packscan
+
+# Common operating-system and IDE noise.
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*.tmp
+*.bak
+
+# Logs and reports that are local by default; coordination evidence remains tracked.
+*.log
+*.trace
+reports/_local/
