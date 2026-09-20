@@ -197,3 +197,19 @@ The owner has explicitly declared GitHub `main` correct for the initial local al
 A prompt may authorize `git reset --hard origin/main` and `git clean -fd` only for that verified first bootstrap, after checking Git root and remote identity. It must not use `git clean -fdx`.
 
 After bootstrap is proven complete, default synchronization returns to fetch/compare/fast-forward-only behavior and unexpected divergence must stop the session unless the owner explicitly authorizes replacement.
+
+
+## Per-child audit persistence rule
+
+During any multi-task or milestone audit, independent audit work is serialized and persisted one child at a time.
+
+For each child task, ChatGPT must:
+
+- finish the strict audit;
+- write the matching ChatGPT audit artifact to GitHub;
+- verify remote visibility;
+- then proceed to the next child.
+
+This persistence step is mandatory even when several child audits are expected to pass. It prevents completed audit evidence from depending on transient conversation state or temporary working memory.
+
+A later child audit must use the current GitHub `main` state plus already-published audit artifacts as its starting truth. Completed child audits are not repeated unless new evidence materially affects them.
