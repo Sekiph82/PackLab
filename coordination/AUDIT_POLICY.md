@@ -46,6 +46,26 @@ Codex must not:
 9. Update root `TASKS.md` after every audit, whether PASS, FAIL, CHANGES_REQUIRED, BLOCKED or OWNER_REQUIRED.
 10. On correction, publish the next versioned `CODEX_PROMPT_VNN.md` and matching criteria before handing work back.
 
+## Owner-authorized milestone batch execution
+
+Root `TASKS.md` may explicitly authorize a milestone batch governed by:
+
+https://github.com/Sekiph82/PackLab/blob/main/coordination/MILESTONE_BATCH_PROTOCOL.md
+
+This is an execution-throughput exception only. It does not weaken independent audit.
+
+During an authorized batch:
+
+1. every child PL task has its own frozen Codex prompt and matching ChatGPT criteria before execution;
+2. every child produces its own implementation/evidence boundary and Codex log;
+3. Codex may continue sequentially only while the current child is validation-green and no STOP condition exists;
+4. Codex must stop the entire batch on a failed child validation, blocker, owner gate, architecture contradiction, unsafe divergence, privacy/security issue, or task-state mismatch;
+5. Codex still cannot edit `TASKS.md`, create ChatGPT audit artifacts, assign audit verdicts, or start the next milestone;
+6. the batch ends with a master Codex log and `AWAITING_MILESTONE_AUDIT`;
+7. ChatGPT independently audits every child, writes child audit artifacts, updates `TASKS.md` to audited truth, and writes a milestone audit only after child audits close.
+
+A child implementation being validation-green is not equivalent to `AUDITED_PASS`.
+
 ## Evidence levels
 
 ### E0 - Claim
