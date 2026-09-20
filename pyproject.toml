@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=75,<77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "packlab"
+version = "0.1.0"
+description = "PackLab packaging digital-twin foundation"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["core/src", "apps/windows-studio/src"]
+include = ["packlab_core*", "packlab_studio*"]
+namespaces = false
