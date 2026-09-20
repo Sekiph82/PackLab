@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M00
-- Current Sprint: M00-S01
-- Current Task: PL-0006 — Define semantic versioning rules for PackLab Studio, PackLab Capture and PackScan schema.
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute the current-state re-entry work order at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/PL-0006-C002/CODEX_PROMPT_V01.md with the frozen strict criteria at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/PL-0006-C002/CHATGPT_AUDIT_CRITERIA_V01.md, then return `AWAITING_AUDIT` for independent ChatGPT audit. `PL-0006-C001/CODEX_PROMPT_V02.md` remains historical and unexecuted because no matching `CODEX_LOG_V02.md` was ever published.
+- Current Sprint: M00-S01/S02 — Remaining M00 governance batch
+- Current Task: M00-BATCH-001 — Complete remaining M00 tasks PL-0006 through PL-0018.
+- Current Task Status: READY
+- Next Task/Action: Execute the owner-authorized M00 milestone batch from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex executes PL-0006 through PL-0018 sequentially using the frozen child prompts/criteria in https://github.com/Sekiph82/PackLab/tree/main/coordination/sessions/M00-C001, publishes one child log per task plus the master log, returns `AWAITING_MILESTONE_AUDIT`, and stops before M01.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -22,6 +22,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Status Legend
 
+- READY - authorized for the Required Actor; may be a single task or an explicitly named milestone batch
 - [ ] Not completed / not audit-approved
 - [x] Implemented, independently audited, and accepted
 - BLOCKED - dependency or external requirement is missing
@@ -749,3 +750,6 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 10. Session artifacts, `AUDIT.md`, `handoff.md`, `AUDIT_INDEX.md`, dashboards, and historical `.hiveai/*` files are evidence/guidance only and never competing live trackers.
 11. Work proceeds in task-ID order unless the owner explicitly reprioritizes or an audited ADR records an approved dependency-safe exception.
 12. No secret, private key, Apple credential, provisioning private material, private Kenya scan, confidential supplier asset, or other protected data may be committed to this public repository.
+13. Owner-authorized milestone batches are permitted only when the Project Status block explicitly names the batch and points to a frozen master prompt/criteria. Each child PL task must retain separate prompt, criteria, implementation/evidence boundary and Codex log.
+14. During an authorized milestone batch Codex may continue sequential child tasks without interim ChatGPT audit only while each child is validation-green and no STOP condition exists. Codex never marks child tasks complete, never edits this tracker, and must stop before the next milestone.
+15. ChatGPT independently audits every batch child and only then writes the milestone audit and updates this tracker to the audited truth.
