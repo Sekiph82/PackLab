@@ -41,3 +41,13 @@ files = ["core/src", "apps/windows-studio/src", "tools"]
 check_untyped_defs = true
 warn_unused_ignores = true
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = ["-m", "not slow"]
+markers = [
+    "unit: fast isolated tests with no external services",
+    "integration: tests crossing owned module or tool boundaries",
+    "slow: opt-in tests that may take materially longer than the default suite",
+]
