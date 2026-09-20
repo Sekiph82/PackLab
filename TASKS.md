@@ -4,11 +4,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M00
-- Current Sprint: M00-S01/S02 — PL-0010 remediation and M00 closure
-- Current Task: PL-0010 — Correct risk-register Related PL task ID mappings, then re-audit M00.
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/PL-0010_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/PL-0010_CHATGPT_AUDIT_CRITERIA_V02.md, publish https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/PL-0010_CODEX_LOG_V02.md, return `AWAITING_AUDIT`, and stop. PL-0006..PL-0009 and PL-0011..PL-0018 are independently accepted; do not reopen them unless new evidence requires it. Do not start M01.
+- Current Milestone: M01
+- Current Sprint: M01-S01/S02/S03 — Full M01 foundation batch
+- Current Task: M01-BATCH-001 — Execute all M01 tasks PL-0019 through PL-0043.
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex executes PL-0019 through PL-0043 sequentially, publishes one child log per task plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_CODEX_LOG_V01.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before M02.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -35,7 +35,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 | Milestone | Name | Primary Outcome | Status |
 |---|---|---|---|
-| M00 | Governance & Architecture | Reproducible rules, repo contract, AI workflow | [ ] |
+| M00 | Governance & Architecture | Reproducible rules, repo contract, AI workflow | [x] |
 | M01 | Monorepo & Development Foundations | iOS + Windows project skeletons, local tooling | [ ] |
 | M02 | PackScan Data Contract & Calibration | Versioned .packscan format and real-world scale contract | [ ] |
 | M03 | iOS Capture Foundation | SwiftUI/NextLevel/ARKit app runs on iPhone 16 | [ ] |
@@ -71,7 +71,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0007** Define source-control conventions: branches, commits, task IDs, pull-request naming and generated-file policy.
 - [x] **PL-0008** Define secrets policy so Apple credentials, signing certificates and tokens never enter Git.
 - [x] **PL-0009** Define Definition of Done, audit gates and evidence requirements for every task.
-- [ ] **PL-0010** Create project risk register with technical, licensing, capture-quality, signing and hardware risks.
+- [x] **PL-0010** Create project risk register with technical, licensing, capture-quality, signing and hardware risks.
 
 ## Sprint M00-S02 - AI execution protocol
 
