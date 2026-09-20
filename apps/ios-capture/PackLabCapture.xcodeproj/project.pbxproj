@@ -17,6 +17,7 @@
 		A10000010000000000000008 /* TransferService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000008 /* TransferService.swift */; };
 		A10000010000000000000009 /* DiagnosticsLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000009 /* DiagnosticsLogger.swift */; };
 		A10000010000000000000010 /* DiagnosticsExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000010 /* DiagnosticsExporter.swift */; };
+		A10000010000000000000011 /* SimulatorFallbacks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000011 /* SimulatorFallbacks.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -31,6 +32,7 @@
 		A10000110000000000000008 /* TransferService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransferService.swift; sourceTree = "<group>"; };
 		A10000110000000000000009 /* DiagnosticsLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsLogger.swift; sourceTree = "<group>"; };
 		A10000110000000000000010 /* DiagnosticsExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsExporter.swift; sourceTree = "<group>"; };
+		A10000110000000000000011 /* SimulatorFallbacks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatorFallbacks.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,6 +55,7 @@
 				A10000110000000000000002 /* ContentView.swift */,
 				A10000300000000000000004 /* Services */,
 				A10000300000000000000005 /* Diagnostics */,
+				A10000300000000000000006 /* Simulator */,
 			);
 			path = PackLabCapture;
 			sourceTree = "<group>";
@@ -66,6 +69,14 @@
 				A10000110000000000000006 /* CaptureQualityService.swift */,
 				A10000110000000000000007 /* StorageService.swift */,
 				A10000110000000000000008 /* TransferService.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		A10000300000000000000006 /* Simulator */ = {
+			isa = PBXGroup;
+			children = (
+				A10000110000000000000011 /* SimulatorFallbacks.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -143,7 +154,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A10000200000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000010000000000000001 /* PackLabCaptureApp.swift in Sources */, A10000010000000000000002 /* ContentView.swift in Sources */, A10000010000000000000003 /* CameraService.swift in Sources */, A10000010000000000000004 /* ARTrackingService.swift in Sources */, A10000010000000000000005 /* MotionService.swift in Sources */, A10000010000000000000006 /* CaptureQualityService.swift in Sources */, A10000010000000000000007 /* StorageService.swift in Sources */, A10000010000000000000008 /* TransferService.swift in Sources */, A10000010000000000000009 /* DiagnosticsLogger.swift in Sources */, A10000010000000000000010 /* DiagnosticsExporter.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000200000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000010000000000000001 /* PackLabCaptureApp.swift in Sources */, A10000010000000000000002 /* ContentView.swift in Sources */, A10000010000000000000003 /* CameraService.swift in Sources */, A10000010000000000000004 /* ARTrackingService.swift in Sources */, A10000010000000000000005 /* MotionService.swift in Sources */, A10000010000000000000006 /* CaptureQualityService.swift in Sources */, A10000010000000000000007 /* StorageService.swift in Sources */, A10000010000000000000008 /* TransferService.swift in Sources */, A10000010000000000000009 /* DiagnosticsLogger.swift in Sources */, A10000010000000000000010 /* DiagnosticsExporter.swift in Sources */, A10000010000000000000011 /* SimulatorFallbacks.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
