@@ -8,7 +8,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Current Sprint: M00-S01
 - Current Task: PL-0006 — Define semantic versioning rules for PackLab Studio, PackLab Capture and PackScan schema.
 - Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute `coordination/sessions/PL-0006-C001/CODEX_PROMPT_V02.md` with `CHATGPT_AUDIT_CRITERIA_V02.md`, then return `AWAITING_AUDIT` for independent ChatGPT re-audit.
+- Next Task/Action: Execute the current-state re-entry work order at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/PL-0006-C002/CODEX_PROMPT_V01.md with the frozen strict criteria at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/PL-0006-C002/CHATGPT_AUDIT_CRITERIA_V01.md, then return `AWAITING_AUDIT` for independent ChatGPT audit. `PL-0006-C001/CODEX_PROMPT_V02.md` remains historical and unexecuted because no matching `CODEX_LOG_V02.md` was ever published.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
