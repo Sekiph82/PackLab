@@ -103,3 +103,22 @@ ChatGPT performs:
 5. milestone closure only when every mandatory child task is independently accepted.
 
 A batch run is therefore execution batching, not audit batching.
+
+
+## Audit checkpoint persistence
+
+For milestone-batch audits, ChatGPT must persist each child audit before beginning the next child audit.
+
+Required sequence for every child:
+
+1. read the current canonical GitHub state;
+2. independently audit exactly one child against its frozen criteria;
+3. create and push that child's `PL-xxxx_CHATGPT_AUDIT_VNN.md`;
+4. verify the audit file is visible on GitHub `main`;
+5. only then begin the next child audit.
+
+ChatGPT must not hold multiple completed child verdicts only in conversation or temporary working context while continuing deeper into the milestone. GitHub is the durable audit checkpoint after every child.
+
+If a long audit session is interrupted, resumes must start from current GitHub `main` and the already-published child audit artifacts. Previously published child audits are not recomputed unless new evidence invalidates them.
+
+After all child audits are persisted, ChatGPT may write the milestone-level audit and update root `TASKS.md`.
