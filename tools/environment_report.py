@@ -9,8 +9,8 @@ import platform
 import shutil
 import subprocess
 import sys
-from pathlib import Path
-from typing import Any, Callable, Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 CommandRunner = Callable[[Sequence[str], float], dict[str, Any]]
 
@@ -72,11 +72,17 @@ def _memory_bytes() -> int | None:
             import ctypes
 
             class MemoryStatus(ctypes.Structure):
-                _fields_ = [("length", ctypes.c_ulong), ("memory_load", ctypes.c_ulong),
-                            ("total", ctypes.c_ulonglong), ("available", ctypes.c_ulonglong),
-                            ("pagefile", ctypes.c_ulonglong), ("available_pagefile", ctypes.c_ulonglong),
-                            ("virtual", ctypes.c_ulonglong), ("available_virtual", ctypes.c_ulonglong),
-                            ("available_extended", ctypes.c_ulonglong)]
+                _fields_ = [
+                    ("length", ctypes.c_ulong),
+                    ("memory_load", ctypes.c_ulong),
+                    ("total", ctypes.c_ulonglong),
+                    ("available", ctypes.c_ulonglong),
+                    ("pagefile", ctypes.c_ulonglong),
+                    ("available_pagefile", ctypes.c_ulonglong),
+                    ("virtual", ctypes.c_ulonglong),
+                    ("available_virtual", ctypes.c_ulonglong),
+                    ("available_extended", ctypes.c_ulonglong),
+                ]
 
             status = MemoryStatus()
             status.length = ctypes.sizeof(MemoryStatus)
@@ -95,7 +101,10 @@ def _gpu_probe(command_runner: CommandRunner) -> dict[str, Any]:
             name, _, memory = line.partition(",")
             adapters.append({"name": name.strip()[:120], "reported_memory": memory.strip()[:40]})
         return {"adapters": adapters, "cuda": {"status": "available", "provenance": "nvidia-smi"}}
-    return {"adapters": [], "cuda": {"status": "unknown", "provenance": "nvidia-smi probe unavailable"}}
+    return {
+        "adapters": [],
+        "cuda": {"status": "unknown", "provenance": "nvidia-smi probe unavailable"},
+    }
 
 
 def collect_report(command_runner: CommandRunner = run_command) -> dict[str, Any]:
@@ -113,7 +122,11 @@ def collect_report(command_runner: CommandRunner = run_command) -> dict[str, Any
     }
     return {
         "schema": "packlab.environment-report.v1",
-        "os": {"name": platform.system(), "release": platform.release(), "architecture": platform.machine()},
+        "os": {
+            "name": platform.system(),
+            "release": platform.release(),
+            "architecture": platform.machine(),
+        },
         "cpu": {
             "logical_cores": os.cpu_count(),
             "physical_cores": None,
@@ -128,7 +141,9 @@ def collect_report(command_runner: CommandRunner = run_command) -> dict[str, Any
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Print a redacted PackLab environment report as JSON.")
+    parser = argparse.ArgumentParser(
+        description="Print a redacted PackLab environment report as JSON."
+    )
     parser.add_argument("--pretty", action="store_true", help="indent JSON for human reading")
     args = parser.parse_args()
     report = collect_report()

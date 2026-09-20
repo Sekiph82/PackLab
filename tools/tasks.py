@@ -6,9 +6,8 @@ import argparse
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,7 +27,11 @@ def command_for(name: str) -> tuple[list[str] | None, str]:
         return (["mypy", "core", "apps", "tools"] if shutil.which("mypy") else None), "mypy"
     if name == "bootstrap":
         script = ROOT / "scripts" / "bootstrap_windows.ps1"
-        return (None, "deferred: scripts/bootstrap_windows.ps1 is not implemented") if not script.exists() else (None, "PowerShell bootstrap must be invoked explicitly")
+        return (
+            (None, "deferred: scripts/bootstrap_windows.ps1 is not implemented")
+            if not script.exists()
+            else (None, "PowerShell bootstrap must be invoked explicitly")
+        )
     if name == "build":
         return None, "deferred: platform build commands are not implemented in M01"
     raise ValueError(f"unknown command: {name}")
@@ -49,7 +52,9 @@ def run(args: Sequence[str]) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run PackLab developer commands without shell-string execution.")
+    parser = argparse.ArgumentParser(
+        description="Run PackLab developer commands without shell-string execution."
+    )
     parser.add_argument("command", nargs="?", default="help")
     parsed = parser.parse_args()
     try:

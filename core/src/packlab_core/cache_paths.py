@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import os
 import platform
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 
 def _default_root(system: str, env: Mapping[str, str], home: Path) -> Path:
@@ -16,23 +16,33 @@ def _default_root(system: str, env: Mapping[str, str], home: Path) -> Path:
     return Path(env.get("XDG_CACHE_HOME") or home / ".cache") / "packlab"
 
 
-def cache_root(*, env: Mapping[str, str] | None = None, home: Path | None = None, system: str | None = None) -> Path:
+def cache_root(
+    *, env: Mapping[str, str] | None = None, home: Path | None = None, system: str | None = None
+) -> Path:
     """Return the cache root without creating it or reading protected data."""
 
     values = os.environ if env is None else env
     selected_home = Path.home() if home is None else Path(home)
     selected_system = platform.system() if system is None else system
     override = values.get("PACKLAB_CACHE_ROOT")
-    return Path(override).expanduser() if override else _default_root(selected_system, values, selected_home)
+    return (
+        Path(override).expanduser()
+        if override
+        else _default_root(selected_system, values, selected_home)
+    )
 
 
-def workspace_root(**kwargs: object) -> Path:
+def workspace_root(
+    *, env: Mapping[str, str] | None = None, home: Path | None = None, system: str | None = None
+) -> Path:
     """Return a disposable per-job workspace below the cache root."""
 
-    return cache_root(**kwargs) / "work"
+    return cache_root(env=env, home=home, system=system) / "work"
 
 
-def project_data_root(*, env: Mapping[str, str] | None = None, home: Path | None = None, system: str | None = None) -> Path:
+def project_data_root(
+    *, env: Mapping[str, str] | None = None, home: Path | None = None, system: str | None = None
+) -> Path:
     """Return durable user/project data, kept distinct from regenerable cache data."""
 
     values = os.environ if env is None else env
@@ -42,13 +52,19 @@ def project_data_root(*, env: Mapping[str, str] | None = None, home: Path | None
     selected_home = Path.home() if home is None else Path(home)
     selected_system = platform.system() if system is None else system
     if selected_system == "Windows":
-        return Path(values.get("LOCALAPPDATA") or selected_home / "AppData" / "Local") / "PackLab" / "data"
+        return (
+            Path(values.get("LOCALAPPDATA") or selected_home / "AppData" / "Local")
+            / "PackLab"
+            / "data"
+        )
     if selected_system == "Darwin":
         return selected_home / "Library" / "Application Support" / "PackLab"
     return Path(values.get("XDG_DATA_HOME") or selected_home / ".local" / "share") / "packlab"
 
 
-def ensure_directories(*, env: Mapping[str, str] | None = None, home: Path | None = None, system: str | None = None) -> dict[str, Path]:
+def ensure_directories(
+    *, env: Mapping[str, str] | None = None, home: Path | None = None, system: str | None = None
+) -> dict[str, Path]:
     """Create only PackLab-owned directories and never remove existing data."""
 
     roots = {

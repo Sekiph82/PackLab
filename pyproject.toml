@@ -20,3 +20,24 @@ dev = [
 where = ["core/src", "apps/windows-studio/src"]
 include = ["packlab_core*", "packlab_studio*"]
 namespaces = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["core/src", "apps/windows-studio/src", "tools", "tests"]
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["core/src", "apps/windows-studio/src", "tools"]
+check_untyped_defs = true
+warn_unused_ignores = true
+ignore_missing_imports = true
