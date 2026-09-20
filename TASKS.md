@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M00
-- Current Sprint: M00-S01/S02 — Remaining M00 governance batch
-- Current Task: M00-BATCH-001 — Complete remaining M00 tasks PL-0006 through PL-0018.
-- Current Task Status: READY
-- Next Task/Action: Execute the owner-authorized M00 milestone batch from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex executes PL-0006 through PL-0018 sequentially using the frozen child prompts/criteria in https://github.com/Sekiph82/PackLab/tree/main/coordination/sessions/M00-C001, publishes one child log per task plus the master log, returns `AWAITING_MILESTONE_AUDIT`, and stops before M01.
+- Current Sprint: M00-S01/S02 — PL-0010 remediation and M00 closure
+- Current Task: PL-0010 — Correct risk-register Related PL task ID mappings, then re-audit M00.
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/PL-0010_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/PL-0010_CHATGPT_AUDIT_CRITERIA_V02.md, publish https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M00-C001/PL-0010_CODEX_LOG_V02.md, return `AWAITING_AUDIT`, and stop. PL-0006..PL-0009 and PL-0011..PL-0018 are independently accepted; do not reopen them unless new evidence requires it. Do not start M01.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -67,22 +67,22 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0003** Create Architecture Decision Record (ADR) process and first ADR for the monorepo.
 - [x] **PL-0004** Document supported host/device baseline: Windows Acer laptop + iPhone 16 Standard, no LiDAR assumption.
 - [x] **PL-0005** Create dependency/license register for NextLevel, COLMAP, OpenMVS, Open3D, OpenCV, PyTorch, OpenCascade bindings, Blender and PySide6.
-- [ ] **PL-0006** Define semantic versioning rules for PackLab Studio, PackLab Capture and PackScan schema.
-- [ ] **PL-0007** Define source-control conventions: branches, commits, task IDs, pull-request naming and generated-file policy.
-- [ ] **PL-0008** Define secrets policy so Apple credentials, signing certificates and tokens never enter Git.
-- [ ] **PL-0009** Define Definition of Done, audit gates and evidence requirements for every task.
+- [x] **PL-0006** Define semantic versioning rules for PackLab Studio, PackLab Capture and PackScan schema.
+- [x] **PL-0007** Define source-control conventions: branches, commits, task IDs, pull-request naming and generated-file policy.
+- [x] **PL-0008** Define secrets policy so Apple credentials, signing certificates and tokens never enter Git.
+- [x] **PL-0009** Define Definition of Done, audit gates and evidence requirements for every task.
 - [ ] **PL-0010** Create project risk register with technical, licensing, capture-quality, signing and hardware risks.
 
 ## Sprint M00-S02 - AI execution protocol
 
-- [ ] **PL-0011** Validate the canonical session workflow: TASKS.md -> CODEX_PROMPT/AUDIT_CRITERIA -> CODEX_LOG -> CHATGPT_AUDIT -> ChatGPT TASKS.md update.
-- [ ] **PL-0012** Define builder-AI responsibilities and forbidden actions.
-- [ ] **PL-0013** Define independent auditor-AI responsibilities, minimum checks and PASS/FAIL criteria.
-- [ ] **PL-0014** Define audit evidence format including commands, test output, inspected files and residual risks.
-- [ ] **PL-0015** Define Codex implementation-log and `AWAITING_AUDIT` handoff format for current task, changed files, tests, blockers and next audit action.
-- [ ] **PL-0016** Add protocol for failed audits: reopen same task, preserve checkbox, remediate findings, re-audit.
-- [ ] **PL-0017** Add protocol for blocked tasks and dependency escalation without silently skipping work.
-- [ ] **PL-0018** Add protocol for architecture changes that require an ADR before implementation.
+- [x] **PL-0011** Validate the canonical session workflow: TASKS.md -> CODEX_PROMPT/AUDIT_CRITERIA -> CODEX_LOG -> CHATGPT_AUDIT -> ChatGPT TASKS.md update.
+- [x] **PL-0012** Define builder-AI responsibilities and forbidden actions.
+- [x] **PL-0013** Define independent auditor-AI responsibilities, minimum checks and PASS/FAIL criteria.
+- [x] **PL-0014** Define audit evidence format including commands, test output, inspected files and residual risks.
+- [x] **PL-0015** Define Codex implementation-log and `AWAITING_AUDIT` handoff format for current task, changed files, tests, blockers and next audit action.
+- [x] **PL-0016** Add protocol for failed audits: reopen same task, preserve checkbox, remediate findings, re-audit.
+- [x] **PL-0017** Add protocol for blocked tasks and dependency escalation without silently skipping work.
+- [x] **PL-0018** Add protocol for architecture changes that require an ADR before implementation.
 
 ---
 
