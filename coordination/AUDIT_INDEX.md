@@ -94,8 +94,19 @@ Each reusable finding uses a permanent `AL-PL-xxxx` ID and records:
 
 **Origin:** `PL-0004-C001 / CHATGPT_AUDIT_V01.md`.
 
+### AL-PL-0009 — Governance cross-links must be semantically verified
+
+**Applies to:** risk registers, dependency maps, requirement matrices, task cross-references, mitigation ownership.
+
+**Finding:** A document can contain a syntactically valid `PL-xxxx` reference while still pointing to a task that has nothing to do with the stated risk, mitigation, or evidence. Presence-only checks can therefore pass misleading governance links.
+
+**Required behavior:** prompts and audits that require related task IDs must validate each referenced ID against current root `TASKS.md` semantics, not merely regex/format presence. Incorrect but well-formed task links are a material governance defect.
+
+**Origin:** `M00-C001 / PL-0010_CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
+- `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
 - `PL-0001-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. Repository structure/ownership specification accepted. Local first-bootstrap commands remain Codex E1/E2 evidence; actual GitHub scope, document content, commit ancestry, push state, and protected-file isolation were independently inspected.
 - `PL-0002-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. PackLab glossary accepted against all 88 frozen criteria. Actual GitHub range contained only `GLOSSARY.md` plus the matching Codex log. Local Git/PowerShell commands remain Codex E1/E2; glossary semantics and final diff were independently inspected.
 - `PL-0003-C001 / CHATGPT_AUDIT_V01.md` — **AUDITED_PASS**. ADR process and ADR-0001 accepted against all 123 frozen criteria. Actual GitHub range contained only the two authorized ADR documents plus the matching Codex log. A reusable log-metadata rule was added to avoid self-referential future commit SHAs.
