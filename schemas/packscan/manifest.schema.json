@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.example/schemas/packscan/1.0/manifest.schema.json",
+  "title": "PackLab PackScan manifest 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "capture_id", "created_at", "device", "capture_mode", "payloads", "source_evidence", "checksums"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "capture_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "created_at": {"$ref": "#/$defs/utc_timestamp"},
+    "started_at": {"$ref": "#/$defs/utc_timestamp"},
+    "ended_at": {"$ref": "#/$defs/utc_timestamp"},
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "model", "os_version"],
+      "properties": {
+        "platform": {"const": "iOS"},
+        "model": {"type": "string", "minLength": 1, "maxLength": 128},
+        "os_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:[-+][A-Za-z0-9.-]+)?$"},
+        "device_identifier": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$"},
+        "lens": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "capture_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "version"],
+      "properties": {
+        "mode": {"enum": ["freehand", "guided_orbit", "turntable"]},
+        "version": {"type": "integer", "minimum": 1},
+        "parameters": {"type": "object"}
+      }
+    },
+    "payloads": {
+      "type": "array",
+      "minItems": 2,
+      "items": {"$ref": "#/$defs/payload"},
+      "uniqueItems": true
+    },
+    "source_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["immutable", "authority"],
+      "properties": {
+        "immutable": {"const": true},
+        "authority": {"const": "original_capture"},
+        "provenance": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "checksums": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "canonicalization"],
+      "properties": {
+        "algorithm": {"const": "sha256"},
+        "canonicalization": {"const": "lowercase_hex_64_bytes"}
+      }
+    },
+    "calibration_profile_ref": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,256}$"}
+  },
+  "$defs": {
+    "utc_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "required", "authority", "size_bytes", "sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?![A-Za-z]:)[^\\u0000-\\u001F]{1,512}$"},
+        "kind": {"enum": ["image", "photo_metadata", "mask", "preview", "thumbnail", "diagnostics", "calibration", "other"]},
+        "required": {"type": "boolean"},
+        "authority": {"enum": ["source", "derived"]},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "media_type": {"type": "string", "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"}
+      }
+    }
+  }
+}
