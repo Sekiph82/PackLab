@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import shutil
+import platform
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -16,21 +16,36 @@ def _python(*args: str) -> list[str]:
     return [sys.executable, *args]
 
 
+def _uv(*args: str) -> list[str]:
+    return ["uv", "run", "--locked", *args]
+
+
 def command_for(name: str) -> tuple[list[str] | None, str]:
     if name == "diagnostics":
-        return _python(str(ROOT / "tools" / "environment_report.py"), "--pretty"), "available"
+        return _uv("python", str(ROOT / "tools" / "environment_report.py"), "--pretty"), "available"
     if name == "test":
-        return _python("-m", "pytest"), "pytest"
+        return _uv("pytest"), "pytest"
     if name == "lint":
-        return (["ruff", "check", "."] if shutil.which("ruff") else None), "ruff"
+        return _uv("ruff", "check", "."), "ruff"
     if name == "type-check":
-        return (["mypy", "core", "apps", "tools"] if shutil.which("mypy") else None), "mypy"
+        return _uv("mypy", "core", "apps", "tools"), "mypy"
     if name == "bootstrap":
         script = ROOT / "scripts" / "bootstrap_windows.ps1"
+        if platform.system() != "Windows":
+            return None, "deferred: Windows bootstrap is unavailable on this platform"
+        if not script.exists():
+            return None, "deferred: scripts/bootstrap_windows.ps1 is missing"
         return (
-            (None, "deferred: scripts/bootstrap_windows.ps1 is not implemented")
-            if not script.exists()
-            else (None, "PowerShell bootstrap must be invoked explicitly")
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script),
+            ],
+            "available",
         )
     if name == "build":
         return None, "deferred: platform build commands are not implemented in M01"
@@ -47,8 +62,15 @@ def run(args: Sequence[str]) -> int:
         print(f"{command}: {status}", file=sys.stderr)
         return 2
     print(f"running {command}: {' '.join(argv)}")
-    completed = subprocess.run(argv, cwd=ROOT, check=False, shell=False)
-    return completed.returncode
+    try:
+        completed = subprocess.run(argv, cwd=ROOT, check=False, shell=False)
+    except FileNotFoundError:
+        print(f"{command}: required executable is unavailable: {argv[0]}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"{command}: unable to start {argv[0]} ({type(exc).__name__})", file=sys.stderr)
+        return 2
+    return int(completed.returncode)
 
 
 def main() -> int:
