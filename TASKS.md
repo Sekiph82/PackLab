@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M01
-- Current Sprint: M01-S01/S02/S03 — Final audited remediation batch
-- Current Task: M01-REMEDIATION-BATCH-002 — Remediate 4 remaining audited M01 findings.
+- Current Sprint: M01-S01/S02/S03 — Final PL-0043 remediation
+- Current Task: M01-REMEDIATION-BATCH-003 — Remediate final PL-0043 audit finding.
 - Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V02.md. Codex remediates only PL-0026, PL-0031, PL-0035 and PL-0043 using their V03 work orders, publishes one V03 child log per task plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_LOG_V02.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before M02. Prior remediation audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V01.md.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V03.md. Codex executes only PL-0043 V04, publishes https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/PL-0043_CODEX_LOG_V04.md plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_LOG_V03.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before M02. Blocking audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/PL-0043_CHATGPT_AUDIT_V03.md.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -97,7 +97,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0023** Define generated-artifact directories and Git LFS policy for sample images/meshes that genuinely belong in source control.
 - [x] **PL-0024** Create local environment diagnostics script that reports OS, CPU, RAM, GPU, CUDA availability, Python and external tool versions.
 - [x] **PL-0025** Create root task-runner strategy for common bootstrap, test, lint and build commands.
-- [ ] **PL-0026** Establish local cache directories outside tracked source for reconstruction intermediates.
+- [x] **PL-0026** Establish local cache directories outside tracked source for reconstruction intermediates.
 
 ## Sprint M01-S02 - Python/Windows foundation
 
@@ -105,11 +105,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0028** Create Python package/workspace layout for PackLab core and Windows Studio.
 - [x] **PL-0029** Add dependency locking and reproducible Windows bootstrap.
 - [x] **PL-0030** Configure Ruff/formatter/type-check strategy and baseline configuration.
-- [ ] **PL-0031** Configure pytest with unit/integration/slow-test markers.
+- [x] **PL-0031** Configure pytest with unit/integration/slow-test markers.
 - [x] **PL-0032** Add structured logging with session/task correlation IDs.
 - [x] **PL-0033** Add application configuration system with user config, project config and environment overrides.
 - [x] **PL-0034** Add capability registry for optional engines such as CUDA, COLMAP, OpenMVS, Blender and OpenCascade.
-- [ ] **PL-0035** Add safe subprocess runner with cancellation, timeout, stdout/stderr streaming and exit-code capture.
+- [x] **PL-0035** Add safe subprocess runner with cancellation, timeout, stdout/stderr streaming and exit-code capture.
 
 ## Sprint M01-S03 - Swift/iOS foundation
 
