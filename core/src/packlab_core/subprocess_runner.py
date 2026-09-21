@@ -28,7 +28,19 @@ class ProcessResult:
 def _stop_process(process: subprocess.Popen[str]) -> None:
     """Stop a process and its group where the host supports it."""
 
-    if os.name != "nt" and process.pid:
+    if os.name == "nt" and process.pid:
+        # The PID is the runner-owned root. /T limits taskkill to that process tree.
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+                shell=False,
+                timeout=1.0,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            process.terminate()
+    elif os.name != "nt" and process.pid:
         kill_group = getattr(os, "killpg", None)
         try:
             if kill_group is not None:
@@ -37,21 +49,13 @@ def _stop_process(process: subprocess.Popen[str]) -> None:
                 process.terminate()
         except ProcessLookupError:
             return
-    else:
+    elif os.name == "nt":
         process.terminate()
     try:
-        process.wait(timeout=0.25)
+        process.wait(timeout=1.0)
         return
     except subprocess.TimeoutExpired:
         pass
-    if os.name == "nt" and process.pid:
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            capture_output=True,
-            check=False,
-            shell=False,
-            timeout=1.0,
-        )
     process.kill()
     process.wait(timeout=1.0)
 
@@ -71,16 +75,28 @@ def run_process(
     command = tuple(args)
     if not command or any(not isinstance(item, str) or not item for item in command):
         raise ValueError("args must be a non-empty sequence of non-empty strings")
-    process = subprocess.Popen(
-        list(command),
-        cwd=cwd,
-        env=None if env is None else dict(env),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        shell=False,
-        start_new_session=os.name != "nt",
-    )
+    if os.name == "nt":
+        process = subprocess.Popen(
+            list(command),
+            cwd=cwd,
+            env=None if env is None else dict(env),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=False,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
+    else:
+        process = subprocess.Popen(
+            list(command),
+            cwd=cwd,
+            env=None if env is None else dict(env),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=False,
+            start_new_session=True,
+        )
     stdout_lines: list[str] = []
     stderr_lines: list[str] = []
 
