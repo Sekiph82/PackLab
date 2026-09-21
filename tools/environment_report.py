@@ -24,6 +24,19 @@ TOOL_COMMANDS: dict[str, tuple[str, ...]] = {
         "--query-gpu=name,memory.total",
         "--format=csv,noheader,nounits",
     ),
+    "nvcc": ("nvcc", "--version"),
+}
+
+GPU_ADAPTER_COMMANDS: dict[str, tuple[str, ...]] = {
+    "Windows": (
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name | ConvertTo-Json -Compress",
+    ),
+    "Darwin": ("system_profiler", "SPDisplaysDataType", "-json"),
+    "Linux": ("lspci", "-mm", "-nn", "-d", "::0300"),
 }
 
 
@@ -57,6 +70,7 @@ def run_command(args: Sequence[str], timeout: float = 2.0) -> dict[str, Any]:
         "status": "available" if completed.returncode == 0 else "error",
         "version": detail if completed.returncode == 0 else None,
         "detail": detail,
+        "output": "\n".join(stdout)[:2048] if completed.returncode == 0 else None,
         "returncode": completed.returncode,
     }
 
@@ -93,17 +107,112 @@ def _memory_bytes() -> int | None:
     return None
 
 
-def _gpu_probe(command_runner: CommandRunner) -> dict[str, Any]:
-    result = command_runner(TOOL_COMMANDS["nvidia_smi"], 2.0)
-    if result.get("status") == "available":
-        adapters = []
-        for line in str(result.get("version") or result.get("detail") or "").splitlines():
-            name, _, memory = line.partition(",")
-            adapters.append({"name": name.strip()[:120], "reported_memory": memory.strip()[:40]})
-        return {"adapters": adapters, "cuda": {"status": "available", "provenance": "nvidia-smi"}}
+def _probe_output(result: dict[str, Any]) -> str:
+    return str(result.get("output") or result.get("version") or result.get("detail") or "")
+
+
+def _normalise_adapter_names(names: Sequence[Any]) -> list[dict[str, str]]:
+    adapters: list[dict[str, str]] = []
+    for value in names:
+        name = str(value).strip()
+        if name and len(name) <= 120:
+            adapters.append({"name": name})
+    return adapters
+
+
+def _windows_adapter_names(output: str) -> list[str]:
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError:
+        return []
+    values = payload if isinstance(payload, list) else [payload]
+    return [value for value in values if isinstance(value, str)]
+
+
+def _system_profiler_adapter_names(output: str) -> list[str]:
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError:
+        return []
+    names: list[str] = []
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {"sppci_model", "_name"} and isinstance(child, str):
+                    names.append(child)
+                else:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    return names
+
+
+def _linux_adapter_names(output: str) -> list[str]:
+    names: list[str] = []
+    for line in output.splitlines():
+        if "VGA compatible controller" not in line and "3D controller" not in line:
+            continue
+        description = line.split("]:", 1)[-1].strip()
+        if description:
+            names.append(description)
+    return names
+
+
+def _generic_gpu_adapters(command_runner: CommandRunner) -> dict[str, Any]:
+    system = platform.system()
+    command = GPU_ADAPTER_COMMANDS.get(system)
+    if command is None:
+        return {"status": "unsupported", "provenance": f"no {system} adapter probe", "adapters": []}
+
+    result = command_runner(command, 2.0)
+    if result.get("status") != "available":
+        return {
+            "status": result.get("status", "error"),
+            "provenance": f"{system} adapter probe",
+            "adapters": [],
+        }
+    output = _probe_output(result)
+    if system == "Windows":
+        names = _windows_adapter_names(output)
+    elif system == "Darwin":
+        names = _system_profiler_adapter_names(output)
+    else:
+        names = _linux_adapter_names(output)
     return {
-        "adapters": [],
-        "cuda": {"status": "unknown", "provenance": "nvidia-smi probe unavailable"},
+        "status": "available" if names else "error",
+        "provenance": f"{system} adapter probe",
+        "adapters": _normalise_adapter_names(names),
+    }
+
+
+def _nvidia_driver_probe(command_runner: CommandRunner) -> dict[str, Any]:
+    result = command_runner(TOOL_COMMANDS["nvidia_smi"], 2.0)
+    if result.get("status") != "available":
+        return {"status": result.get("status", "unknown"), "provenance": "nvidia-smi probe"}
+    return {"status": "available", "provenance": "nvidia-smi driver probe"}
+
+
+def _cuda_probe(command_runner: CommandRunner) -> dict[str, str]:
+    result = command_runner(TOOL_COMMANDS["nvcc"], 2.0)
+    if result.get("status") == "available":
+        return {"status": "available", "provenance": "nvcc compiler probe"}
+    return {"status": "unknown", "provenance": "no direct CUDA compiler evidence"}
+
+
+def _gpu_probe(command_runner: CommandRunner) -> dict[str, Any]:
+    generic = _generic_gpu_adapters(command_runner)
+    return {
+        "adapters": generic["adapters"],
+        "adapter_probe": {
+            "status": generic["status"],
+            "provenance": generic["provenance"],
+        },
+        "driver": _nvidia_driver_probe(command_runner),
+        "cuda": _cuda_probe(command_runner),
     }
 
 
