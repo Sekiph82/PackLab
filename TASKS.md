@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M01
-- Current Sprint: M01-S01/S02/S03 — Audited remediation batch
-- Current Task: M01-REMEDIATION-BATCH-001 — Remediate 11 audited M01 findings.
+- Current Sprint: M01-S01/S02/S03 — Final audited remediation batch
+- Current Task: M01-REMEDIATION-BATCH-002 — Remediate 4 remaining audited M01 findings.
 - Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V01.md. Codex remediates only PL-0024, PL-0025, PL-0026, PL-0030, PL-0031, PL-0034, PL-0035, PL-0037, PL-0041, PL-0043 and PL-0036 in the frozen dependency-safe order, publishes one V02 child log per task plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_LOG_V01.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before M02. Master audit evidence: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_CHATGPT_AUDIT_V01.md.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V02.md. Codex remediates only PL-0026, PL-0031, PL-0035 and PL-0043 using their V03 work orders, publishes one V03 child log per task plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_LOG_V02.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before M02. Prior remediation audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V01.md.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -95,8 +95,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0021** Add Windows/macOS/Linux-safe .gitignore covering Python, Xcode, SwiftPM, Blender, COLMAP/OpenMVS outputs and local scans.
 - [x] **PL-0022** Add .editorconfig and line-ending policy to prevent Windows/macOS churn.
 - [x] **PL-0023** Define generated-artifact directories and Git LFS policy for sample images/meshes that genuinely belong in source control.
-- [ ] **PL-0024** Create local environment diagnostics script that reports OS, CPU, RAM, GPU, CUDA availability, Python and external tool versions.
-- [ ] **PL-0025** Create root task-runner strategy for common bootstrap, test, lint and build commands.
+- [x] **PL-0024** Create local environment diagnostics script that reports OS, CPU, RAM, GPU, CUDA availability, Python and external tool versions.
+- [x] **PL-0025** Create root task-runner strategy for common bootstrap, test, lint and build commands.
 - [ ] **PL-0026** Establish local cache directories outside tracked source for reconstruction intermediates.
 
 ## Sprint M01-S02 - Python/Windows foundation
@@ -104,21 +104,21 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0027** Choose and pin a Python version after compatibility validation across PySide6/Open3D/OpenCV/PyTorch/OpenCascade binding.
 - [x] **PL-0028** Create Python package/workspace layout for PackLab core and Windows Studio.
 - [x] **PL-0029** Add dependency locking and reproducible Windows bootstrap.
-- [ ] **PL-0030** Configure Ruff/formatter/type-check strategy and baseline configuration.
+- [x] **PL-0030** Configure Ruff/formatter/type-check strategy and baseline configuration.
 - [ ] **PL-0031** Configure pytest with unit/integration/slow-test markers.
 - [x] **PL-0032** Add structured logging with session/task correlation IDs.
 - [x] **PL-0033** Add application configuration system with user config, project config and environment overrides.
-- [ ] **PL-0034** Add capability registry for optional engines such as CUDA, COLMAP, OpenMVS, Blender and OpenCascade.
+- [x] **PL-0034** Add capability registry for optional engines such as CUDA, COLMAP, OpenMVS, Blender and OpenCascade.
 - [ ] **PL-0035** Add safe subprocess runner with cancellation, timeout, stdout/stderr streaming and exit-code capture.
 
 ## Sprint M01-S03 - Swift/iOS foundation
 
-- [ ] **PL-0036** Create SwiftUI iOS application project targeting the user's iPhone 16 and a documented minimum iOS version.
-- [ ] **PL-0037** Add NextLevel through Swift Package Manager with a pinned tested version.
+- [x] **PL-0036** Create SwiftUI iOS application project targeting the user's iPhone 16 and a documented minimum iOS version.
+- [x] **PL-0037** Add NextLevel through Swift Package Manager with a pinned tested version.
 - [x] **PL-0038** Add project modules/services for Camera, AR Tracking, Motion, Capture Quality, Storage and Transfer.
 - [x] **PL-0039** Configure Swift 6 strict concurrency and project warning policy.
 - [x] **PL-0040** Add camera/photo-library/local-network permission descriptions actually required by the product.
-- [ ] **PL-0041** Add iOS logging and diagnostics export.
+- [x] **PL-0041** Add iOS logging and diagnostics export.
 - [x] **PL-0042** Create simulator-safe fallbacks so CI can build without physical camera hardware.
 - [ ] **PL-0043** Add unit-test target and initial smoke test.
 
