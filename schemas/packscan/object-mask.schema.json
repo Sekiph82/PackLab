@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.example/schemas/packscan/1.0/object-mask.schema.json",
+  "title": "PackLab optional object mask 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "masks"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "masks": {"type": "array", "items": {"$ref": "#/$defs/mask"}}
+  },
+  "$defs": {
+    "dimensions": {"type": "object", "additionalProperties": false, "required": ["width", "height"], "properties": {"width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}}},
+    "mask": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mask_path", "source_image_path", "source_photo_id", "source_dimensions", "mask_dimensions", "pixel_origin", "semantics", "encoding", "alpha_allowed", "palette_allowed"],
+      "properties": {
+        "mask_path": {"type": "string", "pattern": "^masks/[A-Za-z0-9][A-Za-z0-9._/-]{0,510}\\.png$"},
+        "source_image_path": {"type": "string", "pattern": "^images/[A-Za-z0-9][A-Za-z0-9._/-]{0,510}$"},
+        "source_photo_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        "source_dimensions": {"$ref": "#/$defs/dimensions"},
+        "mask_dimensions": {"$ref": "#/$defs/dimensions"},
+        "pixel_origin": {"const": "top_left_pixel_center"},
+        "semantics": {"enum": ["binary_object_foreground_255_background_0", "label_index_0_background"]},
+        "encoding": {"const": "png_grayscale_8bit"},
+        "alpha_allowed": {"const": false},
+        "palette_allowed": {"const": false},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}
