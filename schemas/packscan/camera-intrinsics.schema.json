@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.example/schemas/packscan/1.0/camera-intrinsics.schema.json",
+  "title": "PackLab camera intrinsics 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "lens", "reference_dimensions", "pixel_coordinate_origin", "matrix_convention", "dimension_policy", "provenance"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "status": {"enum": ["measured", "estimated", "unavailable"]},
+    "lens": {
+      "type": "object", "additionalProperties": false, "required": ["device_model", "lens_identity"],
+      "properties": {
+        "device_model": {"type": "string", "minLength": 1, "maxLength": 128},
+        "lens_identity": {"type": "string", "minLength": 1, "maxLength": 128},
+        "source": {"enum": ["device_api", "calibration", "operator", "unknown"]}
+      }
+    },
+    "reference_dimensions": {"$ref": "#/$defs/dimensions"},
+    "target_dimensions": {"$ref": "#/$defs/dimensions"},
+    "pixel_coordinate_origin": {"const": "top_left_pixel_center"},
+    "matrix_convention": {"const": "row_major_3x3_homogeneous"},
+    "dimension_policy": {"enum": ["exact_reference_only", "uniform_scale_about_origin"]},
+    "intrinsic_matrix": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}
+    },
+    "distortion": {
+      "type": "object", "additionalProperties": false, "required": ["model", "coefficient_order"],
+      "properties": {
+        "model": {"enum": ["none", "brown_conrady", "fisheye"]},
+        "coefficient_order": {"type": "array", "items": {"type": "string"}},
+        "coefficients": {"type": "array", "items": {"type": "number"}}
+      }
+    },
+    "provenance": {
+      "type": "object", "additionalProperties": false, "required": ["source", "recorded_at"],
+      "properties": {
+        "source": {"enum": ["device_api", "dedicated_calibration", "operator", "unknown"]},
+        "recorded_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "calibration_id": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,256}$"},
+        "notes": {"type": "string", "maxLength": 512}
+      }
+    }
+  },
+  "$defs": {
+    "dimensions": {
+      "type": "object", "additionalProperties": false, "required": ["width", "height"],
+      "properties": {"width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}}
+    }
+  },
+  "allOf": [
+    {"if": {"properties": {"status": {"enum": ["measured", "estimated"]}}}, "then": {"required": ["intrinsic_matrix", "distortion"]}},
+    {"if": {"properties": {"status": {"const": "unavailable"}}}, "then": {"not": {"required": ["intrinsic_matrix"]}}}
+  ]
+}

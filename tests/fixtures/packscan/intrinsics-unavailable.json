@@ -1,0 +1,10 @@
+{
+  "schema_version": "1.0.0",
+  "status": "unavailable",
+  "lens": {"device_model": "iPhone 16 Standard", "lens_identity": "main-wide", "source": "unknown"},
+  "reference_dimensions": {"width": 4032, "height": 3024},
+  "pixel_coordinate_origin": "top_left_pixel_center",
+  "matrix_convention": "row_major_3x3_homogeneous",
+  "dimension_policy": "exact_reference_only",
+  "provenance": {"source": "unknown", "recorded_at": "2026-09-22T09:00:00Z"}
+}
