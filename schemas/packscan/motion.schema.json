@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.example/schemas/packscan/1.0/motion.schema.json",
+  "title": "PackLab CoreMotion metadata 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "axis_convention", "samples", "synchronization"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "axis_convention": {"const": "device_right_handed_x_right_y_up_z_forward"},
+    "samples": {"type": "array", "items": {"$ref": "#/$defs/sample"}},
+    "synchronization": {
+      "type": "object", "additionalProperties": false, "required": ["source_clock", "target", "method", "tolerance_ms", "clock_resolution_ms"],
+      "properties": {
+        "source_clock": {"const": "utc"},
+        "target": {"const": "photo_capture_timestamp"},
+        "method": {"enum": ["nearest_sample", "linear_interpolation"]},
+        "tolerance_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
+        "clock_resolution_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000}
+      }
+    }
+  },
+  "$defs": {
+    "vector3": {"type": "object", "additionalProperties": false, "required": ["x", "y", "z"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}},
+    "quaternion": {"type": "object", "additionalProperties": false, "required": ["order", "x", "y", "z", "w"], "properties": {"order": {"const": "xyzw"}, "x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}, "w": {"type": "number"}}},
+    "sample": {
+      "type": "object", "additionalProperties": false, "required": ["timestamp", "status", "source"],
+      "properties": {
+        "timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "status": {"enum": ["available", "stale", "out_of_window", "unavailable"]},
+        "attitude": {"$ref": "#/$defs/quaternion"},
+        "rotation_rate_rad_s": {"$ref": "#/$defs/vector3"},
+        "acceleration_m_s2": {"$ref": "#/$defs/vector3"},
+        "source": {"const": "CoreMotion"},
+        "source_version": {"type": "string", "minLength": 1, "maxLength": 64}
+      }
+    }
+  }
+}

@@ -1,0 +1,1 @@
+{"schema_version":"1.0.0","axis_convention":"device_right_handed_x_right_y_up_z_forward","samples":[{"timestamp":"2026-09-22T08:59:00Z","status":"stale","source":"CoreMotion","source_version":"iOS-18"}],"synchronization":{"source_clock":"utc","target":"photo_capture_timestamp","method":"nearest_sample","tolerance_ms":20,"clock_resolution_ms":1}}
