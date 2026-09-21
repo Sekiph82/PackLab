@@ -25,20 +25,27 @@ class ProcessResult:
     error: str | None = None
 
 
-def _stop_process(process: subprocess.Popen[str]) -> None:
+def _stop_process(process: subprocess.Popen[str]) -> str | None:
     """Stop a process and its group where the host supports it."""
 
+    cleanup_error: str | None = None
     if os.name == "nt" and process.pid:
         # The PID is the runner-owned root. /T limits taskkill to that process tree.
         try:
-            subprocess.run(
+            completed = subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 capture_output=True,
                 check=False,
                 shell=False,
                 timeout=1.0,
             )
-        except (OSError, subprocess.TimeoutExpired):
+            if completed.returncode != 0:
+                cleanup_error = f"taskkill failed with exit code {completed.returncode}"
+        except subprocess.TimeoutExpired:
+            cleanup_error = "taskkill timed out after 1.0 seconds"
+        except OSError as exc:
+            cleanup_error = f"taskkill could not start: {type(exc).__name__}"
+        if cleanup_error is not None:
             process.terminate()
     elif os.name != "nt" and process.pid:
         kill_group = getattr(os, "killpg", None)
@@ -48,16 +55,17 @@ def _stop_process(process: subprocess.Popen[str]) -> None:
             else:
                 process.terminate()
         except ProcessLookupError:
-            return
+            return None
     elif os.name == "nt":
         process.terminate()
     try:
         process.wait(timeout=1.0)
-        return
+        return cleanup_error
     except subprocess.TimeoutExpired:
         pass
     process.kill()
     process.wait(timeout=1.0)
+    return cleanup_error
 
 
 def run_process(
@@ -118,19 +126,26 @@ def run_process(
     started = time.monotonic()
     timed_out = False
     cancelled = False
+    cleanup_error: str | None = None
     while process.poll() is None:
         if cancel_event and cancel_event.is_set():
             cancelled = True
-            _stop_process(process)
+            cleanup_error = _stop_process(process)
             break
         if timeout is not None and time.monotonic() - started >= timeout:
             timed_out = True
-            _stop_process(process)
+            cleanup_error = _stop_process(process)
             break
         time.sleep(0.01)
     returncode = process.wait(timeout=1.0)
     stdout_thread.join(timeout=1.0)
     stderr_thread.join(timeout=1.0)
     return ProcessResult(
-        command, returncode, "".join(stdout_lines), "".join(stderr_lines), timed_out, cancelled
+        command,
+        returncode,
+        "".join(stdout_lines),
+        "".join(stderr_lines),
+        timed_out,
+        cancelled,
+        cleanup_error,
     )

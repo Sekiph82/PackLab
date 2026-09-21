@@ -1,9 +1,14 @@
+import csv
 import os
+import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
+import pytest
+
+import packlab_core.subprocess_runner as subprocess_runner
 from packlab_core.subprocess_runner import run_process
 
 
@@ -53,20 +58,73 @@ def _read_pids(marker: Path) -> tuple[int, int]:
     raise AssertionError("parent did not record both process IDs")
 
 
-def _assert_processes_gone(pids: tuple[int, int]):
-    def is_alive(pid: int) -> bool:
+def _is_process_alive(pid: int) -> bool:
+    if os.name == "nt":
         try:
-            os.kill(pid, 0)
-        except OSError:
+            completed = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True,
+                check=False,
+                shell=False,
+                timeout=1.0,
+                text=True,
+            )
+        except (OSError, subprocess.TimeoutExpired):
             return False
-        return True
+        if completed.returncode != 0:
+            return False
+        return any(
+            len(row) >= 2 and row[1] == str(pid)
+            for row in csv.reader(completed.stdout.splitlines())
+        )
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
 
+
+def _assert_processes_gone(pids: tuple[int, int]):
     deadline = time.monotonic() + 2.0
     while time.monotonic() < deadline:
-        if not any(is_alive(pid) for pid in pids):
+        if not any(_is_process_alive(pid) for pid in pids):
             return
         time.sleep(0.02)
     raise AssertionError(f"runner-owned processes remain alive: {pids}")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process-query proof")
+def test_windows_liveness_query_is_non_destructive():
+    process = subprocess.Popen(child("import time; time.sleep(30)"))
+    try:
+        assert _is_process_alive(process.pid)
+        assert process.poll() is None
+    finally:
+        process.terminate()
+        process.wait(timeout=2.0)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows taskkill result proof")
+@pytest.mark.parametrize("failure", ["nonzero", "timeout", "start"])
+def test_windows_taskkill_failure_is_structured_and_root_is_stopped(monkeypatch, failure):
+    process = subprocess.Popen(child("import time; time.sleep(30)"))
+
+    def fake_run(*args, **kwargs):
+        if failure == "nonzero":
+            return subprocess.CompletedProcess(args[0], 5, stdout="", stderr="denied")
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+        raise FileNotFoundError("taskkill")
+
+    monkeypatch.setattr(subprocess_runner.subprocess, "run", fake_run)
+    try:
+        error = subprocess_runner._stop_process(process)
+        assert error is not None
+        assert process.poll() is not None
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=2.0)
 
 
 def test_timeout_stops_parent_and_spawned_child(tmp_path):
