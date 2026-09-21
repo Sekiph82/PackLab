@@ -8,6 +8,22 @@ from collections.abc import Mapping
 from pathlib import Path
 
 
+def _validate_cache_data_roots(cache: Path, project_data: Path) -> None:
+    """Reject overlapping ownership roots before any directory is created."""
+
+    resolved_cache = cache.expanduser().resolve(strict=False)
+    resolved_data = project_data.expanduser().resolve(strict=False)
+    if (
+        resolved_cache == resolved_data
+        or resolved_data in resolved_cache.parents
+        or resolved_cache in resolved_data.parents
+    ):
+        raise ValueError(
+            "PACKLAB_CACHE_ROOT and PACKLAB_DATA_ROOT must be distinct, "
+            f"non-overlapping roots; cache={resolved_cache}, data={resolved_data}"
+        )
+
+
 def _default_root(system: str, env: Mapping[str, str], home: Path) -> Path:
     if system == "Windows":
         return (
@@ -51,19 +67,24 @@ def project_data_root(
 
     values = os.environ if env is None else env
     override = values.get("PACKLAB_DATA_ROOT")
-    if override:
-        return Path(override).expanduser()
     selected_home = Path.home() if home is None else Path(home)
     selected_system = platform.system() if system is None else system
-    if selected_system == "Windows":
-        return (
+    if override:
+        data_root = Path(override).expanduser()
+    elif selected_system == "Windows":
+        data_root = (
             Path(values.get("LOCALAPPDATA") or selected_home / "AppData" / "Local")
             / "PackLab"
             / "data"
         )
-    if selected_system == "Darwin":
-        return selected_home / "Library" / "Application Support" / "PackLab"
-    return Path(values.get("XDG_DATA_HOME") or selected_home / ".local" / "share") / "packlab"
+    elif selected_system == "Darwin":
+        data_root = selected_home / "Library" / "Application Support" / "PackLab"
+    else:
+        data_root = Path(values.get("XDG_DATA_HOME") or selected_home / ".local" / "share") / "packlab"
+    _validate_cache_data_roots(
+        cache_root(env=values, home=selected_home, system=selected_system), data_root
+    )
+    return data_root
 
 
 def ensure_directories(
@@ -76,6 +97,7 @@ def ensure_directories(
         "workspace": workspace_root(env=env, home=home, system=system),
         "project_data": project_data_root(env=env, home=home, system=system),
     }
+    _validate_cache_data_roots(roots["cache"], roots["project_data"])
     for path in roots.values():
         path.mkdir(parents=True, exist_ok=True)
     return roots

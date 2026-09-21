@@ -1,6 +1,8 @@
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 MODULE_PATH = Path(__file__).parents[2] / "core" / "src" / "packlab_core" / "cache_paths.py"
 SPEC = importlib.util.spec_from_file_location("cache_paths", MODULE_PATH)
 assert SPEC and SPEC.loader
@@ -38,6 +40,46 @@ def test_overrides_and_lazy_creation_use_only_temp_paths(tmp_path):
     assert roots["workspace"] == tmp_path / "cache" / "work"
     assert roots["project_data"] == tmp_path / "data"
     assert all(path.is_dir() for path in roots.values())
+
+
+def test_equal_cache_and_data_overrides_are_rejected(tmp_path):
+    root = tmp_path / "shared"
+    env = {"PACKLAB_CACHE_ROOT": str(root), "PACKLAB_DATA_ROOT": str(root)}
+
+    with pytest.raises(ValueError, match="must be distinct, non-overlapping"):
+        cache_paths.ensure_directories(env=env, home=tmp_path / "unused", system="Windows")
+
+
+def test_data_beneath_cache_override_is_rejected(tmp_path):
+    root = tmp_path / "cache"
+    env = {
+        "PACKLAB_CACHE_ROOT": str(root),
+        "PACKLAB_DATA_ROOT": str(root / "data"),
+    }
+
+    with pytest.raises(ValueError, match="must be distinct, non-overlapping"):
+        cache_paths.ensure_directories(env=env, home=tmp_path / "unused", system="Windows")
+
+
+def test_cache_beneath_data_override_is_rejected(tmp_path):
+    root = tmp_path / "data"
+    env = {
+        "PACKLAB_CACHE_ROOT": str(root / "cache"),
+        "PACKLAB_DATA_ROOT": str(root),
+    }
+
+    with pytest.raises(ValueError, match="must be distinct, non-overlapping"):
+        cache_paths.ensure_directories(env=env, home=tmp_path / "unused", system="Windows")
+
+
+def test_safe_sibling_overrides_are_accepted(tmp_path):
+    env = {
+        "PACKLAB_CACHE_ROOT": str(tmp_path / "cache"),
+        "PACKLAB_DATA_ROOT": str(tmp_path / "data"),
+    }
+
+    roots = cache_paths.ensure_directories(env=env, home=tmp_path / "unused", system="Linux")
+    assert roots["cache"].parent == roots["project_data"].parent == tmp_path
 
 
 def test_workspace_and_project_data_are_distinct(tmp_path):
