@@ -1,4 +1,4 @@
-# PL-0025 — ChatGPT Strict Remediation Audit V02
+# PL-0025 — ChatGPT Strict Remediation Audit V03
 
 Decision: **AUDITED_PASS**
 
