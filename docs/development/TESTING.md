@@ -1,6 +1,6 @@
 # Python testing strategy
 
-Pytest discovers tests below `tests/` through the root `pyproject.toml`. The canonical configuration sets `strict_markers = true`, and three markers are registered with strict validation:
+Pytest discovers tests below `tests/` through the root `pyproject.toml`. The canonical configuration enables strict unknown-marker validation through the `--strict-markers` addopt, and three markers are registered:
 
 - `unit` is for fast isolated behavior;
 - `integration` is for owned module/tool boundaries;
