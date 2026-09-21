@@ -1,6 +1,6 @@
 # Python quality strategy
 
-PackLab uses the root `pyproject.toml` as the one configuration source for Python quality tools. M01 selects Ruff for linting/formatting and mypy for type checking; the root task runner only invokes these tools and does not duplicate their rules.
+PackLab uses the root `pyproject.toml` as the one configuration source for Python quality tools. M01 selects Ruff for linting/formatting and mypy for type checking; the root task runner only invokes these tools through `uv run --locked` and does not duplicate their rules or depend on globally installed executables.
 
 ## Commands
 

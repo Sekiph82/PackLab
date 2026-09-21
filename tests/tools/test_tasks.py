@@ -45,10 +45,17 @@ def test_unsupported_bootstrap_is_explicitly_deferred(monkeypatch):
     assert status.startswith("deferred:")
 
 
-def test_uv_missing_returns_nonzero(monkeypatch, capsys):
-    command = ["uv", "run", "--locked", "pytest"]
-    monkeypatch.setattr(tasks, "command_for", lambda name: (command, "pytest"))
+@pytest.mark.parametrize("command_name", ["lint", "type-check"])
+def test_quality_commands_fail_clearly_when_uv_missing(monkeypatch, capsys, command_name):
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("uv")
 
+    monkeypatch.setattr(tasks.subprocess, "run", missing)
+    assert tasks.run([command_name]) == 2
+    assert "unavailable" in capsys.readouterr().err
+
+
+def test_test_command_fails_clearly_when_uv_missing(monkeypatch, capsys):
     def missing(*args, **kwargs):
         raise FileNotFoundError("uv")
 
