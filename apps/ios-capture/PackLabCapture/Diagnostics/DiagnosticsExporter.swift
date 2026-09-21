@@ -11,8 +11,23 @@ public struct DiagnosticsExportDocument: Codable, Sendable, Equatable {
         entries: [DiagnosticsEntry]
     ) {
         self.generatedAt = generatedAt
-        self.environment = environment
-        self.entries = entries
+        self.environment = environment.map {
+            DiagnosticsEnvironment(
+                appVersion: $0.appVersion,
+                buildNumber: $0.buildNumber,
+                capabilities: $0.capabilities
+            )
+        }
+        self.entries = entries.map {
+            DiagnosticsEntry(
+                sequence: $0.sequence,
+                timestamp: $0.timestamp,
+                level: $0.level,
+                category: $0.category,
+                code: $0.code,
+                message: $0.message
+            )
+        }
     }
 }
 

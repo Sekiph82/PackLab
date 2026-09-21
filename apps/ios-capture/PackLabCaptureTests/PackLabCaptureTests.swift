@@ -21,6 +21,65 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertNil(sample)
         XCTAssertEqual(state, .unavailable)
     }
+
+    func testDiagnosticsRedactsSecretsAndPrivatePathsBeforeRetention() async {
+        let logger = DiagnosticsLogger()
+        await logger.record(
+            category: "auth",
+            code: "token",
+            message: #"api_key=secret123 path=C:\Users\Alice\private\capture.json Bearer abc.def"#
+        )
+
+        let entries = await logger.snapshot()
+        XCTAssertEqual(entries.count, 1)
+        let entry = entries[0]
+        XCTAssertTrue(entry.message.contains("[REDACTED_SECRET]"))
+        XCTAssertTrue(entry.message.contains("[USER_PATH]"))
+        XCTAssertFalse(entry.message.contains("secret123"))
+        XCTAssertFalse(entry.message.contains("Alice"))
+        XCTAssertFalse(entry.message.contains("abc.def"))
+    }
+
+    func testDiagnosticsCapabilityExportIsConstrainedAndSanitized() throws {
+        let environment = DiagnosticsEnvironment(
+            appVersion: "api_key=version-secret",
+            buildNumber: "1.0",
+            capabilities: ["Camera", "GPU: RTX 4090", "/Users/alice/private", "token=hidden"]
+        )
+        let data = try DiagnosticsExporter().prepareUserInitiatedExport(
+            entries: [DiagnosticsEntry(sequence: 0, timestamp: Date(), level: .info, category: "test", code: "safe", message: "ok")],
+            environment: environment
+        )
+        let json = String(decoding: data, as: UTF8.self)
+
+        XCTAssertTrue(json.contains("camera"))
+        XCTAssertTrue(json.contains("gpu-rtx-4090"))
+        XCTAssertFalse(json.contains("version-secret"))
+        XCTAssertFalse(json.contains("alice"))
+        XCTAssertFalse(json.contains("hidden"))
+    }
+
+    func testDiagnosticsRetentionRemainsBounded() async {
+        let logger = DiagnosticsLogger(capacity: 2)
+        for sequence in 0..<3 {
+            await logger.record(category: "test", code: "entry", message: "\(sequence)")
+        }
+
+        let entries = await logger.snapshot()
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries.map(\.message), ["1", "2"])
+    }
+
+    func testDiagnosticsEmptyExportFailsClosed() async {
+        do {
+            _ = try await DiagnosticsExporter().prepareUserInitiatedExport(from: DiagnosticsLogger())
+            XCTFail("An empty diagnostics export must fail closed")
+        } catch let error as DiagnosticsExportError {
+            XCTAssertEqual(error, .empty)
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
