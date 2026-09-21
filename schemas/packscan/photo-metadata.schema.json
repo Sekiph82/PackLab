@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.example/schemas/packscan/1.0/photo-metadata.schema.json",
+  "title": "PackLab PackScan photo metadata 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "photos"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "photos": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/photo"}
+    }
+  },
+  "$defs": {
+    "source_status": {"enum": ["available", "unavailable", "not_recorded", "estimated"]},
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"$ref": "#/$defs/source_status"},
+        "value": {"type": "number", "finite": true},
+        "unit": {"type": "string", "minLength": 1, "maxLength": 32},
+        "source": {"enum": ["exif", "device_api", "operator", "derived", "unknown"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "available"}}}, "then": {"required": ["value", "unit", "source"]}},
+        {"if": {"properties": {"status": {"const": "estimated"}}}, "then": {"required": ["value", "unit", "source"]}},
+        {"if": {"properties": {"status": {"enum": ["unavailable", "not_recorded"]}}}, "then": {"not": {"required": ["value"]}}}
+      ]
+    },
+    "orientation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "source"],
+      "properties": {
+        "value": {"enum": ["portrait", "landscape", "square", "unknown"]},
+        "rotation_degrees": {"enum": [0, 90, 180, 270]},
+        "source": {"enum": ["exif", "device_api", "derived", "unknown"]}
+      }
+    },
+    "photo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["photo_id", "image_path", "sequence", "original_filename", "pixel_dimensions", "orientation", "focal_length_mm", "exposure", "iso", "white_balance_kelvin"],
+      "properties": {
+        "photo_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+        "image_path": {"type": "string", "pattern": "^images/[A-Za-z0-9][A-Za-z0-9._/-]{0,510}$"},
+        "sequence": {"type": "integer", "minimum": 0},
+        "original_filename": {"type": "string", "pattern": "^[^/\\\\\\u0000-\\u001F]{1,255}$"},
+        "pixel_dimensions": {
+          "type": "object", "additionalProperties": false, "required": ["width", "height"],
+          "properties": {"width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}}
+        },
+        "orientation": {"$ref": "#/$defs/orientation"},
+        "focal_length_mm": {"$ref": "#/$defs/measurement"},
+        "exposure": {"$ref": "#/$defs/measurement"},
+        "iso": {"$ref": "#/$defs/measurement"},
+        "white_balance_kelvin": {"$ref": "#/$defs/measurement"}
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "photos": [
+    {
+      "photo_id": "photo-0001",
+      "image_path": "images/0001.jpg",
+      "sequence": -1,
+      "original_filename": "IMG_0001.JPG",
+      "pixel_dimensions": {"width": 0, "height": 3024},
+      "orientation": {"value": "landscape", "source": "exif"},
+      "focal_length_mm": {"status": "available", "value": 6.765, "unit": "mm", "source": "exif"},
+      "exposure": {"status": "unavailable"},
+      "iso": {"status": "unavailable"},
+      "white_balance_kelvin": {"status": "unavailable"}
+    }
+  ]
+}

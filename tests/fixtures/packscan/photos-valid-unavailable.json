@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "photos": [
+    {
+      "photo_id": "photo-0001",
+      "image_path": "images/0001.jpg",
+      "sequence": 0,
+      "original_filename": "IMG_0001.JPG",
+      "pixel_dimensions": {"width": 4032, "height": 3024},
+      "orientation": {"value": "landscape", "rotation_degrees": 0, "source": "exif"},
+      "focal_length_mm": {"status": "available", "value": 6.765, "unit": "mm", "source": "exif"},
+      "exposure": {"status": "available", "value": 0.01, "unit": "s", "source": "exif"},
+      "iso": {"status": "available", "value": 50, "unit": "iso", "source": "exif"},
+      "white_balance_kelvin": {"status": "unavailable"}
+    }
+  ]
+}

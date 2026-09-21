@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0.0",
+  "photos": [
+    {
+      "photo_id": "photo-0001",
+      "image_path": "private/IMG_0001.JPG",
+      "sequence": 0,
+      "original_filename": "IMG_0001.JPG",
+      "pixel_dimensions": {"width": 4032, "height": 3024},
+      "orientation": {"value": "unknown", "source": "unknown"},
+      "focal_length_mm": {"status": "not_recorded"},
+      "exposure": {"status": "not_recorded"},
+      "iso": {"status": "not_recorded"},
+      "white_balance_kelvin": {"status": "not_recorded"}
+    }
+  ]
+}
