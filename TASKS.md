@@ -4,11 +4,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M01
-- Current Sprint: M01-S01/S02/S03 — Final PL-0043 remediation
-- Current Task: M01-REMEDIATION-BATCH-003 — Remediate final PL-0043 audit finding.
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V03.md. Codex executes only PL-0043 V04, publishes https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/PL-0043_CODEX_LOG_V04.md plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CODEX_LOG_V03.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before M02. Blocking audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/PL-0043_CHATGPT_AUDIT_V03.md.
+- Current Milestone: M02
+- Current Sprint: M02-S01/S02 — Full M02 milestone batch
+- Current Task: M02-BATCH-001 — Execute all M02 tasks PL-0044 through PL-0068.
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex executes PL-0044 through PL-0068 sequentially with one child implementation/evidence boundary and one child log per task, never edits TASKS.md, never starts M03, and stops with OWNER_REQUIRED/BATCH_STOPPED if PL-0068 real physical calibration benchmark evidence is unavailable. M01 closure audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V03.md.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -36,7 +36,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 | Milestone | Name | Primary Outcome | Status |
 |---|---|---|---|
 | M00 | Governance & Architecture | Reproducible rules, repo contract, AI workflow | [x] |
-| M01 | Monorepo & Development Foundations | iOS + Windows project skeletons, local tooling | [ ] |
+| M01 | Monorepo & Development Foundations | iOS + Windows project skeletons, local tooling | [x] |
 | M02 | PackScan Data Contract & Calibration | Versioned .packscan format and real-world scale contract | [ ] |
 | M03 | iOS Capture Foundation | SwiftUI/NextLevel/ARKit app runs on iPhone 16 | [ ] |
 | M04 | Guided Capture & Quality Intelligence | Reliable, guided, high-resolution packaging capture | [ ] |
@@ -120,7 +120,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0040** Add camera/photo-library/local-network permission descriptions actually required by the product.
 - [x] **PL-0041** Add iOS logging and diagnostics export.
 - [x] **PL-0042** Create simulator-safe fallbacks so CI can build without physical camera hardware.
-- [ ] **PL-0043** Add unit-test target and initial smoke test.
+- [x] **PL-0043** Add unit-test target and initial smoke test.
 
 ---
 
