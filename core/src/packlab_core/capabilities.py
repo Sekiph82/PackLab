@@ -39,7 +39,8 @@ class Capability:
 Probe = Callable[[Sequence[str]], ProbeResult]
 _VERSION = re.compile(r"\b\d+(?:\.\d+){1,3}\b")
 COMMANDS: dict[str, tuple[str, ...] | None] = {
-    "cuda": ("nvidia-smi", "--version"),
+    "nvidia_driver": ("nvidia-smi", "--version"),
+    "cuda": ("nvcc", "--version"),
     "colmap": ("colmap", "version"),
     "openmvs": ("DensifyPointCloud", "--version"),
     "blender": ("blender", "--version"),
@@ -80,6 +81,27 @@ def _record(name: str, result: ProbeResult, provenance: str) -> Capability:
     return Capability(name, CapabilityStatus.AVAILABLE, match.group(0), provenance, result.detail)
 
 
+def _record_cuda(result: ProbeResult) -> Capability:
+    provenance = "direct CUDA toolkit probe: nvcc --version"
+    if result.status == "missing":
+        return Capability("cuda", CapabilityStatus.UNAVAILABLE, None, provenance, result.detail)
+    if result.status != "ok":
+        return Capability("cuda", CapabilityStatus.UNKNOWN, None, provenance, result.detail)
+    output = result.output.lower()
+    if "cuda compilation tools" not in output and "cuda toolkit" not in output:
+        return Capability(
+            "cuda",
+            CapabilityStatus.UNKNOWN,
+            None,
+            provenance,
+            "probe output did not identify the CUDA toolkit",
+        )
+    match = _VERSION.search(result.output)
+    if not match:
+        return Capability("cuda", CapabilityStatus.UNKNOWN, None, provenance, "no CUDA version found")
+    return Capability("cuda", CapabilityStatus.AVAILABLE, match.group(0), provenance, result.detail)
+
+
 def discover_capabilities(probe: Probe = default_probe) -> dict[str, Capability]:
     """Discover optional executables without inferring capabilities from hardware labels."""
 
@@ -94,5 +116,10 @@ def discover_capabilities(probe: Probe = default_probe) -> dict[str, Capability]
                 "no executable probe configured",
             )
         else:
-            records[name] = _record(name, probe(command), f"executable probe: {command[0]}")
+            result = probe(command)
+            records[name] = (
+                _record_cuda(result)
+                if name == "cuda"
+                else _record(name, result, f"executable probe: {command[0]}")
+            )
     return records
