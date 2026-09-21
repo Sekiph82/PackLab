@@ -19,6 +19,7 @@
 		A10000010000000000000010 /* DiagnosticsExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000010 /* DiagnosticsExporter.swift */; };
 		A10000010000000000000011 /* SimulatorFallbacks.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000011 /* SimulatorFallbacks.swift */; };
 		A10000010000000000000012 /* PackLabCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000012 /* PackLabCaptureTests.swift */; };
+		A10000010000000000000013 /* NextLevel in Frameworks */ = {isa = PBXBuildFile; productRef = A10000900000000000000001 /* NextLevel */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -39,7 +40,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A10000200000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A10000200000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000010000000000000013 /* NextLevel in Frameworks */,); runOnlyForDeploymentPostprocessing = 0; };
 		A10000200000000000000004 /* Test Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
