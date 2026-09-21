@@ -10,7 +10,11 @@ from pathlib import Path
 
 def _default_root(system: str, env: Mapping[str, str], home: Path) -> Path:
     if system == "Windows":
-        return Path(env.get("LOCALAPPDATA") or home / "AppData" / "Local") / "PackLab"
+        return (
+            Path(env.get("LOCALAPPDATA") or home / "AppData" / "Local")
+            / "PackLab"
+            / "cache"
+        )
     if system == "Darwin":
         return home / "Library" / "Caches" / "PackLab"
     return Path(env.get("XDG_CACHE_HOME") or home / ".cache") / "packlab"

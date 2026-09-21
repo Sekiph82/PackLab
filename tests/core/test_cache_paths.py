@@ -16,7 +16,7 @@ def test_platform_defaults_are_deterministic(tmp_path):
     }
     assert (
         cache_paths.cache_root(env=env, home=tmp_path / "home", system="Windows")
-        == tmp_path / "local" / "PackLab"
+        == tmp_path / "local" / "PackLab" / "cache"
     )
     assert (
         cache_paths.cache_root(env=env, home=tmp_path / "home", system="Darwin")
@@ -45,3 +45,14 @@ def test_workspace_and_project_data_are_distinct(tmp_path):
     assert cache_paths.workspace_root(
         env=env, home=tmp_path, system="Linux"
     ) != cache_paths.project_data_root(env=env, home=tmp_path, system="Linux")
+
+
+def test_windows_project_data_is_a_sibling_of_cache(tmp_path):
+    env = {"LOCALAPPDATA": str(tmp_path / "local")}
+    cache = cache_paths.cache_root(env=env, home=tmp_path, system="Windows")
+    data = cache_paths.project_data_root(env=env, home=tmp_path, system="Windows")
+
+    assert cache != data
+    assert cache not in data.parents
+    assert data not in cache.parents
+    assert cache.parent == data.parent
