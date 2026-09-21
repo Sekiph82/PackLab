@@ -1,0 +1,1 @@
+{"schema_version":"1.0.0","timestamp":"2026-09-22T09:00:00Z","timestamp_domain":"utc","status":"degraded","tracking_state":"limited","confidence":0.2,"camera_to_world_matrix":[[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],"coordinate_convention":"packscan_right_handed_x_right_y_up_z_forward","provenance":{"source":"ARKit","source_version":"6.0"}}
