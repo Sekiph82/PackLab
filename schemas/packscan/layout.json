@@ -1,0 +1,53 @@
+{
+  "contract": "PackScan",
+  "container": "ZIP",
+  "extension": ".packscan",
+  "schema_version": "1.0.0",
+  "required_entries": [
+    "manifest.json",
+    "metadata/photos.json",
+    "checksums.json",
+    "images/"
+  ],
+  "optional_entry_prefixes": [
+    "metadata/",
+    "masks/",
+    "previews/",
+    "diagnostics/",
+    "calibration/"
+  ],
+  "path_rules": {
+    "separator": "/",
+    "encoding": "UTF-8",
+    "must_be_relative": true,
+    "must_not_contain": ["", ".", ".."],
+    "forbidden_prefixes": ["/", "\\"],
+    "forbidden_drive_pattern": "^[A-Za-z]:",
+    "case_sensitive": true,
+    "duplicate_policy": "reject_exact_and_casefold_duplicates"
+  },
+  "ordering": {
+    "manifest_payload_order": "lexicographic UTF-8 byte order by normalized path",
+    "zip_entry_order": "manifest.json, metadata/photos.json, checksums.json, then all remaining entries lexicographically",
+    "directory_entries": "forbidden; use file paths only"
+  },
+  "compression": {
+    "required_method": "deflate",
+    "level": 9,
+    "timestamps": "zeroed DOS timestamp where the writer permits it",
+    "deterministic_writer": true
+  },
+  "authority": {
+    "source_entries": ["images/", "metadata/", "calibration/"],
+    "derived_entries": ["masks/", "previews/", "diagnostics/"],
+    "source_is_immutable": true,
+    "derived_is_non_authoritative": true
+  },
+  "compatibility": {
+    "same_major": "accept only known required structures and apply declared minor compatibility rules",
+    "older_major": "accept only through an explicit migration before validation",
+    "future_major": "reject as unsupported_future_version",
+    "unknown_required_entry": "reject",
+    "unknown_optional_entry": "reject unless its namespace is explicitly registered"
+  }
+}
