@@ -33,8 +33,14 @@ Paths use UTF-8 forward slashes, are relative, and contain no empty, `.` or
 duplicate. A path is normalized before comparison; duplicate names are always
 rejected. Directory entries are rejected. The writer orders the three control
 entries first and all remaining normalized paths lexicographically by UTF-8
-bytes. Required entries use DEFLATE level 9 and deterministic timestamps; the
-reader validates the path and duplicate rules before reading content.
+bytes. Every deterministic writer MUST set the ZIP central-directory DOS
+timestamp of every entry to exactly `1980-01-01T00:00:00` (UTC-independent
+calendar value; ZIP stores this as date `1980-01-01` and time `00:00:00`).
+Timestamp-related ZIP extra fields MUST be omitted, including extended/UT
+(`0x5455`) and NTFS (`0x000a`) timestamp fields. This exact string and the
+explicit omission rule are implementable by both Python and Swift without
+platform-local time conversion. The reader validates the path and duplicate
+rules before reading content.
 
 ## Compatibility and authority
 
