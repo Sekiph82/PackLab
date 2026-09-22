@@ -4,7 +4,7 @@
   "title": "PackLab ARKit pose 1.0",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "timestamp", "timestamp_domain", "status", "tracking_state", "confidence", "provenance"],
+  "required": ["schema_version", "timestamp", "timestamp_domain", "status", "tracking_state", "confidence", "coordinate_convention", "basis_conversion", "translation_unit", "provenance"],
   "properties": {
     "schema_version": {"const": "1.0.0"},
     "timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"},
@@ -16,6 +16,8 @@
     "world_to_camera_matrix": {"$ref": "#/$defs/matrix4"},
     "camera_to_world_quaternion": {"$ref": "#/$defs/quaternion"},
     "coordinate_convention": {"const": "packscan_right_handed_x_right_y_up_z_forward"},
+    "basis_conversion": {"const": "arkit_camera_neg_z_to_packscan_pos_z_reflection_v1"},
+    "translation_unit": {"const": "metres"},
     "provenance": {
       "type": "object", "additionalProperties": false, "required": ["source", "source_version"],
       "properties": {"source": {"const": "ARKit"}, "source_version": {"type": "string", "minLength": 1, "maxLength": 64}, "session_ref": {"type": "string", "maxLength": 128}}
@@ -26,8 +28,8 @@
     "quaternion": {"type": "object", "additionalProperties": false, "required": ["order", "x", "y", "z", "w"], "properties": {"order": {"const": "xyzw"}, "x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}, "w": {"type": "number"}}}
   },
   "allOf": [
-    {"if": {"properties": {"status": {"const": "available"}}}, "then": {"required": ["camera_to_world_matrix", "world_to_camera_matrix", "camera_to_world_quaternion"]}},
-    {"if": {"properties": {"status": {"const": "degraded"}}}, "then": {"required": ["camera_to_world_matrix"]}},
+    {"if": {"properties": {"status": {"const": "available"}}}, "then": {"required": ["camera_to_world_matrix", "world_to_camera_matrix", "camera_to_world_quaternion", "coordinate_convention"], "properties": {"tracking_state": {"const": "normal"}}}},
+    {"if": {"properties": {"status": {"const": "degraded"}}}, "then": {"required": ["camera_to_world_matrix", "coordinate_convention"], "properties": {"tracking_state": {"const": "limited"}}}},
     {"if": {"properties": {"status": {"const": "unavailable"}}}, "then": {"properties": {"confidence": {"const": null}}, "not": {"anyOf": [{"required": ["camera_to_world_matrix"]}, {"required": ["world_to_camera_matrix"]}, {"required": ["camera_to_world_quaternion"]}]}}}
   ]
 }
