@@ -1,7 +1,7 @@
 # PL-0051 Codex implementation log V01
 
-Task: PL-0051 — Calibration marker observations and millimetre units  
-Prompt: [PL-0051_CODEX_PROMPT_V01.md](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0051_CODEX_PROMPT_V01.md)  
+Task: PL-0051 — Calibration marker observations and millimetre units
+Prompt: [PL-0051_CODEX_PROMPT_V01.md](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0051_CODEX_PROMPT_V01.md)
 Audit criteria: [PL-0051_CHATGPT_AUDIT_CRITERIA_V01.md](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0051_CHATGPT_AUDIT_CRITERIA_V01.md)
 
 ## Scope and synchronization
