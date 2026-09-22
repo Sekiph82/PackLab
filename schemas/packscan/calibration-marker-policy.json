@@ -1,0 +1,25 @@
+{
+  "policy_version": "1.0.0",
+  "packscan_marker_family": "apriltag",
+  "opencv_dictionary": "DICT_APRILTAG_36h11",
+  "opencv_python_constant": "cv.aruco.DICT_APRILTAG_36h11",
+  "opencv_cpp_constant": "cv::aruco::DICT_APRILTAG_36h11",
+  "opencv_lookup_api": "cv.aruco.getPredefinedDictionary",
+  "dictionary_bits_per_dimension": 6,
+  "dictionary_marker_count": 587,
+  "minimum_hamming_distance": 11,
+  "reserved_calibration_ids": {"first": 0, "last": 63, "count": 64},
+  "dictionary_id_bounds": {"first": 0, "last": 586},
+  "id_rules": {
+    "unique_within_observation_set": true,
+    "application_markers_must_not_use_reserved_ids": true,
+    "ids_outside_dictionary_bounds_rejected": true,
+    "unassigned_reserved_expansion_ids": {"first": 64, "last": 586}
+  },
+  "minimum_nominal_marker_side": {"value": 40, "unit": "mm", "status": "guidance_only", "physical_accuracy_claim": false},
+  "opencv_reference": {
+    "documentation_version": "4.13.0",
+    "url": "https://docs.opencv.org/4.13.0/d1/d21/aruco__dictionary_8hpp.html",
+    "capability": "predefined_dictionary_and_getPredefinedDictionary_are_listed"
+  }
+}
