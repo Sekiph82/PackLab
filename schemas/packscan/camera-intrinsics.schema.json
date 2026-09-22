@@ -25,14 +25,7 @@
       "type": "array", "minItems": 3, "maxItems": 3,
       "items": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}
     },
-    "distortion": {
-      "type": "object", "additionalProperties": false, "required": ["model", "coefficient_order"],
-      "properties": {
-        "model": {"enum": ["none", "brown_conrady", "fisheye"]},
-        "coefficient_order": {"type": "array", "items": {"type": "string"}},
-        "coefficients": {"type": "array", "items": {"type": "number"}}
-      }
-    },
+    "distortion": {"$ref": "#/$defs/distortion"},
     "provenance": {
       "type": "object", "additionalProperties": false, "required": ["source", "recorded_at"],
       "properties": {
@@ -44,6 +37,43 @@
     }
   },
   "$defs": {
+    "distortion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "coefficient_order_version", "coefficient_order", "coefficients"],
+      "properties": {
+        "model": {"enum": ["none", "brown_conrady", "fisheye"]},
+        "coefficient_order_version": {"type": "string"},
+        "coefficient_order": {"type": "array"},
+        "coefficients": {"type": "array", "items": {"type": "number"}}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "model": {"const": "none"},
+            "coefficient_order_version": {"const": "none_v1"},
+            "coefficient_order": {"const": []},
+            "coefficients": {"const": []}
+          }
+        },
+        {
+          "properties": {
+            "model": {"const": "fisheye"},
+            "coefficient_order_version": {"const": "opencv_fisheye_v1"},
+            "coefficient_order": {"const": ["k1", "k2", "k3", "k4"]},
+            "coefficients": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}}
+          }
+        },
+        {
+          "properties": {
+            "model": {"const": "brown_conrady"},
+            "coefficient_order_version": {"const": "opencv_brown_conrady_v1"},
+            "coefficient_order": {"const": ["k1", "k2", "p1", "p2", "k3"]},
+            "coefficients": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"type": "number"}}
+          }
+        }
+      ]
+    },
     "dimensions": {
       "type": "object", "additionalProperties": false, "required": ["width", "height"],
       "properties": {"width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}}

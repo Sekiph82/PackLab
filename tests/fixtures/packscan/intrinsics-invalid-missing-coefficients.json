@@ -1,13 +1,12 @@
 {
   "schema_version": "1.0.0",
-  "status": "measured",
+  "status": "estimated",
   "lens": {"device_model": "iPhone 16 Standard", "lens_identity": "main-wide", "source": "calibration"},
   "reference_dimensions": {"width": 4032, "height": 3024},
-  "target_dimensions": {"width": 1920, "height": 1080},
   "pixel_coordinate_origin": "top_left_pixel_center",
   "matrix_convention": "row_major_3x3_homogeneous",
   "dimension_policy": "exact_reference_only",
   "intrinsic_matrix": [[1450.0, 0.0, 1008.0], [0.0, 1452.0, 756.0], [0.0, 0.0, 1.0]],
-  "distortion": {"model": "none", "coefficient_order_version": "none_v1", "coefficient_order": [], "coefficients": []},
-  "provenance": {"source": "dedicated_calibration", "recorded_at": "2026-09-22T09:00:00Z", "calibration_id": "calibration/synthetic-0002"}
+  "distortion": {"model": "fisheye", "coefficient_order_version": "opencv_fisheye_v1", "coefficient_order": ["k1", "k2", "k3", "k4"]},
+  "provenance": {"source": "operator", "recorded_at": "2026-09-22T09:00:00Z"}
 }

@@ -8,6 +8,6 @@
   "matrix_convention": "row_major_3x3_homogeneous",
   "dimension_policy": "uniform_scale_about_origin",
   "intrinsic_matrix": [[1450.0, 0.0, 1008.0], [0.0, 1452.0, 756.0], [0.0, 0.0, 1.0]],
-  "distortion": {"model": "brown_conrady", "coefficient_order": ["k1", "k2", "p1", "p2", "k3"], "coefficients": [0.01, -0.002, 0.0001, -0.0001, 0.0002]},
+  "distortion": {"model": "brown_conrady", "coefficient_order_version": "opencv_brown_conrady_v1", "coefficient_order": ["k1", "k2", "p1", "p2", "k3"], "coefficients": [0.01, -0.002, 0.0001, -0.0001, 0.0002]},
   "provenance": {"source": "dedicated_calibration", "recorded_at": "2026-09-22T09:00:00Z", "calibration_id": "calibration/synthetic-0001"}
 }
