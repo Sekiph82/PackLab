@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M02
-- Current Sprint: M02-S01/S02 — Full M02 milestone batch
-- Current Task: M02-BATCH-001 — Execute all M02 tasks PL-0044 through PL-0068.
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex executes PL-0044 through PL-0068 sequentially with one child implementation/evidence boundary and one child log per task, never edits TASKS.md, never starts M03, and stops with OWNER_REQUIRED/BATCH_STOPPED if PL-0068 real physical calibration benchmark evidence is unavailable. M01 closure audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M01-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V03.md.
+- Current Sprint: M02-S01 — PackScan contract remediation
+- Current Task: M02-REMEDIATION-BATCH-001 — Remediate audited PL-0044 through PL-0050 findings.
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V01.md. Codex remediates only PL-0044 through PL-0050 using their V02 work orders, publishes one V02 child log per task plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CODEX_LOG_V01.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before PL-0051. Blocking master audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_CHATGPT_AUDIT_V01.md.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
