@@ -138,7 +138,33 @@
         "size_bytes": {"type": "integer", "minimum": 0},
         "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "media_type": {"type": "string", "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"}
-      }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"enum": ["preview", "thumbnail"]}}},
+          "then": {
+            "required": ["media_type"],
+            "properties": {
+              "path": {"pattern": "^(previews|thumbnails)/"},
+              "required": {"const": false},
+              "authority": {"const": "derived"},
+              "media_type": {"enum": ["image/jpeg", "image/png", "image/webp"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "diagnostics"}}},
+          "then": {
+            "required": ["media_type"],
+            "properties": {
+              "path": {"pattern": "^diagnostics/"},
+              "required": {"const": false},
+              "authority": {"const": "derived"},
+              "media_type": {"const": "application/json"}
+            }
+          }
+        }
+      ]
     }
   }
 }

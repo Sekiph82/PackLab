@@ -26,6 +26,22 @@ derived artifacts. A missing optional artifact is valid when the manifest does
 not declare it. A declared artifact that is missing, duplicated, or has the
 wrong checksum is invalid.
 
+Preview and thumbnail payload declarations use `kind: preview` or
+`kind: thumbnail`, `authority: derived`, `required: false`, a `previews/` or
+`thumbnails/` path, and an image media type (`image/jpeg`, `image/png`, or
+`image/webp`). Diagnostics declarations use `kind: diagnostics`,
+`authority: derived`, `required: false`, a `diagnostics/` path, and
+`application/json`. Every declared derived payload still carries its exact
+byte size and lowercase SHA-256 in the manifest; omission is safe and does
+not remove or replace original images or measurement truth.
+
+Diagnostics JSON is validated against
+`schemas/packscan/diagnostics.schema.json`. It is a bounded list of codes,
+severity, redacted messages, and numeric counters/timings. Credentials,
+credential-like fields, and private local path segments are prohibited. A
+diagnostic may describe a derived/debug condition but cannot become an
+authoritative source by changing its manifest kind.
+
 ## Path, ordering, and compression rules
 
 Paths use UTF-8 forward slashes, are relative, and contain no empty, `.` or
