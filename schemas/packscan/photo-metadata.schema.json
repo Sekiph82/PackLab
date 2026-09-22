@@ -15,21 +15,60 @@
   },
   "$defs": {
     "source_status": {"enum": ["available", "unavailable", "not_recorded", "estimated"]},
-    "measurement": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["status"],
-      "properties": {
-        "status": {"$ref": "#/$defs/source_status"},
-        "value": {"type": "number", "finite": true},
-        "unit": {"type": "string", "minLength": 1, "maxLength": 32},
-        "source": {"enum": ["exif", "device_api", "operator", "derived", "unknown"]}
-      },
+    "status_constraints": {
       "allOf": [
         {"if": {"properties": {"status": {"const": "available"}}}, "then": {"required": ["value", "unit", "source"]}},
         {"if": {"properties": {"status": {"const": "estimated"}}}, "then": {"required": ["value", "unit", "source"]}},
         {"if": {"properties": {"status": {"enum": ["unavailable", "not_recorded"]}}}, "then": {"not": {"required": ["value"]}}}
       ]
+    },
+    "focal_length_measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"$ref": "#/$defs/source_status"},
+        "value": {"type": "number", "exclusiveMinimum": 0},
+        "unit": {"const": "mm"},
+        "source": {"enum": ["exif", "device_api", "operator", "derived", "unknown"]}
+      },
+      "allOf": [{"$ref": "#/$defs/status_constraints"}]
+    },
+    "exposure_measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"$ref": "#/$defs/source_status"},
+        "value": {"type": "number", "exclusiveMinimum": 0},
+        "unit": {"const": "s"},
+        "source": {"enum": ["exif", "device_api", "operator", "derived", "unknown"]}
+      },
+      "allOf": [{"$ref": "#/$defs/status_constraints"}]
+    },
+    "iso_measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"$ref": "#/$defs/source_status"},
+        "value": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "unit": {"const": "iso"},
+        "source": {"enum": ["exif", "device_api", "operator", "derived", "unknown"]}
+      },
+      "allOf": [{"$ref": "#/$defs/status_constraints"}]
+    },
+    "white_balance_measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"$ref": "#/$defs/source_status"},
+        "value": {"type": "number", "minimum": 1000, "maximum": 100000},
+        "unit": {"const": "K"},
+        "source": {"enum": ["exif", "device_api", "operator", "derived", "unknown"]}
+      },
+      "allOf": [{"$ref": "#/$defs/status_constraints"}]
     },
     "orientation": {
       "type": "object",
@@ -55,10 +94,10 @@
           "properties": {"width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}}
         },
         "orientation": {"$ref": "#/$defs/orientation"},
-        "focal_length_mm": {"$ref": "#/$defs/measurement"},
-        "exposure": {"$ref": "#/$defs/measurement"},
-        "iso": {"$ref": "#/$defs/measurement"},
-        "white_balance_kelvin": {"$ref": "#/$defs/measurement"}
+        "focal_length_mm": {"$ref": "#/$defs/focal_length_measurement"},
+        "exposure": {"$ref": "#/$defs/exposure_measurement"},
+        "iso": {"$ref": "#/$defs/iso_measurement"},
+        "white_balance_kelvin": {"$ref": "#/$defs/white_balance_measurement"}
       }
     }
   }
