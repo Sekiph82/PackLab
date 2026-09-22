@@ -24,14 +24,11 @@
       }
     },
     "capture_mode": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["mode", "version"],
-      "properties": {
-        "mode": {"enum": ["freehand", "guided_orbit", "turntable"]},
-        "version": {"type": "integer", "minimum": 1},
-        "parameters": {"type": "object"}
-      }
+      "oneOf": [
+        {"$ref": "#/$defs/freehand_mode"},
+        {"$ref": "#/$defs/guided_orbit_mode"},
+        {"$ref": "#/$defs/turntable_mode"}
+      ]
     },
     "payloads": {
       "type": "array",
@@ -61,6 +58,69 @@
     "calibration_profile_ref": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,256}$"}
   },
   "$defs": {
+    "freehand_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "version"],
+      "properties": {
+        "mode": {"const": "freehand"},
+        "version": {"const": 1},
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "operator_guidance": {"const": "none"}
+          }
+        }
+      }
+    },
+    "guided_orbit_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "version", "parameters"],
+      "properties": {
+        "mode": {"const": "guided_orbit"},
+        "version": {"const": 1},
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["orbit_axis", "coverage"],
+          "properties": {
+            "orbit_axis": {"enum": ["subject_vertical"]},
+            "coverage": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["target_sector_deg", "minimum_view_count"],
+              "properties": {
+                "target_sector_deg": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 360},
+                "minimum_view_count": {"type": "integer", "minimum": 1}
+              }
+            }
+          }
+        }
+      }
+    },
+    "turntable_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "version", "parameters"],
+      "properties": {
+        "mode": {"const": "turntable"},
+        "version": {"const": 1},
+        "parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["angle_unit", "angle_convention", "frame_index", "frame_count", "angle_deg"],
+          "properties": {
+            "angle_unit": {"const": "deg"},
+            "angle_convention": {"const": "clockwise_from_reference"},
+            "frame_index": {"type": "integer", "minimum": 0},
+            "frame_count": {"type": "integer", "minimum": 1},
+            "angle_deg": {"type": "number", "minimum": 0, "exclusiveMaximum": 360}
+          }
+        }
+      }
+    },
     "utc_timestamp": {
       "type": "string",
       "format": "date-time",

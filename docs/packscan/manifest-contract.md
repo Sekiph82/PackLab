@@ -19,3 +19,27 @@ source images or measurement truth.
 filename. A future major/minor structure is rejected until an explicit schema
 revision declares compatibility. A local time such as `2026-09-22 12:00:00`
 is invalid because it has no unambiguous offset or UTC conversion.
+
+## Capture-mode variants
+
+`capture_mode` is a tagged union, not an arbitrary parameter blob. PackScan
+1.0 accepts only the explicit version-1 variants `freehand`, `guided_orbit`,
+and `turntable`; an unknown mode or future version requires a schema revision.
+Each variant rejects fields belonging to another mode.
+
+- `freehand` shares only the mode/version fields and may state
+  `parameters.operator_guidance: none`. It describes operator-directed views;
+  it does not promise coverage or an orbit algorithm.
+- `guided_orbit` requires `orbit_axis: subject_vertical` and a bounded
+  `coverage` record. `target_sector_deg` is a positive exclusive-360-degree
+  target, and `minimum_view_count` is an integer lower bound. These are
+  capture metadata boundaries, not proof that the target was achieved.
+- `turntable` requires an integer zero-based `frame_index`, positive
+  `frame_count`, and `angle_deg` in `[0, 360)`. Angles use degrees and the
+  frozen convention `clockwise_from_reference`; the index identifies the
+  frame's position in the declared sequence. The metadata does not implement
+  motor control or infer an angle from pixels.
+
+Adding a future mode requires a new versioned schema variant with explicit
+fields and tests. Unvalidated `parameters` members and mixed-mode combinations
+are rejected.
