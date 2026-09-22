@@ -40,17 +40,16 @@ def detect_markers(image: Any) -> DetectionBatch:
     it deliberately contains no millimetre, scale, distance, or pose field.
     """
 
-    try:
-        import cv2
-    except ImportError:
-        return DetectionBatch("unavailable", (), ("opencv_unavailable",), _provenance())
-
     shape = getattr(image, "shape", None)
     dtype = str(getattr(image, "dtype", ""))
     if not _supported_image(shape, dtype):
         return DetectionBatch(
             "invalid_input", (), ("unsupported_image_shape_or_dtype",), _provenance()
         )
+    try:
+        import cv2
+    except ImportError:
+        return DetectionBatch("unavailable", (), ("opencv_unavailable",), _provenance())
     try:
         gray = image if len(shape) == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
