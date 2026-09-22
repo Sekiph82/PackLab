@@ -4,19 +4,30 @@
   "title": "PackLab CoreMotion metadata 1.0",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "axis_convention", "samples", "synchronization"],
+  "required": ["schema_version", "axis_convention", "attitude_reference_frame", "samples", "synchronization"],
   "properties": {
     "schema_version": {"const": "1.0.0"},
     "axis_convention": {"const": "device_right_handed_x_right_y_up_z_forward"},
+    "attitude_reference_frame": {"const": "xArbitraryZVertical"},
     "samples": {"type": "array", "items": {"$ref": "#/$defs/sample"}},
     "synchronization": {
-      "type": "object", "additionalProperties": false, "required": ["source_clock", "target", "method", "tolerance_ms", "clock_resolution_ms"],
+      "type": "object", "additionalProperties": false, "required": ["source_clock", "target_clock", "mapping", "method", "tolerance_ms"],
       "properties": {
-        "source_clock": {"const": "utc"},
-        "target": {"const": "photo_capture_timestamp"},
+        "source_clock": {"const": "coremotion_monotonic_seconds_since_boot"},
+        "target_clock": {"const": "photo_capture_utc"},
+        "mapping": {
+          "type": "object", "additionalProperties": false,
+          "required": ["equation", "anchor_native_timestamp_s", "anchor_utc_timestamp", "uncertainty_ms", "resolution_ms"],
+          "properties": {
+            "equation": {"const": "utc = anchor_utc + (native_s - anchor_native_s)"},
+            "anchor_native_timestamp_s": {"type": "number", "minimum": 0},
+            "anchor_utc_timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"},
+            "uncertainty_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
+            "resolution_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000}
+          }
+        },
         "method": {"enum": ["nearest_sample", "linear_interpolation"]},
-        "tolerance_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
-        "clock_resolution_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000}
+        "tolerance_ms": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000}
       }
     }
   },
@@ -24,16 +35,21 @@
     "vector3": {"type": "object", "additionalProperties": false, "required": ["x", "y", "z"], "properties": {"x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}}},
     "quaternion": {"type": "object", "additionalProperties": false, "required": ["order", "x", "y", "z", "w"], "properties": {"order": {"const": "xyzw"}, "x": {"type": "number"}, "y": {"type": "number"}, "z": {"type": "number"}, "w": {"type": "number"}}},
     "sample": {
-      "type": "object", "additionalProperties": false, "required": ["timestamp", "status", "source"],
+      "type": "object", "additionalProperties": false, "required": ["timestamp", "native_timestamp_s", "status", "source"],
       "properties": {
         "timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "native_timestamp_s": {"type": "number", "minimum": 0},
         "status": {"enum": ["available", "stale", "out_of_window", "unavailable"]},
         "attitude": {"$ref": "#/$defs/quaternion"},
         "rotation_rate_rad_s": {"$ref": "#/$defs/vector3"},
         "acceleration_m_s2": {"$ref": "#/$defs/vector3"},
         "source": {"const": "CoreMotion"},
         "source_version": {"type": "string", "minLength": 1, "maxLength": 64}
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "available"}}}, "then": {"required": ["attitude", "rotation_rate_rad_s"]}},
+        {"if": {"properties": {"status": {"const": "unavailable"}}}, "then": {"not": {"anyOf": [{"required": ["attitude"]}, {"required": ["rotation_rate_rad_s"]}, {"required": ["acceleration_m_s2"]}]}}}
+      ]
     }
   }
 }
