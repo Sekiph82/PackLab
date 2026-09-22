@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.example/schemas/packscan/1.0/calibration-profile.schema.json",
+  "title": "PackLab calibration profile storage 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile_id",
+    "profile_key",
+    "resolution_policy",
+    "created_at",
+    "verified_at",
+    "units",
+    "provenance",
+    "quality"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "profile_id": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,128}$"},
+    "profile_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_model",
+        "lens_identity",
+        "camera_position",
+        "image_width_px",
+        "image_height_px",
+        "orientation",
+        "zoom_factor",
+        "focus_mode",
+        "capture_app_version",
+        "calibration_model_version",
+        "calibration_policy_version"
+      ],
+      "properties": {
+        "device_model": {"type": "string", "minLength": 1, "maxLength": 128},
+        "lens_identity": {"type": "string", "minLength": 1, "maxLength": 128},
+        "camera_position": {"enum": ["back", "front"]},
+        "image_width_px": {"type": "integer", "minimum": 1},
+        "image_height_px": {"type": "integer", "minimum": 1},
+        "orientation": {"enum": ["portrait", "landscape_left", "landscape_right"]},
+        "zoom_factor": {"type": "number", "exclusiveMinimum": 0},
+        "focus_mode": {"enum": ["locked", "continuous_with_recorded_distance"]},
+        "capture_app_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "calibration_model_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "calibration_policy_version": {"type": "string", "minLength": 1, "maxLength": 64}
+      }
+    },
+    "resolution_policy": {"enum": ["exact_reference_only", "uniform_scale_about_origin"]},
+    "created_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "verified_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "units": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_width", "image_height", "zoom_factor", "reprojection_rmse"],
+      "properties": {
+        "image_width": {"const": "px"},
+        "image_height": {"const": "px"},
+        "zoom_factor": {"const": "unitless"},
+        "reprojection_rmse": {"const": "px"}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "native_capture_evidence", "physical_measurement_evidence"],
+      "properties": {
+        "source": {"enum": ["owner_physical_session", "unavailable_placeholder"]},
+        "native_capture_evidence": {"enum": ["owner_device", "unavailable"]},
+        "physical_measurement_evidence": {"enum": ["owner_completed", "unavailable"]},
+        "notes": {"type": "string", "maxLength": 512}
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confidence_status", "confidence_score", "reprojection_rmse_px", "accepted_view_count"],
+      "properties": {
+        "confidence_status": {"enum": ["accepted", "warning", "rejected"]},
+        "confidence_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "reprojection_rmse_px": {"type": "number", "minimum": 0},
+        "accepted_view_count": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}
