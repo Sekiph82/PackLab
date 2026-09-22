@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "observation_set_id": "synthetic-partial-marker",
+  "canonical_real_world_unit": "mm",
+  "precision": {"unit": "mm", "decimal_places": 2, "rounding": "round_half_even"},
+  "scale_truth_status": "not_usable",
+  "observations": [
+    {
+      "status": "partial",
+      "marker_family": "synthetic",
+      "dictionary": "synthetic-square-v1",
+      "marker_id": 12,
+      "image_corners_px": [{"x": 300.0, "y": 240.0}, {"x": 380.0, "y": 242.0}],
+      "quality": {"confidence": 0.42, "quality": "poor"},
+      "reason": "occluded_two_corner_observation",
+      "scale_eligibility": "not_eligible"
+    }
+  ]
+}

@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.example/schemas/packscan/1.0/calibration-marker-observations.schema.json",
+  "title": "PackLab calibration marker observations 1.0",
+  "description": "Image-space marker observations whose known geometry is canonicalized in millimetres.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "observation_set_id",
+    "canonical_real_world_unit",
+    "precision",
+    "observations",
+    "scale_truth_status"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "observation_set_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "canonical_real_world_unit": {"const": "mm"},
+    "precision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "decimal_places", "rounding"],
+      "properties": {
+        "unit": {"const": "mm"},
+        "decimal_places": {"type": "integer", "minimum": 0, "maximum": 6},
+        "rounding": {"const": "round_half_even"}
+      }
+    },
+    "conversion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule", "accepted_source_units"],
+      "properties": {
+        "rule": {"const": "convert_to_mm_before_storage_v1"},
+        "accepted_source_units": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["mm", "cm", "m", "in"]}
+        }
+      }
+    },
+    "observations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/observation"}
+    },
+    "scale_truth_status": {"enum": ["usable", "not_usable"]}
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": {"type": "number"},
+        "y": {"type": "number"}
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["confidence", "quality"],
+      "properties": {
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "quality": {"enum": ["excellent", "good", "fair", "poor"]}
+      }
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shape", "side_length", "unit", "provenance"],
+      "properties": {
+        "shape": {"const": "square_marker"},
+        "side_length": {"type": "number", "exclusiveMinimum": 0},
+        "unit": {"const": "mm"},
+        "provenance": {"$ref": "#/$defs/geometry_provenance"}
+      }
+    },
+    "geometry_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "reference"],
+      "properties": {
+        "source": {"enum": ["mat_specification", "operator_measurement", "calibration_record", "manufacturer_specification"]},
+        "reference": {"type": "string", "minLength": 1, "maxLength": 256},
+        "measured_at": {"type": "string", "format": "date-time", "pattern": "Z$"}
+      }
+    },
+    "common": {
+      "type": "object",
+      "required": ["marker_family", "dictionary", "marker_id", "image_corners_px", "quality"],
+      "properties": {
+        "marker_family": {"type": "string", "minLength": 1, "maxLength": 64},
+        "dictionary": {"type": "string", "minLength": 1, "maxLength": 128},
+        "marker_id": {"type": "integer", "minimum": 0, "maximum": 65535},
+        "image_corners_px": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/point"}
+        },
+        "quality": {"$ref": "#/$defs/quality"}
+      }
+    },
+    "valid_observation": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "type": "object",
+          "required": ["status", "geometry", "scale_eligibility"],
+          "properties": {
+            "status": {"const": "valid"},
+            "image_corners_px": {"minItems": 4, "maxItems": 4},
+            "geometry": {"$ref": "#/$defs/geometry"},
+            "scale_eligibility": {"const": "eligible"}
+          }
+        }
+      ]
+    },
+    "non_usable_observation": {
+      "unevaluatedProperties": false,
+      "allOf": [
+        {"$ref": "#/$defs/common"},
+        {
+          "type": "object",
+          "required": ["status", "scale_eligibility", "reason"],
+          "properties": {
+            "status": {"enum": ["partial", "ambiguous"]},
+            "scale_eligibility": {"const": "not_eligible"},
+            "reason": {"type": "string", "minLength": 1, "maxLength": 256}
+          },
+          "not": {"required": ["geometry"]}
+        }
+      ]
+    },
+    "observation": {
+      "oneOf": [
+        {"$ref": "#/$defs/valid_observation"},
+        {"$ref": "#/$defs/non_usable_observation"}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"scale_truth_status": {"const": "usable"}}},
+      "then": {
+        "properties": {
+          "observations": {
+            "contains": {"$ref": "#/$defs/valid_observation"},
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"scale_truth_status": {"const": "not_usable"}}},
+      "then": {
+        "properties": {
+          "observations": {
+            "contains": {"$ref": "#/$defs/non_usable_observation"},
+            "minContains": 1
+          }
+        }
+      }
+    }
+  ]
+}

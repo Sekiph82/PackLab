@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "observation_set_id": "synthetic-multi-marker",
+  "canonical_real_world_unit": "mm",
+  "precision": {"unit": "mm", "decimal_places": 2, "rounding": "round_half_even"},
+  "conversion": {"rule": "convert_to_mm_before_storage_v1", "accepted_source_units": ["mm", "cm", "m", "in"]},
+  "scale_truth_status": "usable",
+  "observations": [
+    {
+      "status": "valid",
+      "marker_family": "synthetic",
+      "dictionary": "synthetic-square-v1",
+      "marker_id": 7,
+      "image_corners_px": [{"x": 120.0, "y": 90.0}, {"x": 220.0, "y": 90.0}, {"x": 220.0, "y": 190.0}, {"x": 120.0, "y": 190.0}],
+      "quality": {"confidence": 0.99, "quality": "excellent"},
+      "geometry": {"shape": "square_marker", "side_length": 40.0, "unit": "mm", "provenance": {"source": "mat_specification", "reference": "synthetic-fixture-mat-v1"}},
+      "scale_eligibility": "eligible"
+    },
+    {
+      "status": "valid",
+      "marker_family": "synthetic",
+      "dictionary": "synthetic-square-v1",
+      "marker_id": 8,
+      "image_corners_px": [{"x": 820.0, "y": 100.0}, {"x": 920.0, "y": 100.0}, {"x": 920.0, "y": 200.0}, {"x": 820.0, "y": 200.0}],
+      "quality": {"confidence": 0.98, "quality": "excellent"},
+      "geometry": {"shape": "square_marker", "side_length": 40.0, "unit": "mm", "provenance": {"source": "mat_specification", "reference": "synthetic-fixture-mat-v1"}},
+      "scale_eligibility": "eligible"
+    }
+  ]
+}

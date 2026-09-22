@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "observation_set_id": "invalid-unit",
+  "canonical_real_world_unit": "mm",
+  "precision": {"unit": "mm", "decimal_places": 2, "rounding": "round_half_even"},
+  "scale_truth_status": "usable",
+  "observations": [
+    {
+      "status": "valid",
+      "marker_family": "synthetic",
+      "dictionary": "synthetic-square-v1",
+      "marker_id": 1,
+      "image_corners_px": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}, {"x": 0, "y": 10}],
+      "quality": {"confidence": 0.9, "quality": "good"},
+      "geometry": {"shape": "square_marker", "side_length": 0.04, "unit": "m", "provenance": {"source": "mat_specification", "reference": "invalid-fixture"}},
+      "scale_eligibility": "eligible"
+    }
+  ]
+}
