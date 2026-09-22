@@ -1,0 +1,167 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.example/schemas/packscan/1.0/iphone-main-camera-calibration.schema.json",
+  "title": "PackLab iPhone main-camera calibration profile 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "baseline",
+    "profile_binding",
+    "source_policy",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "status": {"enum": ["unavailable", "candidate", "measured"]},
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "device_model", "camera_position", "lens_identity", "lidar_required"],
+      "properties": {
+        "platform": {"const": "iOS"},
+        "device_model": {"const": "iPhone 16 Standard"},
+        "camera_position": {"const": "back"},
+        "lens_identity": {"const": "main_wide_camera_1x"},
+        "lidar_required": {"const": false},
+        "pro_only_feature_required": {"const": false}
+      }
+    },
+    "profile_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_model",
+        "lens_identity",
+        "image_width_px",
+        "image_height_px",
+        "orientation",
+        "zoom_factor",
+        "focus_mode",
+        "capture_app_version",
+        "calibration_profile_version"
+      ],
+      "properties": {
+        "device_model": {"const": "iPhone 16 Standard"},
+        "lens_identity": {"const": "main_wide_camera_1x"},
+        "image_width_px": {"type": "integer", "minimum": 1},
+        "image_height_px": {"type": "integer", "minimum": 1},
+        "orientation": {"enum": ["portrait", "landscape_left", "landscape_right"]},
+        "zoom_factor": {"const": 1.0},
+        "focus_mode": {"enum": ["locked", "continuous_with_recorded_distance"]},
+        "focus_distance_m": {"type": "number", "exclusiveMinimum": 0},
+        "capture_app_version": {"type": "string", "minLength": 1, "maxLength": 64},
+        "calibration_profile_version": {"type": "string", "pattern": "^iphone16-standard-main-v[0-9]+$"}
+      }
+    },
+    "source_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intrinsics_source", "exif_source", "dedicated_calibration_required"],
+      "properties": {
+        "intrinsics_source": {"enum": ["device_api", "dedicated_calibration", "unavailable"]},
+        "exif_source": {"enum": ["recorded", "unavailable"]},
+        "dedicated_calibration_required": {"type": "boolean"},
+        "policy_version": {"const": "iphone_main_camera_calibration_policy_v1"}
+      }
+    },
+    "capture_run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mat_record_id", "view_set", "capture_constraints"],
+      "properties": {
+        "mat_record_id": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,128}$"},
+        "view_set": {
+          "type": "array",
+          "minItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "fronto_parallel_near",
+              "fronto_parallel_far",
+              "yaw_left",
+              "yaw_right",
+              "pitch_up",
+              "pitch_down",
+              "corner_coverage"
+            ]
+          }
+        },
+        "capture_constraints": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["zoom_factor", "lens_identity", "focus_locked_or_recorded", "no_lidar_dependency"],
+          "properties": {
+            "zoom_factor": {"const": 1.0},
+            "lens_identity": {"const": "main_wide_camera_1x"},
+            "focus_locked_or_recorded": {"const": true},
+            "no_lidar_dependency": {"const": true}
+          }
+        }
+      }
+    },
+    "validation_outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reprojection_rmse_px", "accepted_view_count", "confidence_status"],
+      "properties": {
+        "reprojection_rmse_px": {"type": "number", "minimum": 0},
+        "accepted_view_count": {"type": "integer", "minimum": 7},
+        "confidence_status": {"enum": ["accepted", "warning", "rejected"]}
+      }
+    },
+    "intrinsics_reference": {"$ref": "camera-intrinsics.schema.json"},
+    "owner_physical_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["printed_mat_record_id", "measurement_record_status"],
+      "properties": {
+        "printed_mat_record_id": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,128}$"},
+        "measurement_record_status": {"const": "owner_completed"},
+        "notes": {"type": "string", "maxLength": 512}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recorded_at", "created_by", "native_capture_evidence"],
+      "properties": {
+        "recorded_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+        "created_by": {"enum": ["owner_physical_session", "codex_unavailable_placeholder"]},
+        "native_capture_evidence": {"enum": ["owner_device", "unavailable"]},
+        "notes": {"type": "string", "maxLength": 512}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "unavailable"}}},
+      "then": {
+        "properties": {
+          "provenance": {
+            "properties": {
+              "created_by": {"const": "codex_unavailable_placeholder"},
+              "native_capture_evidence": {"const": "unavailable"}
+            }
+          }
+        },
+        "not": {"anyOf": [{"required": ["capture_run"]}, {"required": ["validation_outputs"]}]}
+      }
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["candidate", "measured"]}}},
+      "then": {
+        "required": ["capture_run", "validation_outputs", "intrinsics_reference", "owner_physical_evidence"],
+        "properties": {
+          "provenance": {
+            "properties": {
+              "created_by": {"const": "owner_physical_session"},
+              "native_capture_evidence": {"const": "owner_device"}
+            }
+          }
+        }
+      }
+    }
+  ]
+}
