@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M02
-- Current Sprint: M02-S01 — PackScan contract remediation
-- Current Task: M02-REMEDIATION-BATCH-001 — Remediate audited PL-0044 through PL-0050 findings.
+- Current Sprint: M02-S01 — Final PL-0048 pose-contract remediation
+- Current Task: M02-REMEDIATION-BATCH-002 — Remediate final PL-0048 pose-contract finding.
 - Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V01.md. Codex remediates only PL-0044 through PL-0050 using their V02 work orders, publishes one V02 child log per task plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CODEX_LOG_V01.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before PL-0051. Blocking master audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_CHATGPT_AUDIT_V01.md.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V02.md. Codex executes only PL-0048 V03, publishes https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0048_CODEX_LOG_V03.md plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CODEX_LOG_V02.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before PL-0051. Blocking audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0048_CHATGPT_AUDIT_V02.md.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -128,13 +128,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M02-S01 - PackScan schema
 
-- [ ] **PL-0044** Specify .packscan as a versioned ZIP container with deterministic directory layout.
-- [ ] **PL-0045** Define manifest.json JSON Schema including schema version, capture ID, device, mode, timestamps and checksums.
-- [ ] **PL-0046** Define per-photo metadata schema: filename, orientation, focal data, exposure, ISO, white balance, dimensions and capture sequence.
-- [ ] **PL-0047** Define camera-intrinsics representation including calibration matrix, reference dimensions and lens identity.
+- [x] **PL-0044** Specify .packscan as a versioned ZIP container with deterministic directory layout.
+- [x] **PL-0045** Define manifest.json JSON Schema including schema version, capture ID, device, mode, timestamps and checksums.
+- [x] **PL-0046** Define per-photo metadata schema: filename, orientation, focal data, exposure, ISO, white balance, dimensions and capture sequence.
+- [x] **PL-0047** Define camera-intrinsics representation including calibration matrix, reference dimensions and lens identity.
 - [ ] **PL-0048** Define ARKit pose representation with coordinate-system conventions and confidence/availability markers.
-- [ ] **PL-0049** Define CoreMotion metadata representation and timestamp synchronization rules.
-- [ ] **PL-0050** Define optional object-mask representation and image/mask pixel-coordinate contract.
+- [x] **PL-0049** Define CoreMotion metadata representation and timestamp synchronization rules.
+- [x] **PL-0050** Define optional object-mask representation and image/mask pixel-coordinate contract.
 - [ ] **PL-0051** Define calibration-marker observations and real-world unit representation in millimetres.
 - [ ] **PL-0052** Define capture-mode metadata for Freehand, Guided Orbit and Turntable modes.
 - [ ] **PL-0053** Define preview, thumbnail and diagnostics payloads.
