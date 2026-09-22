@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M02
-- Current Sprint: M02-S01 — Final PL-0048 pose-contract remediation
-- Current Task: M02-REMEDIATION-BATCH-002 — Remediate final PL-0048 pose-contract finding.
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V02.md. Codex executes only PL-0048 V03, publishes https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0048_CODEX_LOG_V03.md plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CODEX_LOG_V02.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before PL-0051. Blocking audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0048_CHATGPT_AUDIT_V02.md.
+- Current Sprint: M02-S01/S02 — Resume remaining M02 milestone batch
+- Current Task: M02-BATCH-001 — Resume remaining M02 tasks PL-0051 through PL-0068.
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_RESUME_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_RESUME_CHATGPT_AUDIT_CRITERIA_V01.md. Codex resumes the existing M02-BATCH-001 at PL-0051, executes PL-0051 through PL-0068 sequentially using the already-frozen child V01 prompts/criteria, never reopens PL-0044 through PL-0050, never edits TASKS.md, never starts M03, and stops with OWNER_REQUIRED/BATCH_STOPPED if PL-0068 real physical benchmark evidence is unavailable. Accepted remediation audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V02.md.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -132,7 +132,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0045** Define manifest.json JSON Schema including schema version, capture ID, device, mode, timestamps and checksums.
 - [x] **PL-0046** Define per-photo metadata schema: filename, orientation, focal data, exposure, ISO, white balance, dimensions and capture sequence.
 - [x] **PL-0047** Define camera-intrinsics representation including calibration matrix, reference dimensions and lens identity.
-- [ ] **PL-0048** Define ARKit pose representation with coordinate-system conventions and confidence/availability markers.
+- [x] **PL-0048** Define ARKit pose representation with coordinate-system conventions and confidence/availability markers.
 - [x] **PL-0049** Define CoreMotion metadata representation and timestamp synchronization rules.
 - [x] **PL-0050** Define optional object-mask representation and image/mask pixel-coordinate contract.
 - [ ] **PL-0051** Define calibration-marker observations and real-world unit representation in millimetres.
