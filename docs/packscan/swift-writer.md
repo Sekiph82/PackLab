@@ -25,3 +25,11 @@ static evidence for later macOS/Xcode cross-language tests. Windows validation
 here is limited to source inspection, project-file linkage, schema-compatible
 fixture inspection, and the Python reader; native Swift compilation and iOS
 device execution are unavailable and are not claimed.
+
+`tests/packscan/test_swift_compatibility.py` treats the committed fixture as
+the deterministic Swift-output contract: it validates the equivalent package
+with Python, checks ZIP layout/checksum/photo-metadata semantics, and mutates
+only the manifest's authoritative image hash to prove the Python validator
+rejects a semantically corrupt package. The future macOS/Xcode boundary is a
+native test that invokes this writer and feeds its actual bytes to the same
+Python validator; that test is intentionally not simulated on Windows.
