@@ -11,5 +11,5 @@
     {"path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": 2, "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "media_type": "application/json"}
   ],
   "source_evidence": {"immutable": true, "authority": "original_capture", "provenance": "synthetic-fixture"},
-  "checksums": {"algorithm": "sha256", "canonicalization": "lowercase_hex_64_bytes"}
+  "checksums": {"algorithm": "sha256", "canonicalization": "sha256_32_bytes_lowercase_hex_64_chars_v1"}
 }

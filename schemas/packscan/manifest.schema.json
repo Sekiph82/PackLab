@@ -55,7 +55,7 @@
       "required": ["algorithm", "canonicalization"],
       "properties": {
         "algorithm": {"const": "sha256"},
-        "canonicalization": {"const": "lowercase_hex_64_bytes"}
+        "canonicalization": {"const": "sha256_32_bytes_lowercase_hex_64_chars_v1"}
       }
     },
     "calibration_profile_ref": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,256}$"}

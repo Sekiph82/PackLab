@@ -6,5 +6,5 @@
   "capture_mode": {"mode": "freehand", "version": 1},
   "payloads": [],
   "source_evidence": {"immutable": true, "authority": "original_capture"},
-  "checksums": {"algorithm": "sha256", "canonicalization": "lowercase_hex_64_bytes"}
+  "checksums": {"algorithm": "sha256", "canonicalization": "sha256_32_bytes_lowercase_hex_64_chars_v1"}
 }

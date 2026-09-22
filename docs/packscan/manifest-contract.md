@@ -8,7 +8,10 @@ unknown properties are rejected, timestamps must be UTC ISO-8601 values with a
 The manifest identifies the capture with a stable `capture_id`, records the
 iOS device summary and versioned capture mode, and declares every package file
 with its role, authority, byte length, media type where applicable, and
-lowercase SHA-256 digest. `source_evidence.immutable` is always `true`;
+lowercase SHA-256 digest. The checksum canonicalization identifier
+`sha256_32_bytes_lowercase_hex_64_chars_v1` means exactly one 32-byte SHA-256
+digest rendered as 64 lowercase hexadecimal characters; it is not 64 digest
+bytes. `source_evidence.immutable` is always `true`;
 previews, masks, thumbnails, and diagnostics are `derived` and cannot replace
 source images or measurement truth.
 
