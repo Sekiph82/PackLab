@@ -18,6 +18,12 @@ derived and may be omitted or regenerated.
 directory entries are forbidden. The image payloads are never replaced by a
 preview or a re-encoded derivative.
 
+`checksums.json` uses `schemas/packscan/checksums.schema.json` and stores one
+lowercase 64-character hexadecimal SHA-256 digest for every other ZIP file,
+including `manifest.json`. The writer uses canonical UTF-8 JSON and the frozen
+`sha256_32_bytes_lowercase_hex_64_chars_v1` identifier. A missing, extra,
+malformed, or mismatched index entry is a package failure.
+
 ## Optional namespaces
 
 `metadata/` may contain additional source metadata, `calibration/` may contain

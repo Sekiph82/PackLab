@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.example/schemas/packscan/1.0/checksums.schema.json",
+  "title": "PackLab PackScan checksum index 1.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "algorithm", "canonicalization", "entries"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "algorithm": {"const": "sha256"},
+    "canonicalization": {"const": "sha256_32_bytes_lowercase_hex_64_chars_v1"},
+    "entries": {
+      "type": "object",
+      "propertyNames": {"pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?![A-Za-z]:)[^\\u0000-\\u001F]+$"},
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    }
+  }
+}
