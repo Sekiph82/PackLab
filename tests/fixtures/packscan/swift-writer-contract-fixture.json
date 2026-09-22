@@ -1,0 +1,13 @@
+{
+  "fixture_version": "1.0.0",
+  "provenance": "synthetic-public-static-fixture",
+  "writer": "PackLabCapture.PackScanWriter",
+  "input_manifest": "manifest-valid.json",
+  "payloads": [
+    {"path": "images/0001.jpg", "utf8_bytes": "IMG"},
+    {"path": "metadata/photos.json", "utf8_bytes": "{}"}
+  ],
+  "expected_entry_order": ["manifest.json", "metadata/photos.json", "checksums.json", "images/0001.jpg"],
+  "expected_zip": {"compression": "deflate", "level": 9, "central_directory_timestamp": "1980-01-01T00:00:00", "extra_fields": "omit"},
+  "cross_language_assertions": ["canonical UTF-8 JSON", "lowercase SHA-256", "manifest payload size/hash match", "safe relative paths"]
+}
