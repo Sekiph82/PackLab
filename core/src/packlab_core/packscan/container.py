@@ -16,6 +16,7 @@ import tempfile
 import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 CANONICALIZATION = "sha256_32_bytes_lowercase_hex_64_chars_v1"
@@ -33,6 +34,20 @@ _ALLOWED_PREFIXES = (
     "diagnostics/",
     "calibration/",
 )
+_CAPTURE_MODES = {"freehand", "guided_orbit", "turntable"}
+_TOP_LEVEL_FIELDS = {
+    "schema_version",
+    "capture_id",
+    "created_at",
+    "started_at",
+    "ended_at",
+    "device",
+    "capture_mode",
+    "payloads",
+    "source_evidence",
+    "checksums",
+    "calibration_profile_ref",
+}
 
 
 class PackScanError(ValueError):
@@ -87,16 +102,17 @@ def _read_json(data: bytes, code: str, path: str) -> object:
 
 def _validate_manifest(manifest: object) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
     if not isinstance(manifest, dict):
-        raise PackScanError("invalid_manifest", "manifest must be a JSON object", "manifest.json")
+        raise PackScanError("schema_invalid", "manifest must be a JSON object", "manifest.json")
+    if set(manifest) - _TOP_LEVEL_FIELDS:
+        raise PackScanError("schema_invalid", "manifest contains an unknown field", "manifest.json")
     version = manifest.get("schema_version")
     if version != SCHEMA_VERSION:
-        code = (
-            "unsupported_future_version"
-            if isinstance(version, str) and version > SCHEMA_VERSION
-            else "unsupported_version"
+        raise PackScanError(
+            _version_error_code(version),
+            f"expected schema version {SCHEMA_VERSION}",
+            "manifest.json",
         )
-        raise PackScanError(code, f"expected schema version {SCHEMA_VERSION}", "manifest.json")
-    for field in (
+    required_fields = (
         "capture_id",
         "created_at",
         "device",
@@ -104,72 +120,213 @@ def _validate_manifest(manifest: object) -> tuple[dict[str, object], dict[str, d
         "payloads",
         "source_evidence",
         "checksums",
-    ):
+    )
+    for field in required_fields:
         if field not in manifest:
             raise PackScanError(
-                "invalid_manifest", f"missing required field {field}", "manifest.json"
+                "schema_invalid", f"missing required field {field}", "manifest.json"
             )
-    payloads = manifest["payloads"]
-    if not isinstance(payloads, list) or not payloads:
+    if not isinstance(manifest["capture_id"], str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", manifest["capture_id"]
+    ):
+        raise PackScanError("schema_invalid", "capture_id has an invalid format", "manifest.json")
+    for field in ("created_at", "started_at", "ended_at"):
+        if field in manifest and not _is_utc_timestamp(manifest[field]):
+            raise PackScanError(
+                "schema_invalid", f"{field} must be a UTC timestamp", "manifest.json"
+            )
+    device = manifest["device"]
+    if not isinstance(device, dict) or set(device) - {
+        "platform",
+        "model",
+        "os_version",
+        "device_identifier",
+        "lens",
+    }:
+        raise PackScanError("schema_invalid", "device shape is invalid", "manifest.json")
+    if (
+        device.get("platform") != "iOS"
+        or not isinstance(device.get("model"), str)
+        or not isinstance(device.get("os_version"), str)
+    ):
         raise PackScanError(
-            "invalid_manifest", "payloads must be a non-empty array", "manifest.json"
+            "schema_invalid", "device platform/model/version is invalid", "manifest.json"
+        )
+    _validate_capture_mode(manifest["capture_mode"])
+    source_evidence = manifest["source_evidence"]
+    if (
+        not isinstance(source_evidence, dict)
+        or set(source_evidence) - {"immutable", "authority", "provenance"}
+        or source_evidence.get("immutable") is not True
+        or source_evidence.get("authority") != "original_capture"
+    ):
+        raise PackScanError("schema_invalid", "source_evidence is invalid", "manifest.json")
+    checksum_contract = manifest["checksums"]
+    if (
+        not isinstance(checksum_contract, dict)
+        or set(checksum_contract) - {"algorithm", "canonicalization"}
+        or checksum_contract.get("algorithm") != "sha256"
+        or checksum_contract.get("canonicalization") != CANONICALIZATION
+    ):
+        raise PackScanError(
+            "schema_invalid", "manifest checksum contract is invalid", "manifest.json"
+        )
+    payloads = manifest["payloads"]
+    if not isinstance(payloads, list) or len(payloads) < 2:
+        raise PackScanError(
+            "schema_invalid", "payloads must contain at least two entries", "manifest.json"
         )
     by_path: dict[str, dict[str, object]] = {}
     folded: set[str] = set()
+    allowed_kinds = {
+        "image",
+        "photo_metadata",
+        "mask",
+        "preview",
+        "thumbnail",
+        "diagnostics",
+        "calibration",
+        "other",
+    }
     for item in payloads:
-        if not isinstance(item, dict):
-            raise PackScanError(
-                "invalid_manifest", "each payload must be an object", "manifest.json"
-            )
+        if not isinstance(item, dict) or set(item) - {
+            "path",
+            "kind",
+            "required",
+            "authority",
+            "size_bytes",
+            "sha256",
+            "media_type",
+        }:
+            raise PackScanError("schema_invalid", "payload shape is invalid", "manifest.json")
         for field in ("path", "kind", "required", "authority", "size_bytes", "sha256"):
             if field not in item:
-                raise PackScanError("invalid_manifest", f"payload missing {field}", "manifest.json")
+                raise PackScanError("schema_invalid", f"payload missing {field}", "manifest.json")
         path = _safe_entry_name(item["path"])
-        if path in _CONTROL_ENTRIES:
-            raise PackScanError("invalid_manifest", "control entries cannot be payloads", path)
-        if path.casefold() in folded:
-            raise PackScanError(
-                "duplicate_payload", "case-insensitive payload paths are ambiguous", path
-            )
+        if path in _CONTROL_ENTRIES or path.casefold() in folded:
+            raise PackScanError("duplicate_payload", "payload path is ambiguous", path)
         folded.add(path.casefold())
-        if path in by_path:
+        if (
+            not isinstance(item["kind"], str)
+            or item["kind"] not in allowed_kinds
+            or not isinstance(item["required"], bool)
+            or item["authority"] not in {"source", "derived"}
+        ):
             raise PackScanError(
-                "duplicate_payload", "payload path is declared more than once", path
+                "schema_invalid", "payload kind/required/authority is invalid", path
             )
-        if not isinstance(item["required"], bool) or item["authority"] not in {"source", "derived"}:
+        if type(item["size_bytes"]) is not int or item["size_bytes"] < 0:
             raise PackScanError(
-                "invalid_manifest", "payload required/authority values are invalid", path
+                "schema_invalid", "payload size_bytes must be non-negative integer", path
             )
-        if not isinstance(item["size_bytes"], int) or item["size_bytes"] < 0:
-            raise PackScanError(
-                "invalid_manifest", "payload size_bytes must be a non-negative integer", path
-            )
-        digest = item["sha256"]
-        if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
-            raise PackScanError(
-                "invalid_checksum", "payload SHA-256 must be 64 lowercase hex characters", path
-            )
+        if not isinstance(item["sha256"], str) or not _SHA256_RE.fullmatch(item["sha256"]):
+            raise PackScanError("schema_invalid", "payload SHA-256 is not canonical", path)
+        if not any(path.startswith(prefix) for prefix in _ALLOWED_PREFIXES):
+            raise PackScanError("schema_invalid", "payload namespace is not registered", path)
         kind = item["kind"]
+        if kind == "image" and not path.startswith("images/"):
+            raise PackScanError("schema_invalid", "image payload must be under images/", path)
+        if kind == "photo_metadata" and path != "metadata/photos.json":
+            raise PackScanError("schema_invalid", "photo metadata path is fixed", path)
         if kind in {"preview", "thumbnail"} and (
             item["authority"] != "derived"
             or item["required"]
             or not path.startswith(("previews/", "thumbnails/"))
+            or item.get("media_type") not in {"image/jpeg", "image/png", "image/webp"}
         ):
-            raise PackScanError(
-                "invalid_manifest",
-                "preview/thumbnail declarations are optional derived payloads",
-                path,
-            )
+            raise PackScanError("schema_invalid", "preview/thumbnail declaration is invalid", path)
         if kind == "diagnostics" and (
             item["authority"] != "derived"
             or item["required"]
             or not path.startswith("diagnostics/")
+            or item.get("media_type") != "application/json"
+        ):
+            raise PackScanError("schema_invalid", "diagnostics declaration is invalid", path)
+        by_path[path] = item
+    if "metadata/photos.json" not in by_path or not any(
+        item["kind"] == "image" for item in by_path.values()
+    ):
+        raise PackScanError(
+            "schema_invalid",
+            "manifest needs metadata/photos.json and an image payload",
+            "manifest.json",
+        )
+    return manifest, by_path
+
+
+def _version_error_code(version: object) -> str:
+    if not isinstance(version, str):
+        return "unsupported_version"
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    return (
+        "unsupported_future_version"
+        if match and tuple(int(part) for part in match.groups()) > (1, 0, 0)
+        else "unsupported_version"
+    )
+
+
+def _is_utc_timestamp(value: object) -> bool:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return False
+    try:
+        datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_capture_mode(value: object) -> None:
+    if not isinstance(value, dict) or set(value) - {"mode", "version", "parameters"}:
+        raise PackScanError("schema_invalid", "capture_mode shape is invalid", "manifest.json")
+    mode = value.get("mode")
+    if mode not in _CAPTURE_MODES or value.get("version") != 1:
+        raise PackScanError(
+            "schema_invalid", "capture_mode mode/version is invalid", "manifest.json"
+        )
+    parameters = value.get("parameters", {})
+    if not isinstance(parameters, dict):
+        raise PackScanError(
+            "schema_invalid", "capture_mode parameters must be an object", "manifest.json"
+        )
+    if mode == "freehand":
+        if (
+            set(parameters) - {"operator_guidance"}
+            or parameters.get("operator_guidance", "none") != "none"
         ):
             raise PackScanError(
-                "invalid_manifest", "diagnostics declarations are optional derived payloads", path
+                "schema_invalid", "freehand parameters are invalid", "manifest.json"
             )
-        by_path[path] = item
-    return manifest, by_path
+    elif mode == "guided_orbit":
+        coverage = parameters.get("coverage")
+        if (
+            set(parameters) != {"orbit_axis", "coverage"}
+            or parameters.get("orbit_axis") != "subject_vertical"
+            or not isinstance(coverage, dict)
+            or set(coverage) != {"target_sector_deg", "minimum_view_count"}
+            or not isinstance(coverage.get("target_sector_deg"), int | float)
+            or not 0 < coverage["target_sector_deg"] < 360
+            or type(coverage.get("minimum_view_count")) is not int
+            or coverage["minimum_view_count"] < 1
+        ):
+            raise PackScanError(
+                "schema_invalid", "guided orbit parameters are invalid", "manifest.json"
+            )
+    else:
+        fields = {"angle_unit", "angle_convention", "frame_index", "frame_count", "angle_deg"}
+        if (
+            set(parameters) != fields
+            or parameters.get("angle_unit") != "deg"
+            or parameters.get("angle_convention") != "clockwise_from_reference"
+            or type(parameters.get("frame_index")) is not int
+            or parameters["frame_index"] < 0
+            or type(parameters.get("frame_count")) is not int
+            or parameters["frame_count"] < 1
+            or not isinstance(parameters.get("angle_deg"), int | float)
+            or not 0 <= parameters["angle_deg"] < 360
+        ):
+            raise PackScanError(
+                "schema_invalid", "turntable parameters are invalid", "manifest.json"
+            )
 
 
 def _load_archive(path: Path) -> dict[str, bytes]:
