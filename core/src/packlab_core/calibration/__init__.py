@@ -1,5 +1,6 @@
 """PackLab calibration services with device-independent boundaries."""
 
+from .confidence import CalibrationConfidence, score_calibration_confidence
 from .marker_detection import (
     DICTIONARY_NAME,
     DetectionBatch,
@@ -9,6 +10,7 @@ from .marker_detection import (
 from .scale_estimation import KnownMarkerObservation, ScaleEstimate, estimate_scale
 
 __all__ = [
+    "CalibrationConfidence",
     "DICTIONARY_NAME",
     "DetectionBatch",
     "KnownMarkerObservation",
@@ -16,4 +18,5 @@ __all__ = [
     "ScaleEstimate",
     "detect_markers",
     "estimate_scale",
+    "score_calibration_confidence",
 ]

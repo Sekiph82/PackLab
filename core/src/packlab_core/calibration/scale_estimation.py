@@ -81,6 +81,7 @@ def estimate_scale(observations: Iterable[KnownMarkerObservation]) -> ScaleEstim
             "sample_mm_per_pixel": sample,
             "residual_mm_per_pixel": sample - estimate,
             "relative_residual": abs(sample - estimate) / estimate,
+            "relative_edge_spread": _relative_edge_spread(observation.corners_px),
         }
         for observation, sample, _ in samples
     )
@@ -141,6 +142,12 @@ def _edge_lengths(corners: tuple[tuple[float, float], ...]) -> tuple[float, floa
         )
         for index in range(4)
     )  # type: ignore[return-value]
+
+
+def _relative_edge_spread(corners: tuple[tuple[float, float], ...]) -> float:
+    edges = _edge_lengths(corners)
+    mean_edge = sum(edges) / 4.0
+    return (max(edges) - min(edges)) / mean_edge
 
 
 def _rejected(
