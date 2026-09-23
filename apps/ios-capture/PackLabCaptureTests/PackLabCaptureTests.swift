@@ -831,6 +831,14 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(entry.degradedReason, "corrupt_finalization")
     }
 
+    func testPL0093DeletionRequiresAuthoritativeCandidateIdentity() {
+        let root = URL(fileURLWithPath: "/tmp/packlab")
+        let directPlan = SessionDeletionPlan(root: root, session: root.appendingPathComponent("s1"))
+        XCTAssertThrowsError(try directPlan.validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .nonAuthoritative) }
+        let blocked = SessionDeletionPlan(root: root, candidate: SessionResumeCandidate(id: "s1", draft: nil, disposition: .blocked("corrupt"), state: nil))
+        XCTAssertThrowsError(try blocked.validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .outsideRoot) }
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
