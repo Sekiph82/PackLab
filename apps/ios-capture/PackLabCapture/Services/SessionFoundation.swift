@@ -91,6 +91,25 @@ public struct GalleryModel: Sendable, Equatable {
     public mutating func retake(replacing id: String, with replacement: GalleryEntry) throws { guard entries.contains(where: { $0.id == id }), replacement.id != id else { throw GalleryMutationError.invalidReplacement }; replacementTrace[id] = replacement.id; entries.append(replacement); entries.sort { $0.sequence < $1.sequence } }
 }
 
+public enum ResumeDisposition: Sendable, Equatable { case resumable, discardRequired, blocked(String) }
+public struct PersistedSessionState: Codable, Sendable, Equatable {
+    public let sessionID: String
+    public let schemaVersion: String
+    public let nextSequence: Int
+    public let epoch: Int
+    public let acceptedIDs: [String]
+    public init(sessionID: String, schemaVersion: String = "1.0.0", nextSequence: Int, epoch: Int, acceptedIDs: [String]) { self.sessionID = sessionID; self.schemaVersion = schemaVersion; self.nextSequence = nextSequence; self.epoch = epoch; self.acceptedIDs = acceptedIDs }
+}
+public enum SessionResumeValidator {
+    public static func disposition(state: PersistedSessionState?, requiredSourceIDs: Set<String>, supportedVersion: String = "1.0.0") -> ResumeDisposition {
+        guard let state else { return .blocked("missing_state") }
+        guard state.schemaVersion == supportedVersion else { return .blocked("version_mismatch") }
+        guard state.nextSequence >= state.acceptedIDs.count else { return .blocked("invalid_sequence") }
+        guard Set(state.acceptedIDs).isSubset(of: requiredSourceIDs) else { return .blocked("missing_source") }
+        return .resumable
+    }
+}
+
 #if canImport(SwiftUI)
 import SwiftUI
 public struct NewScanWizard: View {
