@@ -2,6 +2,21 @@ import XCTest
 @testable import PackLabCapture
 
 final class PackLabCaptureTests: XCTestCase {
+    func testPreviewLifecyclePolicyIsIdempotent() {
+        var policy = PreviewLifecyclePolicy()
+        XCTAssertTrue(policy.startIfNeeded())
+        XCTAssertFalse(policy.startIfNeeded())
+        policy.attach()
+        policy.attach()
+        XCTAssertEqual(policy.attachmentCount, 2)
+        XCTAssertTrue(policy.stopIfNeeded())
+        XCTAssertFalse(policy.stopIfNeeded())
+        policy.detach()
+        policy.detach()
+        policy.detach()
+        XCTAssertEqual(policy.attachmentCount, 0)
+    }
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(

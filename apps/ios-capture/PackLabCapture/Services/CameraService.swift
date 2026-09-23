@@ -7,10 +7,17 @@ public enum CameraAuthorizationStatus: Sendable, Equatable {
     case restricted
 }
 
-public enum CameraServiceState: Sendable {
+public enum CameraServiceState: Sendable, Equatable {
     case idle
     case running
     case unavailable
+}
+
+public enum CameraServiceError: Error, Sendable, Equatable {
+    case permissionDenied
+    case restricted
+    case unavailable
+    case failed(String)
 }
 
 public protocol CameraService: Sendable {
