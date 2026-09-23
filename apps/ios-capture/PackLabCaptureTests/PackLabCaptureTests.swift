@@ -165,6 +165,14 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PoseAligner.nearest(to: 10, samples: [unavailable]).status, "unavailable")
     }
 
+    func testMotionBufferIsBoundedAndTimestampAligned() {
+        var buffer = MotionBuffer(capacity: 2)
+        for index in 0..<3 { buffer.append(MotionSampleRecord(monotonicTimestamp: Double(index), attitude: [0,0,0,1], rotationRate: [0,0,0])) }
+        XCTAssertEqual(buffer.samples.count, 2)
+        XCTAssertNotNil(buffer.nearest(to: 2.05))
+        XCTAssertNil(buffer.nearest(to: 0))
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)

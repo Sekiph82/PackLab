@@ -76,3 +76,37 @@ public enum PoseAligner {
         return AlignedPose(sample: candidate, delta: delta, status: "available")
     }
 }
+
+public struct MotionSampleRecord: Codable, Sendable, Equatable {
+    public let monotonicTimestamp: TimeInterval
+    public let attitude: [Double]
+    public let rotationRate: [Double]
+    public init(monotonicTimestamp: TimeInterval, attitude: [Double], rotationRate: [Double]) { self.monotonicTimestamp = monotonicTimestamp; self.attitude = attitude; self.rotationRate = rotationRate }
+}
+
+public struct MotionBuffer: Sendable, Equatable {
+    public let capacity: Int
+    public private(set) var samples: [MotionSampleRecord] = []
+    public init(capacity: Int = 256) { self.capacity = max(1, capacity) }
+    public mutating func append(_ sample: MotionSampleRecord) { samples.append(sample); if samples.count > capacity { samples.removeFirst(samples.count - capacity) } }
+    public func nearest(to timestamp: TimeInterval, tolerance: TimeInterval = 0.1) -> MotionSampleRecord? { samples.min { abs($0.monotonicTimestamp - timestamp) < abs($1.monotonicTimestamp - timestamp) }.flatMap { abs($0.monotonicTimestamp - timestamp) <= tolerance ? $0 : nil } }
+}
+
+#if canImport(CoreMotion)
+import CoreMotion
+@MainActor
+public final class CoreMotionController {
+    private let manager = CMMotionManager()
+    public private(set) var buffer: MotionBuffer
+    public init(capacity: Int = 256) { buffer = MotionBuffer(capacity: capacity) }
+    public func start() {
+        guard manager.isDeviceMotionAvailable else { return }
+        manager.deviceMotionUpdateInterval = 1.0 / 60.0
+        manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] motion, _ in
+            guard let self, let motion else { return }
+            self.buffer.append(MotionSampleRecord(monotonicTimestamp: motion.timestamp, attitude: [motion.attitude.quaternion.x, motion.attitude.quaternion.y, motion.attitude.quaternion.z, motion.attitude.quaternion.w], rotationRate: [motion.rotationRate.x, motion.rotationRate.y, motion.rotationRate.z]))
+        }
+    }
+    public func stop() { manager.stopDeviceMotionUpdates() }
+}
+#endif
