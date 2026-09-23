@@ -653,6 +653,15 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testPL0069AuthorizationMustPrecedeStartedState() {
+        var policy = PreviewLifecyclePolicy()
+        XCTAssertFalse(policy.beginAuthorizedStart(.denied))
+        XCTAssertFalse(policy.isStarted)
+        XCTAssertTrue(policy.beginAuthorizedStart(.authorized))
+        policy.markStartedAfterSuccessfulStart()
+        XCTAssertTrue(policy.isStarted)
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
