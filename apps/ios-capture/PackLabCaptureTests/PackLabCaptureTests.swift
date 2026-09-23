@@ -540,6 +540,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(index.degraded(id: "missing", reason: "corrupt_record").exportState, "unavailable")
     }
 
+    func testLocalScanHistoryDerivesEntriesAndRetainsDegradedRows() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "s1")
+        try FileManager.default.createDirectory(at: layout.previews, withIntermediateDirectories: true)
+        try JSONEncoder().encode(NewScanDraft(sessionID: "s1", packageName: "Bottle", packageType: .bottle, captureMode: .freehand, createdAt: Date(timeIntervalSince1970: 1))).write(to: layout.metadata)
+        let entries = await LocalScanHistoryStore(root: root).load()
+        XCTAssertEqual(entries.first?.degradedReason, "missing_preview")
+        XCTAssertEqual(entries.first?.packageName, "Bottle")
+    }
+
     func testDeletionPlanRequiresConfirmationAndStaysInsideRoot() {
         let root = URL(fileURLWithPath: "/tmp/packlab")
         let session = root.appendingPathComponent("s1")

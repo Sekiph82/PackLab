@@ -295,6 +295,34 @@ public struct ScanHistoryIndex: Sendable, Equatable {
     public func degraded(id: String, reason: String) -> ScanHistoryEntry { ScanHistoryEntry(id: id, packageName: "Unavailable scan", packageType: nil, date: nil, previewPath: nil, exportState: "unavailable", degradedReason: reason) }
 }
 
+public struct SessionFinalizationRecord: Codable, Sendable, Equatable {
+    public let sessionID: String
+    public let state: String
+    public let packagePath: String?
+    public init(sessionID: String, state: String, packagePath: String? = nil) { self.sessionID = sessionID; self.state = state; self.packagePath = packagePath }
+}
+
+public actor LocalScanHistoryStore {
+    private let root: URL
+    private let fileManager: FileManager
+    public init(root: URL, fileManager: FileManager = .default) { self.root = root; self.fileManager = fileManager }
+    public func load() -> [ScanHistoryEntry] {
+        guard let directories = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        let index = ScanHistoryIndex()
+        return index.sorted(directories.filter { $0.hasDirectoryPath }.map { directory in
+            let id = directory.lastPathComponent
+            let layout = SessionStorageLayout(root: root, sessionID: id)
+            guard let metadata = try? Data(contentsOf: layout.metadata), let draft = try? JSONDecoder().decode(NewScanDraft.self, from: metadata) else { return index.degraded(id: id, reason: "corrupt_metadata") }
+            let preview = (try? fileManager.contentsOfDirectory(at: layout.previews, includingPropertiesForKeys: nil).first { $0.pathExtension.lowercased() == "jpg" || $0.pathExtension.lowercased() == "jpeg" })
+            let finalizationURL = directory.appendingPathComponent("finalization.json")
+            let finalization = (try? Data(contentsOf: finalizationURL)).flatMap { try? JSONDecoder().decode(SessionFinalizationRecord.self, from: $0) }
+            guard let preview else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: nil, exportState: finalization?.state ?? "in_progress", degradedReason: "missing_preview") }
+            guard let finalization else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: "in_progress") }
+            return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: finalization.state)
+        })
+    }
+}
+
 public enum DeletionError: Error, Sendable, Equatable { case confirmationRequired, outsideRoot, symlinkEscape, partialFailure }
 public struct SessionDeletionPlan: Sendable, Equatable {
     public let root: URL
@@ -395,6 +423,21 @@ public struct SessionResumeView: View {
                 }
             }
         }.task { candidates = await discovery.discover() }.navigationTitle("Resume Scan")
+    }
+}
+
+public struct LocalScanHistoryView: View {
+    @State private var entries: [ScanHistoryEntry] = []
+    private let store: LocalScanHistoryStore
+    public init(root: URL) { store = LocalScanHistoryStore(root: root) }
+    public var body: some View {
+        List(entries) { entry in
+            HStack {
+                if let path = entry.previewPath, let image = UIImage(contentsOfFile: path) { Image(uiImage: image).resizable().scaledToFit().frame(width: 64, height: 64) }
+                else { Image(systemName: "exclamationmark.triangle").frame(width: 64, height: 64) }
+                VStack(alignment: .leading) { Text(entry.packageName); Text(entry.exportState).font(.caption); if let reason = entry.degradedReason { Text(reason).foregroundStyle(.orange).font(.caption2) } }
+            }
+        }.task { entries = await store.load() }.navigationTitle("Scan History")
     }
 }
 #endif
