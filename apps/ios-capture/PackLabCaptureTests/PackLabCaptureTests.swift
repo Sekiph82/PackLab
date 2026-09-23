@@ -825,6 +825,12 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PackScanWriter.checksumCanonicalization, "sha256_32_bytes_lowercase_hex_64_chars_v1")
     }
 
+    func testPL0092HistoryRetainsDegradedStateInsteadOfDowngradingCorruption() {
+        let entry = ScanHistoryIndex().degraded(id: "s1", reason: "corrupt_finalization")
+        XCTAssertEqual(entry.exportState, "unavailable")
+        XCTAssertEqual(entry.degradedReason, "corrupt_finalization")
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
