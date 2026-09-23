@@ -207,6 +207,16 @@ final class PackLabCaptureTests: XCTestCase {
 
     private func unavailableSnapshot() -> TrackingSnapshot { TrackingSnapshot(quality: .unavailable, poseEvidenceEligible: false) }
 
+    func testPoseDiagnosticsExportIsDeterministicAndRejectsNonFiniteData() throws {
+        let pose = AlignedPose(sample: PoseSample(timestamp: 2, transform: Array(repeating: 0, count: 16), tracking: .normal), delta: 0.01, status: "available")
+        let record = PoseDiagnosticRecord(captureID: "b", captureTimestamp: 2, pose: pose, motion: nil, epoch: 1)
+        let bytes = try PoseDiagnosticsExporter.encode(records: [record])
+        XCTAssertTrue(String(decoding: bytes, as: UTF8.self).contains("1.0.0"))
+        XCTAssertThrowsError(try PoseDiagnosticsExporter.encode(records: [PoseDiagnosticRecord(captureID: "bad", captureTimestamp: .infinity, pose: pose, motion: nil, epoch: 1)])) { error in
+            XCTAssertEqual(error as? PoseDiagnosticsError, .nonFinite)
+        }
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)

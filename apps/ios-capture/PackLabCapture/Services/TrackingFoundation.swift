@@ -152,6 +152,39 @@ public struct PoseOverlayModel: Sendable, Equatable {
     }
 }
 
+public struct PoseDiagnosticRecord: Codable, Sendable, Equatable {
+    public let captureID: String
+    public let captureTimestamp: TimeInterval
+    public let pose: AlignedPose
+    public let motion: MotionSampleRecord?
+    public let epoch: Int
+    public init(captureID: String, captureTimestamp: TimeInterval, pose: AlignedPose, motion: MotionSampleRecord?, epoch: Int) { self.captureID = captureID; self.captureTimestamp = captureTimestamp; self.pose = pose; self.motion = motion; self.epoch = epoch }
+}
+
+public struct PoseDiagnosticsExport: Codable, Sendable, Equatable {
+    public let schemaVersion = "1.0.0"
+    public let timebase = "monotonic_seconds_since_boot"
+    public let coordinateConvention = PackScanCoordinateContract.convention
+    public let records: [PoseDiagnosticRecord]
+    public init(records: [PoseDiagnosticRecord]) { self.records = records.sorted { $0.captureTimestamp < $1.captureTimestamp } }
+}
+
+public enum PoseDiagnosticsError: Error, Sendable, Equatable { case nonFinite, tooManyRecords }
+public enum PoseDiagnosticsExporter {
+    public static func encode(records: [PoseDiagnosticRecord], maximumRecords: Int = 10_000) throws -> Data {
+        guard records.count <= maximumRecords else { throw PoseDiagnosticsError.tooManyRecords }
+        for record in records {
+            guard record.captureTimestamp.isFinite, record.pose.delta?.isFinite ?? true else { throw PoseDiagnosticsError.nonFinite }
+            if let sample = record.pose.sample, !sample.transform.allSatisfy(\.isFinite) { throw PoseDiagnosticsError.nonFinite }
+        }
+        return try JSONEncoder.sorted.encode(PoseDiagnosticsExport(records: records))
+    }
+}
+
+private extension JSONEncoder {
+    static var sorted: JSONEncoder { let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .prettyPrinted]; return encoder }
+}
+
 #if canImport(CoreMotion)
 import CoreMotion
 @MainActor
