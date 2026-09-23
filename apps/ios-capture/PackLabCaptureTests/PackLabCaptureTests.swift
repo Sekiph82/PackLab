@@ -738,6 +738,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(bridge.monotonic(for: wall.addingTimeInterval(0.25)), 5.25, accuracy: 0.000001)
     }
 
+    func testPL0081MotionRecordsCarryAttitudeAndRotationRateBehindBoundedBuffer() {
+        var buffer = MotionBuffer(capacity: 2)
+        buffer.append(MotionSampleRecord(monotonicTimestamp: 1, attitude: [0, 0, 0, 1], rotationRate: [0.1, 0.2, 0.3]))
+        buffer.append(MotionSampleRecord(monotonicTimestamp: 2, attitude: [0, 0, 0, 1], rotationRate: [0.4, 0.5, 0.6]))
+        buffer.append(MotionSampleRecord(monotonicTimestamp: 3, attitude: [0, 0, 0, 1], rotationRate: [0.7, 0.8, 0.9]))
+        XCTAssertEqual(buffer.samples.count, 2)
+        XCTAssertEqual(buffer.samples.last?.rotationRate, [0.7, 0.8, 0.9])
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
