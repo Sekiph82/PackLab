@@ -5,12 +5,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M03
-- Current Sprint: M03-BATCH-002 — Independent-audit remediation
-- Current Task: M03-BATCH-002 — Remediate PL-0069 and PL-0071 through PL-0093
+- Current Sprint: M03-BATCH-003 — Third independent-audit remediation
+- Current Task: M03-BATCH-003 — Remediate PL-0069 and PL-0071 through PL-0093
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve accepted PL-0070, remediate exactly the 24 failed M03 children using their frozen versioned work orders, publish one implementation boundary and one remediation log per child, then publish MASTER_REMEDIATION_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. Do not edit TASKS.md, do not start M04, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V02.md. Preserve accepted PL-0070, remediate exactly the 24 remaining M03 children using their frozen V04/V03 work orders, publish one implementation boundary and one child log per task, then publish MASTER_REMEDIATION_CODEX_LOG_V02.md ending `AWAITING_MILESTONE_AUDIT`. Do not edit TASKS.md, do not start M04, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED (1/25 accepted; PL-0070 only)
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED (PL-0070 remains the only accepted M03 child; 24 remediation children remain open)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner explicitly authorized M03 execution/remediation without closing PL-0068 on 2026-09-23.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
