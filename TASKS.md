@@ -4,12 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M02
-- Current Sprint: M02-S02 — Calibration system
-- Current Task: PL-0068 — First physical calibration benchmark
-- Current Task Status: OWNER_REQUIRED
-- Next Task/Action: Owner must execute https://github.com/Sekiph82/PackLab/blob/main/docs/calibration/benchmarks/first-physical-benchmark.md using https://github.com/Sekiph82/PackLab/blob/main/docs/calibration/verification-record-template.md and https://github.com/Sekiph82/PackLab/blob/main/docs/calibration/benchmarks/benchmark-record-template.md. Provide real printed-mat ruler/caliper verification, the bound iPhone 16 Standard seven-view capture evidence, retained accepted/rejected/invalid sample records, and measured error statistics. Blocking audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0068_CHATGPT_AUDIT_V02.md. Do not start M03.
-- Required Actor: OWNER
+- Current Milestone: M03
+- Current Sprint: M03-S01 — Camera control
+- Current Task: PL-0069 — NextLevel preview / SwiftUI UIKit bridge
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/PL-0069_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/PL-0069_CHATGPT_AUDIT_CRITERIA_V01.md. Integrate the real NextLevel 0.19.1 preview behind a controlled UIKit-to-SwiftUI bridge, preserve truthful simulator/unavailable behavior, publish PL-0069_CODEX_LOG_V01.md ending `READY_FOR_INDEPENDENT_AUDIT`, and stop before PL-0070.
+- Required Actor: CODEX
+- Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner explicitly authorized continuing M03 without closing PL-0068 on 2026-09-23. Resume the physical benchmark later when printing/measurement is possible.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
 
@@ -155,7 +156,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0065** Define camera-calibration procedure for iPhone main camera when higher accuracy than EXIF/intrinsics requires it.
 - [x] **PL-0066** Store calibration profile by device/lens/resolution and invalidate incompatible profiles.
 - [x] **PL-0067** Build synthetic calibration tests with known ground-truth dimensions.
-- [ ] **PL-0068** Build first physical calibration benchmark and record measured error.
+- [ ] **PL-0068** Build first physical calibration benchmark and record measured error. **OWNER_REQUIRED:** physical printed-mat verification is pending because no printer is currently available; owner authorized M03 continuation without closing this task.
 
 ---
 
