@@ -773,6 +773,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(epochs.lastReason, .trackingDegraded)
     }
 
+    func testPL0085OverlayUsesCurrentPoseMotionAndEpoch() {
+        let snapshot = TrackingSnapshot(quality: .normal, poseEvidenceEligible: true, message: "Tracking ready")
+        let pose = PoseSample(timestamp: 3, transform: CoordinateTransform.identity.values, tracking: .normal)
+        let motion = MotionSampleRecord(monotonicTimestamp: 3, attitude: [0, 0, 0, 1], rotationRate: [0, 0, 0])
+        let overlay = PoseOverlayModel.make(visible: true, tracking: snapshot, epoch: 4, pose: pose, motion: motion)
+        XCTAssertTrue(overlay.lines.contains("Epoch: 4"))
+        XCTAssertTrue(overlay.lines.contains { $0.contains("Motion t=") })
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
