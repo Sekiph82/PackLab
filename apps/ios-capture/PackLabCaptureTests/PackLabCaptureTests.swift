@@ -187,6 +187,18 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(TrackingQualityClassifier.classify(state: .normal).poseEvidenceEligible)
     }
 
+    func testResetCreatesEpochAndNeverMixesPoseSegments() {
+        var coordinator = SessionEpochCoordinator()
+        coordinator.reset(reason: .trackingDegraded)
+        XCTAssertEqual(coordinator.epoch, 1)
+        XCTAssertFalse(coordinator.accepts(poseEpoch: 0))
+        XCTAssertFalse(coordinator.accepts(poseEpoch: 1))
+        coordinator.recovered()
+        XCTAssertTrue(coordinator.accepts(poseEpoch: 1))
+        coordinator.reset(reason: .userRequested)
+        XCTAssertFalse(coordinator.accepts(poseEpoch: 1))
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)

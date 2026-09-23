@@ -126,6 +126,19 @@ public enum TrackingQualityClassifier {
     }
 }
 
+public enum ResetReason: String, Codable, Sendable, Equatable { case userRequested, trackingDegraded, interruption, runtimeError }
+public enum RelocalizationState: String, Codable, Sendable, Equatable { case idle, relocalizing, recovered, failed }
+public struct SessionEpochCoordinator: Sendable, Equatable {
+    public private(set) var epoch = 0
+    public private(set) var state: RelocalizationState = .idle
+    public private(set) var lastReason: ResetReason?
+    public init() {}
+    public mutating func reset(reason: ResetReason) { epoch += 1; state = .relocalizing; lastReason = reason }
+    public mutating func recovered() { state = .recovered }
+    public mutating func failed() { state = .failed }
+    public func accepts(poseEpoch: Int) -> Bool { poseEpoch == epoch && state == .recovered }
+}
+
 #if canImport(CoreMotion)
 import CoreMotion
 @MainActor
