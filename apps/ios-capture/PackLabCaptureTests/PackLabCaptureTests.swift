@@ -226,6 +226,14 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertThrowsError(try NewScanDraftValidator.make(name: String(repeating: "x", count: 121), type: .bottle, mode: .freehand)) { XCTAssertEqual($0 as? NewScanDraftError, .nameTooLong) }
     }
 
+    func testSessionStorageLayoutSeparatesSourcesDerivativesAndTemps() {
+        let layout = SessionStorageLayout(root: URL(fileURLWithPath: "/tmp/packlab"), sessionID: "s1")
+        XCTAssertTrue(layout.images.path.hasSuffix("s1/images"))
+        XCTAssertTrue(layout.previews.path.hasSuffix("s1/previews"))
+        XCTAssertTrue(layout.temporary.path.hasSuffix("s1/tmp"))
+        XCTAssertNotEqual(layout.images, layout.previews)
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
