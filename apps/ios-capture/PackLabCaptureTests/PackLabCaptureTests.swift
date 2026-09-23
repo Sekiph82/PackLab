@@ -702,6 +702,16 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertThrowsError(try PackScanPhotoMetadataWire.from(metadata)) { XCTAssertEqual($0 as? PhotoMetadataBindingError, .schemaViolation) }
     }
 
+    func testPL0077RecoveryCancelsOnlyInFlightCaptureAndRetriesRestart() {
+        var model = CameraRecoveryIntegrationModel()
+        XCTAssertTrue(model.beginCapture(id: "in-flight"))
+        model.signal(.runtimeError)
+        XCTAssertNil(model.inFlightCaptureID)
+        XCTAssertEqual(model.machine.state, .restarting)
+        XCTAssertEqual(model.machine.apply(.restartFailed), .restarting)
+        XCTAssertEqual(model.machine.apply(.restartFailed), .failed)
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
