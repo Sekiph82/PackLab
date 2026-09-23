@@ -1,7 +1,11 @@
 {
   "fixture_version": "1.0.0",
-  "provenance": "synthetic-public-static-fixture",
+  "provenance": "source-derived-static-byte-fixture",
+  "swift_source_commit": "7b57d334fd678b50a3728dde15e75f675c02d079",
   "writer": "PackLabCapture.PackScanWriter",
+  "contract_schema_version": "1.0.0",
+  "generation_method": "tests/packscan/test_swift_compatibility.py::_build_source_derived_swift_package_bytes mirrors PackScanWriter.swift DeterministicZipArchive headers, zlib raw deflate level 9, CRC32, canonical JSON, entry order, and EOCD without calling packlab_core.write_packscan",
+  "evidence_level": "static source-derived bytes; not native macOS/Xcode Swift execution",
   "input_manifest": "manifest-valid.json",
   "payloads": [
     {"path": "images/0001.jpg", "utf8_bytes": "IMG"},

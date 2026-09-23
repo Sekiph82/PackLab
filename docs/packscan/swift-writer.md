@@ -25,19 +25,24 @@ bytes are complete. An existing destination is not overwritten, and a failed
 write removes the partial file; an interrupted write therefore cannot appear
 as a complete `.packscan` package.
 
-`tests/fixtures/packscan/swift-writer-contract-fixture.json` is deterministic
-static evidence for later macOS/Xcode cross-language tests. Windows validation
-here is limited to source inspection, project-file linkage, schema-compatible
-fixture inspection, and the Python reader; native Swift compilation and iOS
-device execution are unavailable and are not claimed.
+`tests/fixtures/packscan/swift-writer-contract-fixture.json` records the
+source-derived static byte-fixture provenance for later macOS/Xcode
+cross-language tests, including the corrected Swift source commit, schema
+version, generation method, and evidence level. Windows validation here is
+limited to source-derived byte modelling, source inspection, project-file
+linkage, schema-compatible fixture inspection, and the Python reader; native
+Swift compilation and iOS device execution are unavailable and are not claimed.
 
 `tests/packscan/test_swift_compatibility.py` treats the committed fixture as
-the deterministic Swift-output contract: it validates the equivalent package
-with Python, checks ZIP layout/checksum/photo-metadata semantics, and mutates
-only the manifest's authoritative image hash to prove the Python validator
-rejects a semantically corrupt package. It also parses byte-level ZIP local and
-central header fields from the constants in the Swift source to lock the
-timestamp, method, flags, CRC/size slots and omitted extra fields. The future
-macOS/Xcode boundary is a native test that invokes this writer and feeds its
-actual bytes to the same Python validator; that test is intentionally not
-simulated on Windows.
+the deterministic Swift-output contract: it builds source-derived package bytes
+by independently modelling `PackScanWriter.swift` ZIP headers, raw deflate
+level 9, CRC32, canonical JSON, entry order, and EOCD without calling the
+Python `write_packscan` implementation. Python then reads those bytes through
+the real validator, checks ZIP layout/checksum/photo-metadata semantics, and
+mutates only the authoritative image payload while leaving control entries
+intact to prove the Python validator rejects a semantically corrupt package. It
+also parses byte-level ZIP local and central header fields from the constants
+in the Swift source to lock the timestamp, method, flags, CRC/size slots and
+omitted extra fields. The future macOS/Xcode boundary is a native test that
+invokes this writer and feeds its actual bytes to the same Python validator;
+that test is intentionally not simulated on Windows.
