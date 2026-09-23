@@ -28,28 +28,14 @@ import ARKit
 import UIKit
 
 @MainActor
-public final class ARWorldTrackingController: NSObject, ARSessionDelegate {
-    public let session = ARSession()
-    public private(set) var policy = ARTrackingLifecyclePolicy()
-
-    public override init() { super.init(); session.delegate = self }
-    public func start() {
-        guard ARWorldTrackingConfiguration.isSupported else { policy.limited(.cameraUnavailable); return }
-        policy.started()
-        let configuration = ARWorldTrackingConfiguration()
-        session.run(configuration)
-    }
-    public func stop() { session.pause() }
-    public func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
-        switch camera.trackingState {
-        case .normal: policy.normal()
-        case .limited(let reason):
-            switch reason { case .initializing: policy.limited(.initializing); case .excessiveMotion: policy.limited(.excessiveMotion); case .insufficientFeatures: policy.limited(.insufficientFeatures); case .relocalizing: policy.limited(.relocalizing); @unknown default: policy.limited(.unknown) }
-        case .notAvailable: policy.limited(.cameraUnavailable)
-        }
-    }
-    public func sessionWasInterrupted(_ session: ARSession) { policy.interrupted() }
-    public func sessionInterruptionEnded(_ session: ARSession) { policy.reset() }
+public final class ARWorldTrackingController {
+    private let owner: SharedARSessionOwner
+    public var session: ARSession { owner.session }
+    public var policy: ARTrackingLifecyclePolicy { owner.policy }
+    public init(owner: SharedARSessionOwner = .shared) { self.owner = owner }
+    public func start() { owner.start() }
+    public func stop() { owner.stop() }
+    public func reset() { owner.reset() }
 }
 #endif
 
