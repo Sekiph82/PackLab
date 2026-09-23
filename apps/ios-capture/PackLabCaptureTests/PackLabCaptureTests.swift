@@ -199,6 +199,14 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(coordinator.accepts(poseEpoch: 1))
     }
 
+    func testPoseOverlayLabelsUnavailableDataAndCanBeDisabled() {
+        let unavailable = PoseOverlayModel.make(visible: true, tracking: TrackingSnapshot(quality: .unavailable, poseEvidenceEligible: false), epoch: 2, pose: nil)
+        XCTAssertTrue(unavailable.lines.contains("Pose: unavailable"))
+        XCTAssertFalse(PoseOverlayModel.make(visible: false, tracking: unavailableSnapshot(), epoch: 0, pose: nil).visible)
+    }
+
+    private func unavailableSnapshot() -> TrackingSnapshot { TrackingSnapshot(quality: .unavailable, poseEvidenceEligible: false) }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)

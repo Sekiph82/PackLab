@@ -139,6 +139,19 @@ public struct SessionEpochCoordinator: Sendable, Equatable {
     public func accepts(poseEpoch: Int) -> Bool { poseEpoch == epoch && state == .recovered }
 }
 
+public struct PoseOverlayModel: Sendable, Equatable {
+    public let visible: Bool
+    public let lines: [String]
+    public init(visible: Bool, lines: [String]) { self.visible = visible; self.lines = lines }
+    public static func make(visible: Bool, tracking: TrackingSnapshot, epoch: Int, pose: PoseSample?) -> PoseOverlayModel {
+        guard visible else { return PoseOverlayModel(visible: false, lines: []) }
+        var lines = ["Tracking: \(tracking.quality.rawValue)", "Epoch: \(epoch)"]
+        if let pose { lines.append(String(format: "Pose t=%.3fs", pose.timestamp)) }
+        else { lines.append("Pose: unavailable") }
+        return PoseOverlayModel(visible: true, lines: lines)
+    }
+}
+
 #if canImport(CoreMotion)
 import CoreMotion
 @MainActor
