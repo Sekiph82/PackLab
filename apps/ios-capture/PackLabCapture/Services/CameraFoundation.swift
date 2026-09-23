@@ -220,6 +220,43 @@ public struct ExposurePolicy: Sendable, Equatable {
     }
 }
 
+public enum WhiteBalanceState: String, Sendable, Codable, Equatable { case unavailable, stabilizing, locked, failed }
+public struct WhiteBalanceCapabilities: Sendable, Equatable { public let continuous: Bool; public let lock: Bool; public init(continuous: Bool, lock: Bool) { self.continuous = continuous; self.lock = lock } }
+
+public struct WhiteBalancePolicy: Sendable, Equatable {
+    public private(set) var state: WhiteBalanceState = .unavailable
+    public private(set) var temperatureKelvin: Double?
+    public init() {}
+    public mutating func stabilize(capabilities: WhiteBalanceCapabilities, reportedKelvin: Double? = nil) -> WhiteBalanceState {
+        guard capabilities.continuous else { state = .unavailable; return state }
+        temperatureKelvin = reportedKelvin
+        state = .stabilizing; return state
+    }
+    public mutating func lock(capabilities: WhiteBalanceCapabilities, reportedKelvin: Double? = nil) -> WhiteBalanceState {
+        guard state == .stabilizing, capabilities.lock else { state = .failed; return state }
+        temperatureKelvin = reportedKelvin
+        state = .locked; return state
+    }
+}
+
+#if canImport(AVFoundation)
+@available(iOS 17.0, *)
+public enum AVFoundationWhiteBalanceAdapter {
+    public static func configure(device: AVCaptureDevice, lock: Bool) throws -> WhiteBalanceState {
+        guard device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) else { return .unavailable }
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        device.whiteBalanceMode = .continuousAutoWhiteBalance
+        if lock {
+            guard device.isWhiteBalanceModeSupported(.locked) else { return .failed }
+            device.whiteBalanceMode = .locked
+            return .locked
+        }
+        return .stabilizing
+    }
+}
+#endif
+
 #if canImport(AVFoundation)
 @available(iOS 17.0, *)
 public enum AVFoundationExposureAdapter {

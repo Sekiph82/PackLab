@@ -93,6 +93,16 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(unsupported.lock(capabilities: ExposureCapabilities(minBias: -1, maxBias: 1, lock: false)), .failed)
     }
 
+    func testWhiteBalancePolicyDoesNotInventTemperature() {
+        var policy = WhiteBalancePolicy()
+        XCTAssertEqual(policy.stabilize(capabilities: WhiteBalanceCapabilities(continuous: true, lock: true)), .stabilizing)
+        XCTAssertNil(policy.temperatureKelvin)
+        XCTAssertEqual(policy.lock(capabilities: WhiteBalanceCapabilities(continuous: true, lock: true)), .locked)
+        var unavailable = WhiteBalancePolicy()
+        XCTAssertEqual(unavailable.stabilize(capabilities: WhiteBalanceCapabilities(continuous: false, lock: false), reportedKelvin: 5000), .unavailable)
+        XCTAssertNil(unavailable.temperatureKelvin)
+    }
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(
