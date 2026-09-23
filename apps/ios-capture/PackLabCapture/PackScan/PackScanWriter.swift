@@ -1,6 +1,6 @@
-import Compression
 import CryptoKit
 import Foundation
+import zlib
 
 /// PackLab-owned, device-agnostic PackScan package writer.
 ///
@@ -136,6 +136,10 @@ public enum PackScanWriterError: Error, Equatable {
 
 private struct DeterministicZipArchive {
     let files: [String: Data]
+    static let dosTimeMidnight: UInt16 = 0x0000
+    static let dosDate1980Jan1: UInt16 = 0x0021
+    static let generalPurposeUTF8Flag: UInt16 = 0x0800
+    static let deflateMethod: UInt16 = 0x0008
 
     func data() throws -> Data {
         let order = ["manifest.json", "metadata/photos.json", "checksums.json"] + files.keys.filter {
@@ -170,15 +174,15 @@ private struct DeterministicZipArchive {
     }
 
     private func appendLocalHeader(to output: inout Data, name: String, bytes: Data, compressed: Data) {
-        appendUInt32(&output, 0x04034b50); appendUInt16(&output, 20); appendUInt16(&output, 0)
-        appendUInt16(&output, 8); appendUInt16(&output, 0); appendUInt16(&output, 0)
+        appendUInt32(&output, 0x04034b50); appendUInt16(&output, 20); appendUInt16(&output, Self.generalPurposeUTF8Flag)
+        appendUInt16(&output, Self.deflateMethod); appendUInt16(&output, Self.dosTimeMidnight); appendUInt16(&output, Self.dosDate1980Jan1)
         appendUInt32(&output, CRC32.checksum(bytes)); appendUInt32(&output, UInt32(compressed.count)); appendUInt32(&output, UInt32(bytes.count))
         appendName(&output, name); output.append(compressed)
     }
 
     private func appendCentralHeader(to output: inout Data, name: String, bytes: Data, compressed: Data, offset: UInt32) {
-        appendUInt32(&output, 0x02014b50); appendUInt16(&output, 20); appendUInt16(&output, 20); appendUInt16(&output, 0)
-        appendUInt16(&output, 8); appendUInt16(&output, 0); appendUInt16(&output, 0)
+        appendUInt32(&output, 0x02014b50); appendUInt16(&output, 20); appendUInt16(&output, 20); appendUInt16(&output, Self.generalPurposeUTF8Flag)
+        appendUInt16(&output, Self.deflateMethod); appendUInt16(&output, Self.dosTimeMidnight); appendUInt16(&output, Self.dosDate1980Jan1)
         appendUInt32(&output, CRC32.checksum(bytes)); appendUInt32(&output, UInt32(compressed.count)); appendUInt32(&output, UInt32(bytes.count))
         appendName(&output, name); appendUInt16(&output, 0); appendUInt16(&output, 0); appendUInt16(&output, 0); appendUInt16(&output, 0); appendUInt32(&output, 0); appendUInt32(&output, offset)
     }
@@ -193,37 +197,38 @@ private struct DeterministicZipArchive {
 
 private enum Deflater {
     static func deflate(_ data: Data) throws -> Data {
-        var stream = compression_stream()
-        guard compression_stream_init(&stream, COMPRESSION_STREAM_ENCODE, COMPRESSION_ZLIB) == COMPRESSION_STATUS_OK else {
-            throw PackScanWriterError.zipEncodingFailed
-        }
-        defer { compression_stream_destroy(&stream) }
+        var stream = z_stream()
+        let initStatus = deflateInit2_(
+            &stream,
+            Z_BEST_COMPRESSION,
+            Z_DEFLATED,
+            -MAX_WBITS,
+            8,
+            Z_DEFAULT_STRATEGY,
+            ZLIB_VERSION,
+            Int32(MemoryLayout<z_stream>.size)
+        )
+        guard initStatus == Z_OK else { throw PackScanWriterError.zipEncodingFailed }
+        defer { deflateEnd(&stream) }
+
         var result = Data()
         var buffer = [UInt8](repeating: 0, count: 32_768)
         return try data.withUnsafeBytes { source in
-            stream.src_ptr = source.bindMemory(to: UInt8.self).baseAddress
-            stream.src_size = source.count
-            var status: compression_status = COMPRESSION_STATUS_OK
+            stream.next_in = UnsafeMutablePointer<Bytef>(mutating: source.bindMemory(to: Bytef.self).baseAddress)
+            stream.avail_in = uInt(source.count)
             repeat {
-                let before = stream.src_size
-                status = buffer.withUnsafeMutableBytes { destination in
-                    stream.dst_ptr = destination.bindMemory(to: UInt8.self).baseAddress
-                    stream.dst_size = destination.count
-                    let flags: Int32 = stream.src_size == 0 ? Int32(COMPRESSION_STREAM_FINALIZE.rawValue) : 0
-                    return compression_stream_process(&stream, flags)
+                let status = buffer.withUnsafeMutableBytes { destination -> Int32 in
+                    stream.next_out = destination.bindMemory(to: Bytef.self).baseAddress
+                    stream.avail_out = uInt(destination.count)
+                    return zlib.deflate(&stream, Z_FINISH)
                 }
-                let written = buffer.count - stream.dst_size
+                let written = buffer.count - Int(stream.avail_out)
                 result.append(contentsOf: buffer[..<written])
-                if status == COMPRESSION_STATUS_ERROR || (before == stream.src_size && written == 0 && status != COMPRESSION_STATUS_END) {
-                    throw PackScanWriterError.zipEncodingFailed
-                }
-                if stream.src_size == 0 && status == COMPRESSION_STATUS_END { break }
-            } while true
-            guard result.count >= 6 else { throw PackScanWriterError.zipEncodingFailed }
-            // Compression's ZLIB stream includes RFC 1950 framing; ZIP method
-            // 8 stores the raw DEFLATE member, so remove the zlib header and
-            // Adler-32 trailer after successful finalization.
-            return Data(result.dropFirst(2).dropLast(4))
+                if status == Z_STREAM_END { break }
+                guard status == Z_OK else { throw PackScanWriterError.zipEncodingFailed }
+            } while stream.avail_out == 0
+            guard stream.avail_in == 0 else { throw PackScanWriterError.zipEncodingFailed }
+            return result
         }
     }
 }

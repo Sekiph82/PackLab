@@ -21,6 +21,7 @@
 		A10000010000000000000012 /* PackLabCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000012 /* PackLabCaptureTests.swift */; };
 		A10000010000000000000013 /* NextLevel in Frameworks */ = {isa = PBXBuildFile; productRef = A10000900000000000000001 /* NextLevel */; };
 		A10000010000000000000014 /* PackScanWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000110000000000000014 /* PackScanWriter.swift */; };
+		A10000010000000000000015 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000110000000000000015 /* libz.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,11 +39,12 @@
 		A10000110000000000000011 /* SimulatorFallbacks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulatorFallbacks.swift; sourceTree = "<group>"; };
 		A10000110000000000000012 /* PackLabCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PackLabCaptureTests.swift; sourceTree = "<group>"; };
 		A10000110000000000000014 /* PackScanWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PackScanWriter.swift; sourceTree = "<group>"; };
+		A10000110000000000000015 /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
 		A10000100000000000000002 /* PackLabCaptureTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PackLabCaptureTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A10000200000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000010000000000000013 /* NextLevel in Frameworks */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000200000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000010000000000000013 /* NextLevel in Frameworks */, A10000010000000000000015 /* libz.tbd in Frameworks */,); runOnlyForDeploymentPostprocessing = 0; };
 		A10000200000000000000004 /* Test Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
@@ -53,6 +55,7 @@
 				A10000300000000000000002 /* PackLabCapture */,
 				A10000300000000000000007 /* PackLabCaptureTests */,
 				A10000300000000000000003 /* Products */,
+				A10000110000000000000015 /* libz.tbd */,
 			);
 			sourceTree = "<group>";
 		};

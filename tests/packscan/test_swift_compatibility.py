@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import struct
 import zipfile
 from pathlib import Path
 
@@ -90,3 +92,106 @@ def test_python_rejects_swift_contract_negative_manifest_hash_mutation(
             archive.writestr(info, files[name], compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
     with pytest.raises(PackScanError, match="checksum_mismatch_authoritative"):
         read_packscan(mutated_package)
+
+
+def _swift_constant(source: str, name: str) -> int:
+    match = re.search(rf"static let {name}: UInt16 = 0x([0-9a-fA-F]+)", source)
+    assert match is not None
+    return int(match.group(1), 16)
+
+
+def test_swift_writer_source_and_header_contract_are_byte_level(repo_root: Path) -> None:
+    source = (
+        repo_root / "apps" / "ios-capture" / "PackLabCapture" / "PackScan" / "PackScanWriter.swift"
+    ).read_text(encoding="utf-8")
+    fixture = json.loads(
+        (
+            repo_root / "tests" / "fixtures" / "packscan" / "swift-writer-contract-fixture.json"
+        ).read_text(encoding="utf-8")
+    )
+    expected = fixture["expected_zip"]
+    assert "import Compression" not in source
+    assert "import zlib" in source
+    assert "deflateInit2_" in source
+    assert "Z_BEST_COMPRESSION" in source
+    assert "-MAX_WBITS" in source
+    assert "dropFirst(2).dropLast(4)" not in source
+
+    dos_time = _swift_constant(source, "dosTimeMidnight")
+    dos_date = _swift_constant(source, "dosDate1980Jan1")
+    flags = _swift_constant(source, "generalPurposeUTF8Flag")
+    method = _swift_constant(source, "deflateMethod")
+    assert dos_time == expected["dos_time"]
+    assert dos_date == expected["dos_date"]
+    assert flags == expected["general_purpose_flag"]
+    assert method == expected["method"]
+    assert expected["level"] == 9
+    assert expected["raw_deflate_window_bits"] == -15
+
+    crc = 0x12345678
+    compressed_size = 9
+    uncompressed_size = 3
+    name = b"images/0001.jpg"
+    local = (
+        struct.pack(
+            "<IHHHHHIIIHH",
+            0x04034B50,
+            20,
+            flags,
+            method,
+            dos_time,
+            dos_date,
+            crc,
+            compressed_size,
+            uncompressed_size,
+            len(name),
+            0,
+        )
+        + name
+    )
+    local_fields = struct.unpack("<IHHHHHIIIHH", local[:30])
+    assert local_fields == (
+        0x04034B50,
+        20,
+        flags,
+        method,
+        dos_time,
+        dos_date,
+        crc,
+        compressed_size,
+        uncompressed_size,
+        len(name),
+        0,
+    )
+    assert local[30:] == name
+
+    central = (
+        struct.pack(
+            "<IHHHHHHIIIHHHHHII",
+            0x02014B50,
+            20,
+            20,
+            flags,
+            method,
+            dos_time,
+            dos_date,
+            crc,
+            compressed_size,
+            uncompressed_size,
+            len(name),
+            0,
+            0,
+            0,
+            0,
+            0,
+            42,
+        )
+        + name
+    )
+    central_fields = struct.unpack("<IHHHHHHIIIHHHHHII", central[:46])
+    assert central_fields[0] == 0x02014B50
+    assert central_fields[3:7] == (flags, method, dos_time, dos_date)
+    assert central_fields[7:10] == (crc, compressed_size, uncompressed_size)
+    assert central_fields[10:13] == (len(name), 0, 0)
+    assert central_fields[-1] == 42
+    assert central[46:] == name

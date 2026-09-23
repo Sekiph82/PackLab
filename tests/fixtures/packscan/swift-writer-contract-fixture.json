@@ -8,6 +8,16 @@
     {"path": "metadata/photos.json", "utf8_bytes": "{}"}
   ],
   "expected_entry_order": ["manifest.json", "metadata/photos.json", "checksums.json", "images/0001.jpg"],
-  "expected_zip": {"compression": "deflate", "level": 9, "central_directory_timestamp": "1980-01-01T00:00:00", "extra_fields": "omit"},
+  "expected_zip": {
+    "compression": "deflate",
+    "method": 8,
+    "level": 9,
+    "raw_deflate_window_bits": -15,
+    "general_purpose_flag": 2048,
+    "dos_time": 0,
+    "dos_date": 33,
+    "central_directory_timestamp": "1980-01-01T00:00:00",
+    "extra_fields": "omit"
+  },
   "cross_language_assertions": ["canonical UTF-8 JSON", "lowercase SHA-256", "manifest payload size/hash match", "safe relative paths"]
 }
