@@ -446,6 +446,21 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(layout.previews.path.hasSuffix("s1/previews"))
         XCTAssertTrue(layout.temporary.path.hasSuffix("s1/tmp"))
         XCTAssertNotEqual(layout.images, layout.previews)
+        XCTAssertTrue(layout.photoRecords.path.hasSuffix("s1/records"))
+    }
+
+    func testSessionStoreAcceptedCaptureReopenAndStaleTempRecovery() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "s1")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "s1", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        let record = AcceptedCaptureRecord(captureID: "p1", sequence: 0, sourceFilename: "p1.heic", metadataFilename: "p1.json", acceptedAt: Date(timeIntervalSince1970: 0))
+        try await store.storeAcceptedCapture(source: Data([1, 2]), record: record, metadata: Data("{}".utf8), state: try JSONEncoder().encode(PersistedSessionState(sessionID: "s1", nextSequence: 1, epoch: 0, acceptedIDs: ["p1"])))
+        FileManager.default.createFile(atPath: layout.temporary.appendingPathComponent(".stale.tmp-1").path, contents: Data([0]))
+        if case .resumable(let state) = try await store.reopen(requiredSourceIDs: []) { XCTAssertEqual(state.acceptedIDs, ["p1"]) } else { XCTFail("session should reopen") }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.temporary.appendingPathComponent(".stale.tmp-1").path))
+        do { try await store.storeAcceptedCapture(source: Data([3]), record: record, metadata: Data("{}".utf8), state: Data()) ; XCTFail("duplicate capture must be rejected") } catch { XCTAssertEqual(error as? SessionStorageError, .duplicateID) }
     }
 
     func testGalleryDeleteRequiresConfirmationAndRetakeUsesNewIdentity() throws {

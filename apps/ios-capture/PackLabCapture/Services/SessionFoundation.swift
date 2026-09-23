@@ -47,10 +47,22 @@ public struct SessionStorageLayout: Sendable, Equatable {
     public var state: URL { sessionRoot.appendingPathComponent("state.json") }
     public var images: URL { sessionRoot.appendingPathComponent("images", isDirectory: true) }
     public var previews: URL { sessionRoot.appendingPathComponent("previews", isDirectory: true) }
+    public var photoRecords: URL { sessionRoot.appendingPathComponent("records", isDirectory: true) }
     public var temporary: URL { sessionRoot.appendingPathComponent("tmp", isDirectory: true) }
 }
 
 public enum SessionStorageError: Error, Sendable, Equatable { case invalidID, duplicateID, interruptedWrite, missingRecord }
+
+public struct AcceptedCaptureRecord: Codable, Sendable, Equatable {
+    public let captureID: String
+    public let sequence: Int
+    public let sourceFilename: String
+    public let metadataFilename: String
+    public let acceptedAt: Date
+    public init(captureID: String, sequence: Int, sourceFilename: String, metadataFilename: String, acceptedAt: Date = Date()) { self.captureID = captureID; self.sequence = sequence; self.sourceFilename = sourceFilename; self.metadataFilename = metadataFilename; self.acceptedAt = acceptedAt }
+}
+
+public enum SessionReopenDisposition: Sendable, Equatable { case resumable(PersistedSessionState), blocked(String) }
 
 public actor ScanSessionStore {
     private let layout: SessionStorageLayout
@@ -61,6 +73,7 @@ public actor ScanSessionStore {
         guard !fileManager.fileExists(atPath: layout.sessionRoot.path) else { throw SessionStorageError.duplicateID }
         try fileManager.createDirectory(at: layout.images, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: layout.previews, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: layout.photoRecords, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: layout.temporary, withIntermediateDirectories: true)
         try atomicWrite(JSONEncoder().encode(draft), to: layout.metadata)
         try atomicWrite(Data("{\"accepted\":0}".utf8), to: layout.state)
@@ -71,6 +84,38 @@ public actor ScanSessionStore {
         let destination = layout.images.appendingPathComponent(name)
         guard !fileManager.fileExists(atPath: destination.path) else { throw SessionStorageError.duplicateID }
         try data.write(to: destination, options: .atomic); return destination
+    }
+
+    public func storeAcceptedCapture(source: Data, record: AcceptedCaptureRecord, metadata: Data, state: Data) throws {
+        guard validID(record.captureID), record.sequence >= 0 else { throw SessionStorageError.invalidID }
+        let sourceName = record.sourceFilename
+        let recordName = record.metadataFilename
+        guard validID(sourceName.replacingOccurrences(of: ".", with: "_")), validID(recordName.replacingOccurrences(of: ".", with: "_")) else { throw SessionStorageError.invalidID }
+        let sourceURL = layout.images.appendingPathComponent(sourceName)
+        let recordURL = layout.photoRecords.appendingPathComponent(recordName)
+        guard !fileManager.fileExists(atPath: sourceURL.path), !fileManager.fileExists(atPath: recordURL.path) else { throw SessionStorageError.duplicateID }
+        do {
+            try source.write(to: sourceURL, options: .atomic)
+            try atomicWrite(metadata, to: recordURL)
+            try atomicWrite(state, to: layout.state)
+        } catch {
+            try? fileManager.removeItem(at: sourceURL)
+            try? fileManager.removeItem(at: recordURL)
+            throw error
+        }
+    }
+
+    public func reopen(requiredSourceIDs: Set<String>, supportedVersion: String = "1.0.0") throws -> SessionReopenDisposition {
+        try recoverStaleTemps()
+        guard let stateData = try? Data(contentsOf: layout.state), let state = try? JSONDecoder().decode(PersistedSessionState.self, from: stateData) else { return .blocked("missing_state") }
+        let sourceIDs = try fileManager.contentsOfDirectory(at: layout.images, includingPropertiesForKeys: nil).map { $0.deletingPathExtension().lastPathComponent }
+        let disposition = SessionResumeValidator.disposition(state: state, requiredSourceIDs: Set(sourceIDs).union(requiredSourceIDs), supportedVersion: supportedVersion)
+        switch disposition { case .resumable: return .resumable(state); case .blocked(let reason): return .blocked(reason); case .discardRequired: return .blocked("discard_required") }
+    }
+
+    private func recoverStaleTemps() throws {
+        guard let files = try? fileManager.contentsOfDirectory(at: layout.temporary, includingPropertiesForKeys: nil) else { return }
+        for file in files where file.lastPathComponent.contains(".tmp-") || file.pathExtension == "tmp" { try? fileManager.removeItem(at: file) }
     }
     private func atomicWrite(_ data: Data, to destination: URL) throws {
         let temporary = layout.temporary.appendingPathComponent(".\(destination.lastPathComponent).tmp-\(UUID().uuidString)")
