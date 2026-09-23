@@ -84,6 +84,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(policy.lock(capabilities: FocusCapabilities(point: true, lock: true)), .locked)
     }
 
+    func testExposurePolicyClampsBiasAndGatesLock() {
+        var policy = ExposurePolicy()
+        XCTAssertEqual(policy.meter(capabilities: ExposureCapabilities(minBias: -2, maxBias: 2, lock: true), requestedBias: 9), .metering)
+        XCTAssertEqual(policy.targetBias, 2)
+        XCTAssertEqual(policy.lock(capabilities: ExposureCapabilities(minBias: -2, maxBias: 2, lock: true)), .locked)
+        var unsupported = ExposurePolicy()
+        XCTAssertEqual(unsupported.lock(capabilities: ExposureCapabilities(minBias: -1, maxBias: 1, lock: false)), .failed)
+    }
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(

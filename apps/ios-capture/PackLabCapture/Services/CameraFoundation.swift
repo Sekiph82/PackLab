@@ -203,6 +203,42 @@ public actor CameraConfigurationCoordinator {
     public func perform<T: Sendable>(_ operation: @Sendable () throws -> T) rethrows -> T { try operation() }
 }
 
+public enum ExposureState: String, Sendable, Codable, Equatable { case unavailable, metering, locked, failed }
+public struct ExposureCapabilities: Sendable, Equatable { public let minBias: Float; public let maxBias: Float; public let lock: Bool; public init(minBias: Float, maxBias: Float, lock: Bool) { self.minBias = minBias; self.maxBias = maxBias; self.lock = lock } }
+
+public struct ExposurePolicy: Sendable, Equatable {
+    public private(set) var state: ExposureState = .unavailable
+    public private(set) var targetBias: Float?
+    public init() {}
+    public mutating func meter(capabilities: ExposureCapabilities, requestedBias: Float = 0) -> ExposureState {
+        guard capabilities.minBias <= capabilities.maxBias else { state = .failed; return state }
+        targetBias = min(max(requestedBias, capabilities.minBias), capabilities.maxBias)
+        state = .metering; return state
+    }
+    public mutating func lock(capabilities: ExposureCapabilities) -> ExposureState {
+        state = state == .metering && capabilities.lock ? .locked : .failed; return state
+    }
+}
+
+#if canImport(AVFoundation)
+@available(iOS 17.0, *)
+public enum AVFoundationExposureAdapter {
+    public static func configure(device: AVCaptureDevice, bias: Float, lock: Bool) throws -> ExposureState {
+        guard device.isExposureModeSupported(.continuousAutoExposure) else { return .unavailable }
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        device.exposureMode = .continuousAutoExposure
+        device.setExposureTargetBias(min(max(bias, device.minExposureTargetBias), device.maxExposureTargetBias))
+        if lock {
+            guard device.isExposureModeSupported(.locked) else { return .failed }
+            device.exposureMode = .locked
+            return .locked
+        }
+        return .metering
+    }
+}
+#endif
+
 #if canImport(AVFoundation) && canImport(CoreGraphics)
 import AVFoundation
 import CoreGraphics
