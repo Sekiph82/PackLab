@@ -119,6 +119,19 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testCameraRecoveryIsIdempotentAndBounded() {
+        var machine = CameraRecoveryMachine()
+        XCTAssertEqual(machine.apply(.requestStart), .starting)
+        XCTAssertEqual(machine.apply(.started), .running)
+        XCTAssertEqual(machine.apply(.interrupted), .interrupted)
+        XCTAssertEqual(machine.apply(.interruptionEnded), .restarting)
+        XCTAssertEqual(machine.apply(.restartFailed), .restarting)
+        XCTAssertEqual(machine.apply(.restartFailed), .restarting)
+        XCTAssertEqual(machine.apply(.restartFailed), .failed)
+        XCTAssertFalse(machine.userMessage.isEmpty)
+        XCTAssertEqual(machine.apply(.stop), .idle)
+    }
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(

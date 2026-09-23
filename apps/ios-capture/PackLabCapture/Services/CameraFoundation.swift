@@ -212,6 +212,41 @@ public enum PhotoMetadataBinding {
     }
 }
 
+public enum CameraRecoveryState: String, Sendable, Codable, Equatable { case idle, starting, running, interrupted, restarting, denied, restricted, unavailable, failed }
+public enum CameraRecoveryEvent: Sendable, Equatable { case requestStart, started, permissionDenied, permissionRestricted, interrupted, interruptionEnded, runtimeError, restartSucceeded, restartFailed, stop }
+
+public struct CameraRecoveryMachine: Sendable, Equatable {
+    public private(set) var state: CameraRecoveryState = .idle
+    public private(set) var retryCount = 0
+    public init() {}
+    @discardableResult
+    public mutating func apply(_ event: CameraRecoveryEvent) -> CameraRecoveryState {
+        switch event {
+        case .requestStart: state = .starting
+        case .started, .restartSucceeded: state = .running; retryCount = 0
+        case .permissionDenied: state = .denied
+        case .permissionRestricted: state = .restricted
+        case .interrupted: state = .interrupted
+        case .interruptionEnded: if state == .interrupted { state = .restarting }
+        case .runtimeError: state = .failed
+        case .restartFailed: retryCount += 1; state = retryCount < 3 ? .restarting : .failed
+        case .stop: state = .idle
+        }
+        return state
+    }
+
+    public var userMessage: String {
+        switch state {
+        case .denied: return "Camera permission is denied. Enable it in Settings."
+        case .restricted: return "Camera access is restricted on this device."
+        case .interrupted, .restarting: return "Camera interrupted. Reconnecting…"
+        case .failed: return "Camera could not restart. Return to the capture screen and try again."
+        case .unavailable: return "Camera is unavailable."
+        default: return ""
+        }
+    }
+}
+
 public enum FocusState: String, Sendable, Codable, Equatable { case unavailable, focusing, continuous, locked, failed }
 public struct FocusCapabilities: Sendable, Equatable { public let point: Bool; public let lock: Bool; public init(point: Bool, lock: Bool) { self.point = point; self.lock = lock } }
 
