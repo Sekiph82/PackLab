@@ -148,6 +148,61 @@ public struct GalleryModel: Sendable, Equatable {
     public mutating func retake(replacing id: String, with replacement: GalleryEntry) throws { guard entries.contains(where: { $0.id == id }), replacement.id != id else { throw GalleryMutationError.invalidReplacement }; replacementTrace[id] = replacement.id; entries.append(replacement); entries.sort { $0.sequence < $1.sequence } }
 }
 
+public enum GalleryLoadError: Error, Sendable, Equatable { case corruptRecord(String) }
+public struct GalleryAuditEvent: Codable, Sendable, Equatable {
+    public let action: String
+    public let captureID: String
+    public let replacementID: String?
+    public let timestamp: Date
+    public init(action: String, captureID: String, replacementID: String? = nil, timestamp: Date = Date()) { self.action = action; self.captureID = captureID; self.replacementID = replacementID; self.timestamp = timestamp }
+}
+
+public actor SessionGalleryStore {
+    private let layout: SessionStorageLayout
+    private let fileManager: FileManager
+    public init(layout: SessionStorageLayout, fileManager: FileManager = .default) { self.layout = layout; self.fileManager = fileManager }
+
+    public func load() throws -> [GalleryEntry] {
+        guard let files = try? fileManager.contentsOfDirectory(at: layout.photoRecords, includingPropertiesForKeys: nil) else { return [] }
+        return try files.filter { $0.pathExtension == "json" }.compactMap { file in
+            guard let data = try? Data(contentsOf: file), let record = try? JSONDecoder().decode(AcceptedCaptureRecord.self, from: data) else { throw GalleryLoadError.corruptRecord(file.lastPathComponent) }
+            let source = layout.images.appendingPathComponent(record.sourceFilename)
+            let preview = layout.previews.appendingPathComponent("\(record.captureID)-thumbnail.jpg")
+            let status = fileManager.fileExists(atPath: source.path) && fileManager.fileExists(atPath: preview.path) ? "accepted" : "degraded"
+            return GalleryEntry(id: record.captureID, previewPath: preview.path, sourcePath: source.path, sequence: record.sequence, status: status)
+        }.sorted { $0.sequence < $1.sequence }
+    }
+
+    public func delete(id: String, confirmed: Bool) throws {
+        guard confirmed else { throw GalleryMutationError.confirmationRequired }
+        let entries = try load()
+        guard let entry = entries.first(where: { $0.id == id }) else { throw GalleryMutationError.notFound }
+        let recordURL = layout.photoRecords.appendingPathComponent("\(id).json")
+        let audit = GalleryAuditEvent(action: "delete", captureID: id)
+        try appendAudit(audit)
+        for path in [recordURL.path, entry.sourcePath, entry.previewPath ?? ""] where !path.isEmpty { try? fileManager.removeItem(atPath: path) }
+    }
+
+    public func retake(replacing id: String, source: Data, record: AcceptedCaptureRecord, metadata: Data) throws {
+        guard record.captureID != id else { throw GalleryMutationError.invalidReplacement }
+        guard try load().contains(where: { $0.id == id }) else { throw GalleryMutationError.notFound }
+        let sourceURL = layout.images.appendingPathComponent(record.sourceFilename)
+        let recordURL = layout.photoRecords.appendingPathComponent(record.metadataFilename)
+        guard !fileManager.fileExists(atPath: sourceURL.path), !fileManager.fileExists(atPath: recordURL.path) else { throw SessionStorageError.duplicateID }
+        try source.write(to: sourceURL, options: .atomic)
+        try metadata.write(to: recordURL, options: .atomic)
+        try appendAudit(GalleryAuditEvent(action: "retake", captureID: id, replacementID: record.captureID))
+    }
+
+    private func appendAudit(_ event: GalleryAuditEvent) throws {
+        let url = layout.sessionRoot.appendingPathComponent("gallery-audit.json")
+        var events = (try? JSONDecoder().decode([GalleryAuditEvent].self, from: Data(contentsOf: url))) ?? []
+        events.append(event)
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(events).write(to: url, options: .atomic)
+    }
+}
+
 public enum ResumeDisposition: Sendable, Equatable { case resumable, discardRequired, blocked(String) }
 public struct PersistedSessionState: Codable, Sendable, Equatable {
     public let sessionID: String
@@ -226,6 +281,9 @@ public actor SafeSessionDeleter {
 
 #if canImport(SwiftUI)
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 public struct NewScanWizard: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
@@ -255,6 +313,23 @@ public struct NewScanWizard: View {
                 }
             }
         }.navigationTitle("New Scan")
+    }
+}
+
+public struct AcceptedFrameGalleryView: View {
+    @State private var entries: [GalleryEntry] = []
+    @State private var message: String?
+    private let store: SessionGalleryStore
+    public init(store: SessionGalleryStore) { self.store = store }
+    public var body: some View {
+        List(entries) { entry in
+            HStack {
+                if let previewPath = entry.previewPath, FileManager.default.fileExists(atPath: previewPath), let image = UIImage(contentsOfFile: previewPath) { Image(uiImage: image).resizable().scaledToFit().frame(width: 64, height: 64) }
+                else { Image(systemName: "photo.badge.exclamationmark").frame(width: 64, height: 64) }
+                VStack(alignment: .leading) { Text(entry.id); Text(entry.status).font(.caption).foregroundStyle(entry.status == "accepted" ? .secondary : .orange) }
+            }
+        }.overlay { if let message { Text(message).foregroundStyle(.red) } }.task { do { entries = try await store.load() } catch { message = "Gallery data is unavailable." } }
+            .navigationTitle("Accepted Frames")
     }
 }
 #endif

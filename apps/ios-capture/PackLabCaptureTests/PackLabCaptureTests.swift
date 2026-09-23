@@ -472,6 +472,22 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(gallery.entries.map(\.id), ["b"])
     }
 
+    func testSessionGalleryDetectsMissingPreviewAndPersistsDeleteRetakeAudit() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "s1")
+        let session = ScanSessionStore(layout: layout)
+        try await session.create(NewScanDraft(sessionID: "s1", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        let record = AcceptedCaptureRecord(captureID: "a", sequence: 0, sourceFilename: "a.heic", metadataFilename: "a.json")
+        try await session.storeAcceptedCapture(source: Data([1]), record: record, metadata: Data("{}".utf8), state: Data("{}".utf8))
+        let gallery = SessionGalleryStore(layout: layout)
+        XCTAssertEqual(try await gallery.load().first?.status, "degraded")
+        let replacement = AcceptedCaptureRecord(captureID: "b", sequence: 1, sourceFilename: "b.heic", metadataFilename: "b.json")
+        try await gallery.retake(replacing: "a", source: Data([2]), record: replacement, metadata: Data("{}".utf8))
+        try await gallery.delete(id: "a", confirmed: true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.sessionRoot.appendingPathComponent("gallery-audit.json").path))
+    }
+
     func testSessionResumeBlocksMissingStaleAndVersionMismatchedRecords() {
         let valid = PersistedSessionState(sessionID: "s", nextSequence: 2, epoch: 1, acceptedIDs: ["a", "b"])
         XCTAssertEqual(SessionResumeValidator.disposition(state: valid, requiredSourceIDs: ["a", "b"]), .resumable)
