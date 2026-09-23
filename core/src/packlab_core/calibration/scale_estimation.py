@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 MIN_ACCEPTED_SAMPLES = 2
 MAX_RELATIVE_RESIDUAL = 0.05
+MIN_QUADRILATERAL_AREA_PX2 = 1e-6
+MIN_CONVEX_CROSS_PRODUCT_PX2 = 1e-6
 MATH_VERSION = "mean_marker_edge_mm_per_pixel_weighted_v1"
 
 
@@ -129,7 +131,9 @@ def _valid_observation(observation: KnownMarkerObservation) -> bool:
         edges = _edge_lengths(observation.corners_px)
     except (TypeError, ValueError):
         return False
-    return all(math.isfinite(edge) and edge > 0 for edge in edges)
+    return all(math.isfinite(edge) and edge > 0 for edge in edges) and _valid_quadrilateral(
+        observation.corners_px
+    )
 
 
 def _edge_lengths(corners: tuple[tuple[float, float], ...]) -> tuple[float, float, float, float]:
@@ -142,6 +146,59 @@ def _edge_lengths(corners: tuple[tuple[float, float], ...]) -> tuple[float, floa
         )
         for index in range(4)
     )  # type: ignore[return-value]
+
+
+def _valid_quadrilateral(corners: tuple[tuple[float, float], ...]) -> bool:
+    if len(corners) != 4:
+        return False
+    if not all(math.isfinite(value) for point in corners for value in point):
+        return False
+    if abs(_polygon_area(corners)) <= MIN_QUADRILATERAL_AREA_PX2:
+        return False
+    if _segments_intersect(corners[0], corners[1], corners[2], corners[3]):
+        return False
+    if _segments_intersect(corners[1], corners[2], corners[3], corners[0]):
+        return False
+    cross_products = [
+        _cross(corners[index], corners[(index + 1) % 4], corners[(index + 2) % 4])
+        for index in range(4)
+    ]
+    if any(abs(value) <= MIN_CONVEX_CROSS_PRODUCT_PX2 for value in cross_products):
+        return False
+    return all(value > 0 for value in cross_products) or all(value < 0 for value in cross_products)
+
+
+def _segments_intersect(
+    a: tuple[float, float],
+    b: tuple[float, float],
+    c: tuple[float, float],
+    d: tuple[float, float],
+) -> bool:
+    ab_c = _cross(a, b, c)
+    ab_d = _cross(a, b, d)
+    cd_a = _cross(c, d, a)
+    cd_b = _cross(c, d, b)
+    return (
+        ab_c * ab_d < -MIN_CONVEX_CROSS_PRODUCT_PX2 and cd_a * cd_b < -MIN_CONVEX_CROSS_PRODUCT_PX2
+    )
+
+
+def _cross(
+    origin: tuple[float, float],
+    first: tuple[float, float],
+    second: tuple[float, float],
+) -> float:
+    return (first[0] - origin[0]) * (second[1] - origin[1]) - (first[1] - origin[1]) * (
+        second[0] - origin[0]
+    )
+
+
+def _polygon_area(corners: tuple[tuple[float, float], ...]) -> float:
+    return 0.5 * sum(
+        corners[index][0] * corners[(index + 1) % 4][1]
+        - corners[(index + 1) % 4][0] * corners[index][1]
+        for index in range(4)
+    )
 
 
 def _relative_edge_spread(corners: tuple[tuple[float, float], ...]) -> float:

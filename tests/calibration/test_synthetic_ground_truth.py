@@ -194,14 +194,15 @@ def test_unit_and_corner_order_sensitivity_are_bounded() -> None:
             _known(_detected_marker(1, scenario="bad_order", order="diagonal_perturbed")),
         ]
     )
-    assert bad_order.status == "estimated"
+    assert bad_order.status == "rejected"
+    assert bad_order.errors == ("insufficient_accepted_observations",)
+    assert bad_order.samples_rejected == (
+        "0:invalid_geometry_or_quality",
+        "1:invalid_geometry_or_quality",
+    )
     confidence = score_calibration_confidence(bad_order)
     assert confidence.status == "rejected"
     assert confidence.usable_for_capture is False
-    assert (
-        confidence.factors["max_relative_edge_spread"]
-        > confidence.thresholds["max_relative_edge_spread"]
-    )
 
 
 def test_synthetic_generation_provenance_is_recorded() -> None:

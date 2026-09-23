@@ -14,11 +14,17 @@ top-left/clockwise convention.
 
 At least two accepted valid observations are required. Partial/unaccepted
 observations, non-positive or degenerate geometry, non-finite values, and
-quality outside `(0, 1]` are not used. If accepted samples disagree by more
-than the provisional 5% relative residual threshold, the estimate is
-`rejected` with no usable scale value. These thresholds are mathematical
-consistency gates, not a claim of physical measurement accuracy.
+quality outside `(0, 1]` are not used. A marker quadrilateral must be simple,
+convex, and ordered according to the detector's top-left/clockwise convention:
+opposite edges must not self-intersect, all four consecutive cross products
+must have the same sign, and the absolute polygon area plus each convexity
+cross product must exceed `1e-6 px²`. Collinear, bow-tie/self-crossing, and
+near-zero-area observations are rejected before scale estimation. If accepted
+samples disagree by more than the provisional 5% relative residual threshold,
+the estimate is `rejected` with no usable scale value. These thresholds are
+mathematical consistency gates, not a claim of physical measurement accuracy.
 
 This stage does not use printer measurements, camera intrinsics, device APIs,
 or physical benchmark data. Synthetic tests cover exact, noisy, inconsistent,
-insufficient, and rejected-observation cases.
+insufficient, collinear, self-crossing, near-zero-area and valid
+perspective-distorted convex cases.
