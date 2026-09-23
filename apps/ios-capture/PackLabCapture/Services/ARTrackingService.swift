@@ -46,6 +46,7 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
     public let session = ARSession()
     public private(set) var policy = ARTrackingLifecyclePolicy()
     public private(set) var poseBuffer = PoseBuffer(capacity: 256)
+    public private(set) var epochCoordinator = SessionEpochCoordinator()
     private override init() { super.init(); session.delegate = self }
 
     public func start() {
@@ -54,8 +55,9 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
         session.run(ARWorldTrackingConfiguration())
     }
     public func stop() { session.pause() }
-    public func reset(options: ARSession.RunOptions = [.resetTracking, .removeExistingAnchors]) {
+    public func reset(reason: ResetReason = .userRequested, options: ARSession.RunOptions = [.resetTracking, .removeExistingAnchors]) {
         guard ARWorldTrackingConfiguration.isSupported else { policy.limited(.cameraUnavailable); return }
+        epochCoordinator.reset(reason: reason)
         policy.reset()
         session.run(ARWorldTrackingConfiguration(), options: options)
     }
@@ -74,7 +76,7 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
         poseBuffer.append(PoseSample(timestamp: frame.timestamp, transform: values, tracking: tracking))
     }
     public func sessionWasInterrupted(_ session: ARSession) { policy.interrupted() }
-    public func sessionInterruptionEnded(_ session: ARSession) { policy.reset() }
+    public func sessionInterruptionEnded(_ session: ARSession) { reset(reason: .interruption) }
 }
 
 @MainActor
@@ -88,6 +90,6 @@ public final class ARKitTrackingService: ARTrackingService {
     }
     public func snapshot() -> TrackingSnapshot { owner.policy.snapshot }
     public func bindPose(captureID: String, timestamp: TimeInterval, tolerance: TimeInterval = 0.1) -> PoseCaptureBinding { owner.poseBuffer.bind(captureID: captureID, timestamp: timestamp, tolerance: tolerance) }
-    public func reset() async { owner.reset() }
+    public func reset() async { owner.reset(reason: .userRequested) }
 }
 #endif

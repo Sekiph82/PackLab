@@ -364,6 +364,19 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(coordinator.accepts(poseEpoch: 1))
     }
 
+    func testResetOrchestrationRetainsAcceptedCapturesAndRecordsReasons() {
+        var model = ResetOrchestrationModel()
+        model.retainAcceptedCapture("accepted")
+        model.reset(reason: .trackingDegraded)
+        XCTAssertEqual(model.acceptedCaptureIDs, ["accepted"])
+        XCTAssertFalse(model.accepts(poseEpoch: 0))
+        XCTAssertEqual(model.diagnostics.map(\.reason), [.trackingDegraded])
+        model.recovered()
+        XCTAssertTrue(model.accepts(poseEpoch: 1))
+        model.reset(reason: .userRequested)
+        XCTAssertEqual(model.epochCoordinator.epoch, 2)
+    }
+
     func testPoseOverlayLabelsUnavailableDataAndCanBeDisabled() {
         let unavailable = PoseOverlayModel.make(visible: true, tracking: TrackingSnapshot(quality: .unavailable, poseEvidenceEligible: false), epoch: 2, pose: nil)
         XCTAssertTrue(unavailable.lines.contains("Pose: unavailable"))

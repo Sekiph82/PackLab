@@ -35,7 +35,7 @@ public final class ARWorldTrackingController {
     public init(owner: SharedARSessionOwner = .shared) { self.owner = owner }
     public func start() { owner.start() }
     public func stop() { owner.stop() }
-    public func reset() { owner.reset() }
+    public func reset() { owner.reset(reason: .userRequested) }
 }
 #endif
 
@@ -238,6 +238,28 @@ public struct SessionEpochCoordinator: Sendable, Equatable {
     public mutating func recovered() { state = .recovered }
     public mutating func failed() { state = .failed }
     public func accepts(poseEpoch: Int) -> Bool { poseEpoch == epoch && state == .recovered }
+}
+
+public struct ResetDiagnosticEvent: Codable, Sendable, Equatable {
+    public let epoch: Int
+    public let reason: ResetReason
+    public let state: RelocalizationState
+    public init(epoch: Int, reason: ResetReason, state: RelocalizationState) { self.epoch = epoch; self.reason = reason; self.state = state }
+}
+
+public struct ResetOrchestrationModel: Sendable, Equatable {
+    public private(set) var epochCoordinator = SessionEpochCoordinator()
+    public private(set) var diagnostics: [ResetDiagnosticEvent] = []
+    public private(set) var acceptedCaptureIDs: Set<String> = []
+    public init() {}
+    public mutating func retainAcceptedCapture(_ id: String) { acceptedCaptureIDs.insert(id) }
+    public mutating func reset(reason: ResetReason) {
+        epochCoordinator.reset(reason: reason)
+        diagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: reason, state: epochCoordinator.state))
+    }
+    public mutating func recovered() { epochCoordinator.recovered() }
+    public mutating func failed() { epochCoordinator.failed() }
+    public func accepts(poseEpoch: Int) -> Bool { epochCoordinator.accepts(poseEpoch: poseEpoch) }
 }
 
 public struct PoseOverlayModel: Sendable, Equatable {
