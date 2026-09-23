@@ -42,6 +42,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
 struct ContentView: View {
     @State private var showPoseDebug = false
     @State private var showNewScan = false
+    @State private var showResume = false
     @StateObject private var runtime = CaptureRuntimeViewModel()
 
     var body: some View {
@@ -89,9 +90,12 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button(showPoseDebug ? "Hide Debug" : "Show Debug") { showPoseDebug.toggle() } }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard { _ in showNewScan = false } } }
-            .task { await runtime.start() }
+            .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { _ in showResume = false }, onDiscard: { _ in showResume = false }) } }
+            .task { await runtime.start(); let candidates = await SessionDiscoveryService(root: ContentView.sessionRoot).discover(); showResume = !candidates.isEmpty }
         }
     }
+
+    private static var sessionRoot: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("PackLabSessions", isDirectory: true) }
 }
 
 #Preview { ContentView() }

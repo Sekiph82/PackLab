@@ -496,6 +496,23 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(SessionResumeValidator.disposition(state: mismatch, requiredSourceIDs: []), .blocked("version_mismatch"))
     }
 
+    func testSessionDiscoveryReconstructsHistoryAndBlocksMissingOrVersionMismatch() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "s1")
+        try FileManager.default.createDirectory(at: layout.images, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: layout.previews, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: layout.photoRecords, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: layout.temporary, withIntermediateDirectories: true)
+        try JSONEncoder().encode(NewScanDraft(sessionID: "s1", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: layout.metadata)
+        try JSONEncoder().encode(PersistedSessionState(sessionID: "s1", nextSequence: 2, epoch: 3, acceptedIDs: ["a"], rejectedIDs: ["r"], replacementTrace: ["a": "b"])).write(to: layout.state)
+        try Data([1]).write(to: layout.images.appendingPathComponent("a.heic"))
+        let candidates = await SessionDiscoveryService(root: root).discover()
+        XCTAssertEqual(candidates.first?.state?.rejectedIDs, ["r"])
+        XCTAssertEqual(candidates.first?.state?.replacementTrace["a"], "b")
+        XCTAssertEqual(candidates.first?.disposition, .resumable)
+    }
+
     func testFinalizationGateRequiresPhotoAndMetadataPayloads() throws {
         let input = FinalizationInput(manifest: Data("{}".utf8), payloads: [:], destination: URL(fileURLWithPath: "/tmp/out.packscan"))
         XCTAssertThrowsError(try SessionFinalizer().validate(input)) { error in XCTAssertEqual(error as? FinalizationError, .missingPhoto) }

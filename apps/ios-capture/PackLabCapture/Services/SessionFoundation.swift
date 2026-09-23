@@ -210,7 +210,14 @@ public struct PersistedSessionState: Codable, Sendable, Equatable {
     public let nextSequence: Int
     public let epoch: Int
     public let acceptedIDs: [String]
-    public init(sessionID: String, schemaVersion: String = "1.0.0", nextSequence: Int, epoch: Int, acceptedIDs: [String]) { self.sessionID = sessionID; self.schemaVersion = schemaVersion; self.nextSequence = nextSequence; self.epoch = epoch; self.acceptedIDs = acceptedIDs }
+    public let rejectedIDs: [String]
+    public let replacementTrace: [String: String]
+    public init(sessionID: String, schemaVersion: String = "1.0.0", nextSequence: Int, epoch: Int, acceptedIDs: [String], rejectedIDs: [String] = [], replacementTrace: [String: String] = [:]) { self.sessionID = sessionID; self.schemaVersion = schemaVersion; self.nextSequence = nextSequence; self.epoch = epoch; self.acceptedIDs = acceptedIDs; self.rejectedIDs = rejectedIDs; self.replacementTrace = replacementTrace }
+    enum CodingKeys: String, CodingKey { case sessionID, schemaVersion, nextSequence, epoch, acceptedIDs, rejectedIDs, replacementTrace }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sessionID = try values.decode(String.self, forKey: .sessionID); schemaVersion = try values.decode(String.self, forKey: .schemaVersion); nextSequence = try values.decode(Int.self, forKey: .nextSequence); epoch = try values.decode(Int.self, forKey: .epoch); acceptedIDs = try values.decode([String].self, forKey: .acceptedIDs); rejectedIDs = try values.decodeIfPresent([String].self, forKey: .rejectedIDs) ?? []; replacementTrace = try values.decodeIfPresent([String: String].self, forKey: .replacementTrace) ?? [:]
+    }
 }
 public enum SessionResumeValidator {
     public static func disposition(state: PersistedSessionState?, requiredSourceIDs: Set<String>, supportedVersion: String = "1.0.0") -> ResumeDisposition {
@@ -219,6 +226,32 @@ public enum SessionResumeValidator {
         guard state.nextSequence >= state.acceptedIDs.count else { return .blocked("invalid_sequence") }
         guard Set(state.acceptedIDs).isSubset(of: requiredSourceIDs) else { return .blocked("missing_source") }
         return .resumable
+    }
+}
+
+public struct SessionResumeCandidate: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let draft: NewScanDraft?
+    public let disposition: ResumeDisposition
+    public let state: PersistedSessionState?
+    public init(id: String, draft: NewScanDraft?, disposition: ResumeDisposition, state: PersistedSessionState?) { self.id = id; self.draft = draft; self.disposition = disposition; self.state = state }
+}
+
+public actor SessionDiscoveryService {
+    private let root: URL
+    private let fileManager: FileManager
+    public init(root: URL, fileManager: FileManager = .default) { self.root = root; self.fileManager = fileManager }
+    public func discover() -> [SessionResumeCandidate] {
+        guard let directories = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
+        return directories.filter { $0.hasDirectoryPath }.map { directory in
+            let id = directory.lastPathComponent
+            let layout = SessionStorageLayout(root: root, sessionID: id)
+            let draft = (try? Data(contentsOf: layout.metadata)).flatMap { try? JSONDecoder().decode(NewScanDraft.self, from: $0) }
+            let state = (try? Data(contentsOf: layout.state)).flatMap { try? JSONDecoder().decode(PersistedSessionState.self, from: $0) }
+            let sourceIDs = Set((try? fileManager.contentsOfDirectory(at: layout.images, includingPropertiesForKeys: nil).map { $0.deletingPathExtension().lastPathComponent }) ?? [])
+            let disposition = SessionResumeValidator.disposition(state: state, requiredSourceIDs: sourceIDs)
+            return SessionResumeCandidate(id: id, draft: draft, disposition: disposition, state: state)
+        }.sorted { $0.id < $1.id }
     }
 }
 
@@ -330,6 +363,31 @@ public struct AcceptedFrameGalleryView: View {
             }
         }.overlay { if let message { Text(message).foregroundStyle(.red) } }.task { do { entries = try await store.load() } catch { message = "Gallery data is unavailable." } }
             .navigationTitle("Accepted Frames")
+    }
+}
+
+public struct SessionResumeView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var candidates: [SessionResumeCandidate] = []
+    private let discovery: SessionDiscoveryService
+    public let onResume: (SessionResumeCandidate) -> Void
+    public let onDiscard: (SessionResumeCandidate) -> Void
+    public init(root: URL, onResume: @escaping (SessionResumeCandidate) -> Void, onDiscard: @escaping (SessionResumeCandidate) -> Void) {
+        discovery = SessionDiscoveryService(root: root); self.onResume = onResume; self.onDiscard = onDiscard
+    }
+    public var body: some View {
+        List(candidates) { candidate in
+            VStack(alignment: .leading) {
+                Text(candidate.draft?.packageName ?? candidate.id)
+                switch candidate.disposition {
+                case .resumable:
+                    Button("Resume") { onResume(candidate); dismiss() }
+                    Button("Discard") { onDiscard(candidate); dismiss() }.foregroundStyle(.red)
+                case .blocked(let reason): Text("Blocked: \(reason)").foregroundStyle(.red)
+                case .discardRequired: Text("Discard required").foregroundStyle(.orange)
+                }
+            }
+        }.task { candidates = await discovery.discover() }.navigationTitle("Resume Scan")
     }
 }
 #endif
