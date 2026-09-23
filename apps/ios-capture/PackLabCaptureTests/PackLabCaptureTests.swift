@@ -252,6 +252,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(unavailable.severity, .normal)
     }
 
+    func testDeviceHealthGateDistinguishesWarningHardStopAndUnavailable() {
+        let warning = DeviceHealthCaptureGate.evaluate(DeviceHealthSnapshot(thermal: .fair, availableStorageBytes: 500_000_000, batteryLevel: 0.5, batteryStateAvailable: true))
+        let stop = DeviceHealthCaptureGate.evaluate(DeviceHealthSnapshot(thermal: .critical, availableStorageBytes: 10, batteryLevel: 0.02, batteryStateAvailable: true))
+        let unavailable = DeviceHealthCaptureGate.evaluate(UnavailableDeviceHealthProvider().snapshot())
+        XCTAssertTrue(warning.allowsCapture)
+        XCTAssertFalse(stop.allowsCapture)
+        XCTAssertTrue(unavailable.allowsCapture)
+    }
+
     func testTrackingLifecycleIsUnavailableUntilRecovered() {
         var policy = ARTrackingLifecyclePolicy()
         XCTAssertFalse(policy.snapshot.poseEvidenceEligible)

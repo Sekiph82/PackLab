@@ -601,6 +601,71 @@ public enum DeviceHealthPolicy {
     private static func rank(_ severity: HealthSeverity) -> Int { severity == .normal ? 0 : severity == .warning ? 1 : 2 }
 }
 
+public protocol DeviceHealthProvider: Sendable {
+    func snapshot() -> DeviceHealthSnapshot
+}
+
+public struct UnavailableDeviceHealthProvider: DeviceHealthProvider {
+    public init() {}
+    public func snapshot() -> DeviceHealthSnapshot { DeviceHealthSnapshot(thermal: .unavailable, availableStorageBytes: nil, batteryLevel: nil, batteryStateAvailable: false) }
+}
+
+public enum DeviceHealthCaptureGate: Sendable, Equatable {
+    case ready(HealthDecision)
+    case warning(HealthDecision)
+    case hardStop(HealthDecision)
+    public var allowsCapture: Bool { if case .hardStop = self { return false }; return true }
+    public static func evaluate(_ snapshot: DeviceHealthSnapshot) -> DeviceHealthCaptureGate {
+        let decision = DeviceHealthPolicy.evaluate(snapshot)
+        switch decision.severity { case .normal: return .ready(decision); case .warning: return .warning(decision); case .hardStop: return .hardStop(decision) }
+    }
+}
+
+public actor DeviceHealthMonitor {
+    private let provider: any DeviceHealthProvider
+    private var loop: Task<Void, Never>?
+    private var latest: DeviceHealthCaptureGate = .ready(DeviceHealthPolicy.evaluate(UnavailableDeviceHealthProvider().snapshot()))
+    public init(provider: any DeviceHealthProvider) { self.provider = provider }
+    public func preflight() -> DeviceHealthCaptureGate { latest = DeviceHealthCaptureGate.evaluate(provider.snapshot()); return latest }
+    public func current() -> DeviceHealthCaptureGate { latest }
+    public func start(intervalNanoseconds: UInt64 = 2_000_000_000, onUpdate: @escaping @Sendable (DeviceHealthCaptureGate) async -> Void) {
+        guard loop == nil else { return }
+        loop = Task { [weak self, provider] in
+            while !Task.isCancelled {
+                let gate = DeviceHealthCaptureGate.evaluate(provider.snapshot())
+                await self?.record(gate)
+                await onUpdate(gate)
+                try? await Task.sleep(nanoseconds: intervalNanoseconds)
+            }
+        }
+    }
+    public func stop() { loop?.cancel(); loop = nil }
+    private func record(_ gate: DeviceHealthCaptureGate) { latest = gate }
+}
+
+#if canImport(UIKit)
+import UIKit
+
+public struct PhysicalDeviceHealthProvider: DeviceHealthProvider {
+    public init() {}
+    public func snapshot() -> DeviceHealthSnapshot {
+        let thermal: ThermalCondition
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: thermal = .nominal
+        case .fair: thermal = .fair
+        case .serious: thermal = .serious
+        case .critical: thermal = .critical
+        @unknown default: thermal = .unavailable
+        }
+        let capacity = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
+        let device = UIDevice.current
+        device.isBatteryMonitoringEnabled = true
+        let batteryAvailable = device.batteryState != .unknown && device.batteryLevel >= 0
+        return DeviceHealthSnapshot(thermal: thermal, availableStorageBytes: capacity, batteryLevel: batteryAvailable ? Double(device.batteryLevel) : nil, batteryStateAvailable: batteryAvailable)
+    }
+}
+#endif
+
 public enum FocusState: String, Sendable, Codable, Equatable { case unavailable, focusing, continuous, locked, failed }
 public struct FocusCapabilities: Sendable, Equatable { public let point: Bool; public let lock: Bool; public init(point: Bool, lock: Bool) { self.point = point; self.lock = lock } }
 
