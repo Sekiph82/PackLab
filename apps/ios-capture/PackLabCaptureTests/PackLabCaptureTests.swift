@@ -815,6 +815,12 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(gallery.entries.map(\.id), ["a", "b"])
     }
 
+    func testPL0090ResumeValidatorBlocksMissingCorruptAndVersionMismatchedState() {
+        XCTAssertEqual(SessionResumeValidator.disposition(state: nil, requiredSourceIDs: []), .blocked("missing_state"))
+        XCTAssertEqual(SessionResumeValidator.disposition(state: PersistedSessionState(sessionID: "s", schemaVersion: "2.0.0", nextSequence: 0, epoch: 0, acceptedIDs: []), requiredSourceIDs: []), .blocked("version_mismatch"))
+        XCTAssertEqual(SessionResumeValidator.disposition(state: PersistedSessionState(sessionID: "s", nextSequence: 1, epoch: 0, acceptedIDs: ["missing"]), requiredSourceIDs: []), .blocked("missing_source"))
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
