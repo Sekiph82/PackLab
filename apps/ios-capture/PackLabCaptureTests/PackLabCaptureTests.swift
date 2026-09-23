@@ -58,6 +58,19 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue([firstResult, second].contains { if case .rejected("capture_in_flight") = $0 { true } else { false } })
     }
 
+    func testStillCaptureLifecycleCompletesExactlyOnceAndRejectsDuplicates() {
+        var lifecycle = StillCaptureLifecycle()
+        XCTAssertTrue(lifecycle.begin())
+        XCTAssertFalse(lifecycle.begin())
+        XCTAssertTrue(lifecycle.complete(success: true))
+        XCTAssertFalse(lifecycle.complete(success: false))
+        XCTAssertEqual(lifecycle.state, .accepted)
+        lifecycle.reset()
+        XCTAssertTrue(lifecycle.begin())
+        XCTAssertTrue(lifecycle.complete(success: false))
+        XCTAssertEqual(lifecycle.state, .failed)
+    }
+
     func testOriginalSourceIntegrityPreservesBytesDimensionsAndSeparateDerivativePath() throws {
         let bytes = Data([10, 20, 30])
         let dimensions = CaptureDimensions(width: 4000, height: 3000)

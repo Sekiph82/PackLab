@@ -155,6 +155,25 @@ public actor StillCaptureGate {
     public func isBusy() -> Bool { inFlight }
 }
 
+/// Deterministic capture completion guard shared by the delegate adapter and
+/// its injected tests. Exactly one terminal result is allowed for a request.
+public struct StillCaptureLifecycle: Sendable, Equatable {
+    public enum State: Sendable, Equatable { case idle, inFlight, accepted, failed }
+    public private(set) var state: State = .idle
+    public init() {}
+    public mutating func begin() -> Bool {
+        guard state == .idle else { return false }
+        state = .inFlight
+        return true
+    }
+    public mutating func complete(success: Bool) -> Bool {
+        guard state == .inFlight else { return false }
+        state = success ? .accepted : .failed
+        return true
+    }
+    public mutating func reset() { state = .idle }
+}
+
 public protocol StillPhotoBackend: Sendable {
     func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions)
 }
@@ -437,15 +456,60 @@ public enum AVFoundationFocusAdapter {
 #if canImport(NextLevel) && canImport(UIKit)
 import NextLevel
 import UIKit
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
 
 @MainActor
-public final class NextLevelStillCaptureAdapter: StillPhotoBackend {
+public final class NextLevelStillCaptureAdapter: NSObject, StillPhotoBackend, NextLevelPhotoDelegate {
     private let nextLevel: NextLevel
+    private var continuation: CheckedContinuation<(bytes: Data, dimensions: CaptureDimensions), Error>?
     public init(nextLevel: NextLevel = .shared) { self.nextLevel = nextLevel }
+
     public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
-        // NextLevel delivers the original photo through its photo delegate. The
-        // delegate handoff is intentionally kept here, outside SwiftUI.
-        throw CameraServiceError.unavailable
+        guard continuation == nil else { throw CameraServiceError.failed("capture_in_flight") }
+        nextLevel.photoConfiguration.isHighResolutionEnabled = true
+        nextLevel.photoDelegate = self
+        return try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(bytes: Data, dimensions: CaptureDimensions), Error>) in
+                self.continuation = continuation
+                guard self.nextLevel.canCapturePhoto else {
+                    self.finish(.failure(CameraServiceError.unavailable))
+                    return
+                }
+                self.nextLevel.capturePhoto()
+            }
+        }, onCancel: {
+            Task { @MainActor in self.finish(.failure(CameraServiceError.failed("capture_cancelled"))) }
+        })
+    }
+
+    private func finish(_ result: Result<(bytes: Data, dimensions: CaptureDimensions), Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        if nextLevel.photoDelegate === self { nextLevel.photoDelegate = nil }
+        continuation.resume(with: result)
+    }
+
+    public func nextLevel(_ nextLevel: NextLevel, output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, photoConfiguration: NextLevelPhotoConfiguration) {}
+    public func nextLevel(_ nextLevel: NextLevel, output: AVCapturePhotoOutput, willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings, photoConfiguration: NextLevelPhotoConfiguration) {}
+    public func nextLevel(_ nextLevel: NextLevel, output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings, photoConfiguration: NextLevelPhotoConfiguration) {}
+
+    public func nextLevel(_ nextLevel: NextLevel, didFinishProcessingPhoto photo: AVCapturePhoto, photoDict: [String: Any], photoConfiguration: NextLevelPhotoConfiguration) {
+        guard let bytes = photo.fileDataRepresentation(), !bytes.isEmpty else {
+            finish(.failure(CameraServiceError.failed("photo_data_missing")))
+            return
+        }
+        let dimensions = photo.resolvedSettings.photoDimensions
+        guard dimensions.width > 0, dimensions.height > 0 else {
+            finish(.failure(CameraServiceError.failed("photo_dimensions_missing")))
+            return
+        }
+        finish(.success((bytes: bytes, dimensions: CaptureDimensions(width: Int(dimensions.width), height: Int(dimensions.height)))))
+    }
+
+    public func nextLevelDidCompletePhotoCapture(_ nextLevel: NextLevel) {
+        if continuation != nil { finish(.failure(CameraServiceError.failed("photo_capture_completed_without_data"))) }
     }
 }
 #endif
