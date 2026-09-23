@@ -231,6 +231,18 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(machine.apply(.stop), .idle)
     }
 
+    func testCameraRecoveryCancelsOnlyInFlightAndPreservesAcceptedCaptures() {
+        var model = CameraRecoveryIntegrationModel()
+        XCTAssertTrue(model.beginCapture(id: "accepted"))
+        model.acceptCapture()
+        XCTAssertTrue(model.beginCapture(id: "in-flight"))
+        model.signal(.interruption)
+        XCTAssertEqual(model.acceptedCaptureIDs, ["accepted"])
+        XCTAssertNil(model.inFlightCaptureID)
+        XCTAssertEqual(model.machine.state, .interrupted)
+        XCTAssertFalse(model.beginCapture(id: "next"))
+    }
+
     func testDeviceHealthPolicyUsesConservativeHardStops() {
         let warning = DeviceHealthPolicy.evaluate(DeviceHealthSnapshot(thermal: .fair, availableStorageBytes: 500_000_000, batteryLevel: 0.5, batteryStateAvailable: true))
         XCTAssertEqual(warning.severity, .warning)

@@ -484,6 +484,88 @@ public struct CameraRecoveryMachine: Sendable, Equatable {
     }
 }
 
+public enum CameraRecoverySignal: Sendable, Equatable { case permission(CameraAuthorizationStatus), interruption, interruptionEnded, runtimeError, started, stopped }
+
+public struct CameraRecoveryIntegrationModel: Sendable, Equatable {
+    public private(set) var machine = CameraRecoveryMachine()
+    public private(set) var acceptedCaptureIDs: Set<String> = []
+    public private(set) var inFlightCaptureID: String?
+    public init() {}
+    public mutating func beginCapture(id: String) -> Bool {
+        guard inFlightCaptureID == nil, machine.state == .idle || machine.state == .running else { return false }
+        inFlightCaptureID = id; return true
+    }
+    public mutating func acceptCapture() {
+        if let id = inFlightCaptureID { acceptedCaptureIDs.insert(id) }
+        inFlightCaptureID = nil
+    }
+    public mutating func signal(_ signal: CameraRecoverySignal) {
+        switch signal {
+        case .interruption: inFlightCaptureID = nil; _ = machine.apply(.interrupted)
+        case .runtimeError: inFlightCaptureID = nil; _ = machine.apply(.runtimeError)
+        case .interruptionEnded: _ = machine.apply(.interruptionEnded)
+        case .permission(.denied): _ = machine.apply(.permissionDenied)
+        case .permission(.restricted): _ = machine.apply(.permissionRestricted)
+        case .permission: _ = machine.apply(.requestStart)
+        case .started: _ = machine.apply(.started)
+        case .stopped: _ = machine.apply(.stop)
+        }
+    }
+}
+
+#if canImport(AVFoundation)
+import AVFoundation
+
+@available(iOS 17.0, *)
+@MainActor
+public final class CameraRecoveryOwner {
+    public private(set) var machine = CameraRecoveryMachine()
+    public private(set) var registrationCount = 0
+    private var observerTokens: [NSObjectProtocol] = []
+    private var cancelInFlight: (() -> Void)?
+    public var onStateChange: ((CameraRecoveryState, String) -> Void)?
+
+    public init() {}
+
+    public func setInFlightCancellation(_ cancellation: (() -> Void)?) { cancelInFlight = cancellation }
+
+    public func register(session: AVCaptureSession, notificationCenter: NotificationCenter = .default) {
+        guard observerTokens.isEmpty else { return }
+        registrationCount += 1
+        let names: [(Notification.Name, CameraRecoverySignal)] = [
+            (AVCaptureSession.wasInterruptedNotification, .interruption),
+            (AVCaptureSession.interruptionEndedNotification, .interruptionEnded),
+            (AVCaptureSession.runtimeErrorNotification, .runtimeError)
+        ]
+        observerTokens = names.map { name, signal in
+            notificationCenter.addObserver(forName: name, object: session, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.handle(signal) }
+            }
+        }
+    }
+
+    public func unregister(notificationCenter: NotificationCenter = .default) {
+        for token in observerTokens { notificationCenter.removeObserver(token) }
+        observerTokens.removeAll()
+    }
+
+    public func handle(_ signal: CameraRecoverySignal) {
+        switch signal {
+        case .permission(.denied): _ = machine.apply(.permissionDenied)
+        case .permission(.restricted): _ = machine.apply(.permissionRestricted)
+        case .permission: _ = machine.apply(.requestStart)
+        case .interruption: cancelInFlight?(); _ = machine.apply(.interrupted)
+        case .interruptionEnded: _ = machine.apply(.interruptionEnded)
+        case .runtimeError: cancelInFlight?(); _ = machine.apply(.runtimeError)
+        case .started: _ = machine.apply(.started)
+        case .stopped: _ = machine.apply(.stop)
+        }
+        onStateChange?(machine.state, machine.userMessage)
+    }
+
+}
+#endif
+
 public enum ThermalCondition: String, Sendable, Codable, Equatable { case nominal, fair, serious, critical, unavailable }
 public struct DeviceHealthSnapshot: Sendable, Equatable {
     public let thermal: ThermalCondition
@@ -824,6 +906,7 @@ public final class NextLevelPreviewViewController: UIViewController {
     private let statusLabel = UILabel()
     private var lifecycle = PreviewLifecyclePolicy()
     private var previewLayer: AVCaptureVideoPreviewLayer?
+    private let recoveryOwner = CameraRecoveryOwner()
 
     public init(nextLevel: NextLevel = .shared) {
         self.nextLevel = nextLevel
@@ -853,6 +936,7 @@ public final class NextLevelPreviewViewController: UIViewController {
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if previewLayer == nil { attachPreviewIfPossible() }
+        if let session = previewLayer?.session { recoveryOwner.register(session: session) }
         guard lifecycle.startIfNeeded() else { return }
         let authorization = AVCaptureDevice.authorizationStatus(for: .video)
         switch authorization {
@@ -881,6 +965,7 @@ public final class NextLevelPreviewViewController: UIViewController {
         super.viewDidDisappear(animated)
         guard lifecycle.stopIfNeeded() else { return }
         nextLevel.stop()
+        recoveryOwner.unregister()
         detachPreview()
     }
 
@@ -903,8 +988,14 @@ public final class NextLevelPreviewViewController: UIViewController {
     }
 
     private func startAuthorizedPreview() {
-        nextLevel.start()
-        statusLabel.isHidden = true
+        do {
+            try nextLevel.start()
+            recoveryOwner.handle(.started)
+            statusLabel.isHidden = true
+        } catch {
+            recoveryOwner.handle(.runtimeError)
+            show(.error("Camera failed to start. Try again."))
+        }
     }
 
     private func show(_ state: PreviewSurfaceState) {
