@@ -673,6 +673,14 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(SourceMetadataExtractor.decodedDimensions(from: Data()), nil)
     }
 
+    func testPL0073FocusCannotLockBeforeObservedStabilization() {
+        var focus = FocusPolicy()
+        XCTAssertEqual(focus.begin(capabilities: FocusCapabilities(point: true, lock: true)), .focusing)
+        XCTAssertEqual(focus.lock(capabilities: FocusCapabilities(point: true, lock: true)), .failed)
+        XCTAssertEqual(focus.stabilize(), .continuous)
+        XCTAssertEqual(focus.lock(capabilities: FocusCapabilities(point: true, lock: true)), .locked)
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
