@@ -720,6 +720,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(controller.allowsCapture)
     }
 
+    func testPL0079FoundationTrackingServiceUsesOneLifecycleContract() async {
+        let service = FoundationARTrackingService(isAvailable: true)
+        await service.start()
+        XCTAssertEqual(await service.state(), .tracking)
+        XCTAssertTrue((await service.snapshot()).poseEvidenceEligible)
+        await service.stop()
+        XCTAssertEqual(await service.state(), .idle)
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
