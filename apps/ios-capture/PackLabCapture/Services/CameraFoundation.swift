@@ -196,7 +196,7 @@ public actor HighResolutionStillCaptureService {
     }
 }
 
-public enum SourceValueStatus: String, Codable, Sendable { case available, unavailable, notRecorded }
+public enum SourceValueStatus: String, Codable, Sendable { case available, unavailable, notRecorded = "not_recorded", estimated }
 
 public struct SourceMeasurement: Codable, Sendable, Equatable {
     public let status: SourceValueStatus
@@ -300,6 +300,141 @@ public struct PhotoCaptureMetadata: Codable, Sendable, Equatable {
     public let captureTimestamp: Date
     public init(photoID: String, imagePath: String, sequence: Int, originalFilename: String, pixelDimensions: CaptureDimensions, orientation: String, lensIdentity: CameraLensIdentity, focalLengthMM: SourceMeasurement, exposureSeconds: SourceMeasurement, iso: SourceMeasurement, whiteBalanceKelvin: SourceMeasurement, captureTimestamp: Date) {
         self.photoID = photoID; self.imagePath = imagePath; self.sequence = sequence; self.originalFilename = originalFilename; self.pixelDimensions = pixelDimensions; self.orientation = orientation; self.lensIdentity = lensIdentity; self.focalLengthMM = focalLengthMM; self.exposureSeconds = exposureSeconds; self.iso = iso; self.whiteBalanceKelvin = whiteBalanceKelvin; self.captureTimestamp = captureTimestamp
+    }
+}
+
+public enum PackScanOrientationValue: String, Codable, Sendable { case portrait, landscape, square, unknown }
+public enum PackScanMeasurementSource: String, Codable, Sendable { case exif, deviceAPI = "device_api", operator, derived, unknown }
+
+public struct PackScanNumericMeasurement: Codable, Sendable, Equatable {
+    public let status: SourceValueStatus
+    public let value: Double?
+    public let unit: String?
+    public let source: PackScanMeasurementSource?
+    public init(status: SourceValueStatus, value: Double? = nil, unit: String? = nil, source: PackScanMeasurementSource? = nil) {
+        self.status = status; self.value = value; self.unit = unit; self.source = source
+    }
+}
+
+public struct PackScanISOMeasurement: Codable, Sendable, Equatable {
+    public let status: SourceValueStatus
+    public let value: Int?
+    public let unit: String?
+    public let source: PackScanMeasurementSource?
+    public init(status: SourceValueStatus, value: Int? = nil, unit: String? = nil, source: PackScanMeasurementSource? = nil) {
+        self.status = status; self.value = value; self.unit = unit; self.source = source
+    }
+}
+
+public struct PackScanOrientation: Codable, Sendable, Equatable {
+    public let value: PackScanOrientationValue
+    public let rotationDegrees: Int?
+    public let source: PackScanMeasurementSource
+    public init(value: PackScanOrientationValue, rotationDegrees: Int? = nil, source: PackScanMeasurementSource) {
+        self.value = value; self.rotationDegrees = rotationDegrees; self.source = source
+    }
+    enum CodingKeys: String, CodingKey { case value, rotationDegrees = "rotation_degrees", source }
+}
+
+/// Strict M02 PackScan wire object. App-only lens/timestamp values remain in
+/// this separate internal record and are never encoded into the photo object.
+public struct PackScanPhotoMetadataWire: Codable, Sendable, Equatable {
+    public let photoID: String
+    public let imagePath: String
+    public let sequence: Int
+    public let originalFilename: String
+    public let pixelDimensions: CaptureDimensions
+    public let orientation: PackScanOrientation
+    public let focalLengthMM: PackScanNumericMeasurement
+    public let exposure: PackScanNumericMeasurement
+    public let iso: PackScanISOMeasurement
+    public let whiteBalanceKelvin: PackScanNumericMeasurement
+
+    public init(photoID: String, imagePath: String, sequence: Int, originalFilename: String, pixelDimensions: CaptureDimensions, orientation: PackScanOrientation, focalLengthMM: PackScanNumericMeasurement, exposure: PackScanNumericMeasurement, iso: PackScanISOMeasurement, whiteBalanceKelvin: PackScanNumericMeasurement) {
+        self.photoID = photoID; self.imagePath = imagePath; self.sequence = sequence; self.originalFilename = originalFilename; self.pixelDimensions = pixelDimensions; self.orientation = orientation; self.focalLengthMM = focalLengthMM; self.exposure = exposure; self.iso = iso; self.whiteBalanceKelvin = whiteBalanceKelvin
+    }
+
+    enum CodingKeys: String, CodingKey { case photoID = "photo_id", imagePath = "image_path", sequence, originalFilename = "original_filename", pixelDimensions = "pixel_dimensions", orientation, focalLengthMM = "focal_length_mm", exposure, iso, whiteBalanceKelvin = "white_balance_kelvin" }
+
+    public static func from(_ metadata: PhotoCaptureMetadata) throws -> PackScanPhotoMetadataWire {
+        func source(_ value: String?) -> PackScanMeasurementSource? { value.flatMap(PackScanMeasurementSource.init(rawValue:)) }
+        func numeric(_ value: SourceMeasurement, unit: String) -> PackScanNumericMeasurement {
+            PackScanNumericMeasurement(status: value.status, value: value.value, unit: value.value == nil ? nil : unit, source: value.value == nil ? nil : source(value.source))
+        }
+        let isoValue: Int?
+        if let raw = metadata.iso.value {
+            guard raw.isFinite, raw.rounded() == raw, raw >= 1, raw <= 1_000_000 else { throw PhotoMetadataBindingError.digestMismatch }
+            isoValue = Int(raw)
+        } else { isoValue = nil }
+        let orientationValue = PackScanOrientationValue(rawValue: metadata.orientation.lowercased()) ?? .unknown
+        return PackScanPhotoMetadataWire(
+            photoID: metadata.photoID, imagePath: metadata.imagePath, sequence: metadata.sequence,
+            originalFilename: metadata.originalFilename, pixelDimensions: metadata.pixelDimensions,
+            orientation: PackScanOrientation(value: orientationValue, source: .exif),
+            focalLengthMM: numeric(metadata.focalLengthMM, unit: "mm"),
+            exposure: numeric(metadata.exposureSeconds, unit: "s"),
+            iso: PackScanISOMeasurement(status: metadata.iso.status, value: isoValue, unit: isoValue == nil ? nil : "iso", source: isoValue == nil ? nil : source(metadata.iso.source)),
+            whiteBalanceKelvin: numeric(metadata.whiteBalanceKelvin, unit: "K")
+        )
+    }
+}
+
+public struct PackScanPhotoMetadataDocument: Codable, Sendable, Equatable {
+    public let schemaVersion: String
+    public let photos: [PackScanPhotoMetadataWire]
+    public init(photos: [PackScanPhotoMetadataWire]) { self.schemaVersion = "1.0.0"; self.photos = photos }
+    enum CodingKeys: String, CodingKey { case schemaVersion = "schema_version", photos }
+}
+
+public struct PhotoCaptureAppMetadata: Codable, Sendable, Equatable {
+    public let lensIdentity: CameraLensIdentity
+    public let captureTimestamp: Date
+    public init(lensIdentity: CameraLensIdentity, captureTimestamp: Date) { self.lensIdentity = lensIdentity; self.captureTimestamp = captureTimestamp }
+}
+
+public enum AcceptedPhotoPersistenceError: Error, Sendable, Equatable { case duplicatePhoto, invalidContract, writeFailed }
+
+/// Atomic wire-document persistence for an accepted source/metadata pair.
+/// The immutable source is written first through `OriginalSourceStore`; the
+/// metadata document is replaced only after the pair has passed binding.
+public actor AcceptedPhotoMetadataStore {
+    private let sourceStore: OriginalSourceStore
+    private let metadataURL: URL
+    private let fileManager: FileManager
+
+    public init(sourceRoot: URL, metadataURL: URL, fileManager: FileManager = .default) {
+        self.sourceStore = OriginalSourceStore(root: sourceRoot, fileManager: fileManager)
+        self.metadataURL = metadataURL
+        self.fileManager = fileManager
+    }
+
+    public func persist(metadata: PhotoCaptureMetadata, source: OriginalSourceRecord, bytes: Data) async throws {
+        do {
+            try PhotoMetadataBinding.validate(metadata: metadata, source: source, bytes: bytes)
+            let wire = try PackScanPhotoMetadataWire.from(metadata)
+            _ = try await sourceStore.persist(record: source, bytes: bytes)
+            var document = try loadDocument()
+            guard !document.photos.contains(where: { $0.photoID == wire.photoID }) else { throw AcceptedPhotoPersistenceError.duplicatePhoto }
+            document = PackScanPhotoMetadataDocument(photos: document.photos + [wire])
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            try fileManager.createDirectory(at: metadataURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let temp = metadataURL.deletingLastPathComponent().appendingPathComponent(".photos-\(UUID().uuidString).tmp")
+            do {
+                try encoder.encode(document).write(to: temp, options: .atomic)
+                if fileManager.fileExists(atPath: metadataURL.path) { try fileManager.replaceItemAt(metadataURL, withItemAt: temp, backupItemName: nil, options: .usingNewMetadataOnly) }
+                else { try fileManager.moveItem(at: temp, to: metadataURL) }
+            } catch {
+                try? fileManager.removeItem(at: temp)
+                throw AcceptedPhotoPersistenceError.writeFailed
+            }
+        } catch let error as AcceptedPhotoPersistenceError { throw error }
+        catch { throw AcceptedPhotoPersistenceError.invalidContract }
+    }
+
+    private func loadDocument() throws -> PackScanPhotoMetadataDocument {
+        guard fileManager.fileExists(atPath: metadataURL.path) else { return PackScanPhotoMetadataDocument(photos: []) }
+        guard let data = try? Data(contentsOf: metadataURL), let document = try? JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: data) else { throw AcceptedPhotoPersistenceError.writeFailed }
+        return document
     }
 }
 

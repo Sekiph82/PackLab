@@ -185,6 +185,39 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testPackScanPhotoWireUsesStrictSnakeCaseAndIntegerISO() throws {
+        let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)
+        let metadata = PhotoCaptureMetadata(photoID: "p1", imagePath: "images/p1.heic", sequence: 0, originalFilename: "p1.heic", pixelDimensions: CaptureDimensions(width: 10, height: 8), orientation: "portrait", lensIdentity: lens, focalLengthMM: SourceMeasurement(status: .available, value: 26, unit: "mm", source: "device_api"), exposureSeconds: SourceMeasurement(status: .estimated, value: 0.01, unit: "s", source: "derived"), iso: SourceMeasurement(status: .available, value: 400, unit: "iso", source: "exif"), whiteBalanceKelvin: SourceMeasurement(status: .unavailable), captureTimestamp: Date(timeIntervalSince1970: 0))
+        let wire = try PackScanPhotoMetadataWire.from(metadata)
+        let data = try JSONEncoder().encode(PackScanPhotoMetadataDocument(photos: [wire]))
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let photos = try XCTUnwrap(object["photos"] as? [[String: Any]])
+        XCTAssertEqual(object["schema_version"] as? String, "1.0.0")
+        XCTAssertEqual(photos[0]["photo_id"] as? String, "p1")
+        XCTAssertNil(photos[0]["lensIdentity"])
+        XCTAssertEqual((photos[0]["iso"] as? [String: Any])?["value"] as? Int, 400)
+        XCTAssertEqual((photos[0]["orientation"] as? [String: Any])?["value"] as? String, "portrait")
+    }
+
+    func testAcceptedPhotoMetadataStoreAtomicallyBindsSourceAndWireMetadata() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = Data([7, 8, 9])
+        let dimensions = CaptureDimensions(width: 10, height: 8)
+        let source = OriginalSourceRecord(captureID: "p1", filename: "p1.heic", dimensions: dimensions, orientation: "portrait", sha256: SourceIntegrity.digest(bytes))
+        let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)
+        let metadata = PhotoCaptureMetadata(photoID: "p1", imagePath: "images/p1.heic", sequence: 0, originalFilename: "p1.heic", pixelDimensions: dimensions, orientation: "portrait", lensIdentity: lens, focalLengthMM: SourceMeasurement(status: .unavailable), exposureSeconds: SourceMeasurement(status: .unavailable), iso: SourceMeasurement(status: .unavailable), whiteBalanceKelvin: SourceMeasurement(status: .unavailable), captureTimestamp: Date(timeIntervalSince1970: 0))
+        let store = AcceptedPhotoMetadataStore(sourceRoot: root.appendingPathComponent("images"), metadataURL: root.appendingPathComponent("metadata/photos.json"))
+        try await store.persist(metadata: metadata, source: source, bytes: bytes)
+        let encoded = try Data(contentsOf: root.appendingPathComponent("metadata/photos.json"))
+        let document = try JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: encoded)
+        XCTAssertEqual(document.photos.map(\.photoID), ["p1"])
+        do {
+            try await store.persist(metadata: metadata, source: source, bytes: bytes)
+            XCTFail("duplicate photo must be rejected")
+        } catch { XCTAssertEqual(error as? AcceptedPhotoPersistenceError, .duplicatePhoto) }
+    }
+
     func testCameraRecoveryIsIdempotentAndBounded() {
         var machine = CameraRecoveryMachine()
         XCTAssertEqual(machine.apply(.requestStart), .starting)
