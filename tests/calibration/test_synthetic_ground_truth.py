@@ -126,8 +126,9 @@ def test_ideal_synthetic_markers_recover_ground_truth_scale_confidence_and_profi
         },
     )
     compatibility = check_profile_compatibility(profile, CaptureProfileRequest(_profile_key()))
-    assert compatibility.status == "compatible"
-    assert compatibility.reusable is True
+    assert compatibility.status == "invalid"
+    assert compatibility.reusable is False
+    assert "provenance_source_not_owner_physical_session" in compatibility.invalidation_reasons
 
 
 def test_noisy_synthetic_markers_stay_inside_explicit_error_bound() -> None:

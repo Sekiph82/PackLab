@@ -61,6 +61,14 @@ def _check(profile: CalibrationProfile, key: CalibrationProfileKey):
     return check_profile_compatibility(profile, CaptureProfileRequest(key))
 
 
+def _assert_invalid(profile: CalibrationProfile, reason: str) -> None:
+    result = _check(profile, _key())
+    assert result.status == "invalid"
+    assert result.reusable is False
+    assert reason in result.invalidation_reasons
+    assert result.compatibility_reasons == ()
+
+
 def test_exact_profile_key_match_is_compatible() -> None:
     result = _check(_profile(), _key())
     assert result.status == "compatible"
@@ -112,7 +120,7 @@ def test_incompatible_aspect_ratio_invalidates_even_with_scaling_policy() -> Non
 
 def test_unknown_or_malformed_profile_is_not_reused() -> None:
     bad_schema = _profile(schema_version="2.0.0")
-    assert _check(bad_schema, _key()).invalidation_reasons == ("profile_schema_version_changed",)
+    assert "profile_schema_version_changed" in _check(bad_schema, _key()).invalidation_reasons
 
     bad_units = _profile(units={"image_width": "px"})
     result = _check(bad_units, _key())
@@ -123,6 +131,58 @@ def test_unknown_or_malformed_profile_is_not_reused() -> None:
         quality=dataclasses.replace(_profile().quality, confidence_status="rejected")
     )
     assert "profile_quality_not_reusable" in _check(rejected, _key()).invalidation_reasons
+
+
+def test_unavailable_or_placeholder_provenance_fails_closed() -> None:
+    unavailable = _profile(
+        provenance={
+            "source": "unavailable_placeholder",
+            "native_capture_evidence": "unavailable",
+            "physical_measurement_evidence": "unavailable",
+        }
+    )
+    result = _check(unavailable, _key())
+    assert result.status == "invalid"
+    assert result.reusable is False
+    assert "provenance_source_not_owner_physical_session" in result.invalidation_reasons
+    assert "native_capture_evidence_unavailable" in result.invalidation_reasons
+    assert "physical_measurement_evidence_unavailable" in result.invalidation_reasons
+    assert result.compatibility_reasons == ()
+
+
+def test_malformed_timestamps_fail_rfc3339_validation() -> None:
+    _assert_invalid(_profile(created_at_utc="garbageZ"), "timestamps_not_rfc3339_utc")
+    bad_verified = _profile(
+        quality=dataclasses.replace(_profile().quality, verified_at_utc="2026-99-99T00:00:00Z")
+    )
+    _assert_invalid(bad_verified, "timestamps_not_rfc3339_utc")
+
+
+def test_invalid_dimensions_and_empty_key_fields_fail_before_compatibility() -> None:
+    _assert_invalid(_profile(key=_key(image_width_px=0)), "resolution_dimensions_invalid")
+    _assert_invalid(_profile(key=_key(image_height_px=-1)), "resolution_dimensions_invalid")
+    _assert_invalid(_profile(key=_key(device_model="")), "profile_key_device_model_empty")
+    _assert_invalid(_profile(key=_key(lens_identity="")), "profile_key_lens_identity_empty")
+
+
+def test_quality_ranges_fail_before_compatibility() -> None:
+    _assert_invalid(
+        _profile(quality=dataclasses.replace(_profile().quality, confidence_score=1.1)),
+        "confidence_score_out_of_range",
+    )
+    _assert_invalid(
+        _profile(quality=dataclasses.replace(_profile().quality, reprojection_rmse_px=-0.1)),
+        "reprojection_rmse_px_invalid",
+    )
+    _assert_invalid(
+        _profile(quality=dataclasses.replace(_profile().quality, accepted_view_count=0)),
+        "accepted_view_count_invalid",
+    )
+
+
+def test_unknown_resolution_policy_and_schema_version_fail_closed() -> None:
+    _assert_invalid(_profile(resolution_policy="scale_somehow"), "unknown_resolution_policy")
+    _assert_invalid(_profile(schema_version="2.0.0"), "profile_schema_version_changed")
 
 
 def test_calibration_profile_schema_freezes_required_storage_contract(repo_root: Path) -> None:

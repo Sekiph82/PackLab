@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+import re
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from functools import cache
+from pathlib import Path
+
+from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import SchemaError
 
 PROFILE_SCHEMA_VERSION = "1.0.0"
 PROFILE_COMPATIBILITY_VERSION = "calibration_profile_compatibility_v1"
+_PROFILE_ID_RE = re.compile(r"^[A-Za-z0-9._/-]{1,128}$")
 
 
 @dataclass(frozen=True)
@@ -95,10 +103,20 @@ def check_profile_compatibility(
 
 def _profile_structural_errors(profile: CalibrationProfile) -> tuple[str, ...]:
     errors: list[str] = []
+    errors.extend(_schema_contract_errors(profile))
+    if not _PROFILE_ID_RE.fullmatch(profile.profile_id):
+        errors.append("profile_id_invalid")
     if profile.schema_version != PROFILE_SCHEMA_VERSION:
         errors.append("profile_schema_version_changed")
     if profile.resolution_policy not in {"exact_reference_only", "uniform_scale_about_origin"}:
         errors.append("unknown_resolution_policy")
+    errors.extend(_key_structural_errors(profile.key))
+    if profile.provenance.get("source") != "owner_physical_session":
+        errors.append("provenance_source_not_owner_physical_session")
+    if profile.provenance.get("native_capture_evidence") != "owner_device":
+        errors.append("native_capture_evidence_unavailable")
+    if profile.provenance.get("physical_measurement_evidence") != "owner_completed":
+        errors.append("physical_measurement_evidence_unavailable")
     if profile.quality.confidence_status not in {"accepted", "warning"}:
         errors.append("profile_quality_not_reusable")
     if not 0 <= profile.quality.confidence_score <= 1:
@@ -107,10 +125,10 @@ def _profile_structural_errors(profile: CalibrationProfile) -> tuple[str, ...]:
         errors.append("reprojection_rmse_px_invalid")
     if profile.quality.accepted_view_count < 1:
         errors.append("accepted_view_count_invalid")
-    if not profile.created_at_utc.endswith("Z") or not profile.quality.verified_at_utc.endswith(
-        "Z"
+    if not _valid_utc_timestamp(profile.created_at_utc) or not _valid_utc_timestamp(
+        profile.quality.verified_at_utc
     ):
-        errors.append("timestamps_not_utc_z")
+        errors.append("timestamps_not_rfc3339_utc")
     required_units = {
         "image_width": "px",
         "image_height": "px",
@@ -121,6 +139,94 @@ def _profile_structural_errors(profile: CalibrationProfile) -> tuple[str, ...]:
         if profile.units.get(key) != expected:
             errors.append(f"unit_{key}_not_{expected}")
     return tuple(errors)
+
+
+def _schema_contract_errors(profile: CalibrationProfile) -> tuple[str, ...]:
+    try:
+        errors = sorted(
+            _profile_schema_validator().iter_errors(_profile_document(profile)),
+            key=lambda error: tuple(str(part) for part in error.absolute_path),
+        )
+    except (OSError, ValueError, SchemaError):
+        return ("profile_schema_resource_unavailable",)
+    reasons: list[str] = []
+    for error in errors:
+        path = ".".join(str(part) for part in error.absolute_path) or "root"
+        reasons.append(f"profile_schema_contract_invalid:{path}")
+    return tuple(reasons)
+
+
+@cache
+def _profile_schema_validator() -> Draft202012Validator:
+    schema_path = (
+        Path(__file__).resolve().parents[4]
+        / "schemas"
+        / "packscan"
+        / "calibration-profile.schema.json"
+    )
+    import json
+
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
+def _profile_document(profile: CalibrationProfile) -> dict[str, object]:
+    return {
+        "schema_version": profile.schema_version,
+        "profile_id": profile.profile_id,
+        "profile_key": asdict(profile.key),
+        "resolution_policy": profile.resolution_policy,
+        "created_at": profile.created_at_utc,
+        "verified_at": profile.quality.verified_at_utc,
+        "units": dict(profile.units),
+        "provenance": dict(profile.provenance),
+        "quality": {
+            "confidence_status": profile.quality.confidence_status,
+            "confidence_score": profile.quality.confidence_score,
+            "reprojection_rmse_px": profile.quality.reprojection_rmse_px,
+            "accepted_view_count": profile.quality.accepted_view_count,
+        },
+    }
+
+
+def _key_structural_errors(key: CalibrationProfileKey) -> tuple[str, ...]:
+    errors: list[str] = []
+    required_strings = (
+        "device_model",
+        "lens_identity",
+        "camera_position",
+        "orientation",
+        "focus_mode",
+        "capture_app_version",
+        "calibration_model_version",
+        "calibration_policy_version",
+    )
+    for field_name in required_strings:
+        value = getattr(key, field_name)
+        if not isinstance(value, str) or not value:
+            errors.append(f"profile_key_{field_name}_empty")
+    if key.camera_position not in {"back", "front"}:
+        errors.append("profile_key_camera_position_invalid")
+    if key.orientation not in {"portrait", "landscape_left", "landscape_right"}:
+        errors.append("profile_key_orientation_invalid")
+    if key.focus_mode not in {"locked", "continuous_with_recorded_distance"}:
+        errors.append("profile_key_focus_mode_invalid")
+    if key.image_width_px < 1 or key.image_height_px < 1:
+        errors.append("resolution_dimensions_invalid")
+    if not math.isfinite(key.zoom_factor) or key.zoom_factor <= 0:
+        errors.append("zoom_factor_invalid")
+    return tuple(errors)
+
+
+def _valid_utc_timestamp(value: str) -> bool:
+    if not isinstance(value, str) or not value.endswith("Z"):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+    except ValueError:
+        return False
+    return parsed.tzinfo == UTC
 
 
 def _key_invalidation_reasons(
