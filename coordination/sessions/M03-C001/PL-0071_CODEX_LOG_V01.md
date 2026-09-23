@@ -12,4 +12,6 @@ Files changed: `apps/ios-capture/PackLabCapture/Services/CameraFoundation.swift`
 
 Validation: `git diff --check` passed; deterministic source/gate tests were added; implementation was pushed and remote visibility verified with `git ls-remote` at `ec3b045`; `git diff -- TASKS.md` was empty. No native xcodebuild, simulator, or iPhone result is claimed. No secrets, signing material, private assets, cache, M04 work, TASKS.md, or ChatGPT audit artifacts were changed.
 
+Publication checkpoint: this child log is being published as its own log-only checkpoint after the paired publication commit `de6467477078f94b194895e934c572be995a8539`.
+
 READY_FOR_INDEPENDENT_AUDIT
