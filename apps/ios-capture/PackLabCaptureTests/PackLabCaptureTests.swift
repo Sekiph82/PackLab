@@ -559,6 +559,20 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertThrowsError(try SessionDeletionPlan(root: root, session: URL(fileURLWithPath: "/tmp/other")).validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .outsideRoot) }
     }
 
+    func testAuthoritativeDeletionRemovesSessionAndRejectsTraversal() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "s1")
+        try FileManager.default.createDirectory(at: layout.sessionRoot, withIntermediateDirectories: true)
+        let candidate = SessionResumeCandidate(id: "s1", draft: nil, disposition: .resumable, state: nil)
+        let plan = SessionDeletionPlan(root: root, candidate: candidate)
+        let report = try await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true)
+        XCTAssertEqual(report.sessionID, "s1")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.sessionRoot.path))
+        let traversal = SessionDeletionPlan(root: root, session: root.appendingPathComponent("../escape"))
+        XCTAssertThrowsError(try traversal.validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .outsideRoot) }
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)

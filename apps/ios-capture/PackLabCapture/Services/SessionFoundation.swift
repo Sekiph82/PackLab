@@ -279,7 +279,7 @@ public struct SessionFinalizer: Sendable {
     }
 }
 
-public struct ScanHistoryEntry: Sendable, Equatable, Identifiable {
+public struct ScanHistoryEntry: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let packageName: String
     public let packageType: PackageType?
@@ -327,23 +327,42 @@ public enum DeletionError: Error, Sendable, Equatable { case confirmationRequire
 public struct SessionDeletionPlan: Sendable, Equatable {
     public let root: URL
     public let session: URL
-    public init(root: URL, session: URL) { self.root = root.standardizedFileURL; self.session = session.standardizedFileURL }
+    public let sessionID: String
+    public let authoritative: Bool
+    public init(root: URL, session: URL) { self.root = root.standardizedFileURL; self.session = session.standardizedFileURL; self.sessionID = session.lastPathComponent; self.authoritative = false }
+    public init(root: URL, candidate: SessionResumeCandidate) { self.root = root.standardizedFileURL; self.session = root.appendingPathComponent(candidate.id, isDirectory: true).standardizedFileURL; self.sessionID = candidate.id; self.authoritative = true }
     public func validate(confirmed: Bool, fileManager: FileManager = .default) throws {
         guard confirmed else { throw DeletionError.confirmationRequired }
         let rootPath = root.resolvingSymlinksInPath.path
         let sessionPath = session.resolvingSymlinksInPath.path
         guard sessionPath != rootPath, sessionPath.hasPrefix(rootPath + "/") else { throw DeletionError.outsideRoot }
         guard sessionPath == session.path else { throw DeletionError.symlinkEscape }
+        guard !sessionID.isEmpty, sessionID == session.lastPathComponent, sessionID.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { throw DeletionError.outsideRoot }
         _ = fileManager
     }
 }
+
+public struct DeletionReport: Sendable, Equatable { public let sessionID: String; public let removedPaths: [String]; public let failures: [String]; public init(sessionID: String, removedPaths: [String], failures: [String]) { self.sessionID = sessionID; self.removedPaths = removedPaths; self.failures = failures } }
 public actor SafeSessionDeleter {
     private let fileManager: FileManager
     public init(fileManager: FileManager = .default) { self.fileManager = fileManager }
     public func delete(plan: SessionDeletionPlan, confirmed: Bool) throws {
+        _ = try deleteDetailed(plan: plan, confirmed: confirmed)
+    }
+    public func deleteDetailed(plan: SessionDeletionPlan, confirmed: Bool, historyIndex: URL? = nil) throws -> DeletionReport {
         try plan.validate(confirmed: confirmed, fileManager: fileManager)
-        guard fileManager.fileExists(atPath: plan.session.path) else { return }
-        do { try fileManager.removeItem(at: plan.session) } catch { throw DeletionError.partialFailure }
+        guard fileManager.fileExists(atPath: plan.session.path) else { return DeletionReport(sessionID: plan.sessionID, removedPaths: [], failures: []) }
+        var removed: [String] = []; var failures: [String] = []
+        do { try fileManager.removeItem(at: plan.session); removed.append(plan.session.path) } catch { failures.append(plan.session.path) }
+        if let historyIndex, fileManager.fileExists(atPath: historyIndex.path) {
+            do {
+                let entries = try JSONDecoder().decode([ScanHistoryEntry].self, from: Data(contentsOf: historyIndex)).filter { $0.id != plan.sessionID }
+                try JSONEncoder().encode(entries).write(to: historyIndex, options: .atomic)
+                removed.append(historyIndex.path)
+            } catch { failures.append(historyIndex.path) }
+        }
+        guard failures.isEmpty else { throw DeletionError.partialFailure }
+        return DeletionReport(sessionID: plan.sessionID, removedPaths: removed, failures: failures)
     }
 }
 
@@ -438,6 +457,24 @@ public struct LocalScanHistoryView: View {
                 VStack(alignment: .leading) { Text(entry.packageName); Text(entry.exportState).font(.caption); if let reason = entry.degradedReason { Text(reason).foregroundStyle(.orange).font(.caption2) } }
             }
         }.task { entries = await store.load() }.navigationTitle("Scan History")
+    }
+}
+
+public struct SessionDeletionView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var showConfirmation = false
+    @State private var errorMessage: String?
+    private let plan: SessionDeletionPlan
+    private let deleter = SafeSessionDeleter()
+    public init(root: URL, candidate: SessionResumeCandidate) { plan = SessionDeletionPlan(root: root, candidate: candidate) }
+    public var body: some View {
+        VStack(spacing: 16) {
+            Text("Delete scan?").font(.title2)
+            Text("This permanently removes session \(plan.sessionID), its accepted originals, previews, records, and temporary files.").multilineTextAlignment(.center)
+            Button("Delete \(plan.sessionID)", role: .destructive) { showConfirmation = true }
+            Button("Cancel") { dismiss() }
+            if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
+        }.padding().confirmationDialog("Delete this scan?", isPresented: $showConfirmation) { Button("Delete", role: .destructive) { Task { do { _ = try await deleter.deleteDetailed(plan: plan, confirmed: true); dismiss() } catch { errorMessage = "Deletion failed; some files may remain." } } }; Button("Cancel", role: .cancel) {} }
     }
 }
 #endif
