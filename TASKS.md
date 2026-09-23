@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M02
-- Current Sprint: M02-S01/S02 — Resume remediation batch
-- Current Task: M02-RESUME-REMEDIATION-BATCH-001 — Remediate 10 audited resume findings.
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_RESUME_REMEDIATION_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_RESUME_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V01.md. Codex remediates only PL-0053, PL-0056, PL-0057, PL-0058, PL-0060, PL-0061, PL-0062, PL-0063, PL-0064 and PL-0066 using their V02 work orders, publishes one V02 child log per task plus https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_RESUME_REMEDIATION_CODEX_LOG_V01.md, returns `AWAITING_MILESTONE_AUDIT`, and stops before PL-0067. Blocking audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/MASTER_RESUME_CHATGPT_AUDIT_V01.md.
+- Current Sprint: M02-S02 — Calibration system
+- Current Task: PL-0067 — Synthetic calibration ground-truth reconciliation
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0067_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0067_CHATGPT_AUDIT_CRITERIA_V02.md. Preserve the audited M02 remediation contracts, publish PL-0067_CODEX_LOG_V02.md, return `READY_FOR_INDEPENDENT_AUDIT`, and stop before PL-0068.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -137,23 +137,23 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0050** Define optional object-mask representation and image/mask pixel-coordinate contract.
 - [x] **PL-0051** Define calibration-marker observations and real-world unit representation in millimetres.
 - [x] **PL-0052** Define capture-mode metadata for Freehand, Guided Orbit and Turntable modes.
-- [ ] **PL-0053** Define preview, thumbnail and diagnostics payloads.
+- [x] **PL-0053** Define preview, thumbnail and diagnostics payloads.
 - [x] **PL-0054** Define SHA-256 integrity checks and partial/corrupt package handling.
 - [x] **PL-0055** Create schema validation fixtures: valid, old-version, future-version, corrupt and incomplete samples.
-- [ ] **PL-0056** Implement Python PackScan reader/writer/validator.
-- [ ] **PL-0057** Implement Swift PackScan writer compatible with the same fixtures.
-- [ ] **PL-0058** Add cross-language contract tests ensuring Swift output validates in Python.
+- [x] **PL-0056** Implement Python PackScan reader/writer/validator.
+- [x] **PL-0057** Implement Swift PackScan writer compatible with the same fixtures.
+- [x] **PL-0058** Add cross-language contract tests ensuring Swift output validates in Python.
 
 ## Sprint M02-S02 - Calibration system
 
 - [x] **PL-0059** Select marker family and IDs for PackLab calibration mat using OpenCV-supported AprilTag/ArUco dictionaries.
-- [ ] **PL-0060** Design printable A4/A3 PackLab calibration mat with precise reference distances and print-at-100% instructions.
-- [ ] **PL-0061** Add printed-mat verification procedure using ruler/caliper measurements before first use.
-- [ ] **PL-0062** Implement marker detection and corner refinement in OpenCV.
-- [ ] **PL-0063** Implement scale estimation from known marker geometry.
-- [ ] **PL-0064** Implement calibration confidence score and rejection thresholds.
+- [x] **PL-0060** Design printable A4/A3 PackLab calibration mat with precise reference distances and print-at-100% instructions.
+- [x] **PL-0061** Add printed-mat verification procedure using ruler/caliper measurements before first use.
+- [x] **PL-0062** Implement marker detection and corner refinement in OpenCV.
+- [x] **PL-0063** Implement scale estimation from known marker geometry.
+- [x] **PL-0064** Implement calibration confidence score and rejection thresholds.
 - [x] **PL-0065** Define camera-calibration procedure for iPhone main camera when higher accuracy than EXIF/intrinsics requires it.
-- [ ] **PL-0066** Store calibration profile by device/lens/resolution and invalidate incompatible profiles.
+- [x] **PL-0066** Store calibration profile by device/lens/resolution and invalidate incompatible profiles.
 - [ ] **PL-0067** Build synthetic calibration tests with known ground-truth dimensions.
 - [ ] **PL-0068** Build first physical calibration benchmark and record measured error.
 
