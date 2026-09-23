@@ -6,10 +6,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M02
 - Current Sprint: M02-S02 — Calibration system
-- Current Task: PL-0068 — First physical calibration benchmark preparation / owner handoff
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0068_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0068_CHATGPT_AUDIT_CRITERIA_V02.md. Prepare the physical benchmark record/procedure without fabricating owner evidence; if genuine physical evidence is unavailable, publish PL-0068_CODEX_LOG_V02.md ending `OWNER_REQUIRED` and stop before M03.
-- Required Actor: CODEX
+- Current Task: PL-0068 — First physical calibration benchmark
+- Current Task Status: OWNER_REQUIRED
+- Next Task/Action: Owner must execute https://github.com/Sekiph82/PackLab/blob/main/docs/calibration/benchmarks/first-physical-benchmark.md using https://github.com/Sekiph82/PackLab/blob/main/docs/calibration/verification-record-template.md and https://github.com/Sekiph82/PackLab/blob/main/docs/calibration/benchmarks/benchmark-record-template.md. Provide real printed-mat ruler/caliper verification, the bound iPhone 16 Standard seven-view capture evidence, retained accepted/rejected/invalid sample records, and measured error statistics. Blocking audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0068_CHATGPT_AUDIT_V02.md. Do not start M03.
+- Required Actor: OWNER
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
 
