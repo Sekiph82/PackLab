@@ -74,6 +74,23 @@ public actor ScanSessionStore {
     private func errorIsInterruption(_ error: Error) -> Bool { (error as NSError).code == NSUserCancelledError }
 }
 
+public struct GalleryEntry: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let previewPath: String?
+    public let sourcePath: String
+    public let sequence: Int
+    public let status: String
+    public init(id: String, previewPath: String?, sourcePath: String, sequence: Int, status: String = "accepted") { self.id = id; self.previewPath = previewPath; self.sourcePath = sourcePath; self.sequence = sequence; self.status = status }
+}
+public enum GalleryMutationError: Error, Sendable, Equatable { case notFound, confirmationRequired, invalidReplacement }
+public struct GalleryModel: Sendable, Equatable {
+    public private(set) var entries: [GalleryEntry]
+    public private(set) var replacementTrace: [String: String] = [:]
+    public init(entries: [GalleryEntry]) { self.entries = entries.sorted { $0.sequence < $1.sequence } }
+    public mutating func delete(id: String, confirmed: Bool) throws { guard confirmed else { throw GalleryMutationError.confirmationRequired }; guard entries.contains(where: { $0.id == id }) else { throw GalleryMutationError.notFound }; entries.removeAll { $0.id == id } }
+    public mutating func retake(replacing id: String, with replacement: GalleryEntry) throws { guard entries.contains(where: { $0.id == id }), replacement.id != id else { throw GalleryMutationError.invalidReplacement }; replacementTrace[id] = replacement.id; entries.append(replacement); entries.sort { $0.sequence < $1.sequence } }
+}
+
 #if canImport(SwiftUI)
 import SwiftUI
 public struct NewScanWizard: View {

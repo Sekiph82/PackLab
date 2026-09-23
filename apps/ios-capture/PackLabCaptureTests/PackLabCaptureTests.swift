@@ -234,6 +234,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertNotEqual(layout.images, layout.previews)
     }
 
+    func testGalleryDeleteRequiresConfirmationAndRetakeUsesNewIdentity() throws {
+        var gallery = GalleryModel(entries: [GalleryEntry(id: "a", previewPath: "previews/a.jpg", sourcePath: "images/a.heic", sequence: 0)])
+        XCTAssertThrowsError(try gallery.delete(id: "a", confirmed: false))
+        try gallery.retake(replacing: "a", with: GalleryEntry(id: "b", previewPath: "previews/b.jpg", sourcePath: "images/b.heic", sequence: 1))
+        XCTAssertEqual(gallery.replacementTrace["a"], "b")
+        try gallery.delete(id: "a", confirmed: true)
+        XCTAssertEqual(gallery.entries.map(\.id), ["b"])
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
