@@ -320,6 +320,20 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PackScanCoordinateContract.units, "metres")
     }
 
+    func testCoordinateMathCoversTranslationRotationsInverseAndFailClosedInvalidInput() throws {
+        let translation = CoordinateTransform.translation(x: 2, y: -3, z: 4)
+        let composed = try translation.validatedMultiplying(by: CoordinateTransform.rotationZ(.pi / 2))
+        let inverse = try composed.inverted()
+        let roundTrip = try composed.validatedMultiplying(by: inverse)
+        XCTAssertTrue(zip(roundTrip.values, CoordinateTransform.identity.values).allSatisfy { abs($0.0 - $0.1) < 1e-9 })
+        XCTAssertEqual(CoordinateTransform.rotationX(.pi / 2).values.count, 16)
+        XCTAssertEqual(CoordinateTransform.rotationY(.pi / 2).values.count, 16)
+        XCTAssertEqual(CoordinateTransform.rotationZ(.pi / 2).values.count, 16)
+        XCTAssertFalse(CoordinateTransform(values: [1, 2]).multiplied(by: .identity).isFinite)
+        XCTAssertThrowsError(try CoordinateTransform(values: [1, .infinity]).inverted()) { error in XCTAssertEqual(error as? CoordinateTransformError, .invalidShapeOrValue) }
+        XCTAssertNoThrow(try PackScanCoordinateContract.validate(translation))
+    }
+
     func testTrackingClassifierGatesPoseEvidenceDuringFlapping() {
         XCTAssertTrue(TrackingQualityClassifier.classify(state: .normal).poseEvidenceEligible)
         XCTAssertFalse(TrackingQualityClassifier.classify(state: .limited, limitation: .insufficientFeatures).poseEvidenceEligible)

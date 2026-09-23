@@ -132,18 +132,47 @@ public struct CoordinateTransform: Codable, Sendable, Equatable {
     public init(values: [Double]) { self.values = values }
     public static let identity = CoordinateTransform(values: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
     public func multiplied(by other: CoordinateTransform) -> CoordinateTransform {
-        guard values.count == 16, other.values.count == 16 else { return .identity }
+        guard values.count == 16, other.values.count == 16, isFinite, other.isFinite else { return CoordinateTransform(values: []) }
         var result = Array(repeating: 0.0, count: 16)
         for row in 0..<4 { for column in 0..<4 { for index in 0..<4 { result[row * 4 + column] += values[row * 4 + index] * other.values[index * 4 + column] } } }
         return CoordinateTransform(values: result)
     }
     public var isFinite: Bool { values.count == 16 && values.allSatisfy { $0.isFinite } }
+    public func validatedMultiplying(by other: CoordinateTransform) throws -> CoordinateTransform {
+        guard isFinite, other.isFinite else { throw CoordinateTransformError.invalidShapeOrValue }
+        return multiplied(by: other)
+    }
+    public func inverted() throws -> CoordinateTransform {
+        guard isFinite else { throw CoordinateTransformError.invalidShapeOrValue }
+        var a = (0..<4).map { row in (0..<8).map { column in column < 4 ? values[row * 4 + column] : (column - 4 == row ? 1.0 : 0.0) } }
+        for pivot in 0..<4 {
+            guard let row = (pivot..<4).max(by: { abs(a[$0][pivot]) < abs(a[$1][pivot]) }), abs(a[row][pivot]) > 1e-12 else { throw CoordinateTransformError.singular }
+            a.swapAt(pivot, row)
+            let divisor = a[pivot][pivot]
+            for column in 0..<8 { a[pivot][column] /= divisor }
+            for rowIndex in 0..<4 where rowIndex != pivot {
+                let factor = a[rowIndex][pivot]
+                for column in 0..<8 { a[rowIndex][column] -= factor * a[pivot][column] }
+            }
+        }
+        return CoordinateTransform(values: (0..<4).flatMap { row in (0..<4).map { a[row][$0 + 4] } })
+    }
+    public static func translation(x: Double, y: Double, z: Double) -> CoordinateTransform { CoordinateTransform(values: [1,0,0,x, 0,1,0,y, 0,0,1,z, 0,0,0,1]) }
+    public static func rotationX(_ radians: Double) -> CoordinateTransform { let c = cos(radians), s = sin(radians); return CoordinateTransform(values: [1,0,0,0, 0,c,-s,0, 0,s,c,0, 0,0,0,1]) }
+    public static func rotationY(_ radians: Double) -> CoordinateTransform { let c = cos(radians), s = sin(radians); return CoordinateTransform(values: [c,0,s,0, 0,1,0,0, -s,0,c,0, 0,0,0,1]) }
+    public static func rotationZ(_ radians: Double) -> CoordinateTransform { let c = cos(radians), s = sin(radians); return CoordinateTransform(values: [c,-s,0,0, s,c,0,0, 0,0,1,0, 0,0,0,1]) }
 }
+
+public enum CoordinateTransformError: Error, Sendable, Equatable { case invalidShapeOrValue, singular }
 
 public enum PackScanCoordinateContract {
     public static let convention = "packscan_right_handed_x_right_y_up_z_out_of_screen_camera_forward_neg_z_v3"
     public static let units = "metres"
     public static func appLocalToPackScan(_ transform: CoordinateTransform) -> CoordinateTransform { transform }
+    public static func validate(_ transform: CoordinateTransform) throws {
+        guard transform.isFinite else { throw CoordinateTransformError.invalidShapeOrValue }
+        guard convention == "packscan_right_handed_x_right_y_up_z_out_of_screen_camera_forward_neg_z_v3", units == "metres" else { throw CoordinateTransformError.invalidShapeOrValue }
+    }
 }
 
 public enum TrackingQualityClassifier {
