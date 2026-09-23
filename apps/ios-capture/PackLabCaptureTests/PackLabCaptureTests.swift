@@ -662,6 +662,12 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(policy.isStarted)
     }
 
+    func testPL0071AcceptedStillCarriesMonotonicCaptureEvidence() {
+        let still = AcceptedStill(captureID: "p1", sourceBytes: Data([1]), dimensions: CaptureDimensions(width: 1, height: 1), capturedAt: Date(timeIntervalSince1970: 0), monotonicTimestamp: 12.5)
+        XCTAssertEqual(still.monotonicTimestamp, 12.5)
+        XCTAssertEqual(still.captureID, "p1")
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
