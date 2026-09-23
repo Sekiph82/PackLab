@@ -30,7 +30,7 @@
           "maxLength": 512,
           "allOf": [
             {"not": {"pattern": "(^|[\\\\/])(Users|home|private|tmp|var|AppData|credentials|secrets)([\\\\/]|$)"}},
-            {"not": {"pattern": "(^|[ =:_-])(token|password|passwd|secret|api[_-]?key)([ =:_-]|$)"}}
+            {"not": {"pattern": "(^|[ =:_-])([Tt][Oo][Kk][Ee][Nn]|[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]|[Pp][Aa][Ss][Ss][Ww][Dd]|[Ss][Ee][Cc][Rr][Ee][Tt]|[Aa][Pp][Ii][_-]?[Kk][Ee][Yy])([ =:_-]|$)"}}
           ]
         },
         "count": {"type": "integer", "minimum": 0},
