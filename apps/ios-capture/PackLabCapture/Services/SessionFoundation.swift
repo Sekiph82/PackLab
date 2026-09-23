@@ -260,9 +260,16 @@ public struct FinalizationInput: Sendable { public let manifest: Data; public le
 public struct SessionFinalizer: Sendable {
     public init() {}
     public func validate(_ input: FinalizationInput) throws {
-        guard let object = try? JSONSerialization.jsonObject(with: input.manifest) as? [String: Any], let payloads = object["payloads"] as? [[String: Any]], payloads.contains(where: { ($0["path"] as? String)?.hasPrefix("images/") == true }), input.payloads.keys.contains("metadata/photos.json") else { throw FinalizationError.missingPhoto }
-        for item in payloads {
+        guard let object = try? JSONSerialization.jsonObject(with: input.manifest) as? [String: Any], object["schema_version"] as? String == PackScanWriter.schemaVersion, let declared = object["payloads"] as? [[String: Any]], let checksums = object["checksums"] as? [String: Any], checksums["algorithm"] as? String == "sha256" else { throw FinalizationError.invalidManifest }
+        guard input.payloads.keys.contains("metadata/photos.json"), declared.contains(where: { ($0["path"] as? String)?.hasPrefix("images/") == true }) else { throw FinalizationError.missingPhoto }
+        guard let metadataBytes = input.payloads["metadata/photos.json"], let document = try? JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: metadataBytes), !document.photos.isEmpty else { throw FinalizationError.invalidMetadataBinding }
+        for photo in document.photos {
+            guard let bytes = input.payloads[photo.imagePath], !bytes.isEmpty else { throw FinalizationError.invalidMetadataBinding }
+            guard photo.imagePath == "images/\(photo.originalFilename)" else { throw FinalizationError.invalidMetadataBinding }
+        }
+        for item in declared {
             guard let path = item["path"] as? String, let bytes = input.payloads[path], let size = item["size_bytes"] as? Int, bytes.count == size else { throw FinalizationError.checksumFailure }
+            guard let digest = item["sha256"] as? String, digest == SourceIntegrity.digest(bytes) else { throw FinalizationError.checksumFailure }
         }
     }
     public func finalize(_ input: FinalizationInput) throws {
