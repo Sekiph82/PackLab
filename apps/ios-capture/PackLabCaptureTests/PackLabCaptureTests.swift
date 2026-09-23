@@ -156,6 +156,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(policy.snapshot.poseEvidenceEligible)
     }
 
+    func testPoseAlignmentRejectsMissingStaleAndUnavailableSamples() {
+        let sample = PoseSample(timestamp: 10, transform: Array(repeating: 0, count: 16), tracking: .normal)
+        XCTAssertEqual(PoseAligner.nearest(to: 10.05, samples: [sample]).status, "available")
+        XCTAssertEqual(PoseAligner.nearest(to: 11, samples: [sample]).status, "stale")
+        XCTAssertEqual(PoseAligner.nearest(to: 10, samples: []).status, "unavailable")
+        let unavailable = PoseSample(timestamp: 10, transform: Array(repeating: 0, count: 16), tracking: .unavailable)
+        XCTAssertEqual(PoseAligner.nearest(to: 10, samples: [unavailable]).status, "unavailable")
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)

@@ -52,3 +52,27 @@ public final class ARWorldTrackingController: NSObject, ARSessionDelegate {
     public func sessionInterruptionEnded(_ session: ARSession) { policy.reset() }
 }
 #endif
+
+public struct PoseSample: Codable, Sendable, Equatable {
+    public let timestamp: TimeInterval
+    public let transform: [Double]
+    public let tracking: TrackingQuality
+    public init(timestamp: TimeInterval, transform: [Double], tracking: TrackingQuality) { self.timestamp = timestamp; self.transform = transform; self.tracking = tracking }
+}
+
+public struct AlignedPose: Codable, Sendable, Equatable {
+    public let sample: PoseSample?
+    public let delta: TimeInterval?
+    public let status: String
+    public init(sample: PoseSample?, delta: TimeInterval?, status: String) { self.sample = sample; self.delta = delta; self.status = status }
+}
+
+public enum PoseAligner {
+    public static func nearest(to timestamp: TimeInterval, samples: [PoseSample], tolerance: TimeInterval = 0.1) -> AlignedPose {
+        guard let candidate = samples.min(by: { abs($0.timestamp - timestamp) < abs($1.timestamp - timestamp) }) else { return AlignedPose(sample: nil, delta: nil, status: "unavailable") }
+        let delta = candidate.timestamp - timestamp
+        guard abs(delta) <= tolerance else { return AlignedPose(sample: nil, delta: delta, status: "stale") }
+        guard candidate.tracking != .unavailable else { return AlignedPose(sample: nil, delta: delta, status: "unavailable") }
+        return AlignedPose(sample: candidate, delta: delta, status: "available")
+    }
+}
