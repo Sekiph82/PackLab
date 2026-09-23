@@ -17,6 +17,8 @@ Final implementation/evidence commit: `8210bff03801e9a316babf483213a377401bb3cb`
 
 Each child was executed in master-prompt order. The prompt, criteria, and previous audit are the frozen versioned files in the canonical session directory.
 
+Canonical URL rule for every row: prepend `https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/` to the exact filename shown in the Prompt, Criteria, or Previous audit column.
+
 | Child | Prompt | Criteria | Previous audit | Start | Implementation | Log |
 |---|---|---|---|---|---|---|
 | PL-0069 | `PL-0069_CODEX_PROMPT_V04.md` | `PL-0069_CHATGPT_AUDIT_CRITERIA_V04.md` | `PL-0069_CHATGPT_AUDIT_V03.md` | `aa0dc80` | `10ff9e5` | `921d99c` |
