@@ -26,6 +26,18 @@ public enum NewScanDraftValidator {
     }
 }
 
+public struct NewScanWorkflowModel: Sendable, Equatable {
+    public enum State: Sendable, Equatable { case editing, validationFailed(String), started(NewScanDraft), cancelled }
+    public private(set) var state: State = .editing
+    public init() {}
+    public mutating func start(name: String, type: PackageType, mode: CaptureModeID, notes: String = "", now: Date = Date(), sessionID: String = UUID().uuidString) -> NewScanDraft? {
+        do { let draft = try NewScanDraftValidator.make(name: name, type: type, mode: mode, notes: notes, now: now, sessionID: sessionID); state = .started(draft); return draft }
+        catch let error as NewScanDraftError { state = .validationFailed(String(describing: error)); return nil }
+        catch { state = .validationFailed("invalid") ; return nil }
+    }
+    public mutating func cancel() { state = .cancelled }
+}
+
 public struct SessionStorageLayout: Sendable, Equatable {
     public let root: URL
     public let sessionID: String
@@ -175,6 +187,7 @@ public struct NewScanWizard: View {
     @State private var packageType: PackageType = .bottle
     @State private var mode: CaptureModeID = .freehand
     @State private var notes = ""
+    @State private var validationMessage: String?
     public let onStart: (NewScanDraft) -> Void
     public init(onStart: @escaping (NewScanDraft) -> Void) { self.onStart = onStart }
     public var body: some View {
@@ -183,7 +196,19 @@ public struct NewScanWizard: View {
             Picker("Package type", selection: $packageType) { ForEach(PackageType.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
             Picker("Capture mode", selection: $mode) { ForEach(CaptureModeID.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
             TextField("Notes (optional)", text: $notes, axis: .vertical)
-            HStack { Button("Cancel") { dismiss() }; Spacer(); Button("Start") { if let draft = try? NewScanDraftValidator.make(name: name, type: packageType, mode: mode, notes: notes) { onStart(draft); dismiss() } } }
+            if let validationMessage { Text(validationMessage).foregroundStyle(.red).accessibilityAddTraits(.isStaticText) }
+            HStack {
+                Button("Cancel") { dismiss() }
+                Spacer()
+                Button("Start") {
+                    do {
+                        let draft = try NewScanDraftValidator.make(name: name, type: packageType, mode: mode, notes: notes)
+                        onStart(draft); dismiss()
+                    } catch let error as NewScanDraftError {
+                        validationMessage = "Cannot start scan: \(error)"
+                    } catch { validationMessage = "Cannot start scan." }
+                }
+            }
         }.navigationTitle("New Scan")
     }
 }

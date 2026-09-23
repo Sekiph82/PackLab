@@ -429,6 +429,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertThrowsError(try NewScanDraftValidator.make(name: String(repeating: "x", count: 121), type: .bottle, mode: .freehand)) { XCTAssertEqual($0 as? NewScanDraftError, .nameTooLong) }
     }
 
+    func testNewScanWorkflowCoversCancelStartFailureAndAllM02Modes() {
+        var workflow = NewScanWorkflowModel()
+        XCTAssertNil(workflow.start(name: "", type: .bottle, mode: .freehand, sessionID: "s1"))
+        if case .validationFailed = workflow.state {} else { XCTFail("invalid start must be visible in workflow state") }
+        XCTAssertNotNil(workflow.start(name: "Bottle", type: .bottle, mode: .freehand, sessionID: "s1"))
+        XCTAssertNotNil(workflow.start(name: "Bottle", type: .bottle, mode: .guidedOrbit, sessionID: "s2"))
+        XCTAssertNotNil(workflow.start(name: "Bottle", type: .bottle, mode: .turntable, sessionID: "s3"))
+        workflow.cancel()
+        XCTAssertEqual(workflow.state, .cancelled)
+    }
+
     func testSessionStorageLayoutSeparatesSourcesDerivativesAndTemps() {
         let layout = SessionStorageLayout(root: URL(fileURLWithPath: "/tmp/packlab"), sessionID: "s1")
         XCTAssertTrue(layout.images.path.hasSuffix("s1/images"))
