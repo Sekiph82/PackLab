@@ -5,12 +5,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M03
-- Current Sprint: M03-BATCH-001 — Full iOS Capture Foundation
-- Current Task: M03-BATCH-001 — Execute PL-0069 through PL-0093
+- Current Sprint: M03-BATCH-002 — Independent-audit remediation
+- Current Task: M03-BATCH-002 — Remediate PL-0069 and PL-0071 through PL-0093
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0069 through PL-0093 in frozen order using each child prompt/criteria, publish one implementation boundary and one child log per task, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. Do not edit TASKS.md, do not start M04, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve accepted PL-0070, remediate exactly the 24 failed M03 children using their frozen versioned work orders, publish one implementation boundary and one remediation log per child, then publish MASTER_REMEDIATION_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. Do not edit TASKS.md, do not start M04, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner explicitly authorized M03 milestone-batch execution without closing PL-0068 on 2026-09-23. Resume the physical benchmark later when printing/measurement is possible.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED (1/25 accepted; PL-0070 only)
+- Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner explicitly authorized M03 execution/remediation without closing PL-0068 on 2026-09-23.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
 
@@ -165,7 +166,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Sprint M03-S01 - Camera control
 
 - [ ] **PL-0069** Integrate NextLevel preview into SwiftUI using a controlled UIKit bridge where required.
-- [ ] **PL-0070** Enumerate iPhone 16 rear-camera devices and select the intended main lens deterministically.
+- [x] **PL-0070** Enumerate iPhone 16 rear-camera devices and select the intended main lens deterministically.
 - [ ] **PL-0071** Implement high-resolution still-photo capture for reconstruction source images.
 - [ ] **PL-0072** Preserve original capture metadata without destructive resizing or social-media style processing.
 - [ ] **PL-0073** Implement focus control with guided autofocus followed by optional focus lock.
