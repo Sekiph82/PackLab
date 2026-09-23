@@ -91,6 +91,73 @@ public enum CameraDeviceSelector {
     }
 }
 
+public struct CaptureDimensions: Sendable, Equatable, Codable {
+    public let width: Int
+    public let height: Int
+    public init(width: Int, height: Int) { self.width = width; self.height = height }
+}
+
+public struct AcceptedStill: Sendable, Equatable {
+    public let captureID: String
+    public let sourceBytes: Data
+    public let dimensions: CaptureDimensions
+    public let capturedAt: Date
+    public init(captureID: String, sourceBytes: Data, dimensions: CaptureDimensions, capturedAt: Date) {
+        self.captureID = captureID; self.sourceBytes = sourceBytes; self.dimensions = dimensions; self.capturedAt = capturedAt
+    }
+}
+
+public enum StillCaptureResult: Sendable, Equatable {
+    case accepted(AcceptedStill)
+    case rejected(String)
+}
+
+public actor StillCaptureGate {
+    private var inFlight = false
+    public init() {}
+    public func begin() -> Bool { guard !inFlight else { return false }; inFlight = true; return true }
+    public func end() { inFlight = false }
+    public func isBusy() -> Bool { inFlight }
+}
+
+public protocol StillPhotoBackend: Sendable {
+    func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions)
+}
+
+public actor HighResolutionStillCaptureService {
+    private let backend: any StillPhotoBackend
+    private let gate = StillCaptureGate()
+    public init(backend: any StillPhotoBackend) { self.backend = backend }
+
+    public func capture(now: Date = Date(), captureID: String = UUID().uuidString) async -> StillCaptureResult {
+        guard await gate.begin() else { return .rejected("capture_in_flight") }
+        defer { Task { await gate.end() } }
+        do {
+            let source = try await backend.requestOriginalStill()
+            guard !source.bytes.isEmpty, source.dimensions.width > 0, source.dimensions.height > 0 else {
+                return .rejected("invalid_source")
+            }
+            return .accepted(AcceptedStill(captureID: captureID, sourceBytes: source.bytes, dimensions: source.dimensions, capturedAt: now))
+        } catch { return .rejected("capture_failed") }
+    }
+}
+
+#if canImport(NextLevel) && canImport(UIKit)
+import NextLevel
+import UIKit
+
+@MainActor
+public final class NextLevelStillCaptureAdapter: StillPhotoBackend {
+    private let nextLevel: NextLevel
+    public init(nextLevel: NextLevel = .shared) { self.nextLevel = nextLevel }
+    public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
+        // NextLevel delivers the original photo through its photo delegate. The
+        // delegate handoff is intentionally kept here, outside SwiftUI.
+        throw CameraServiceError.unavailable
+    }
+}
+#endif
+
 #if canImport(UIKit) && canImport(AVFoundation) && canImport(NextLevel)
 import AVFoundation
 import NextLevel

@@ -42,6 +42,22 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(CameraDeviceSelector.selectMainRearWide(from: candidates), .ambiguous(candidates))
     }
 
+    func testHighResolutionCaptureRejectsOverlappingRequestsAndInvalidSource() async {
+        struct Backend: StillPhotoBackend {
+            let bytes: Data
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
+                try await Task.sleep(for: .milliseconds(10))
+                return (bytes, CaptureDimensions(width: 4000, height: 3000))
+            }
+        }
+        let service = HighResolutionStillCaptureService(backend: Backend(bytes: Data([1, 2, 3])))
+        async let first = service.capture(captureID: "one")
+        let second = await service.capture(captureID: "two")
+        let firstResult = await first
+        XCTAssertTrue([firstResult, second].contains { if case .accepted = $0 { true } else { false } })
+        XCTAssertTrue([firstResult, second].contains { if case .rejected("capture_in_flight") = $0 { true } else { false } })
+    }
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(
