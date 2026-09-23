@@ -690,6 +690,12 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(bound.exposureSeconds.source, "device_api")
     }
 
+    func testPL0075WhiteBalanceRequiresObservedReadingBeforeAcceptedMetadata() throws {
+        let binding = try WhiteBalanceCaptureBinding(reading: WhiteBalanceCaptureReading(temperatureKelvin: 5000), state: .locked)
+        XCTAssertTrue(binding.reading.isValid)
+        XCTAssertThrowsError(try WhiteBalanceCaptureBinding(reading: WhiteBalanceCaptureReading(temperatureKelvin: 999)))
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
