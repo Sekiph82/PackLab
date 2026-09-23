@@ -127,6 +127,22 @@ public struct SessionFinalizer: Sendable {
     }
 }
 
+public struct ScanHistoryEntry: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let packageName: String
+    public let packageType: PackageType?
+    public let date: Date?
+    public let previewPath: String?
+    public let exportState: String
+    public let degradedReason: String?
+    public init(id: String, packageName: String, packageType: PackageType?, date: Date?, previewPath: String?, exportState: String, degradedReason: String? = nil) { self.id = id; self.packageName = packageName; self.packageType = packageType; self.date = date; self.previewPath = previewPath; self.exportState = exportState; self.degradedReason = degradedReason }
+}
+public struct ScanHistoryIndex: Sendable, Equatable {
+    public init() {}
+    public func sorted(_ entries: [ScanHistoryEntry]) -> [ScanHistoryEntry] { entries.sorted { ($0.date ?? .distantPast, $0.id) > ($1.date ?? .distantPast, $1.id) } }
+    public func degraded(id: String, reason: String) -> ScanHistoryEntry { ScanHistoryEntry(id: id, packageName: "Unavailable scan", packageType: nil, date: nil, previewPath: nil, exportState: "unavailable", degradedReason: reason) }
+}
+
 #if canImport(SwiftUI)
 import SwiftUI
 public struct NewScanWizard: View {

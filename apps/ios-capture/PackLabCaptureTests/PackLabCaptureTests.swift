@@ -256,6 +256,13 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertThrowsError(try SessionFinalizer().validate(input)) { error in XCTAssertEqual(error as? FinalizationError, .missingPhoto) }
     }
 
+    func testHistoryIndexSortsDeterministicallyAndKeepsDegradedEntries() {
+        let index = ScanHistoryIndex()
+        let entries = [ScanHistoryEntry(id: "b", packageName: "B", packageType: .bottle, date: Date(timeIntervalSince1970: 1), previewPath: nil, exportState: "in_progress"), ScanHistoryEntry(id: "a", packageName: "A", packageType: .jar, date: Date(timeIntervalSince1970: 2), previewPath: "previews/a.jpg", exportState: "exported")]
+        XCTAssertEqual(index.sorted(entries).map(\.id), ["a", "b"])
+        XCTAssertEqual(index.degraded(id: "missing", reason: "corrupt_record").exportState, "unavailable")
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
