@@ -782,6 +782,13 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(overlay.lines.contains { $0.contains("Motion t=") })
     }
 
+    func testPL0086DiagnosticsExportCarriesUnitsAndUsesPrivacyBoundary() throws {
+        let pose = AlignedPose(sample: PoseSample(timestamp: 1, transform: CoordinateTransform.identity.values, tracking: .normal), delta: 0, status: "available")
+        let data = try PoseDiagnosticsExporter.encode(records: [PoseDiagnosticRecord(captureID: "../private", captureTimestamp: 1, pose: pose, motion: nil, epoch: 0)])
+        let json = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(json.contains("basis_conversion")); XCTAssertTrue(json.contains("translation_unit")); XCTAssertFalse(json.contains("../private"))
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
