@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from packlab_core.calibration import ScaleEstimate, score_calibration_confidence
 
+EPSILON = 0.000001
+
 
 def _estimate(
     marker_count: int,
@@ -42,11 +44,17 @@ def test_exact_accepted_threshold_is_accepted() -> None:
     assert result.thresholds["accepted_min_score"] == 0.8
 
 
-def test_just_below_accepted_threshold_warns() -> None:
-    result = score_calibration_confidence(_estimate(4, residual=0.0252, edge_spread=0.0))
-    assert result.status == "warning"
-    assert result.score < result.thresholds["accepted_min_score"]
-    assert result.usable_for_capture is True
+def test_accepted_score_boundary_immediate_below_exact_above() -> None:
+    above = score_calibration_confidence(_estimate(4, residual=0.025 - EPSILON, edge_spread=0.0))
+    exact = score_calibration_confidence(_estimate(4, residual=0.025, edge_spread=0.0))
+    below = score_calibration_confidence(_estimate(4, residual=0.025 + EPSILON, edge_spread=0.0))
+
+    assert above.score > above.thresholds["accepted_min_score"]
+    assert above.status == "accepted"
+    assert exact.score == exact.thresholds["accepted_min_score"] == 0.8
+    assert exact.status == "accepted"
+    assert below.score < below.thresholds["accepted_min_score"]
+    assert below.status == "warning"
 
 
 def test_exact_warning_threshold_warns() -> None:
@@ -57,11 +65,77 @@ def test_exact_warning_threshold_warns() -> None:
     assert result.thresholds["reject_below_score"] == result.thresholds["warning_min_score"]
 
 
-def test_just_below_warning_threshold_fails_closed() -> None:
-    result = score_calibration_confidence(_estimate(4, residual=0.05, edge_spread=0.0006))
+def test_warning_score_boundary_immediate_below_exact_above() -> None:
+    above = score_calibration_confidence(_estimate(4, residual=0.05 - EPSILON, edge_spread=0.0))
+    exact = score_calibration_confidence(_estimate(4, residual=0.05, edge_spread=0.0))
+    below = score_calibration_confidence(_estimate(4, residual=0.05, edge_spread=EPSILON))
+
+    assert above.score > above.thresholds["warning_min_score"]
+    assert above.status == "warning"
+    assert exact.score == exact.thresholds["warning_min_score"] == 0.6
+    assert exact.status == "warning"
+    assert below.score < below.thresholds["warning_min_score"]
+    assert below.status == "rejected"
+    assert below.usable_for_capture is False
+
+
+def test_residual_hard_gate_boundary_immediate_below_exact_above() -> None:
+    below = score_calibration_confidence(_estimate(4, residual=0.05 - EPSILON, edge_spread=0.0))
+    exact = score_calibration_confidence(_estimate(4, residual=0.05, edge_spread=0.0))
+    above = score_calibration_confidence(_estimate(4, residual=0.05 + EPSILON, edge_spread=0.0))
+
+    assert below.status == "warning"
+    assert below.factors["max_relative_residual"] < below.thresholds["max_relative_residual"]
+    assert exact.status == "warning"
+    assert exact.factors["max_relative_residual"] == exact.thresholds["max_relative_residual"]
+    assert above.status == "rejected"
+    assert above.score == 0.0
+    assert above.reasons == ("max_relative_residual_above_hard_gate",)
+    assert above.usable_for_capture is False
+
+
+def test_edge_spread_hard_gate_boundary_immediate_below_exact_above() -> None:
+    below = score_calibration_confidence(_estimate(4, residual=0.0, edge_spread=0.03 - EPSILON))
+    exact = score_calibration_confidence(_estimate(4, residual=0.0, edge_spread=0.03))
+    above = score_calibration_confidence(_estimate(4, residual=0.0, edge_spread=0.03 + EPSILON))
+
+    assert below.status == "warning"
+    assert below.factors["max_relative_edge_spread"] < below.thresholds["max_relative_edge_spread"]
+    assert exact.status == "warning"
+    assert exact.factors["max_relative_edge_spread"] == exact.thresholds["max_relative_edge_spread"]
+    assert above.status == "rejected"
+    assert above.score == 0.0
+    assert above.reasons == ("max_relative_edge_spread_above_hard_gate",)
+    assert above.usable_for_capture is False
+
+
+def test_marker_count_full_credit_boundary_immediate_below_exact_above() -> None:
+    below = score_calibration_confidence(_estimate(3, residual=0.0, edge_spread=0.0))
+    exact = score_calibration_confidence(_estimate(4, residual=0.0, edge_spread=0.0))
+    above = score_calibration_confidence(_estimate(5, residual=0.0, edge_spread=0.0))
+
+    assert below.factors["count_factor"] == 0.75
+    assert below.score == 0.9125
+    assert exact.factors["count_factor"] == 1.0
+    assert exact.score == 1.0
+    assert above.factors["count_factor"] == 1.0
+    assert above.score == 1.0
+
+
+def test_adversarial_above_residual_gate_fails_even_with_strong_other_factors() -> None:
+    result = score_calibration_confidence(_estimate(8, residual=0.05 + EPSILON, edge_spread=0.0))
     assert result.status == "rejected"
-    assert result.score < result.thresholds["warning_min_score"]
+    assert result.score == 0.0
     assert result.usable_for_capture is False
+    assert result.reasons == ("max_relative_residual_above_hard_gate",)
+
+
+def test_adversarial_above_edge_spread_gate_fails_even_with_strong_other_factors() -> None:
+    result = score_calibration_confidence(_estimate(8, residual=0.0, edge_spread=0.03 + EPSILON))
+    assert result.status == "rejected"
+    assert result.score == 0.0
+    assert result.usable_for_capture is False
+    assert result.reasons == ("max_relative_edge_spread_above_hard_gate",)
 
 
 def test_rejected_scale_estimate_fails_closed_without_capture_use() -> None:
