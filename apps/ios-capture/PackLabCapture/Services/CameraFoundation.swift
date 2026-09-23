@@ -183,6 +183,35 @@ public enum SourceIntegrity {
     }
 }
 
+public struct PhotoCaptureMetadata: Codable, Sendable, Equatable {
+    public let photoID: String
+    public let imagePath: String
+    public let sequence: Int
+    public let originalFilename: String
+    public let pixelDimensions: CaptureDimensions
+    public let orientation: String
+    public let lensIdentity: CameraLensIdentity
+    public let focalLengthMM: SourceMeasurement
+    public let exposureSeconds: SourceMeasurement
+    public let iso: SourceMeasurement
+    public let whiteBalanceKelvin: SourceMeasurement
+    public let captureTimestamp: Date
+    public init(photoID: String, imagePath: String, sequence: Int, originalFilename: String, pixelDimensions: CaptureDimensions, orientation: String, lensIdentity: CameraLensIdentity, focalLengthMM: SourceMeasurement, exposureSeconds: SourceMeasurement, iso: SourceMeasurement, whiteBalanceKelvin: SourceMeasurement, captureTimestamp: Date) {
+        self.photoID = photoID; self.imagePath = imagePath; self.sequence = sequence; self.originalFilename = originalFilename; self.pixelDimensions = pixelDimensions; self.orientation = orientation; self.lensIdentity = lensIdentity; self.focalLengthMM = focalLengthMM; self.exposureSeconds = exposureSeconds; self.iso = iso; self.whiteBalanceKelvin = whiteBalanceKelvin; self.captureTimestamp = captureTimestamp
+    }
+}
+
+public enum PhotoMetadataBindingError: Error, Sendable, Equatable { case missingSource, idMismatch, pathMismatch, digestMismatch }
+
+public enum PhotoMetadataBinding {
+    public static func validate(metadata: PhotoCaptureMetadata, source: OriginalSourceRecord, bytes: Data) throws {
+        guard !bytes.isEmpty else { throw PhotoMetadataBindingError.missingSource }
+        guard metadata.photoID == source.captureID else { throw PhotoMetadataBindingError.idMismatch }
+        guard metadata.imagePath == "images/\(source.filename)" else { throw PhotoMetadataBindingError.pathMismatch }
+        guard metadata.pixelDimensions == source.dimensions, SourceIntegrity.digest(bytes) == source.sha256 else { throw PhotoMetadataBindingError.digestMismatch }
+    }
+}
+
 public enum FocusState: String, Sendable, Codable, Equatable { case unavailable, focusing, continuous, locked, failed }
 public struct FocusCapabilities: Sendable, Equatable { public let point: Bool; public let lock: Bool; public init(point: Bool, lock: Bool) { self.point = point; self.lock = lock } }
 
