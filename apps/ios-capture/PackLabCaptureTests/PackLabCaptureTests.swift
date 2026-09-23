@@ -763,6 +763,16 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(recovery.diagnostics.count, 4)
     }
 
+    func testPL0084ResetEpochSeparatesOldPoseAndRetainsReason() {
+        var epochs = SessionEpochCoordinator()
+        epochs.reset(reason: .trackingDegraded)
+        XCTAssertFalse(epochs.accepts(poseEpoch: 0))
+        XCTAssertFalse(epochs.accepts(poseEpoch: 1))
+        epochs.recovered()
+        XCTAssertTrue(epochs.accepts(poseEpoch: 1))
+        XCTAssertEqual(epochs.lastReason, .trackingDegraded)
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
