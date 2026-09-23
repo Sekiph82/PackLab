@@ -441,6 +441,29 @@ public struct ExposurePolicy: Sendable, Equatable {
     }
 }
 
+public struct ExposureCaptureReading: Sendable, Equatable {
+    public let exposureSeconds: Double
+    public let iso: Int
+    public let bias: Float
+    public init(exposureSeconds: Double, iso: Int, bias: Float) {
+        self.exposureSeconds = exposureSeconds; self.iso = iso; self.bias = bias
+    }
+    public var isValid: Bool { exposureSeconds > 0 && exposureSeconds.isFinite && iso >= 1 && bias.isFinite }
+}
+
+public enum ExposureCaptureBindingError: Error, Sendable, Equatable { case unavailable, invalidReading }
+
+public struct ExposureCaptureBinding: Sendable, Equatable {
+    public let reading: ExposureCaptureReading
+    public private(set) var state: ExposureState
+    public init(reading: ExposureCaptureReading, state: ExposureState = .metering) throws {
+        guard reading.isValid else { throw ExposureCaptureBindingError.invalidReading }
+        guard state == .metering || state == .locked else { throw ExposureCaptureBindingError.unavailable }
+        self.reading = reading; self.state = state
+    }
+    public mutating func lock() { state = .locked }
+}
+
 public enum WhiteBalanceState: String, Sendable, Codable, Equatable { case unavailable, stabilizing, locked, failed }
 public struct WhiteBalanceCapabilities: Sendable, Equatable { public let continuous: Bool; public let lock: Bool; public init(continuous: Bool, lock: Bool) { self.continuous = continuous; self.lock = lock } }
 

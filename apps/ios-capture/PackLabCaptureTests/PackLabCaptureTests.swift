@@ -125,6 +125,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(unsupported.lock(capabilities: ExposureCapabilities(minBias: -1, maxBias: 1, lock: false)), .failed)
     }
 
+    func testExposureCaptureBindingRequiresFiniteReadingAndUsesIntegerISO() throws {
+        var binding = try ExposureCaptureBinding(reading: ExposureCaptureReading(exposureSeconds: 0.01, iso: 400, bias: 0))
+        XCTAssertEqual(binding.reading.iso, 400)
+        XCTAssertEqual(binding.state, .metering)
+        binding.lock()
+        XCTAssertEqual(binding.state, .locked)
+        XCTAssertThrowsError(try ExposureCaptureBinding(reading: ExposureCaptureReading(exposureSeconds: .nan, iso: 400, bias: 0))) { error in
+            XCTAssertEqual(error as? ExposureCaptureBindingError, .invalidReading)
+        }
+    }
+
     func testWhiteBalancePolicyDoesNotInventTemperature() {
         var policy = WhiteBalancePolicy()
         XCTAssertEqual(policy.stabilize(capabilities: WhiteBalanceCapabilities(continuous: true, lock: true)), .stabilizing)
