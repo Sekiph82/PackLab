@@ -747,6 +747,13 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(buffer.samples.last?.rotationRate, [0.7, 0.8, 0.9])
     }
 
+    func testPL0082GoldenCoordinateRotationsAndBasisVersion() {
+        XCTAssertEqual(CoordinateTransform.rotationX(.pi / 2).values[6], -1, accuracy: 1e-12)
+        XCTAssertEqual(CoordinateTransform.rotationY(.pi / 2).values[8], -1, accuracy: 1e-12)
+        XCTAssertEqual(CoordinateTransform.rotationZ(.pi / 2).values[4], 1, accuracy: 1e-12)
+        XCTAssertEqual(PackScanCoordinateContract.basisConversion, "arkit_to_packscan_identity_shared_right_handed_basis_v1")
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
