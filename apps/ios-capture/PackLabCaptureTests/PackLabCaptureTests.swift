@@ -808,6 +808,13 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("p1.json"))).captureID, "p1")
     }
 
+    func testPL0089GalleryOrderingAndReplacementTraceRemainDeterministic() throws {
+        var gallery = GalleryModel(entries: [GalleryEntry(id: "a", previewPath: nil, sourcePath: "images/a.heic", sequence: 0)])
+        try gallery.retake(replacing: "a", with: GalleryEntry(id: "b", previewPath: nil, sourcePath: "images/b.heic", sequence: 1))
+        XCTAssertEqual(gallery.replacementTrace["a"], "b")
+        XCTAssertEqual(gallery.entries.map(\.id), ["a", "b"])
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
