@@ -156,3 +156,74 @@ def test_optional_derived_payloads_are_safe_when_omitted(tmp_path: Path, repo_ro
         )
     )
     assert not any(path.startswith(("previews/", "diagnostics/")) for path in report.payloads)
+
+
+@pytest.mark.parametrize(
+    ("mutation_name", "mutate"),
+    [
+        ("empty-device-model", lambda manifest: manifest["device"].update({"model": ""})),
+        (
+            "malformed-os-version",
+            lambda manifest: manifest["device"].update({"os_version": "iOS seventeen"}),
+        ),
+        (
+            "invalid-device-identifier",
+            lambda manifest: manifest["device"].update({"device_identifier": "bad id!"}),
+        ),
+        (
+            "invalid-lens",
+            lambda manifest: manifest["device"].update({"lens": ""}),
+        ),
+        (
+            "invalid-source-provenance",
+            lambda manifest: manifest["source_evidence"].update({"provenance": ""}),
+        ),
+        (
+            "invalid-optional-started-at",
+            lambda manifest: manifest.update({"started_at": "2026-09-23T10:00:00+03:00"}),
+        ),
+        (
+            "invalid-optional-media-type",
+            lambda manifest: manifest["payloads"][0].update({"media_type": "Image/JPEG"}),
+        ),
+    ],
+)
+def test_validate_packscan_rejects_manifest_schema_drift(
+    tmp_path: Path, repo_root: Path, mutation_name: str, mutate
+) -> None:
+    manifest = _manifest(repo_root)
+    mutate(manifest)
+    _write_raw(tmp_path / f"{mutation_name}.packscan", _valid_files(manifest))
+    with pytest.raises(PackScanError) as error:
+        read_packscan(tmp_path / f"{mutation_name}.packscan")
+    assert error.value.code == "schema_invalid"
+
+
+def test_validate_packscan_rejects_checksum_schema_drift(tmp_path: Path, repo_root: Path) -> None:
+    manifest = _manifest(repo_root)
+    files = _valid_files(manifest)
+    checksums = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
+    files["checksums.json"] = (
+        json.dumps(
+            {
+                "schema_version": "1.0.0",
+                "algorithm": "sha256",
+                "canonicalization": "lowercase_hex_64_bytes",
+                "entries": checksums,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+    with zipfile.ZipFile(
+        tmp_path / "checksum-schema-drift.packscan",
+        "w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=9,
+    ) as archive:
+        for name, data in files.items():
+            archive.writestr(name, data)
+    with pytest.raises(PackScanError) as error:
+        read_packscan(tmp_path / "checksum-schema-drift.packscan")
+    assert error.value.code == "invalid_checksums"
