@@ -723,10 +723,19 @@ final class PackLabCaptureTests: XCTestCase {
     func testPL0079FoundationTrackingServiceUsesOneLifecycleContract() async {
         let service = FoundationARTrackingService(isAvailable: true)
         await service.start()
-        XCTAssertEqual(await service.state(), .tracking)
-        XCTAssertTrue((await service.snapshot()).poseEvidenceEligible)
+        let runningState = await service.state()
+        let runningSnapshot = await service.snapshot()
+        XCTAssertEqual(runningState, .tracking)
+        XCTAssertTrue(runningSnapshot.poseEvidenceEligible)
         await service.stop()
-        XCTAssertEqual(await service.state(), .idle)
+        let stoppedState = await service.state()
+        XCTAssertEqual(stoppedState, .idle)
+    }
+
+    func testPL0080AcceptedStillUsesTheARKitMonotonicDomainBridge() {
+        let wall = Date(timeIntervalSince1970: 50)
+        let bridge = TimestampDomainBridge(wallReference: wall, monotonicReference: 5)
+        XCTAssertEqual(bridge.monotonic(for: wall.addingTimeInterval(0.25)), 5.25, accuracy: 0.000001)
     }
 
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
