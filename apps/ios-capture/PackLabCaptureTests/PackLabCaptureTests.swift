@@ -263,6 +263,14 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(index.degraded(id: "missing", reason: "corrupt_record").exportState, "unavailable")
     }
 
+    func testDeletionPlanRequiresConfirmationAndStaysInsideRoot() {
+        let root = URL(fileURLWithPath: "/tmp/packlab")
+        let session = root.appendingPathComponent("s1")
+        XCTAssertThrowsError(try SessionDeletionPlan(root: root, session: session).validate(confirmed: false)) { XCTAssertEqual($0 as? DeletionError, .confirmationRequired) }
+        XCTAssertNoThrow(try SessionDeletionPlan(root: root, session: session).validate(confirmed: true))
+        XCTAssertThrowsError(try SessionDeletionPlan(root: root, session: URL(fileURLWithPath: "/tmp/other")).validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .outsideRoot) }
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)

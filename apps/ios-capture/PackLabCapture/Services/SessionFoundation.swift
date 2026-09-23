@@ -143,6 +143,30 @@ public struct ScanHistoryIndex: Sendable, Equatable {
     public func degraded(id: String, reason: String) -> ScanHistoryEntry { ScanHistoryEntry(id: id, packageName: "Unavailable scan", packageType: nil, date: nil, previewPath: nil, exportState: "unavailable", degradedReason: reason) }
 }
 
+public enum DeletionError: Error, Sendable, Equatable { case confirmationRequired, outsideRoot, symlinkEscape, partialFailure }
+public struct SessionDeletionPlan: Sendable, Equatable {
+    public let root: URL
+    public let session: URL
+    public init(root: URL, session: URL) { self.root = root.standardizedFileURL; self.session = session.standardizedFileURL }
+    public func validate(confirmed: Bool, fileManager: FileManager = .default) throws {
+        guard confirmed else { throw DeletionError.confirmationRequired }
+        let rootPath = root.resolvingSymlinksInPath.path
+        let sessionPath = session.resolvingSymlinksInPath.path
+        guard sessionPath != rootPath, sessionPath.hasPrefix(rootPath + "/") else { throw DeletionError.outsideRoot }
+        guard sessionPath == session.path else { throw DeletionError.symlinkEscape }
+        _ = fileManager
+    }
+}
+public actor SafeSessionDeleter {
+    private let fileManager: FileManager
+    public init(fileManager: FileManager = .default) { self.fileManager = fileManager }
+    public func delete(plan: SessionDeletionPlan, confirmed: Bool) throws {
+        try plan.validate(confirmed: confirmed, fileManager: fileManager)
+        guard fileManager.fileExists(atPath: plan.session.path) else { return }
+        do { try fileManager.removeItem(at: plan.session) } catch { throw DeletionError.partialFailure }
+    }
+}
+
 #if canImport(SwiftUI)
 import SwiftUI
 public struct NewScanWizard: View {
