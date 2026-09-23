@@ -681,6 +681,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(focus.lock(capabilities: FocusCapabilities(point: true, lock: true)), .locked)
     }
 
+    func testPL0074ExposureReadingIsPersistableOnlyWhenValid() throws {
+        let reading = try ExposureCaptureBinding(reading: ExposureCaptureReading(exposureSeconds: 0.02, iso: 200, bias: 0), state: .locked)
+        let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)
+        let base = PhotoCaptureMetadata(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 2, height: 2), orientation: "portrait", lensIdentity: lens, focalLengthMM: SourceMeasurement(status: .unavailable), exposureSeconds: SourceMeasurement(status: .unavailable), iso: SourceMeasurement(status: .unavailable), whiteBalanceKelvin: SourceMeasurement(status: .unavailable), captureTimestamp: Date())
+        let bound = AcceptedPhotoMetadataFactory.withCaptureReadings(base, exposure: reading, whiteBalance: nil)
+        XCTAssertEqual(bound.iso.value, 200)
+        XCTAssertEqual(bound.exposureSeconds.source, "device_api")
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
