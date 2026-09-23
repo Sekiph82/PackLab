@@ -236,6 +236,55 @@ public enum SourceIntegrity {
     }
 }
 
+public enum SourcePersistenceError: Error, Sendable, Equatable { case invalidName, sourceOverwritten, recordWriteFailed }
+
+/// Persists the immutable original and its source record together. The source
+/// file is never replaced; derivatives are intentionally outside this API.
+public actor OriginalSourceStore {
+    private let root: URL
+    private let fileManager: FileManager
+
+    public init(root: URL, fileManager: FileManager = .default) {
+        self.root = root
+        self.fileManager = fileManager
+    }
+
+    public func persist(record: OriginalSourceRecord, bytes: Data) throws -> URL {
+        guard !record.captureID.isEmpty,
+              record.captureID.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }),
+              !record.filename.isEmpty,
+              !record.filename.contains("/"),
+              !record.filename.contains("\\") else { throw SourcePersistenceError.invalidName }
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        try SourceIntegrity.validate(record: record, bytes: bytes, dimensions: record.dimensions)
+        let sourceURL = root.appendingPathComponent(record.filename)
+        if fileManager.fileExists(atPath: sourceURL.path) {
+            guard let existing = try? Data(contentsOf: sourceURL), SourceIntegrity.digest(existing) == record.sha256 else {
+                throw SourcePersistenceError.sourceOverwritten
+            }
+            return sourceURL
+        }
+        do {
+            try bytes.write(to: sourceURL, options: .atomic)
+            let recordURL = root.appendingPathComponent("\(record.captureID).source.json")
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            try encoder.encode(record).write(to: recordURL, options: .atomic)
+            return sourceURL
+        } catch {
+            try? fileManager.removeItem(at: sourceURL)
+            throw SourcePersistenceError.recordWriteFailed
+        }
+    }
+
+    public func load(recordID: String) throws -> OriginalSourceRecord {
+        let url = root.appendingPathComponent("\(recordID).source.json")
+        guard let data = try? Data(contentsOf: url), let record = try? JSONDecoder().decode(OriginalSourceRecord.self, from: data) else {
+            throw SourcePersistenceError.recordWriteFailed
+        }
+        return record
+    }
+}
+
 public struct PhotoCaptureMetadata: Codable, Sendable, Equatable {
     public let photoID: String
     public let imagePath: String

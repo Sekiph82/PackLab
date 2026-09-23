@@ -88,6 +88,25 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testOriginalSourceStorePersistsImmutableBytesAndRecord() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bytes = Data([4, 5, 6])
+        let record = OriginalSourceRecord(captureID: "capture-1", filename: "capture-1.heic", dimensions: CaptureDimensions(width: 4, height: 3), orientation: "portrait", sha256: SourceIntegrity.digest(bytes))
+        let store = OriginalSourceStore(root: root)
+        let url = try await store.persist(record: record, bytes: bytes)
+        XCTAssertEqual(try Data(contentsOf: url), bytes)
+        XCTAssertEqual(try await store.load(recordID: "capture-1"), record)
+        let repeatURL = try await store.persist(record: record, bytes: bytes)
+        XCTAssertEqual(repeatURL, url)
+        do {
+            _ = try await store.persist(record: record, bytes: Data([9]))
+            XCTFail("mismatched source must be rejected")
+        } catch {
+            XCTAssertEqual(error as? SourceIntegrityError, .digestMismatch)
+        }
+    }
+
     func testFocusPolicyRequiresCapabilityBeforeLock() {
         var policy = FocusPolicy()
         XCTAssertEqual(policy.begin(capabilities: FocusCapabilities(point: false, lock: true)), .unavailable)
