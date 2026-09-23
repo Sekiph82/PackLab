@@ -183,6 +183,51 @@ public enum SourceIntegrity {
     }
 }
 
+public enum FocusState: String, Sendable, Codable, Equatable { case unavailable, focusing, continuous, locked, failed }
+public struct FocusCapabilities: Sendable, Equatable { public let point: Bool; public let lock: Bool; public init(point: Bool, lock: Bool) { self.point = point; self.lock = lock } }
+
+public struct FocusPolicy: Sendable, Equatable {
+    public private(set) var state: FocusState = .unavailable
+    public init() {}
+    public mutating func begin(capabilities: FocusCapabilities) -> FocusState {
+        state = capabilities.point ? .focusing : .unavailable; return state
+    }
+    public mutating func stabilize() -> FocusState { if state == .focusing { state = .continuous }; return state }
+    public mutating func lock(capabilities: FocusCapabilities) -> FocusState {
+        state = state == .continuous && capabilities.lock ? .locked : .failed; return state
+    }
+}
+
+public actor CameraConfigurationCoordinator {
+    public init() {}
+    public func perform<T: Sendable>(_ operation: @Sendable () throws -> T) rethrows -> T { try operation() }
+}
+
+#if canImport(AVFoundation) && canImport(CoreGraphics)
+import AVFoundation
+import CoreGraphics
+
+@available(iOS 17.0, *)
+public enum AVFoundationFocusAdapter {
+    public static func configure(device: AVCaptureDevice, point: CGPoint?, lock: Bool) throws -> FocusState {
+        guard device.isFocusModeSupported(.continuousAutoFocus) else { return .unavailable }
+        try device.lockForConfiguration()
+        defer { device.unlockForConfiguration() }
+        if let point {
+            guard device.isFocusPointOfInterestSupported else { return .unavailable }
+            device.focusPointOfInterest = point
+        }
+        device.focusMode = .continuousAutoFocus
+        if lock {
+            guard device.isFocusModeSupported(.locked) else { return .failed }
+            device.focusMode = .locked
+            return .locked
+        }
+        return .continuous
+    }
+}
+#endif
+
 #if canImport(NextLevel) && canImport(UIKit)
 import NextLevel
 import UIKit

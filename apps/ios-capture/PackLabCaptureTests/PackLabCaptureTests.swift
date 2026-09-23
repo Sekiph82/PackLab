@@ -75,6 +75,15 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testFocusPolicyRequiresCapabilityBeforeLock() {
+        var policy = FocusPolicy()
+        XCTAssertEqual(policy.begin(capabilities: FocusCapabilities(point: false, lock: true)), .unavailable)
+        XCTAssertEqual(policy.lock(capabilities: FocusCapabilities(point: true, lock: true)), .failed)
+        XCTAssertEqual(policy.begin(capabilities: FocusCapabilities(point: true, lock: true)), .focusing)
+        XCTAssertEqual(policy.stabilize(), .continuous)
+        XCTAssertEqual(policy.lock(capabilities: FocusCapabilities(point: true, lock: true)), .locked)
+    }
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(
