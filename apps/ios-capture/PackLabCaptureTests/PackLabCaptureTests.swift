@@ -821,6 +821,10 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(SessionResumeValidator.disposition(state: PersistedSessionState(sessionID: "s", nextSequence: 1, epoch: 0, acceptedIDs: ["missing"]), requiredSourceIDs: []), .blocked("missing_source"))
     }
 
+    func testPL0091FinalizationCanonicalizationConstantMatchesM02() {
+        XCTAssertEqual(PackScanWriter.checksumCanonicalization, "sha256_32_bytes_lowercase_hex_64_chars_v1")
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
