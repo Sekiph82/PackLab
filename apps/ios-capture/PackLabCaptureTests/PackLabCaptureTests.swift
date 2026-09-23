@@ -141,6 +141,22 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(unavailable.severity, .normal)
     }
 
+    func testTrackingLifecycleIsUnavailableUntilRecovered() {
+        var policy = ARTrackingLifecyclePolicy()
+        XCTAssertFalse(policy.snapshot.poseEvidenceEligible)
+        policy.started()
+        XCTAssertEqual(policy.snapshot.quality, .limited)
+        policy.normal()
+        XCTAssertTrue(policy.snapshot.poseEvidenceEligible)
+        let oldEpoch = policy.epoch
+        policy.reset()
+        XCTAssertEqual(policy.epoch, oldEpoch + 1)
+        XCTAssertFalse(policy.snapshot.poseEvidenceEligible)
+        policy.recovered()
+        XCTAssertTrue(policy.snapshot.poseEvidenceEligible)
+    }
+
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(
