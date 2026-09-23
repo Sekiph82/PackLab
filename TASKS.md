@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M02
 - Current Sprint: M02-S02 — Calibration system
-- Current Task: PL-0067 — Synthetic calibration ground-truth reconciliation
+- Current Task: PL-0068 — First physical calibration benchmark preparation / owner handoff
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0067_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0067_CHATGPT_AUDIT_CRITERIA_V02.md. Preserve the audited M02 remediation contracts, publish PL-0067_CODEX_LOG_V02.md, return `READY_FOR_INDEPENDENT_AUDIT`, and stop before PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0068_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M02-C001/PL-0068_CHATGPT_AUDIT_CRITERIA_V02.md. Prepare the physical benchmark record/procedure without fabricating owner evidence; if genuine physical evidence is unavailable, publish PL-0068_CODEX_LOG_V02.md ending `OWNER_REQUIRED` and stop before M03.
 - Required Actor: CODEX
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -154,7 +154,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0064** Implement calibration confidence score and rejection thresholds.
 - [x] **PL-0065** Define camera-calibration procedure for iPhone main camera when higher accuracy than EXIF/intrinsics requires it.
 - [x] **PL-0066** Store calibration profile by device/lens/resolution and invalidate incompatible profiles.
-- [ ] **PL-0067** Build synthetic calibration tests with known ground-truth dimensions.
+- [x] **PL-0067** Build synthetic calibration tests with known ground-truth dimensions.
 - [ ] **PL-0068** Build first physical calibration benchmark and record measured error.
 
 ---
