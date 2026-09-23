@@ -668,6 +668,11 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(still.captureID, "p1")
     }
 
+    func testPL0072MetadataExtractorFailsClosedForUnsupportedBytes() {
+        XCTAssertThrowsError(try SourceMetadataExtractor.extract(from: Data())) { XCTAssertEqual($0 as? SourceMetadataError, .unsupported) }
+        XCTAssertEqual(SourceMetadataExtractor.decodedDimensions(from: Data()), nil)
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
