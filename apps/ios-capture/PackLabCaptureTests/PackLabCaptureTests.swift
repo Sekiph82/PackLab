@@ -712,6 +712,14 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(model.machine.apply(.restartFailed), .failed)
     }
 
+    func testPL0078HealthMonitorGateIsTheCaptureAdmissionBoundary() {
+        var controller = CaptureAdmissionController()
+        controller.update(.warning(DeviceHealthPolicy.evaluate(DeviceHealthSnapshot(thermal: .fair, availableStorageBytes: 500_000_000, batteryLevel: 0.5, batteryStateAvailable: true))))
+        XCTAssertTrue(controller.allowsCapture)
+        controller.update(.hardStop(DeviceHealthPolicy.evaluate(DeviceHealthSnapshot(thermal: .critical, availableStorageBytes: 1, batteryLevel: 0.01, batteryStateAvailable: true))))
+        XCTAssertFalse(controller.allowsCapture)
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
