@@ -110,6 +110,23 @@ public enum SessionResumeValidator {
     }
 }
 
+public enum FinalizationError: Error, Sendable, Equatable { case missingPhoto, invalidMetadataBinding, checksumFailure, invalidManifest, packagingFailed }
+public struct FinalizationInput: Sendable { public let manifest: Data; public let payloads: [String: Data]; public let destination: URL; public init(manifest: Data, payloads: [String: Data], destination: URL) { self.manifest = manifest; self.payloads = payloads; self.destination = destination } }
+public struct SessionFinalizer: Sendable {
+    public init() {}
+    public func validate(_ input: FinalizationInput) throws {
+        guard let object = try? JSONSerialization.jsonObject(with: input.manifest) as? [String: Any], let payloads = object["payloads"] as? [[String: Any]], payloads.contains(where: { ($0["path"] as? String)?.hasPrefix("images/") == true }), input.payloads.keys.contains("metadata/photos.json") else { throw FinalizationError.missingPhoto }
+        for item in payloads {
+            guard let path = item["path"] as? String, let bytes = input.payloads[path], let size = item["size_bytes"] as? Int, bytes.count == size else { throw FinalizationError.checksumFailure }
+        }
+    }
+    public func finalize(_ input: FinalizationInput) throws {
+        do { try validate(input); try PackScanWriter().write(manifestJSON: input.manifest, payloads: input.payloads, to: input.destination) }
+        catch let error as FinalizationError { throw error }
+        catch { throw FinalizationError.packagingFailed }
+    }
+}
+
 #if canImport(SwiftUI)
 import SwiftUI
 public struct NewScanWizard: View {
