@@ -114,6 +114,18 @@ public enum PackScanCoordinateContract {
     public static func appLocalToPackScan(_ transform: CoordinateTransform) -> CoordinateTransform { transform }
 }
 
+public enum TrackingQualityClassifier {
+    public static func classify(state: TrackingQuality, limitation: TrackingLimitation? = nil) -> TrackingSnapshot {
+        switch state {
+        case .normal: return TrackingSnapshot(quality: .normal, poseEvidenceEligible: true, message: "Tracking ready")
+        case .limited: return TrackingSnapshot(quality: .limited, limitation: limitation ?? .unknown, poseEvidenceEligible: false, message: "Tracking limited")
+        case .interrupted: return TrackingSnapshot(quality: .interrupted, limitation: .cameraUnavailable, poseEvidenceEligible: false, message: "Tracking interrupted")
+        case .recovering: return TrackingSnapshot(quality: .recovering, limitation: .relocalizing, poseEvidenceEligible: false, message: "Relocalizing")
+        case .unavailable: return TrackingSnapshot(quality: .unavailable, poseEvidenceEligible: false, message: "Tracking unavailable")
+        }
+    }
+}
+
 #if canImport(CoreMotion)
 import CoreMotion
 @MainActor

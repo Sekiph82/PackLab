@@ -180,6 +180,13 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PackScanCoordinateContract.units, "metres")
     }
 
+    func testTrackingClassifierGatesPoseEvidenceDuringFlapping() {
+        XCTAssertTrue(TrackingQualityClassifier.classify(state: .normal).poseEvidenceEligible)
+        XCTAssertFalse(TrackingQualityClassifier.classify(state: .limited, limitation: .insufficientFeatures).poseEvidenceEligible)
+        XCTAssertFalse(TrackingQualityClassifier.classify(state: .recovering).poseEvidenceEligible)
+        XCTAssertTrue(TrackingQualityClassifier.classify(state: .normal).poseEvidenceEligible)
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
