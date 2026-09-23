@@ -789,6 +789,13 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(json.contains("basis_conversion")); XCTAssertTrue(json.contains("translation_unit")); XCTAssertFalse(json.contains("../private"))
     }
 
+    func testPL0087WorkflowSeamInvokesStartOnlyForValidDraft() {
+        var workflow = NewScanWorkflowModel()
+        XCTAssertNil(workflow.start(name: "", type: .bottle, mode: .freehand, sessionID: "bad"))
+        XCTAssertNotNil(workflow.start(name: "Bottle", type: .bottle, mode: .guidedOrbit, sessionID: "good"))
+        if case .started(let draft) = workflow.state { XCTAssertEqual(draft.captureMode, .guidedOrbit) } else { XCTFail("valid draft must reach started state") }
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
