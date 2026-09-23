@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum PreviewSurfaceState: Sendable, Equatable {
@@ -139,6 +140,46 @@ public actor HighResolutionStillCaptureService {
             }
             return .accepted(AcceptedStill(captureID: captureID, sourceBytes: source.bytes, dimensions: source.dimensions, capturedAt: now))
         } catch { return .rejected("capture_failed") }
+    }
+}
+
+public enum SourceValueStatus: String, Codable, Sendable { case available, unavailable, notRecorded }
+
+public struct SourceMeasurement: Codable, Sendable, Equatable {
+    public let status: SourceValueStatus
+    public let value: Double?
+    public let unit: String?
+    public let source: String?
+    public init(status: SourceValueStatus, value: Double? = nil, unit: String? = nil, source: String? = nil) {
+        self.status = status; self.value = value; self.unit = unit; self.source = source
+    }
+}
+
+public struct OriginalSourceRecord: Codable, Sendable, Equatable {
+    public let captureID: String
+    public let filename: String
+    public let dimensions: CaptureDimensions
+    public let orientation: String
+    public let sha256: String
+    public let metadataBytes: Data
+    public init(captureID: String, filename: String, dimensions: CaptureDimensions, orientation: String, sha256: String, metadataBytes: Data = Data()) {
+        self.captureID = captureID; self.filename = filename; self.dimensions = dimensions; self.orientation = orientation; self.sha256 = sha256; self.metadataBytes = metadataBytes
+    }
+}
+
+public enum SourceIntegrityError: Error, Sendable, Equatable { case empty, digestMismatch, dimensionMismatch, sourceOverwritten }
+
+public enum SourceIntegrity {
+    public static func digest(_ bytes: Data) -> String { SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined() }
+
+    public static func validate(record: OriginalSourceRecord, bytes: Data, dimensions: CaptureDimensions) throws {
+        guard !bytes.isEmpty else { throw SourceIntegrityError.empty }
+        guard record.sha256 == digest(bytes) else { throw SourceIntegrityError.digestMismatch }
+        guard record.dimensions == dimensions else { throw SourceIntegrityError.dimensionMismatch }
+    }
+
+    public static func derivativePath(for record: OriginalSourceRecord) -> String {
+        "previews/\(record.captureID)-thumbnail.jpg"
     }
 }
 

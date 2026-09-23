@@ -58,6 +58,23 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue([firstResult, second].contains { if case .rejected("capture_in_flight") = $0 { true } else { false } })
     }
 
+    func testOriginalSourceIntegrityPreservesBytesDimensionsAndSeparateDerivativePath() throws {
+        let bytes = Data([10, 20, 30])
+        let dimensions = CaptureDimensions(width: 4000, height: 3000)
+        let record = OriginalSourceRecord(
+            captureID: "capture-1", filename: "IMG_0001.HEIC", dimensions: dimensions,
+            orientation: "landscape", sha256: SourceIntegrity.digest(bytes), metadataBytes: Data([99])
+        )
+        XCTAssertNoThrow(try SourceIntegrity.validate(record: record, bytes: bytes, dimensions: dimensions))
+        XCTAssertEqual(SourceIntegrity.derivativePath(for: record), "previews/capture-1-thumbnail.jpg")
+        XCTAssertThrowsError(try SourceIntegrity.validate(record: record, bytes: Data([0]), dimensions: dimensions)) { error in
+            XCTAssertEqual(error as? SourceIntegrityError, .digestMismatch)
+        }
+        XCTAssertThrowsError(try SourceIntegrity.validate(record: record, bytes: bytes, dimensions: CaptureDimensions(width: 1, height: 1))) { error in
+            XCTAssertEqual(error as? SourceIntegrityError, .dimensionMismatch)
+        }
+    }
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(
