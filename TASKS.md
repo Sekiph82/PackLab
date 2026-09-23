@@ -5,12 +5,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M03
-- Current Sprint: M03-S01 — Camera control
-- Current Task: PL-0069 — NextLevel preview / SwiftUI UIKit bridge
+- Current Sprint: M03-BATCH-001 — Full iOS Capture Foundation
+- Current Task: M03-BATCH-001 — Execute PL-0069 through PL-0093
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/PL-0069_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/PL-0069_CHATGPT_AUDIT_CRITERIA_V01.md. Integrate the real NextLevel 0.19.1 preview behind a controlled UIKit-to-SwiftUI bridge, preserve truthful simulator/unavailable behavior, publish PL-0069_CODEX_LOG_V01.md ending `READY_FOR_INDEPENDENT_AUDIT`, and stop before PL-0070.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0069 through PL-0093 in frozen order using each child prompt/criteria, publish one implementation boundary and one child log per task, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. Do not edit TASKS.md, do not start M04, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner explicitly authorized continuing M03 without closing PL-0068 on 2026-09-23. Resume the physical benchmark later when printing/measurement is possible.
+- Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner explicitly authorized M03 milestone-batch execution without closing PL-0068 on 2026-09-23. Resume the physical benchmark later when printing/measurement is possible.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
 
