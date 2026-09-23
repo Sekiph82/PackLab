@@ -95,14 +95,33 @@ public struct MotionSampleRecord: Codable, Sendable, Equatable {
     public let attitude: [Double]
     public let rotationRate: [Double]
     public init(monotonicTimestamp: TimeInterval, attitude: [Double], rotationRate: [Double]) { self.monotonicTimestamp = monotonicTimestamp; self.attitude = attitude; self.rotationRate = rotationRate }
+    public var isValid: Bool { monotonicTimestamp.isFinite && attitude.count == 4 && rotationRate.count == 3 && attitude.allSatisfy(\.isFinite) && rotationRate.allSatisfy(\.isFinite) }
 }
 
 public struct MotionBuffer: Sendable, Equatable {
     public let capacity: Int
     public private(set) var samples: [MotionSampleRecord] = []
     public init(capacity: Int = 256) { self.capacity = max(1, capacity) }
-    public mutating func append(_ sample: MotionSampleRecord) { samples.append(sample); if samples.count > capacity { samples.removeFirst(samples.count - capacity) } }
+    public mutating func append(_ sample: MotionSampleRecord) { guard sample.isValid else { return }; samples.append(sample); samples.sort { $0.monotonicTimestamp < $1.monotonicTimestamp }; if samples.count > capacity { samples.removeFirst(samples.count - capacity) } }
     public func nearest(to timestamp: TimeInterval, tolerance: TimeInterval = 0.1) -> MotionSampleRecord? { samples.min { abs($0.monotonicTimestamp - timestamp) < abs($1.monotonicTimestamp - timestamp) }.flatMap { abs($0.monotonicTimestamp - timestamp) <= tolerance ? $0 : nil } }
+}
+
+public struct MotionCaptureBinding: Codable, Sendable, Equatable {
+    public let captureID: String
+    public let captureTimestamp: TimeInterval
+    public let sample: MotionSampleRecord?
+    public let delta: TimeInterval?
+    public let status: String
+    public init(captureID: String, captureTimestamp: TimeInterval, sample: MotionSampleRecord?, delta: TimeInterval?, status: String) { self.captureID = captureID; self.captureTimestamp = captureTimestamp; self.sample = sample; self.delta = delta; self.status = status }
+}
+
+public enum MotionAligner {
+    public static func bind(captureID: String, timestamp: TimeInterval, buffer: MotionBuffer, tolerance: TimeInterval = 0.1) -> MotionCaptureBinding {
+        guard timestamp.isFinite, let candidate = buffer.samples.filter(\.isValid).min(by: { abs($0.monotonicTimestamp - timestamp) < abs($1.monotonicTimestamp - timestamp) }) else { return MotionCaptureBinding(captureID: captureID, captureTimestamp: timestamp, sample: nil, delta: nil, status: "unavailable") }
+        let delta = candidate.monotonicTimestamp - timestamp
+        guard abs(delta) <= tolerance else { return MotionCaptureBinding(captureID: captureID, captureTimestamp: timestamp, sample: nil, delta: delta, status: "stale") }
+        return MotionCaptureBinding(captureID: captureID, captureTimestamp: timestamp, sample: candidate, delta: delta, status: "available")
+    }
 }
 
 /// App-local and PackScan frames share a right-handed metre basis: X right,

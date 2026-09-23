@@ -303,6 +303,16 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertNil(buffer.nearest(to: 0))
     }
 
+    func testMotionCaptureBindingReportsAvailableStaleAndInvalidProviderData() {
+        var buffer = MotionBuffer(capacity: 3)
+        buffer.append(MotionSampleRecord(monotonicTimestamp: 2, attitude: [0, 0, 0, 1], rotationRate: [0, 0, 0]))
+        buffer.append(MotionSampleRecord(monotonicTimestamp: 1, attitude: [0, 0, 0, 1], rotationRate: [0, 0, 0]))
+        buffer.append(MotionSampleRecord(monotonicTimestamp: 3, attitude: [0, 0], rotationRate: [0]))
+        XCTAssertEqual(MotionAligner.bind(captureID: "p1", timestamp: 2.05, buffer: buffer).status, "available")
+        XCTAssertEqual(MotionAligner.bind(captureID: "p2", timestamp: 4, buffer: buffer).status, "stale")
+        XCTAssertEqual(MotionAligner.bind(captureID: "p3", timestamp: 2, buffer: MotionBuffer()).status, "unavailable")
+    }
+
     func testCoordinateContractPreservesIdentityAndComposition() {
         XCTAssertEqual(PackScanCoordinateContract.appLocalToPackScan(.identity), .identity)
         XCTAssertEqual(CoordinateTransform.identity.multiplied(by: .identity), .identity)

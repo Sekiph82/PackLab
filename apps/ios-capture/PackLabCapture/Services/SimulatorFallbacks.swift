@@ -73,4 +73,6 @@ public actor SimulatorMotionService: MotionService {
     public func latestSample() async -> MotionSample? {
         nil
     }
+
+    public func state() async -> MotionServiceState { .unavailable }
 }
