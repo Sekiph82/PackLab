@@ -39,11 +39,15 @@ public final class ARWorldTrackingController {
 }
 #endif
 
+/// ARFrame.timestamp is ARKit's session monotonic seconds-since-boot domain,
+/// not UTC. The transform is the raw ARKit camera-to-world 4x4 matrix; values
+/// are copied row-major and must remain finite before PackScan conversion.
 public struct PoseSample: Codable, Sendable, Equatable {
     public let timestamp: TimeInterval
     public let transform: [Double]
     public let tracking: TrackingQuality
     public init(timestamp: TimeInterval, transform: [Double], tracking: TrackingQuality) { self.timestamp = timestamp; self.transform = transform; self.tracking = tracking }
+    public var hasValidTransform: Bool { transform.count == 16 && transform.allSatisfy(\.isFinite) }
 }
 
 public struct AlignedPose: Codable, Sendable, Equatable {
@@ -55,12 +59,35 @@ public struct AlignedPose: Codable, Sendable, Equatable {
 
 public enum PoseAligner {
     public static func nearest(to timestamp: TimeInterval, samples: [PoseSample], tolerance: TimeInterval = 0.1) -> AlignedPose {
-        guard let candidate = samples.min(by: { abs($0.timestamp - timestamp) < abs($1.timestamp - timestamp) }) else { return AlignedPose(sample: nil, delta: nil, status: "unavailable") }
+        guard timestamp.isFinite, let candidate = samples.filter({ $0.timestamp.isFinite }).min(by: { abs($0.timestamp - timestamp) < abs($1.timestamp - timestamp) }) else { return AlignedPose(sample: nil, delta: nil, status: "unavailable") }
         let delta = candidate.timestamp - timestamp
         guard abs(delta) <= tolerance else { return AlignedPose(sample: nil, delta: delta, status: "stale") }
-        guard candidate.tracking != .unavailable else { return AlignedPose(sample: nil, delta: delta, status: "unavailable") }
+        guard candidate.hasValidTransform else { return AlignedPose(sample: nil, delta: delta, status: "invalid_transform") }
+        guard candidate.tracking == .normal else { return AlignedPose(sample: nil, delta: delta, status: "unavailable") }
         return AlignedPose(sample: candidate, delta: delta, status: "available")
     }
+}
+
+public struct PoseBuffer: Sendable, Equatable {
+    public let capacity: Int
+    public private(set) var samples: [PoseSample] = []
+    public init(capacity: Int = 256) { self.capacity = max(1, capacity) }
+    public mutating func append(_ sample: PoseSample) {
+        guard sample.timestamp.isFinite else { return }
+        samples.append(sample)
+        samples.sort { $0.timestamp < $1.timestamp }
+        if samples.count > capacity { samples.removeFirst(samples.count - capacity) }
+    }
+    public func bind(captureID: String, timestamp: TimeInterval, tolerance: TimeInterval = 0.1) -> PoseCaptureBinding {
+        PoseCaptureBinding(captureID: captureID, captureTimestamp: timestamp, aligned: PoseAligner.nearest(to: timestamp, samples: samples, tolerance: tolerance))
+    }
+}
+
+public struct PoseCaptureBinding: Codable, Sendable, Equatable {
+    public let captureID: String
+    public let captureTimestamp: TimeInterval
+    public let aligned: AlignedPose
+    public init(captureID: String, captureTimestamp: TimeInterval, aligned: AlignedPose) { self.captureID = captureID; self.captureTimestamp = captureTimestamp; self.aligned = aligned }
 }
 
 public struct MotionSampleRecord: Codable, Sendable, Equatable {

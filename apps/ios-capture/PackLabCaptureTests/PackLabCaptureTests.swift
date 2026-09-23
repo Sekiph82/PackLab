@@ -285,6 +285,16 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PoseAligner.nearest(to: 10, samples: [unavailable]).status, "unavailable")
     }
 
+    func testPoseBufferSortsOutOfOrderSamplesAndBindsExactBoundaryButRejectsInvalidTransform() {
+        var buffer = PoseBuffer(capacity: 3)
+        buffer.append(PoseSample(timestamp: 10.1, transform: CoordinateTransform.identity.values, tracking: .normal))
+        buffer.append(PoseSample(timestamp: 10.0, transform: CoordinateTransform.identity.values, tracking: .normal))
+        XCTAssertEqual(buffer.samples.map(\.timestamp), [10.0, 10.1])
+        XCTAssertEqual(buffer.bind(captureID: "p1", timestamp: 10.1, tolerance: 0.1).aligned.status, "available")
+        buffer.append(PoseSample(timestamp: 10.2, transform: [1, 2], tracking: .normal))
+        XCTAssertEqual(buffer.bind(captureID: "p2", timestamp: 10.2).aligned.status, "invalid_transform")
+    }
+
     func testMotionBufferIsBoundedAndTimestampAligned() {
         var buffer = MotionBuffer(capacity: 2)
         for index in 0..<3 { buffer.append(MotionSampleRecord(monotonicTimestamp: Double(index), attitude: [0,0,0,1], rotationRate: [0,0,0])) }

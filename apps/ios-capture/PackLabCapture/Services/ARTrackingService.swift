@@ -45,6 +45,7 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
     public static let shared = SharedARSessionOwner()
     public let session = ARSession()
     public private(set) var policy = ARTrackingLifecyclePolicy()
+    public private(set) var poseBuffer = PoseBuffer(capacity: 256)
     private override init() { super.init(); session.delegate = self }
 
     public func start() {
@@ -66,6 +67,12 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
         case .notAvailable: policy.limited(.cameraUnavailable)
         }
     }
+    public func session(_ session: ARSession, didUpdate frame: ARFrame) {
+        let m = frame.camera.transform
+        let values: [Double] = [Double(m.columns.0.x), Double(m.columns.1.x), Double(m.columns.2.x), Double(m.columns.3.x), Double(m.columns.0.y), Double(m.columns.1.y), Double(m.columns.2.y), Double(m.columns.3.y), Double(m.columns.0.z), Double(m.columns.1.z), Double(m.columns.2.z), Double(m.columns.3.z), Double(m.columns.0.w), Double(m.columns.1.w), Double(m.columns.2.w), Double(m.columns.3.w)]
+        let tracking: TrackingQuality = policy.snapshot.quality == .normal ? .normal : policy.snapshot.quality
+        poseBuffer.append(PoseSample(timestamp: frame.timestamp, transform: values, tracking: tracking))
+    }
     public func sessionWasInterrupted(_ session: ARSession) { policy.interrupted() }
     public func sessionInterruptionEnded(_ session: ARSession) { policy.reset() }
 }
@@ -80,6 +87,7 @@ public final class ARKitTrackingService: ARTrackingService {
         switch owner.policy.snapshot.quality { case .normal: return .tracking; case .limited, .recovering: return .limited; case .interrupted: return .interrupted; case .unavailable: return .unavailable }
     }
     public func snapshot() -> TrackingSnapshot { owner.policy.snapshot }
+    public func bindPose(captureID: String, timestamp: TimeInterval, tolerance: TimeInterval = 0.1) -> PoseCaptureBinding { owner.poseBuffer.bind(captureID: captureID, timestamp: timestamp, tolerance: tolerance) }
     public func reset() async { owner.reset() }
 }
 #endif
