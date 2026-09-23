@@ -92,6 +92,28 @@ public struct MotionBuffer: Sendable, Equatable {
     public func nearest(to timestamp: TimeInterval, tolerance: TimeInterval = 0.1) -> MotionSampleRecord? { samples.min { abs($0.monotonicTimestamp - timestamp) < abs($1.monotonicTimestamp - timestamp) }.flatMap { abs($0.monotonicTimestamp - timestamp) <= tolerance ? $0 : nil } }
 }
 
+/// App-local and PackScan frames share a right-handed metre basis: X right,
+/// Y up, camera-forward is -Z. Matrices are 4x4 row-major values and world
+/// origin is the AR session origin. Image pixels are deliberately excluded.
+public struct CoordinateTransform: Codable, Sendable, Equatable {
+    public let values: [Double]
+    public init(values: [Double]) { self.values = values }
+    public static let identity = CoordinateTransform(values: [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1])
+    public func multiplied(by other: CoordinateTransform) -> CoordinateTransform {
+        guard values.count == 16, other.values.count == 16 else { return .identity }
+        var result = Array(repeating: 0.0, count: 16)
+        for row in 0..<4 { for column in 0..<4 { for index in 0..<4 { result[row * 4 + column] += values[row * 4 + index] * other.values[index * 4 + column] } } }
+        return CoordinateTransform(values: result)
+    }
+    public var isFinite: Bool { values.count == 16 && values.allSatisfy { $0.isFinite } }
+}
+
+public enum PackScanCoordinateContract {
+    public static let convention = "packscan_right_handed_x_right_y_up_z_out_of_screen_camera_forward_neg_z_v3"
+    public static let units = "metres"
+    public static func appLocalToPackScan(_ transform: CoordinateTransform) -> CoordinateTransform { transform }
+}
+
 #if canImport(CoreMotion)
 import CoreMotion
 @MainActor

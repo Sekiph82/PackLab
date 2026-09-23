@@ -173,6 +173,13 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertNil(buffer.nearest(to: 0))
     }
 
+    func testCoordinateContractPreservesIdentityAndComposition() {
+        XCTAssertEqual(PackScanCoordinateContract.appLocalToPackScan(.identity), .identity)
+        XCTAssertEqual(CoordinateTransform.identity.multiplied(by: .identity), .identity)
+        XCTAssertTrue(CoordinateTransform.identity.isFinite)
+        XCTAssertEqual(PackScanCoordinateContract.units, "metres")
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
