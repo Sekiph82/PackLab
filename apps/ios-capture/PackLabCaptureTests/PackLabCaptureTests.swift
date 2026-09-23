@@ -341,6 +341,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(TrackingQualityClassifier.classify(state: .normal).poseEvidenceEligible)
     }
 
+    func testTrackingRecoveryRequiresStableNormalFramesAndRetainsDiagnostics() {
+        var policy = TrackingRecoveryPolicy(requiredStableNormalFrames: 2)
+        XCTAssertFalse(policy.update(state: .normal).poseEvidenceEligible)
+        XCTAssertFalse(policy.update(state: .limited, limitation: .insufficientFeatures).poseEvidenceEligible)
+        XCTAssertFalse(policy.update(state: .normal).poseEvidenceEligible)
+        XCTAssertTrue(policy.update(state: .normal).poseEvidenceEligible)
+        XCTAssertEqual(policy.diagnostics.count, 4)
+        XCTAssertTrue(TrackingWarningViewModel(snapshot: policy.snapshot).isVisible == false)
+        XCTAssertTrue(TrackingWarningViewModel(snapshot: TrackingQualityClassifier.classify(state: .recovering)).isVisible)
+    }
+
     func testResetCreatesEpochAndNeverMixesPoseSegments() {
         var coordinator = SessionEpochCoordinator()
         coordinator.reset(reason: .trackingDegraded)

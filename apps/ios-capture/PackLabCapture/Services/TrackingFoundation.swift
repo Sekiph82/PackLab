@@ -187,6 +187,46 @@ public enum TrackingQualityClassifier {
     }
 }
 
+public struct TrackingDiagnosticEvent: Codable, Sendable, Equatable {
+    public let sequence: Int
+    public let quality: TrackingQuality
+    public let limitation: TrackingLimitation?
+    public let message: String
+    public init(sequence: Int, quality: TrackingQuality, limitation: TrackingLimitation?, message: String) { self.sequence = sequence; self.quality = quality; self.limitation = limitation; self.message = message }
+}
+
+public struct TrackingRecoveryPolicy: Sendable, Equatable {
+    public let requiredStableNormalFrames: Int
+    public private(set) var stableNormalFrames = 0
+    public private(set) var snapshot: TrackingSnapshot
+    public private(set) var diagnostics: [TrackingDiagnosticEvent] = []
+    public init(requiredStableNormalFrames: Int = 3) {
+        self.requiredStableNormalFrames = max(1, requiredStableNormalFrames)
+        self.snapshot = TrackingQualityClassifier.classify(state: .unavailable)
+    }
+    public mutating func update(state: TrackingQuality, limitation: TrackingLimitation? = nil) -> TrackingSnapshot {
+        if state == .normal {
+            stableNormalFrames += 1
+            if stableNormalFrames >= requiredStableNormalFrames { snapshot = TrackingQualityClassifier.classify(state: .normal) }
+            else { snapshot = TrackingSnapshot(quality: .recovering, limitation: .relocalizing, poseEvidenceEligible: false, message: "Stabilizing tracking") }
+        } else {
+            stableNormalFrames = 0
+            snapshot = TrackingQualityClassifier.classify(state: state, limitation: limitation)
+        }
+        diagnostics.append(TrackingDiagnosticEvent(sequence: diagnostics.count, quality: snapshot.quality, limitation: snapshot.limitation, message: snapshot.message))
+        return snapshot
+    }
+}
+
+public struct TrackingWarningViewModel: Sendable, Equatable {
+    public let isVisible: Bool
+    public let text: String
+    public init(snapshot: TrackingSnapshot) {
+        isVisible = !snapshot.poseEvidenceEligible
+        text = snapshot.message
+    }
+}
+
 public enum ResetReason: String, Codable, Sendable, Equatable { case userRequested, trackingDegraded, interruption, runtimeError }
 public enum RelocalizationState: String, Codable, Sendable, Equatable { case idle, relocalizing, recovered, failed }
 public struct SessionEpochCoordinator: Sendable, Equatable {
