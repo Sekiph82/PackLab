@@ -300,15 +300,24 @@ public struct PoseDiagnosticsExport: Codable, Sendable, Equatable {
     public init(records: [PoseDiagnosticRecord]) { self.records = records.sorted { $0.captureTimestamp < $1.captureTimestamp } }
 }
 
-public enum PoseDiagnosticsError: Error, Sendable, Equatable { case nonFinite, tooManyRecords }
+public enum PoseDiagnosticsError: Error, Sendable, Equatable { case nonFinite, tooManyRecords, malformedTransform, malformedMotion }
 public enum PoseDiagnosticsExporter {
     public static func encode(records: [PoseDiagnosticRecord], maximumRecords: Int = 10_000) throws -> Data {
         guard records.count <= maximumRecords else { throw PoseDiagnosticsError.tooManyRecords }
-        for record in records {
+        let redacted = try records.map { record -> PoseDiagnosticRecord in
             guard record.captureTimestamp.isFinite, record.pose.delta?.isFinite ?? true else { throw PoseDiagnosticsError.nonFinite }
-            if let sample = record.pose.sample, !sample.transform.allSatisfy(\.isFinite) { throw PoseDiagnosticsError.nonFinite }
+            if let sample = record.pose.sample {
+                guard sample.transform.count == 16 else { throw PoseDiagnosticsError.malformedTransform }
+                guard sample.transform.allSatisfy(\.isFinite) else { throw PoseDiagnosticsError.nonFinite }
+            }
+            if let motion = record.motion {
+                guard motion.attitude.count == 4, motion.rotationRate.count == 3 else { throw PoseDiagnosticsError.malformedMotion }
+                guard motion.isValid else { throw PoseDiagnosticsError.nonFinite }
+            }
+            let safeID = record.captureID.map { $0.isLetter || $0.isNumber || ".-_".contains($0) ? $0 : "_" }
+            return PoseDiagnosticRecord(captureID: String(safeID), captureTimestamp: record.captureTimestamp, pose: record.pose, motion: record.motion, epoch: record.epoch)
         }
-        return try JSONEncoder.sorted.encode(PoseDiagnosticsExport(records: records))
+        return try JSONEncoder.sorted.encode(PoseDiagnosticsExport(records: redacted))
     }
 }
 

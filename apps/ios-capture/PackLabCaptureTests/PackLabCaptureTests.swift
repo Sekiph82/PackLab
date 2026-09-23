@@ -406,6 +406,20 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testPoseDiagnosticsRejectsMalformedSensorShapesAndRedactsIdentifiers() throws {
+        let malformedPose = AlignedPose(sample: PoseSample(timestamp: 2, transform: [1, 2], tracking: .normal), delta: 0, status: "available")
+        XCTAssertThrowsError(try PoseDiagnosticsExporter.encode(records: [PoseDiagnosticRecord(captureID: "../private", captureTimestamp: 2, pose: malformedPose, motion: nil, epoch: 1)])) { error in
+            XCTAssertEqual(error as? PoseDiagnosticsError, .malformedTransform)
+        }
+        let pose = AlignedPose(sample: PoseSample(timestamp: 2, transform: CoordinateTransform.identity.values, tracking: .normal), delta: 0, status: "available")
+        let malformedMotion = MotionSampleRecord(monotonicTimestamp: 2, attitude: [0], rotationRate: [0])
+        XCTAssertThrowsError(try PoseDiagnosticsExporter.encode(records: [PoseDiagnosticRecord(captureID: "../private", captureTimestamp: 2, pose: pose, motion: malformedMotion, epoch: 1)])) { error in
+            XCTAssertEqual(error as? PoseDiagnosticsError, .malformedMotion)
+        }
+        let data = try PoseDiagnosticsExporter.encode(records: [PoseDiagnosticRecord(captureID: "../private", captureTimestamp: 2, pose: pose, motion: nil, epoch: 1)])
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("_private"))
+    }
+
     func testNewScanDraftNormalizesAndValidatesM02Modes() throws {
         let draft = try NewScanDraftValidator.make(name: "  Kenya Bottle  ", type: .bottle, mode: .guidedOrbit, notes: "  note  ", now: Date(timeIntervalSince1970: 0), sessionID: "s1")
         XCTAssertEqual(draft.packageName, "Kenya Bottle")
