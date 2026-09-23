@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import math
 
+import pytest
+
 from packlab_core.calibration import (
     CalibrationProfile,
     CalibrationProfileKey,
@@ -20,6 +22,9 @@ GENERATOR_VERSION = "synthetic_ground_truth_v1"
 GROUND_TRUTH_SIDE_MM = 40.0
 GROUND_TRUTH_MM_PER_PIXEL = 0.4
 IDEAL_EDGE_PX = GROUND_TRUTH_SIDE_MM / GROUND_TRUTH_MM_PER_PIXEL
+SYNTHETIC_IMAGE_SHAPE = (900, 900)
+SYNTHETIC_MARKER_PX = 100
+SYNTHETIC_MARKER_ORIGINS = ((80, 80), (720, 80), (80, 720), (720, 720))
 
 
 def _detected_marker(
@@ -91,6 +96,103 @@ def _profile_key() -> CalibrationProfileKey:
         "synthetic-calibration-model-v1",
         "synthetic-calibration-policy-v1",
     )
+
+
+def _detected_synthetic_scene(*, noise_seed: int | None = None):
+    """Render policy markers, then return the actual detector observations."""
+
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+
+    from packlab_core.calibration import detect_markers
+
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
+    image = np.full(SYNTHETIC_IMAGE_SHAPE, 255, dtype=np.uint8)
+    for marker_id, (x, y) in enumerate(SYNTHETIC_MARKER_ORIGINS):
+        marker = cv2.aruco.generateImageMarker(
+            dictionary, marker_id, SYNTHETIC_MARKER_PX, borderBits=1
+        )
+        image[y : y + SYNTHETIC_MARKER_PX, x : x + SYNTHETIC_MARKER_PX] = marker
+    if noise_seed is not None:
+        rng = np.random.default_rng(noise_seed)
+        noise = rng.normal(0.0, 2.0, image.shape)
+        image = np.clip(image.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+    result = detect_markers(image)
+    assert result.status == "detected"
+    assert {observation.marker_id for observation in result.observations} == {0, 1, 2, 3}
+    return result
+
+
+def _known_from_detected(result, *, side_mm: float = GROUND_TRUTH_SIDE_MM):
+    return [
+        KnownMarkerObservation(
+            observation.marker_id,
+            observation.corners_px,
+            side_mm,
+            0.1,
+            float(observation.quality["quality_score"]),
+            True,
+            f"{GENERATOR_VERSION}:opencv_detector",
+        )
+        for observation in result.observations
+    ]
+
+
+def test_actual_detector_to_scale_confidence_and_profile_is_reproducible() -> None:
+    first = _detected_synthetic_scene()
+    second = _detected_synthetic_scene()
+    assert first.provenance == second.provenance
+    assert first.observations == second.observations
+
+    estimate = estimate_scale(_known_from_detected(first))
+    assert estimate.status == "estimated"
+    assert estimate.mm_per_pixel is not None
+    assert math.isclose(
+        estimate.mm_per_pixel,
+        GROUND_TRUTH_SIDE_MM / SYNTHETIC_MARKER_PX,
+        abs_tol=0.01,
+    )
+    confidence = score_calibration_confidence(estimate)
+    assert confidence.status == "accepted"
+    assert confidence.usable_for_capture is True
+
+    profile = CalibrationProfile(
+        "synthetic-detector-profile-v1",
+        "1.0.0",
+        _profile_key(),
+        "exact_reference_only",
+        "2026-09-23T00:00:00Z",
+        {"source": "synthetic_public_detector_test"},
+        CalibrationQualityEvidence(
+            confidence.status, confidence.score, 0.0, 4, "2026-09-23T00:01:00Z"
+        ),
+        {
+            "image_width": "px",
+            "image_height": "px",
+            "zoom_factor": "unitless",
+            "reprojection_rmse": "px",
+        },
+    )
+    compatibility = check_profile_compatibility(profile, CaptureProfileRequest(_profile_key()))
+    assert compatibility.reusable is False
+    assert "provenance_source_not_owner_physical_session" in compatibility.invalidation_reasons
+
+
+def test_actual_detector_noise_and_material_geometry_perturbation_are_visible() -> None:
+    noisy = _detected_synthetic_scene(noise_seed=67)
+    noisy_estimate = estimate_scale(_known_from_detected(noisy))
+    assert noisy_estimate.status == "estimated"
+    assert noisy_estimate.mm_per_pixel is not None
+    assert math.isclose(
+        noisy_estimate.mm_per_pixel,
+        GROUND_TRUTH_SIDE_MM / SYNTHETIC_MARKER_PX,
+        abs_tol=0.015,
+    )
+
+    wrong_units = estimate_scale(_known_from_detected(noisy, side_mm=GROUND_TRUTH_SIDE_MM * 10.0))
+    assert wrong_units.status == "estimated"
+    assert wrong_units.mm_per_pixel is not None
+    assert wrong_units.mm_per_pixel > noisy_estimate.mm_per_pixel * 9.0
 
 
 def test_ideal_synthetic_markers_recover_ground_truth_scale_confidence_and_profile() -> None:
