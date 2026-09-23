@@ -217,6 +217,15 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testNewScanDraftNormalizesAndValidatesM02Modes() throws {
+        let draft = try NewScanDraftValidator.make(name: "  Kenya Bottle  ", type: .bottle, mode: .guidedOrbit, notes: "  note  ", now: Date(timeIntervalSince1970: 0), sessionID: "s1")
+        XCTAssertEqual(draft.packageName, "Kenya Bottle")
+        XCTAssertEqual(draft.notes, "note")
+        XCTAssertEqual(draft.captureMode, .guidedOrbit)
+        XCTAssertThrowsError(try NewScanDraftValidator.make(name: " ", type: .bottle, mode: .freehand)) { XCTAssertEqual($0 as? NewScanDraftError, .emptyName) }
+        XCTAssertThrowsError(try NewScanDraftValidator.make(name: String(repeating: "x", count: 121), type: .bottle, mode: .freehand)) { XCTAssertEqual($0 as? NewScanDraftError, .nameTooLong) }
+    }
+
 
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
