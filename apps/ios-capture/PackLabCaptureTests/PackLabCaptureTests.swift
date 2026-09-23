@@ -383,6 +383,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(PoseOverlayModel.make(visible: false, tracking: unavailableSnapshot(), epoch: 0, pose: nil).visible)
     }
 
+    func testPoseOverlayFormatsLiveOrientationAndTrackingStatesWithoutInventingData() {
+        let pose = PoseSample(timestamp: 4, transform: CoordinateTransform.identity.values, tracking: .normal)
+        let motion = MotionSampleRecord(monotonicTimestamp: 4, attitude: [0, 0, 0, 1], rotationRate: [0, 0, 0])
+        let normal = PoseOverlayModel.make(visible: true, tracking: TrackingQualityClassifier.classify(state: .normal), epoch: 3, pose: pose, motion: motion)
+        XCTAssertTrue(normal.lines.contains("Orientation: ARKit camera-to-world"))
+        XCTAssertTrue(normal.lines.contains("Motion t=4.000s"))
+        let degraded = PoseOverlayModel.make(visible: true, tracking: TrackingQualityClassifier.classify(state: .recovering), epoch: 3, pose: nil, motion: nil)
+        XCTAssertTrue(degraded.lines.contains("Pose: unavailable"))
+        XCTAssertTrue(degraded.lines.contains("Motion: unavailable"))
+    }
+
     private func unavailableSnapshot() -> TrackingSnapshot { TrackingSnapshot(quality: .unavailable, poseEvidenceEligible: false) }
 
     func testPoseDiagnosticsExportIsDeterministicAndRejectsNonFiniteData() throws {

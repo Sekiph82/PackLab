@@ -12,6 +12,21 @@ public protocol ARTrackingService: Sendable {
     func start() async
     func stop() async
     func state() async -> ARTrackingServiceState
+    func snapshot() async -> TrackingSnapshot
+    func latestPose() async -> PoseSample?
+}
+
+public extension ARTrackingService {
+    func snapshot() async -> TrackingSnapshot {
+        switch await state() {
+        case .tracking: return TrackingSnapshot(quality: .normal, poseEvidenceEligible: true, message: "Tracking ready")
+        case .limited: return TrackingSnapshot(quality: .limited, limitation: .unknown, poseEvidenceEligible: false, message: "Tracking limited")
+        case .interrupted: return TrackingSnapshot(quality: .interrupted, limitation: .cameraUnavailable, poseEvidenceEligible: false, message: "Tracking interrupted")
+        case .idle: return TrackingSnapshot(quality: .unavailable, poseEvidenceEligible: false, message: "Tracking idle")
+        case .unavailable: return TrackingSnapshot(quality: .unavailable, poseEvidenceEligible: false, message: "Tracking unavailable")
+        }
+    }
+    func latestPose() async -> PoseSample? { nil }
 }
 
 /// Foundation-only seam for a future ARKit adapter owned by this service.
@@ -88,7 +103,8 @@ public final class ARKitTrackingService: ARTrackingService {
     public func state() async -> ARTrackingServiceState {
         switch owner.policy.snapshot.quality { case .normal: return .tracking; case .limited, .recovering: return .limited; case .interrupted: return .interrupted; case .unavailable: return .unavailable }
     }
-    public func snapshot() -> TrackingSnapshot { owner.policy.snapshot }
+    public func snapshot() async -> TrackingSnapshot { owner.policy.snapshot }
+    public func latestPose() async -> PoseSample? { owner.poseBuffer.samples.last }
     public func bindPose(captureID: String, timestamp: TimeInterval, tolerance: TimeInterval = 0.1) -> PoseCaptureBinding { owner.poseBuffer.bind(captureID: captureID, timestamp: timestamp, tolerance: tolerance) }
     public func reset() async { owner.reset(reason: .userRequested) }
 }

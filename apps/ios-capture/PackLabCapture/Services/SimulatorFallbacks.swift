@@ -60,6 +60,9 @@ public actor SimulatorARTrackingService: ARTrackingService {
     public func state() async -> ARTrackingServiceState {
         .unavailable
     }
+
+    public func snapshot() async -> TrackingSnapshot { TrackingSnapshot(quality: .unavailable, poseEvidenceEligible: false, message: "Tracking unavailable in Simulator") }
+    public func latestPose() async -> PoseSample? { nil }
 }
 
 /// Explicit unavailable motion seam; it never manufactures sensor samples.
