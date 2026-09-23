@@ -479,12 +479,12 @@ final class PackLabCaptureTests: XCTestCase {
         let session = ScanSessionStore(layout: layout)
         try await session.create(NewScanDraft(sessionID: "s1", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
         let record = AcceptedCaptureRecord(captureID: "a", sequence: 0, sourceFilename: "a.heic", metadataFilename: "a.json")
-        try await session.storeAcceptedCapture(source: Data([1]), record: record, metadata: Data("{}".utf8), state: Data("{}".utf8))
+        try await session.storeAcceptedCapture(source: Data([1]), record: record, metadata: Data("{}".utf8), state: try JSONEncoder().encode(PersistedSessionState(sessionID: "s1", nextSequence: 1, epoch: 0, acceptedIDs: ["a"])))
         let gallery = SessionGalleryStore(layout: layout)
         XCTAssertEqual(try await gallery.load().first?.status, "degraded")
         let replacement = AcceptedCaptureRecord(captureID: "b", sequence: 1, sourceFilename: "b.heic", metadataFilename: "b.json")
         try await gallery.retake(replacing: "a", source: Data([2]), record: replacement, metadata: Data("{}".utf8))
-        try await gallery.delete(id: "a", confirmed: true)
+        try await gallery.delete(id: "b", confirmed: true)
         XCTAssertTrue(FileManager.default.fileExists(atPath: layout.sessionRoot.appendingPathComponent("gallery-audit.json").path))
     }
 
@@ -555,7 +555,7 @@ final class PackLabCaptureTests: XCTestCase {
         let root = URL(fileURLWithPath: "/tmp/packlab")
         let session = root.appendingPathComponent("s1")
         XCTAssertThrowsError(try SessionDeletionPlan(root: root, session: session).validate(confirmed: false)) { XCTAssertEqual($0 as? DeletionError, .confirmationRequired) }
-        XCTAssertNoThrow(try SessionDeletionPlan(root: root, session: session).validate(confirmed: true))
+        XCTAssertThrowsError(try SessionDeletionPlan(root: root, session: session).validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .nonAuthoritative) }
         XCTAssertThrowsError(try SessionDeletionPlan(root: root, session: URL(fileURLWithPath: "/tmp/other")).validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .outsideRoot) }
     }
 
@@ -651,6 +651,145 @@ final class PackLabCaptureTests: XCTestCase {
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
+    }
+
+    func testPreviewAuthorizationAndFailureLifecycleRecover() {
+        var lifecycle = PreviewLifecyclePolicy()
+        XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
+        XCTAssertFalse(lifecycle.isStarted)
+        XCTAssertTrue(lifecycle.beginAuthorizedStart(.authorized))
+        lifecycle.markStartedAfterSuccessfulStart()
+        XCTAssertTrue(lifecycle.isStarted)
+        XCTAssertTrue(lifecycle.stopIfNeeded())
+        XCTAssertTrue(lifecycle.beginAuthorizedStart(.authorized))
+        lifecycle.markStartedAfterSuccessfulStart()
+        XCTAssertTrue(lifecycle.stopIfNeeded())
+        XCTAssertEqual(PreviewAuthorizationResolver.state(for: .denied), .denied)
+        XCTAssertEqual(PreviewAuthorizationResolver.state(for: CameraServiceError.failed("start")), .error("start"))
+    }
+
+    func testStillAdapterBoundaryRejectsDuplicateAndSessionStop() {
+        var lifecycle = StillCaptureLifecycle()
+        XCTAssertTrue(lifecycle.begin())
+        XCTAssertTrue(lifecycle.complete(success: false))
+        XCTAssertFalse(lifecycle.complete(success: true))
+        lifecycle.reset()
+        XCTAssertTrue(lifecycle.begin())
+        XCTAssertTrue(lifecycle.complete(success: true))
+    }
+
+    func testSourceDerivativeAndSchemaBoundariesAreFailClosed() throws {
+        let bytes = Data([1, 2, 3])
+        let record = OriginalSourceRecord(captureID: "p1", filename: "p1.heic", dimensions: CaptureDimensions(width: 3, height: 2), orientation: "portrait", sha256: SourceIntegrity.digest(bytes))
+        XCTAssertNoThrow(try SourceIntegrity.validateDerivative(URL(fileURLWithPath: "/tmp/p1.jpg"), master: URL(fileURLWithPath: "/tmp/p1.heic")))
+        XCTAssertThrowsError(try SourceIntegrity.validateDerivative(URL(fileURLWithPath: "/tmp/p1.heic"), master: URL(fileURLWithPath: "/tmp/p1.heic")))
+        let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)
+        let bad = PhotoCaptureMetadata(photoID: "p1", imagePath: "images/p1.heic", sequence: 0, originalFilename: "p1.heic", pixelDimensions: record.dimensions, orientation: "portrait", lensIdentity: lens, focalLengthMM: SourceMeasurement(status: .available, value: -1, source: "device_api"), exposureSeconds: SourceMeasurement(status: .unavailable), iso: SourceMeasurement(status: .unavailable), whiteBalanceKelvin: SourceMeasurement(status: .unavailable), captureTimestamp: Date())
+        XCTAssertThrowsError(try PackScanPhotoMetadataWire.from(bad)) { XCTAssertEqual($0 as? PhotoMetadataBindingError, .schemaViolation) }
+    }
+
+    func testActualReadingsBindIntoAcceptedPhotoMetadata() throws {
+        let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)
+        let base = PhotoCaptureMetadata(photoID: "p1", imagePath: "images/p1.heic", sequence: 0, originalFilename: "p1.heic", pixelDimensions: CaptureDimensions(width: 10, height: 8), orientation: "portrait", lensIdentity: lens, focalLengthMM: SourceMeasurement(status: .unavailable), exposureSeconds: SourceMeasurement(status: .unavailable), iso: SourceMeasurement(status: .unavailable), whiteBalanceKelvin: SourceMeasurement(status: .unavailable), captureTimestamp: Date())
+        let exposure = try ExposureCaptureBinding(reading: ExposureCaptureReading(exposureSeconds: 0.01, iso: 400, bias: 0), state: .locked)
+        let wb = try WhiteBalanceCaptureBinding(reading: WhiteBalanceCaptureReading(temperatureKelvin: 5200), state: .locked)
+        let bound = AcceptedPhotoMetadataFactory.withCaptureReadings(base, exposure: exposure, whiteBalance: wb)
+        XCTAssertEqual(bound.exposureSeconds.value, 0.01)
+        XCTAssertEqual(bound.iso.value, 400)
+        XCTAssertEqual(bound.whiteBalanceKelvin.value, 5200)
+    }
+
+    func testHealthAdmissionBlocksHardStopButAllowsWarning() {
+        var admission = CaptureAdmissionController()
+        let warning = DeviceHealthCaptureGate.evaluate(DeviceHealthSnapshot(thermal: .fair, availableStorageBytes: 500_000_000, batteryLevel: 0.5, batteryStateAvailable: true))
+        admission.update(warning)
+        XCTAssertTrue(admission.allowsCapture)
+        admission.update(DeviceHealthCaptureGate.evaluate(DeviceHealthSnapshot(thermal: .critical, availableStorageBytes: 1, batteryLevel: 0.01, batteryStateAvailable: true)))
+        XCTAssertFalse(admission.allowsCapture)
+        XCTAssertNotNil(admission.rejectReason())
+    }
+
+    func testPoseClockBridgeBindsAcceptedStillAndExactBoundaries() {
+        let bridge = TimestampDomainBridge(wallReference: Date(timeIntervalSince1970: 100), monotonicReference: 10)
+        let still = AcceptedStill(captureID: "p1", sourceBytes: Data([1]), dimensions: CaptureDimensions(width: 1, height: 1), capturedAt: Date(timeIntervalSince1970: 100.1))
+        var buffer = PoseBuffer()
+        buffer.append(PoseSample(timestamp: 10.2, transform: CoordinateTransform.identity.values, tracking: .normal))
+        XCTAssertEqual(AcceptedStillPoseBinder.bind(still: still, buffer: buffer, bridge: bridge)?.aligned.status, "available")
+        XCTAssertEqual(PoseAligner.nearest(to: 10.1, samples: [PoseSample(timestamp: 10.2, transform: CoordinateTransform.identity.values, tracking: .normal)], tolerance: 0.1).status, "available")
+        XCTAssertEqual(PoseAligner.nearest(to: 10.101, samples: [PoseSample(timestamp: 10.2, transform: CoordinateTransform.identity.values, tracking: .normal)], tolerance: 0.1).status, "stale")
+    }
+
+    func testCoordinateGoldensAndBasisContract() {
+        let x = CoordinateTransform.rotationX(.pi / 2).values
+        let y = CoordinateTransform.rotationY(.pi / 2).values
+        let z = CoordinateTransform.rotationZ(.pi / 2).values
+        XCTAssertEqual(x[5], 0, accuracy: 1e-12); XCTAssertEqual(x[6], -1, accuracy: 1e-12); XCTAssertEqual(x[9], 1, accuracy: 1e-12)
+        XCTAssertEqual(y[0], 0, accuracy: 1e-12); XCTAssertEqual(y[2], 1, accuracy: 1e-12); XCTAssertEqual(y[8], -1, accuracy: 1e-12)
+        XCTAssertEqual(z[0], 0, accuracy: 1e-12); XCTAssertEqual(z[1], -1, accuracy: 1e-12); XCTAssertEqual(z[4], 1, accuracy: 1e-12)
+        XCTAssertEqual(PackScanCoordinateContract.basisConversion, "arkit_to_packscan_identity_shared_right_handed_basis_v1")
+    }
+
+    func testDiagnosticsExportContainsVersionedUnitsAndRejectsBadRecords() throws {
+        let pose = AlignedPose(sample: PoseSample(timestamp: 2, transform: CoordinateTransform.identity.values, tracking: .normal), delta: 0, status: "available")
+        let data = try PoseDiagnosticsExporter.encode(records: [PoseDiagnosticRecord(captureID: "safe", captureTimestamp: 2, pose: pose, motion: nil, epoch: 1)])
+        let json = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(json.contains("basis_conversion")); XCTAssertTrue(json.contains("translation_unit")); XCTAssertTrue(json.contains("attitude_order"))
+        XCTAssertThrowsError(try PoseDiagnosticsExporter.encode(records: [PoseDiagnosticRecord(captureID: "", captureTimestamp: 2, pose: pose, motion: nil, epoch: 1)])) { XCTAssertEqual($0 as? PoseDiagnosticsError, .invalidCaptureID) }
+    }
+
+    func testTransactionRecordIsCanonicalAndReopenRejectsMissingRecord() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "tx")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "tx", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        let record = AcceptedCaptureRecord(captureID: "p1", sequence: 0, sourceFilename: "p1.heic", metadataFilename: "p1.json")
+        let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "tx", nextSequence: 1, epoch: 0, acceptedIDs: ["p1"]))
+        try await store.storeAcceptedCapture(source: Data([1]), record: record, metadata: Data("{}".utf8), state: state)
+        XCTAssertEqual(try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("p1.json"))), record)
+        try FileManager.default.removeItem(at: layout.photoRecords.appendingPathComponent("p1.json"))
+        if case .blocked(let reason) = try await store.reopen(requiredSourceIDs: []) { XCTAssertEqual(reason, "missing_or_corrupt_record") } else { XCTFail("missing record must block reopen") }
+    }
+
+    func testHistoryMarksCorruptFinalizationAsDegraded() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "history")
+        try FileManager.default.createDirectory(at: layout.previews, withIntermediateDirectories: true)
+        try JSONEncoder().encode(NewScanDraft(sessionID: "history", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: layout.metadata)
+        try Data("not-json".utf8).write(to: layout.finalization)
+        let entries = await LocalScanHistoryStore(root: root).load()
+        XCTAssertEqual(entries.first?.exportState, "corrupt")
+        XCTAssertEqual(entries.first?.degradedReason, "corrupt_finalization")
+    }
+
+    func testFinalizerWritesRealPackageAndKeepsSessionResumableOnDestinationFailure() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let image = Data([1, 2, 3])
+        let unavailable = PackScanNumericMeasurement(status: .unavailable)
+        let wire = PackScanPhotoMetadataWire(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: PackScanOrientation(value: .unknown, source: .unknown), focalLengthMM: unavailable, exposure: unavailable, iso: PackScanISOMeasurement(status: .unavailable), whiteBalanceKelvin: unavailable)
+        let metadata = try JSONEncoder().encode(PackScanPhotoMetadataDocument(photos: [wire]))
+        let manifestObject: [String: Any] = ["schema_version": "1.0.0", "capture_id": "session", "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization], "payloads": [["path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": metadata.count, "sha256": SourceIntegrity.digest(metadata)], ["path": "images/p.heic", "kind": "image", "required": true, "authority": "source", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)]]]
+        let manifest = try JSONSerialization.data(withJSONObject: manifestObject)
+        let destination = root.appendingPathComponent("out.packscan")
+        try SessionFinalizer().finalize(FinalizationInput(manifest: manifest, payloads: ["metadata/photos.json": metadata, "images/p.heic": image], destination: destination, sessionRoot: root))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("finalization.json").path))
+        XCTAssertThrowsError(try SessionFinalizer().finalize(FinalizationInput(manifest: manifest, payloads: ["metadata/photos.json": metadata, "images/p.heic": image], destination: destination, sessionRoot: root))) { XCTAssertEqual($0 as? FinalizationError, .packagingFailed) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    func testDeletionRejectsNonAuthoritativeAndReportsInjectedPartialFailure() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("s1"), withIntermediateDirectories: true)
+        let nonAuthoritative = SessionDeletionPlan(root: root, session: root.appendingPathComponent("s1"))
+        XCTAssertThrowsError(try nonAuthoritative.validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .nonAuthoritative) }
+        let candidate = SessionResumeCandidate(id: "s1", draft: nil, disposition: .resumable, state: nil)
+        let report = try await SafeSessionDeleter(failureInjector: { _ in true }).deleteDetailed(plan: SessionDeletionPlan(root: root, candidate: candidate), confirmed: true)
+        XCTAssertEqual(report.failures, [root.appendingPathComponent("s1").path])
     }
 }
 

@@ -1,5 +1,8 @@
 import CryptoKit
 import Foundation
+#if canImport(ImageIO)
+import ImageIO
+#endif
 
 public enum PreviewSurfaceState: Sendable, Equatable {
     case loading
@@ -17,6 +20,17 @@ public struct PreviewLifecyclePolicy: Sendable, Equatable {
     public private(set) var attachmentCount = 0
 
     public init() {}
+
+    public var canStart: Bool { !isStarted }
+
+    public mutating func beginAuthorizedStart(_ status: CameraAuthorizationStatus) -> Bool {
+        guard status == .authorized, !isStarted else { return false }
+        return true
+    }
+
+    public mutating func markStartedAfterSuccessfulStart() {
+        isStarted = true
+    }
 
     @discardableResult
     public mutating func startIfNeeded() -> Bool {
@@ -137,8 +151,9 @@ public struct AcceptedStill: Sendable, Equatable {
     public let sourceBytes: Data
     public let dimensions: CaptureDimensions
     public let capturedAt: Date
-    public init(captureID: String, sourceBytes: Data, dimensions: CaptureDimensions, capturedAt: Date) {
-        self.captureID = captureID; self.sourceBytes = sourceBytes; self.dimensions = dimensions; self.capturedAt = capturedAt
+    public let monotonicTimestamp: TimeInterval?
+    public init(captureID: String, sourceBytes: Data, dimensions: CaptureDimensions, capturedAt: Date, monotonicTimestamp: TimeInterval? = nil) {
+        self.captureID = captureID; self.sourceBytes = sourceBytes; self.dimensions = dimensions; self.capturedAt = capturedAt; self.monotonicTimestamp = monotonicTimestamp
     }
 }
 
@@ -178,6 +193,17 @@ public protocol StillPhotoBackend: Sendable {
     func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions)
 }
 
+public actor HealthGatedStillPhotoBackend: StillPhotoBackend {
+    private let backend: any StillPhotoBackend
+    private var admission = CaptureAdmissionController()
+    public init(backend: any StillPhotoBackend) { self.backend = backend }
+    public func update(_ admission: CaptureAdmissionController) { self.admission = admission }
+    public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
+        guard admission.allowsCapture else { throw CameraServiceError.failed(admission.rejectReason() ?? "capture_blocked") }
+        return try await backend.requestOriginalStill()
+    }
+}
+
 public actor HighResolutionStillCaptureService {
     private let backend: any StillPhotoBackend
     private let gate = StillCaptureGate()
@@ -191,7 +217,7 @@ public actor HighResolutionStillCaptureService {
             guard !source.bytes.isEmpty, source.dimensions.width > 0, source.dimensions.height > 0 else {
                 return .rejected("invalid_source")
             }
-            return .accepted(AcceptedStill(captureID: captureID, sourceBytes: source.bytes, dimensions: source.dimensions, capturedAt: now))
+            return .accepted(AcceptedStill(captureID: captureID, sourceBytes: source.bytes, dimensions: source.dimensions, capturedAt: now, monotonicTimestamp: ProcessInfo.processInfo.systemUptime))
         } catch { return .rejected("capture_failed") }
     }
 }
@@ -218,6 +244,10 @@ public struct OriginalSourceRecord: Codable, Sendable, Equatable {
     public init(captureID: String, filename: String, dimensions: CaptureDimensions, orientation: String, sha256: String, metadataBytes: Data = Data()) {
         self.captureID = captureID; self.filename = filename; self.dimensions = dimensions; self.orientation = orientation; self.sha256 = sha256; self.metadataBytes = metadataBytes
     }
+
+    public static func fromSource(captureID: String, filename: String, dimensions: CaptureDimensions, orientation: String, bytes: Data) throws -> OriginalSourceRecord {
+        OriginalSourceRecord(captureID: captureID, filename: filename, dimensions: dimensions, orientation: orientation, sha256: SourceIntegrity.digest(bytes), metadataBytes: try SourceMetadataExtractor.extract(from: bytes))
+    }
 }
 
 public enum SourceIntegrityError: Error, Sendable, Equatable { case empty, digestMismatch, dimensionMismatch, sourceOverwritten }
@@ -233,6 +263,36 @@ public enum SourceIntegrity {
 
     public static func derivativePath(for record: OriginalSourceRecord) -> String {
         "previews/\(record.captureID)-thumbnail.jpg"
+    }
+
+    public static func validateDerivative(_ derivative: URL, master: URL, fileManager: FileManager = .default) throws {
+        guard derivative.standardizedFileURL != master.standardizedFileURL else { throw SourceIntegrityError.sourceOverwritten }
+        guard !derivative.standardizedFileURL.path.hasPrefix(master.deletingLastPathComponent().standardizedFileURL.path + "/") || derivative.standardizedFileURL != master.standardizedFileURL else { throw SourceIntegrityError.sourceOverwritten }
+        _ = fileManager
+    }
+}
+
+public enum SourceMetadataError: Error, Sendable, Equatable { case unsupported, malformed, dimensionMismatch }
+
+public enum SourceMetadataExtractor {
+    public static func extract(from bytes: Data) throws -> Data {
+        #if canImport(ImageIO)
+        guard let source = CGImageSourceCreateWithData(bytes as CFData, nil), CGImageSourceGetCount(source) > 0 else { throw SourceMetadataError.unsupported }
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) else { throw SourceMetadataError.malformed }
+        return try PropertyListSerialization.data(fromPropertyList: properties, format: .binary, options: 0)
+        #else
+        guard !bytes.isEmpty else { throw SourceMetadataError.unsupported }
+        return Data()
+        #endif
+    }
+
+    public static func decodedDimensions(from bytes: Data) -> CaptureDimensions? {
+        #if canImport(ImageIO)
+        guard let source = CGImageSourceCreateWithData(bytes as CFData, nil), let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any], let width = properties[kCGImagePropertyPixelWidth] as? NSNumber, let height = properties[kCGImagePropertyPixelHeight] as? NSNumber else { return nil }
+        return CaptureDimensions(width: width.intValue, height: height.intValue)
+        #else
+        return nil
+        #endif
     }
 }
 
@@ -262,8 +322,10 @@ public actor OriginalSourceStore {
             guard let existing = try? Data(contentsOf: sourceURL), SourceIntegrity.digest(existing) == record.sha256 else {
                 throw SourcePersistenceError.sourceOverwritten
             }
+            guard let existingRecord = try? load(recordID: record.captureID), existingRecord == record else { throw SourcePersistenceError.recordWriteFailed }
             return sourceURL
         }
+        if let decoded = SourceMetadataExtractor.decodedDimensions(from: bytes), decoded != record.dimensions { throw SourcePersistenceError.recordWriteFailed }
         do {
             try bytes.write(to: sourceURL, options: .atomic)
             let recordURL = root.appendingPathComponent("\(record.captureID).source.json")
@@ -300,6 +362,25 @@ public struct PhotoCaptureMetadata: Codable, Sendable, Equatable {
     public let captureTimestamp: Date
     public init(photoID: String, imagePath: String, sequence: Int, originalFilename: String, pixelDimensions: CaptureDimensions, orientation: String, lensIdentity: CameraLensIdentity, focalLengthMM: SourceMeasurement, exposureSeconds: SourceMeasurement, iso: SourceMeasurement, whiteBalanceKelvin: SourceMeasurement, captureTimestamp: Date) {
         self.photoID = photoID; self.imagePath = imagePath; self.sequence = sequence; self.originalFilename = originalFilename; self.pixelDimensions = pixelDimensions; self.orientation = orientation; self.lensIdentity = lensIdentity; self.focalLengthMM = focalLengthMM; self.exposureSeconds = exposureSeconds; self.iso = iso; self.whiteBalanceKelvin = whiteBalanceKelvin; self.captureTimestamp = captureTimestamp
+    }
+}
+
+public enum AcceptedPhotoMetadataFactory {
+    public static func withCaptureReadings(
+        _ metadata: PhotoCaptureMetadata,
+        exposure: ExposureCaptureBinding?,
+        whiteBalance: WhiteBalanceCaptureBinding?
+    ) -> PhotoCaptureMetadata {
+        PhotoCaptureMetadata(
+            photoID: metadata.photoID, imagePath: metadata.imagePath, sequence: metadata.sequence,
+            originalFilename: metadata.originalFilename, pixelDimensions: metadata.pixelDimensions,
+            orientation: metadata.orientation, lensIdentity: metadata.lensIdentity,
+            focalLengthMM: metadata.focalLengthMM,
+            exposureSeconds: exposure.map { SourceMeasurement(status: .available, value: $0.reading.exposureSeconds, unit: "s", source: "device_api") } ?? metadata.exposureSeconds,
+            iso: exposure.map { SourceMeasurement(status: .available, value: Double($0.reading.iso), unit: "iso", source: "device_api") } ?? metadata.iso,
+            whiteBalanceKelvin: whiteBalance.map { SourceMeasurement(status: .available, value: $0.reading.temperatureKelvin, unit: "K", source: "device_api") } ?? metadata.whiteBalanceKelvin,
+            captureTimestamp: metadata.captureTimestamp
+        )
     }
 }
 
@@ -358,23 +439,38 @@ public struct PackScanPhotoMetadataWire: Codable, Sendable, Equatable {
 
     public static func from(_ metadata: PhotoCaptureMetadata) throws -> PackScanPhotoMetadataWire {
         func source(_ value: String?) -> PackScanMeasurementSource? { value.flatMap(PackScanMeasurementSource.init(rawValue:)) }
-        func numeric(_ value: SourceMeasurement, unit: String) -> PackScanNumericMeasurement {
-            PackScanNumericMeasurement(status: value.status, value: value.value, unit: value.value == nil ? nil : unit, source: value.value == nil ? nil : source(value.source))
+        func numeric(_ value: SourceMeasurement, unit: String, range: ClosedRange<Double>) throws -> PackScanNumericMeasurement {
+            switch value.status {
+            case .available, .estimated:
+                guard let raw = value.value, raw.isFinite, range.contains(raw), value.unit == nil || value.unit == unit, source(value.source) != nil else { throw PhotoMetadataBindingError.schemaViolation }
+                return PackScanNumericMeasurement(status: value.status, value: raw, unit: unit, source: source(value.source))
+            case .unavailable, .notRecorded:
+                guard value.value == nil else { throw PhotoMetadataBindingError.schemaViolation }
+                return PackScanNumericMeasurement(status: value.status)
+            }
         }
+        guard metadata.photoID.count > 0, metadata.photoID.count <= 128,
+              metadata.photoID.first?.isLetter == true || metadata.photoID.first?.isNumber == true,
+              metadata.photoID.allSatisfy({ $0.isLetter || $0.isNumber || ".-_".contains($0) }),
+              metadata.sequence >= 0, metadata.pixelDimensions.width > 0, metadata.pixelDimensions.height > 0,
+              !metadata.originalFilename.isEmpty, !metadata.originalFilename.contains("/"), !metadata.originalFilename.contains("\\") else { throw PhotoMetadataBindingError.schemaViolation }
         let isoValue: Int?
         if let raw = metadata.iso.value {
-            guard raw.isFinite, raw.rounded() == raw, raw >= 1, raw <= 1_000_000 else { throw PhotoMetadataBindingError.digestMismatch }
+            guard raw.isFinite, raw.rounded() == raw, raw >= 1, raw <= 1_000_000, source(metadata.iso.source) != nil else { throw PhotoMetadataBindingError.schemaViolation }
             isoValue = Int(raw)
-        } else { isoValue = nil }
+        } else {
+            guard metadata.iso.status == .unavailable || metadata.iso.status == .notRecorded else { throw PhotoMetadataBindingError.schemaViolation }
+            isoValue = nil
+        }
         let orientationValue = PackScanOrientationValue(rawValue: metadata.orientation.lowercased()) ?? .unknown
         return PackScanPhotoMetadataWire(
             photoID: metadata.photoID, imagePath: metadata.imagePath, sequence: metadata.sequence,
             originalFilename: metadata.originalFilename, pixelDimensions: metadata.pixelDimensions,
             orientation: PackScanOrientation(value: orientationValue, source: .exif),
-            focalLengthMM: numeric(metadata.focalLengthMM, unit: "mm"),
-            exposure: numeric(metadata.exposureSeconds, unit: "s"),
+            focalLengthMM: try numeric(metadata.focalLengthMM, unit: "mm", range: 0.000001...1_000_000),
+            exposure: try numeric(metadata.exposureSeconds, unit: "s", range: 0.000001...1_000_000),
             iso: PackScanISOMeasurement(status: metadata.iso.status, value: isoValue, unit: isoValue == nil ? nil : "iso", source: isoValue == nil ? nil : source(metadata.iso.source)),
-            whiteBalanceKelvin: numeric(metadata.whiteBalanceKelvin, unit: "K")
+            whiteBalanceKelvin: try numeric(metadata.whiteBalanceKelvin, unit: "K", range: 1000...100000)
         )
     }
 }
@@ -399,10 +495,12 @@ public enum AcceptedPhotoPersistenceError: Error, Sendable, Equatable { case dup
 /// metadata document is replaced only after the pair has passed binding.
 public actor AcceptedPhotoMetadataStore {
     private let sourceStore: OriginalSourceStore
+    private let sourceRoot: URL
     private let metadataURL: URL
     private let fileManager: FileManager
 
     public init(sourceRoot: URL, metadataURL: URL, fileManager: FileManager = .default) {
+        self.sourceRoot = sourceRoot
         self.sourceStore = OriginalSourceStore(root: sourceRoot, fileManager: fileManager)
         self.metadataURL = metadataURL
         self.fileManager = fileManager
@@ -410,25 +508,41 @@ public actor AcceptedPhotoMetadataStore {
 
     public func persist(metadata: PhotoCaptureMetadata, source: OriginalSourceRecord, bytes: Data) async throws {
         do {
+            try recoverInterruptedTransaction()
             try PhotoMetadataBinding.validate(metadata: metadata, source: source, bytes: bytes)
             let wire = try PackScanPhotoMetadataWire.from(metadata)
-            _ = try await sourceStore.persist(record: source, bytes: bytes)
             var document = try loadDocument()
             guard !document.photos.contains(where: { $0.photoID == wire.photoID }) else { throw AcceptedPhotoPersistenceError.duplicatePhoto }
             document = PackScanPhotoMetadataDocument(photos: document.photos + [wire])
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             try fileManager.createDirectory(at: metadataURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let markerURL = metadataURL.deletingLastPathComponent().appendingPathComponent(".accepted-transaction.json")
+            let marker: [String: String] = ["capture_id": source.captureID, "source": source.filename, "record": "\(source.captureID).source.json"]
+            try JSONSerialization.data(withJSONObject: marker, options: [.sortedKeys]).write(to: markerURL, options: .atomic)
+            _ = try await sourceStore.persist(record: source, bytes: bytes)
+            var stagedMarker = marker; stagedMarker["stage"] = "source_staged"
+            try JSONSerialization.data(withJSONObject: stagedMarker, options: [.sortedKeys]).write(to: markerURL, options: .atomic)
             let temp = metadataURL.deletingLastPathComponent().appendingPathComponent(".photos-\(UUID().uuidString).tmp")
             do {
                 try encoder.encode(document).write(to: temp, options: .atomic)
                 if fileManager.fileExists(atPath: metadataURL.path) { try fileManager.replaceItemAt(metadataURL, withItemAt: temp, backupItemName: nil, options: .usingNewMetadataOnly) }
                 else { try fileManager.moveItem(at: temp, to: metadataURL) }
+                try? fileManager.removeItem(at: markerURL)
             } catch {
                 try? fileManager.removeItem(at: temp)
                 throw AcceptedPhotoPersistenceError.writeFailed
             }
         } catch let error as AcceptedPhotoPersistenceError { throw error }
         catch { throw AcceptedPhotoPersistenceError.invalidContract }
+    }
+
+    private func recoverInterruptedTransaction() throws {
+        let markerURL = metadataURL.deletingLastPathComponent().appendingPathComponent(".accepted-transaction.json")
+        guard let data = try? Data(contentsOf: markerURL), let marker = try? JSONSerialization.jsonObject(with: data) as? [String: String], let captureID = marker["capture_id"], let sourceName = marker["source"], let document = try? loadDocument() else { return }
+        if document.photos.contains(where: { $0.photoID == captureID }) { try? fileManager.removeItem(at: markerURL); return }
+        try? fileManager.removeItem(at: sourceRoot.appendingPathComponent(sourceName))
+        try? fileManager.removeItem(at: sourceRoot.appendingPathComponent("\(captureID).source.json"))
+        try? fileManager.removeItem(at: markerURL)
     }
 
     private func loadDocument() throws -> PackScanPhotoMetadataDocument {
@@ -438,7 +552,7 @@ public actor AcceptedPhotoMetadataStore {
     }
 }
 
-public enum PhotoMetadataBindingError: Error, Sendable, Equatable { case missingSource, idMismatch, pathMismatch, digestMismatch }
+public enum PhotoMetadataBindingError: Error, Sendable, Equatable { case missingSource, idMismatch, pathMismatch, digestMismatch, schemaViolation }
 
 public enum PhotoMetadataBinding {
     public static func validate(metadata: PhotoCaptureMetadata, source: OriginalSourceRecord, bytes: Data) throws {
@@ -465,7 +579,7 @@ public struct CameraRecoveryMachine: Sendable, Equatable {
         case .permissionRestricted: state = .restricted
         case .interrupted: state = .interrupted
         case .interruptionEnded: if state == .interrupted { state = .restarting }
-        case .runtimeError: state = .failed
+        case .runtimeError: retryCount += 1; state = retryCount < 3 ? .restarting : .failed
         case .restartFailed: retryCount += 1; state = retryCount < 3 ? .restarting : .failed
         case .stop: state = .idle
         }
@@ -523,11 +637,13 @@ public final class CameraRecoveryOwner {
     public private(set) var registrationCount = 0
     private var observerTokens: [NSObjectProtocol] = []
     private var cancelInFlight: (() -> Void)?
+    private var restartSession: (() -> Void)?
     public var onStateChange: ((CameraRecoveryState, String) -> Void)?
 
     public init() {}
 
     public func setInFlightCancellation(_ cancellation: (() -> Void)?) { cancelInFlight = cancellation }
+    public func setSessionRestart(_ restart: (() -> Void)?) { restartSession = restart }
 
     public func register(session: AVCaptureSession, notificationCenter: NotificationCenter = .default) {
         guard observerTokens.isEmpty else { return }
@@ -555,8 +671,11 @@ public final class CameraRecoveryOwner {
         case .permission(.restricted): _ = machine.apply(.permissionRestricted)
         case .permission: _ = machine.apply(.requestStart)
         case .interruption: cancelInFlight?(); _ = machine.apply(.interrupted)
-        case .interruptionEnded: _ = machine.apply(.interruptionEnded)
-        case .runtimeError: cancelInFlight?(); _ = machine.apply(.runtimeError)
+        case .interruptionEnded:
+            if machine.apply(.interruptionEnded) == .restarting { restartSession?() }
+        case .runtimeError:
+            cancelInFlight?()
+            if machine.apply(.runtimeError) == .restarting { restartSession?() }
         case .started: _ = machine.apply(.started)
         case .stopped: _ = machine.apply(.stop)
         }
@@ -619,6 +738,14 @@ public enum DeviceHealthCaptureGate: Sendable, Equatable {
         let decision = DeviceHealthPolicy.evaluate(snapshot)
         switch decision.severity { case .normal: return .ready(decision); case .warning: return .warning(decision); case .hardStop: return .hardStop(decision) }
     }
+}
+
+public struct CaptureAdmissionController: Sendable, Equatable {
+    public private(set) var gate: DeviceHealthCaptureGate = .ready(DeviceHealthPolicy.evaluate(UnavailableDeviceHealthProvider().snapshot()))
+    public init() {}
+    public mutating func update(_ gate: DeviceHealthCaptureGate) { self.gate = gate }
+    public var allowsCapture: Bool { gate.allowsCapture }
+    public func rejectReason() -> String? { if case .hardStop(let decision) = gate { return decision.messages.joined(separator: " ") }; return nil }
 }
 
 public actor DeviceHealthMonitor {
@@ -785,29 +912,34 @@ public struct WhiteBalanceCaptureBinding: Sendable, Equatable {
 }
 
 #if canImport(AVFoundation)
+public enum CameraConfigurationError: Error, Sendable, Equatable { case nonSelectedDevice, stabilizationRequired }
+
 @available(iOS 17.0, *)
 public enum AVFoundationWhiteBalanceAdapter {
-    public static func configure(device: AVCaptureDevice, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> WhiteBalanceState {
+    public static func configure(device: AVCaptureDevice, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState {
+        try coordinator.requireSelected(device)
         guard device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) else { return .unavailable }
-        guard !lock else { return try lock(device: device, coordinator: coordinator) }
-        if let coordinator { return try coordinator.withLockedDevice { $0.whiteBalanceMode = .continuousAutoWhiteBalance; return .stabilizing } }
-        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }
-        device.whiteBalanceMode = .continuousAutoWhiteBalance
-        return .stabilizing
+        guard !lock else { return try self.lock(device: device, coordinator: coordinator) }
+        return try coordinator.withLockedDevice { $0.whiteBalanceMode = .continuousAutoWhiteBalance; return .stabilizing }
     }
 
-    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> WhiteBalanceState {
+    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState {
+        try coordinator.requireSelected(device)
+        guard coordinator.whiteBalanceIsStable, !device.isAdjustingWhiteBalance else { throw CameraConfigurationError.stabilizationRequired }
         guard device.isWhiteBalanceModeSupported(.locked) else { return .failed }
-        if let coordinator { return try coordinator.withLockedDevice { $0.whiteBalanceMode = .locked; return .locked } }
-        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }
-        device.whiteBalanceMode = .locked
-        return .locked
+        return try coordinator.withLockedDevice { $0.whiteBalanceMode = .locked; return .locked }
     }
 
     public static func observedTemperatureKelvin(device: AVCaptureDevice) -> WhiteBalanceCaptureReading? {
         let values = device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains)
         let reading = WhiteBalanceCaptureReading(temperatureKelvin: Double(values.temperature))
         return reading.isValid ? reading : nil
+    }
+
+    public static func observe(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState {
+        try coordinator.requireSelected(device)
+        try coordinator.observeWhiteBalance(isAdjusting: device.isAdjustingWhiteBalance)
+        return device.isAdjustingWhiteBalance ? .stabilizing : .stabilizing
     }
 }
 #endif
@@ -818,6 +950,8 @@ public enum AVFoundationWhiteBalanceAdapter {
 public final class CameraDeviceConfigurationCoordinator {
     public let selectedLens: CameraLensIdentity
     public let device: AVCaptureDevice
+    private var focusObservedStable = false
+    private var whiteBalanceObservedStable = false
 
     public init(device: AVCaptureDevice, selectedLens: CameraLensIdentity) {
         self.device = device
@@ -828,6 +962,14 @@ public final class CameraDeviceConfigurationCoordinator {
         device.uniqueID == selectedLens.identifier && device.position == .back && selectedLens.position == .back && selectedLens.kind == .wideAngle
     }
 
+    public func requireSelected(_ candidate: AVCaptureDevice) throws {
+        guard isSelectedDevice, candidate.uniqueID == device.uniqueID else { throw CameraConfigurationError.nonSelectedDevice }
+    }
+    public func observeFocus(isAdjusting: Bool) throws { try requireSelected(device); if !isAdjusting { focusObservedStable = true } }
+    public func observeWhiteBalance(isAdjusting: Bool) throws { try requireSelected(device); if !isAdjusting { whiteBalanceObservedStable = true } }
+    public var focusIsStable: Bool { focusObservedStable }
+    public var whiteBalanceIsStable: Bool { whiteBalanceObservedStable }
+
     public func withLockedDevice<T>(_ operation: (AVCaptureDevice) throws -> T) throws -> T {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
@@ -837,7 +979,8 @@ public final class CameraDeviceConfigurationCoordinator {
 
 @available(iOS 17.0, *)
 public enum AVFoundationExposureAdapter {
-    public static func configure(device: AVCaptureDevice, bias: Float, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> ExposureState {
+    public static func configure(device: AVCaptureDevice, bias: Float, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureState {
+        try coordinator.requireSelected(device)
         guard device.isExposureModeSupported(.continuousAutoExposure) else { return .unavailable }
         let result = try withConfiguration(device: device, coordinator: coordinator) { configuredDevice in
             configuredDevice.exposureMode = .continuousAutoExposure
@@ -850,19 +993,27 @@ public enum AVFoundationExposureAdapter {
         return result
     }
 
-    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> ExposureState {
+    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureState {
+        try coordinator.requireSelected(device)
         guard device.isExposureModeSupported(.locked) else { return .failed }
         return try configureLocked(device: device, coordinator: coordinator) { $0.exposureMode = .locked; return .locked }
     }
 
-    private static func configureLocked<T>(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator?, operation: (AVCaptureDevice) throws -> T) throws -> T {
-        if let coordinator { return try coordinator.withLockedDevice(operation) }
-        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }; return try operation(device)
+    public static func observedReading(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureCaptureReading {
+        try coordinator.requireSelected(device)
+        let reading = ExposureCaptureReading(exposureSeconds: device.exposureDuration.seconds, iso: Int(device.iso), bias: device.exposureTargetBias)
+        guard reading.isValid else { throw ExposureCaptureBindingError.invalidReading }
+        return reading
     }
 
-    private static func withConfiguration<T>(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator?, operation: (AVCaptureDevice) throws -> T) throws -> T {
-        if let coordinator { return try coordinator.withLockedDevice(operation) }
-        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }; return try operation(device)
+    private static func configureLocked<T>(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator, operation: (AVCaptureDevice) throws -> T) throws -> T {
+        try coordinator.requireSelected(device)
+        return try coordinator.withLockedDevice(operation)
+    }
+
+    private static func withConfiguration<T>(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator, operation: (AVCaptureDevice) throws -> T) throws -> T {
+        try coordinator.requireSelected(device)
+        return try coordinator.withLockedDevice(operation)
     }
 }
 #endif
@@ -873,7 +1024,8 @@ import CoreGraphics
 
 @available(iOS 17.0, *)
 public enum AVFoundationFocusAdapter {
-    public static func configure(device: AVCaptureDevice, point: CGPoint?, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> FocusState {
+    public static func configure(device: AVCaptureDevice, point: CGPoint?, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState {
+        try coordinator.requireSelected(device)
         guard device.isFocusModeSupported(.continuousAutoFocus) else { return .unavailable }
         guard !lock else { return try lock(device: device, coordinator: coordinator) }
         let operation: (AVCaptureDevice) throws -> FocusState = { configuredDevice in
@@ -882,18 +1034,22 @@ public enum AVFoundationFocusAdapter {
                 configuredDevice.focusPointOfInterest = point
             }
             configuredDevice.focusMode = .continuousAutoFocus
-            return .continuous
+            return .focusing
         }
-        if let coordinator { return try coordinator.withLockedDevice(operation) }
-        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }; return try operation(device)
+        return try coordinator.withLockedDevice(operation)
     }
 
-    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> FocusState {
+    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState {
+        try coordinator.requireSelected(device)
+        guard coordinator.focusIsStable, !device.isAdjustingFocus else { throw CameraConfigurationError.stabilizationRequired }
         guard device.isFocusModeSupported(.locked) else { return .failed }
-        if let coordinator { return try coordinator.withLockedDevice { $0.focusMode = .locked; return .locked } }
-        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }
-        device.focusMode = .locked
-        return .locked
+        return try coordinator.withLockedDevice { $0.focusMode = .locked; return .locked }
+    }
+
+    public static func observe(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState {
+        try coordinator.requireSelected(device)
+        try coordinator.observeFocus(isAdjusting: device.isAdjustingFocus)
+        return device.isAdjustingFocus ? .focusing : .continuous
     }
 }
 #endif
@@ -908,11 +1064,18 @@ import AVFoundation
 @MainActor
 public final class NextLevelStillCaptureAdapter: NSObject, StillPhotoBackend, NextLevelPhotoDelegate {
     private let nextLevel: NextLevel
+    public let selectedLens: CameraLensIdentity
+    private let activeLensIdentifier: () -> String?
     private var continuation: CheckedContinuation<(bytes: Data, dimensions: CaptureDimensions), Error>?
-    public init(nextLevel: NextLevel = .shared) { self.nextLevel = nextLevel }
+    public init(nextLevel: NextLevel, selectedLens: CameraLensIdentity, activeLensIdentifier: @escaping () -> String?) {
+        self.nextLevel = nextLevel
+        self.selectedLens = selectedLens
+        self.activeLensIdentifier = activeLensIdentifier
+    }
 
     public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
         guard continuation == nil else { throw CameraServiceError.failed("capture_in_flight") }
+        guard activeLensIdentifier() == selectedLens.identifier else { throw CameraServiceError.failed("selected_lens_mismatch") }
         nextLevel.photoConfiguration.isHighResolutionEnabled = true
         nextLevel.photoDelegate = self
         return try await withTaskCancellationHandler(operation: {
@@ -928,6 +1091,14 @@ public final class NextLevelStillCaptureAdapter: NSObject, StillPhotoBackend, Ne
             Task { @MainActor in self.finish(.failure(CameraServiceError.failed("capture_cancelled"))) }
         })
     }
+
+    public func sessionDidStop() { finish(.failure(CameraServiceError.failed("session_stopped"))) }
+
+    #if canImport(AVFoundation)
+    public func bind(to recoveryOwner: CameraRecoveryOwner) {
+        recoveryOwner.setInFlightCancellation { [weak self] in self?.sessionDidStop() }
+    }
+    #endif
 
     private func finish(_ result: Result<(bytes: Data, dimensions: CaptureDimensions), Error>) {
         guard let continuation else { return }
@@ -1002,24 +1173,27 @@ public final class NextLevelPreviewViewController: UIViewController {
         super.viewDidAppear(animated)
         if previewLayer == nil { attachPreviewIfPossible() }
         if let session = previewLayer?.session { recoveryOwner.register(session: session) }
-        guard lifecycle.startIfNeeded() else { return }
+        recoveryOwner.setSessionRestart { [weak self] in self?.restartAuthorizedPreview() }
         let authorization = AVCaptureDevice.authorizationStatus(for: .video)
         switch authorization {
         case .denied:
+            recoveryOwner.handle(.permission(.denied))
             statusLabel.isHidden = false; statusLabel.text = "Camera permission is denied. Enable it in Settings."
             return
         case .restricted:
+            recoveryOwner.handle(.permission(.restricted))
             statusLabel.isHidden = false; statusLabel.text = "Camera access is restricted on this device."
             return
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 Task { @MainActor in
                     guard let self else { return }
-                    if granted { self.startAuthorizedPreview() }
-                    else { self.show(.denied) }
+                    if granted { self.recoveryOwner.handle(.permission(.authorized)); self.startAuthorizedPreview() }
+                    else { self.recoveryOwner.handle(.permission(.denied)); self.show(.denied) }
                 }
             }
         case .authorized:
+            recoveryOwner.handle(.permission(.authorized))
             startAuthorizedPreview()
         @unknown default:
             show(.unavailable)
@@ -1028,8 +1202,9 @@ public final class NextLevelPreviewViewController: UIViewController {
 
     public override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        guard lifecycle.stopIfNeeded() else { return }
+        _ = lifecycle.stopIfNeeded()
         nextLevel.stop()
+        recoveryOwner.handle(.stopped)
         recoveryOwner.unregister()
         detachPreview()
     }
@@ -1053,14 +1228,24 @@ public final class NextLevelPreviewViewController: UIViewController {
     }
 
     private func startAuthorizedPreview() {
+        guard lifecycle.beginAuthorizedStart(.authorized) else { return }
         do {
             try nextLevel.start()
+            lifecycle.markStartedAfterSuccessfulStart()
             recoveryOwner.handle(.started)
             statusLabel.isHidden = true
         } catch {
+            _ = lifecycle.stopIfNeeded()
             recoveryOwner.handle(.runtimeError)
             show(.error("Camera failed to start. Try again."))
         }
+    }
+
+    private func restartAuthorizedPreview() {
+        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { recoveryOwner.handle(.permission(.denied)); return }
+        nextLevel.stop()
+        do { try nextLevel.start(); recoveryOwner.handle(.restartSucceeded) }
+        catch { recoveryOwner.handle(.restartFailed); show(.error("Camera failed to restart. Try again.")) }
     }
 
     private func show(_ state: PreviewSurfaceState) {

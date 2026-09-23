@@ -5,12 +5,16 @@ public struct MotionSample: Sendable, Equatable {
     public let accelerationX: Double
     public let accelerationY: Double
     public let accelerationZ: Double
+    public let attitude: [Double]
+    public let rotationRate: [Double]
 
-    public init(timestamp: TimeInterval, accelerationX: Double, accelerationY: Double, accelerationZ: Double) {
+    public init(timestamp: TimeInterval, accelerationX: Double, accelerationY: Double, accelerationZ: Double, attitude: [Double] = [], rotationRate: [Double] = []) {
         self.timestamp = timestamp
         self.accelerationX = accelerationX
         self.accelerationY = accelerationY
         self.accelerationZ = accelerationZ
+        self.attitude = attitude
+        self.rotationRate = rotationRate
     }
 }
 
@@ -20,7 +24,12 @@ public protocol MotionService: Sendable {
     func start() async
     func stop() async
     func latestSample() async -> MotionSample?
+    func latestRecord() async -> MotionSampleRecord?
     func state() async -> MotionServiceState
+}
+
+public extension MotionService {
+    func latestRecord() async -> MotionSampleRecord? { nil }
 }
 
 /// Foundation-only seam for a future Core Motion adapter.
@@ -53,6 +62,7 @@ import CoreMotion
 public final class CoreMotionMotionService: MotionService {
     private let manager = CMMotionManager()
     private var latest: MotionSample?
+    private var buffer = MotionBuffer(capacity: 256)
     private var currentState: MotionServiceState = .idle
     public init() {}
     public func start() async {
@@ -63,11 +73,15 @@ public final class CoreMotionMotionService: MotionService {
             if let error { self.currentState = .failed(error.localizedDescription); return }
             guard let motion else { self.currentState = .failed("motion_update_missing"); return }
             self.currentState = .running
-            self.latest = MotionSample(timestamp: motion.timestamp, accelerationX: motion.userAcceleration.x, accelerationY: motion.userAcceleration.y, accelerationZ: motion.userAcceleration.z)
+            let record = MotionSampleRecord(monotonicTimestamp: motion.timestamp, attitude: [motion.attitude.quaternion.x, motion.attitude.quaternion.y, motion.attitude.quaternion.z, motion.attitude.quaternion.w], rotationRate: [motion.rotationRate.x, motion.rotationRate.y, motion.rotationRate.z])
+            self.buffer.append(record)
+            self.latest = MotionSample(timestamp: motion.timestamp, accelerationX: motion.userAcceleration.x, accelerationY: motion.userAcceleration.y, accelerationZ: motion.userAcceleration.z, attitude: record.attitude, rotationRate: record.rotationRate)
         }
     }
-    public func stop() async { manager.stopDeviceMotionUpdates(); latest = nil; currentState = .idle }
+    public func stop() async { manager.stopDeviceMotionUpdates(); latest = nil; buffer = MotionBuffer(capacity: 256); currentState = .idle }
     public func latestSample() async -> MotionSample? { latest }
+    public func latestRecord() async -> MotionSampleRecord? { buffer.samples.last }
+    public func records() async -> [MotionSampleRecord] { buffer.samples }
     public func state() async -> MotionServiceState { currentState }
 }
 #endif

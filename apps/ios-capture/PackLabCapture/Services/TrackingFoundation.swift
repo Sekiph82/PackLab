@@ -90,6 +90,20 @@ public struct PoseCaptureBinding: Codable, Sendable, Equatable {
     public init(captureID: String, captureTimestamp: TimeInterval, aligned: AlignedPose) { self.captureID = captureID; self.captureTimestamp = captureTimestamp; self.aligned = aligned }
 }
 
+public struct TimestampDomainBridge: Sendable, Equatable {
+    public let wallReference: Date
+    public let monotonicReference: TimeInterval
+    public init(wallReference: Date, monotonicReference: TimeInterval) { self.wallReference = wallReference; self.monotonicReference = monotonicReference }
+    public func monotonic(for wallDate: Date) -> TimeInterval { monotonicReference + wallDate.timeIntervalSince(wallReference) }
+}
+
+public enum AcceptedStillPoseBinder {
+    public static func bind(still: AcceptedStill, buffer: PoseBuffer, bridge: TimestampDomainBridge? = nil, tolerance: TimeInterval = 0.1) -> PoseCaptureBinding? {
+        guard let timestamp = still.monotonicTimestamp ?? bridge?.monotonic(for: still.capturedAt) else { return nil }
+        return buffer.bind(captureID: still.captureID, timestamp: timestamp, tolerance: tolerance)
+    }
+}
+
 public struct MotionSampleRecord: Codable, Sendable, Equatable {
     public let monotonicTimestamp: TimeInterval
     public let attitude: [Double]
@@ -167,11 +181,12 @@ public enum CoordinateTransformError: Error, Sendable, Equatable { case invalidS
 
 public enum PackScanCoordinateContract {
     public static let convention = "packscan_right_handed_x_right_y_up_z_out_of_screen_camera_forward_neg_z_v3"
+    public static let basisConversion = "arkit_to_packscan_identity_shared_right_handed_basis_v1"
     public static let units = "metres"
     public static func appLocalToPackScan(_ transform: CoordinateTransform) -> CoordinateTransform { transform }
     public static func validate(_ transform: CoordinateTransform) throws {
         guard transform.isFinite else { throw CoordinateTransformError.invalidShapeOrValue }
-        guard convention == "packscan_right_handed_x_right_y_up_z_out_of_screen_camera_forward_neg_z_v3", units == "metres" else { throw CoordinateTransformError.invalidShapeOrValue }
+        guard convention == "packscan_right_handed_x_right_y_up_z_out_of_screen_camera_forward_neg_z_v3", basisConversion == "arkit_to_packscan_identity_shared_right_handed_basis_v1", units == "metres" else { throw CoordinateTransformError.invalidShapeOrValue }
     }
 }
 
@@ -296,25 +311,41 @@ public struct PoseDiagnosticsExport: Codable, Sendable, Equatable {
     public let schemaVersion = "1.0.0"
     public let timebase = "monotonic_seconds_since_boot"
     public let coordinateConvention = PackScanCoordinateContract.convention
+    public let basisConversion = PackScanCoordinateContract.basisConversion
+    public let translationUnit = "metres"
+    public let attitudeOrder = "xyzw"
+    public let rotationRateUnit = "radians_per_second"
     public let records: [PoseDiagnosticRecord]
     public init(records: [PoseDiagnosticRecord]) { self.records = records.sorted { $0.captureTimestamp < $1.captureTimestamp } }
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version", timebase, coordinateConvention = "coordinate_convention", basisConversion = "basis_conversion", translationUnit = "translation_unit", attitudeOrder = "attitude_order", rotationRateUnit = "rotation_rate_unit", records
+    }
 }
 
-public enum PoseDiagnosticsError: Error, Sendable, Equatable { case nonFinite, tooManyRecords, malformedTransform, malformedMotion }
+public enum PoseDiagnosticsError: Error, Sendable, Equatable { case nonFinite, tooManyRecords, malformedTransform, malformedMotion, invalidCaptureID, invalidEpoch, inconsistentStatus }
 public enum PoseDiagnosticsExporter {
     public static func encode(records: [PoseDiagnosticRecord], maximumRecords: Int = 10_000) throws -> Data {
         guard records.count <= maximumRecords else { throw PoseDiagnosticsError.tooManyRecords }
         let redacted = try records.map { record -> PoseDiagnosticRecord in
+            guard !record.captureID.isEmpty else { throw PoseDiagnosticsError.invalidCaptureID }
+            guard record.epoch >= 0 else { throw PoseDiagnosticsError.invalidEpoch }
             guard record.captureTimestamp.isFinite, record.pose.delta?.isFinite ?? true else { throw PoseDiagnosticsError.nonFinite }
+            switch record.pose.status {
+            case "available": guard record.pose.sample?.tracking == .normal else { throw PoseDiagnosticsError.inconsistentStatus }
+            case "unavailable", "stale", "invalid_transform": guard record.pose.sample == nil || record.pose.status != "unavailable" else { throw PoseDiagnosticsError.inconsistentStatus }
+            default: break
+            }
             if let sample = record.pose.sample {
                 guard sample.transform.count == 16 else { throw PoseDiagnosticsError.malformedTransform }
+                guard sample.timestamp.isFinite else { throw PoseDiagnosticsError.nonFinite }
                 guard sample.transform.allSatisfy(\.isFinite) else { throw PoseDiagnosticsError.nonFinite }
             }
             if let motion = record.motion {
                 guard motion.attitude.count == 4, motion.rotationRate.count == 3 else { throw PoseDiagnosticsError.malformedMotion }
                 guard motion.isValid else { throw PoseDiagnosticsError.nonFinite }
             }
-            let safeID = record.captureID.map { $0.isLetter || $0.isNumber || ".-_".contains($0) ? $0 : "_" }
+            let sanitizedID = DiagnosticsSanitizer.sanitize(record.captureID, maxLength: 128)
+            let safeID = sanitizedID.map { $0.isLetter || $0.isNumber || ".-_".contains($0) ? $0 : "_" }
             return PoseDiagnosticRecord(captureID: String(safeID), captureTimestamp: record.captureTimestamp, pose: record.pose, motion: record.motion, epoch: record.epoch)
         }
         return try JSONEncoder.sorted.encode(PoseDiagnosticsExport(records: redacted))
@@ -329,17 +360,13 @@ private extension JSONEncoder {
 import CoreMotion
 @MainActor
 public final class CoreMotionController {
-    private let manager = CMMotionManager()
+    private let service: CoreMotionMotionService
+    private let capacity: Int
     public private(set) var buffer: MotionBuffer
-    public init(capacity: Int = 256) { buffer = MotionBuffer(capacity: capacity) }
+    public init(capacity: Int = 256) { self.capacity = max(1, capacity); service = CoreMotionMotionService(); buffer = MotionBuffer(capacity: capacity) }
     public func start() {
-        guard manager.isDeviceMotionAvailable else { return }
-        manager.deviceMotionUpdateInterval = 1.0 / 60.0
-        manager.startDeviceMotionUpdates(using: .xArbitraryZVertical, to: .main) { [weak self] motion, _ in
-            guard let self, let motion else { return }
-            self.buffer.append(MotionSampleRecord(monotonicTimestamp: motion.timestamp, attitude: [motion.attitude.quaternion.x, motion.attitude.quaternion.y, motion.attitude.quaternion.z, motion.attitude.quaternion.w], rotationRate: [motion.rotationRate.x, motion.rotationRate.y, motion.rotationRate.z]))
-        }
+        Task { await service.start(); buffer = MotionBuffer(capacity: capacity); for record in await service.records() { buffer.append(record) } }
     }
-    public func stop() { manager.stopDeviceMotionUpdates() }
+    public func stop() { Task { await service.stop(); buffer = MotionBuffer(capacity: capacity) } }
 }
 #endif

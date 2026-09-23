@@ -14,6 +14,8 @@ public protocol ARTrackingService: Sendable {
     func state() async -> ARTrackingServiceState
     func snapshot() async -> TrackingSnapshot
     func latestPose() async -> PoseSample?
+    func localizationEpoch() async -> Int
+    func resetDiagnostics() async -> [ResetDiagnosticEvent]
 }
 
 public extension ARTrackingService {
@@ -27,6 +29,8 @@ public extension ARTrackingService {
         }
     }
     func latestPose() async -> PoseSample? { nil }
+    func localizationEpoch() async -> Int { 0 }
+    func resetDiagnostics() async -> [ResetDiagnosticEvent] { [] }
 }
 
 /// Foundation-only seam for a future ARKit adapter owned by this service.
@@ -62,6 +66,8 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
     public private(set) var policy = ARTrackingLifecyclePolicy()
     public private(set) var poseBuffer = PoseBuffer(capacity: 256)
     public private(set) var epochCoordinator = SessionEpochCoordinator()
+    public private(set) var resetDiagnostics: [ResetDiagnosticEvent] = []
+    private var degradedFrames = 0
     private override init() { super.init(); session.delegate = self }
 
     public func start() {
@@ -73,14 +79,20 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
     public func reset(reason: ResetReason = .userRequested, options: ARSession.RunOptions = [.resetTracking, .removeExistingAnchors]) {
         guard ARWorldTrackingConfiguration.isSupported else { policy.limited(.cameraUnavailable); return }
         epochCoordinator.reset(reason: reason)
+        resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: reason, state: epochCoordinator.state))
         policy.reset()
         session.run(ARWorldTrackingConfiguration(), options: options)
     }
     public func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
         switch camera.trackingState {
-        case .normal: policy.normal()
+        case .normal:
+            degradedFrames = 0
+            policy.normal()
+            if epochCoordinator.state == .relocalizing { epochCoordinator.recovered(); resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: epochCoordinator.lastReason ?? .userRequested, state: epochCoordinator.state)) }
         case .limited(let reason):
+            degradedFrames += 1
             switch reason { case .initializing: policy.limited(.initializing); case .excessiveMotion: policy.limited(.excessiveMotion); case .insufficientFeatures: policy.limited(.insufficientFeatures); case .relocalizing: policy.limited(.relocalizing); @unknown default: policy.limited(.unknown) }
+            if degradedFrames >= 3, epochCoordinator.state != .relocalizing { reset(reason: .trackingDegraded) }
         case .notAvailable: policy.limited(.cameraUnavailable)
         }
     }
@@ -92,6 +104,7 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
     }
     public func sessionWasInterrupted(_ session: ARSession) { policy.interrupted() }
     public func sessionInterruptionEnded(_ session: ARSession) { reset(reason: .interruption) }
+    public func session(_ session: ARSession, didFailWithError error: Error) { epochCoordinator.failed(); resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: .runtimeError, state: epochCoordinator.state)) }
 }
 
 @MainActor
@@ -106,6 +119,9 @@ public final class ARKitTrackingService: ARTrackingService {
     public func snapshot() async -> TrackingSnapshot { owner.policy.snapshot }
     public func latestPose() async -> PoseSample? { owner.poseBuffer.samples.last }
     public func bindPose(captureID: String, timestamp: TimeInterval, tolerance: TimeInterval = 0.1) -> PoseCaptureBinding { owner.poseBuffer.bind(captureID: captureID, timestamp: timestamp, tolerance: tolerance) }
+    public func bindAcceptedStill(_ still: AcceptedStill, bridge: TimestampDomainBridge? = nil, tolerance: TimeInterval = 0.1) async -> PoseCaptureBinding? { AcceptedStillPoseBinder.bind(still: still, buffer: owner.poseBuffer, bridge: bridge, tolerance: tolerance) }
+    public func localizationEpoch() async -> Int { owner.epochCoordinator.epoch }
+    public func resetDiagnostics() async -> [ResetDiagnosticEvent] { owner.resetDiagnostics }
     public func reset() async { owner.reset(reason: .userRequested) }
 }
 #endif
