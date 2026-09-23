@@ -5,10 +5,61 @@ from __future__ import annotations
 import pytest
 
 from packlab_core.calibration import DICTIONARY_NAME, detect_markers
+from packlab_core.calibration.marker_detection import (
+    MarkerPolicyError,
+    _duplicate_marker_result,
+    load_marker_policy,
+    resolve_policy_dictionary,
+)
 
 
-def test_detector_pins_the_selected_dictionary() -> None:
-    assert DICTIONARY_NAME == "DICT_APRILTAG_36h11"
+class _FakeAruco:
+    DICT_APRILTAG_36h11 = 3611
+    DICT_4X4_50 = 450
+
+    def __init__(self) -> None:
+        self.requested: list[int] = []
+
+    def getPredefinedDictionary(self, dictionary_id: int) -> tuple[str, int]:
+        self.requested.append(dictionary_id)
+        return ("dictionary", dictionary_id)
+
+
+class _FakeCV2:
+    def __init__(self) -> None:
+        self.aruco = _FakeAruco()
+
+
+def test_detector_dictionary_name_is_loaded_from_policy(repo_root) -> None:
+    policy = load_marker_policy(
+        repo_root / "schemas" / "packscan" / "calibration-marker-policy.json"
+    )
+    assert DICTIONARY_NAME == policy["opencv_dictionary"] == "DICT_APRILTAG_36h11"
+
+
+def test_policy_dictionary_resolution_follows_policy_data() -> None:
+    policy = load_marker_policy()
+    fake_cv2 = _FakeCV2()
+
+    dictionary = resolve_policy_dictionary(fake_cv2, policy)
+
+    assert dictionary == ("dictionary", _FakeAruco.DICT_APRILTAG_36h11)
+    assert fake_cv2.aruco.requested == [_FakeAruco.DICT_APRILTAG_36h11]
+
+    substituted_policy = dict(policy)
+    substituted_policy["opencv_dictionary"] = "DICT_4X4_50"
+    substituted = resolve_policy_dictionary(fake_cv2, substituted_policy)
+
+    assert substituted == ("dictionary", _FakeAruco.DICT_4X4_50)
+    assert fake_cv2.aruco.requested[-1] == _FakeAruco.DICT_4X4_50
+
+
+def test_unsupported_policy_dictionary_fails_clearly() -> None:
+    policy = dict(load_marker_policy())
+    policy["opencv_dictionary"] = "DICT_DOES_NOT_EXIST"
+
+    with pytest.raises(MarkerPolicyError, match="unsupported_marker_dictionary"):
+        resolve_policy_dictionary(_FakeCV2(), policy)
 
 
 def test_unsupported_image_shapes_are_non_fatal() -> None:
@@ -41,6 +92,13 @@ def test_synthetic_marker_has_ordered_pixel_corners_and_no_scale_fields() -> Non
 
 
 def test_duplicate_ids_are_flagged_without_crash() -> None:
+    duplicate = _duplicate_marker_result([[7], [7]])
+    assert duplicate is not None
+    assert duplicate.status == "invalid"
+    assert duplicate.errors == ("duplicate_marker_id",)
+
+
+def test_synthetic_duplicate_scene_remains_bounded_if_detected() -> None:
     cv2 = pytest.importorskip("cv2")
     import numpy as np
 

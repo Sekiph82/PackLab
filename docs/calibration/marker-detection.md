@@ -1,9 +1,13 @@
 # PackLab marker detection
 
 `packlab_core.calibration.marker_detection.detect_markers` is the PackLab-owned
-boundary around OpenCV ArUco/AprilTag detection. It loads only the pinned
-`DICT_APRILTAG_36h11` dictionary from the marker policy, accepts non-empty
-uint8 grayscale or 1/3-channel images, and returns marker IDs, four ordered
+boundary around OpenCV ArUco/AprilTag detection. It loads the selected OpenCV
+dictionary name from `schemas/packscan/calibration-marker-policy.json` and
+resolves that policy value through `cv2.aruco.getPredefinedDictionary`. If the
+policy dictionary cannot be mapped to the local OpenCV ArUco module, detection
+returns a bounded `unavailable` result with an explicit policy-dictionary
+error rather than substituting a fallback family. The detector accepts non-empty
+uint8 grayscale or 1/3-channel images and returns marker IDs, four ordered
 corners, geometry-quality metadata, and detector/dictionary provenance.
 
 Corners are deterministic image pixels in `x` right / `y` down coordinates,
@@ -20,5 +24,6 @@ printer, camera, or pose inference. Scale estimation is a later calibration
 stage.
 
 Positive tests generate tiny synthetic markers with OpenCV in a temporary
-workspace. Tests that run without OpenCV still cover pinned constants and
+workspace. Tests that run without OpenCV still cover policy-driven dictionary
+resolution, unsupported-policy rejection, injected duplicate-ID handling, and
 unsupported-input boundaries; no private or device image is required.

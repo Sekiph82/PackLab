@@ -2,12 +2,70 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+from types import ModuleType
 from typing import Any
 
-DICTIONARY_NAME = "DICT_APRILTAG_36h11"
-DICTIONARY_POLICY_VERSION = "1.0.0"
 CORNER_ORDER = "clockwise_from_top_left_image_coordinates"
+
+
+class MarkerPolicyError(ValueError):
+    """Raised when the PackLab marker policy cannot select an OpenCV dictionary."""
+
+
+def _policy_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[4]
+        / "schemas"
+        / "packscan"
+        / ("calibration-marker-policy.json")
+    )
+
+
+def load_marker_policy(path: str | Path | None = None) -> dict[str, object]:
+    """Load the PackLab-owned marker dictionary policy."""
+
+    policy_path = Path(path) if path is not None else _policy_path()
+    try:
+        value = json.loads(policy_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise MarkerPolicyError("marker_policy_unavailable") from error
+    if not isinstance(value, dict):
+        raise MarkerPolicyError("marker_policy_invalid")
+    return value
+
+
+def _policy_string(policy: Mapping[str, object], key: str) -> str:
+    value = policy.get(key)
+    if not isinstance(value, str) or not value:
+        raise MarkerPolicyError(f"marker_policy_missing_{key}")
+    return value
+
+
+def _policy_dictionary_name(policy: Mapping[str, object]) -> str:
+    return _policy_string(policy, "opencv_dictionary")
+
+
+def _policy_version(policy: Mapping[str, object]) -> str:
+    return _policy_string(policy, "policy_version")
+
+
+def resolve_policy_dictionary(cv2_module: ModuleType | Any, policy: Mapping[str, object]) -> Any:
+    """Resolve the policy dictionary to an OpenCV predefined dictionary."""
+
+    dictionary_name = _policy_dictionary_name(policy)
+    aruco = getattr(cv2_module, "aruco", None)
+    if aruco is None or not hasattr(aruco, dictionary_name):
+        raise MarkerPolicyError(f"unsupported_marker_dictionary:{dictionary_name}")
+    return aruco.getPredefinedDictionary(getattr(aruco, dictionary_name))
+
+
+_DEFAULT_POLICY = load_marker_policy()
+DICTIONARY_NAME = _policy_dictionary_name(_DEFAULT_POLICY)
+DICTIONARY_POLICY_VERSION = _policy_version(_DEFAULT_POLICY)
 
 
 @dataclass(frozen=True)
@@ -52,7 +110,8 @@ def detect_markers(image: Any) -> DetectionBatch:
         return DetectionBatch("unavailable", (), ("opencv_unavailable",), _provenance())
     try:
         gray = image if len(shape) == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
+        policy = load_marker_policy()
+        dictionary = resolve_policy_dictionary(cv2, policy)
         parameters = cv2.aruco.DetectorParameters()
         if hasattr(parameters, "cornerRefinementMethod") and hasattr(
             cv2.aruco, "CORNER_REFINE_APRILTAG"
@@ -65,14 +124,17 @@ def detect_markers(image: Any) -> DetectionBatch:
             raw_corners, raw_ids, _ = cv2.aruco.detectMarkers(
                 gray, dictionary, parameters=parameters
             )
+    except MarkerPolicyError as error:
+        return DetectionBatch("unavailable", (), (str(error),), _provenance())
     except (AttributeError, cv2.error, TypeError, ValueError):
         return DetectionBatch("invalid_input", (), ("opencv_detection_failed",), _provenance())
     if raw_ids is None or len(raw_ids) == 0:
         return DetectionBatch("no_markers", (), (), _provenance())
 
-    ids = [int(value) for value in raw_ids.reshape(-1)]
-    if len(set(ids)) != len(ids):
-        return DetectionBatch("invalid", (), ("duplicate_marker_id",), _provenance())
+    duplicate_result = _duplicate_marker_result(raw_ids)
+    if duplicate_result is not None:
+        return duplicate_result
+    ids = _raw_marker_ids(raw_ids)
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_COUNT, 30, 0.001)
     observations: list[MarkerObservation] = []
     height, width = int(shape[0]), int(shape[1])
@@ -108,6 +170,21 @@ def _supported_image(shape: Any, dtype: str) -> bool:
     if shape[0] <= 0 or shape[1] <= 0:
         return False
     return len(shape) == 2 or shape[2] in {1, 3}
+
+
+def _raw_marker_ids(raw_ids: Any) -> tuple[int, ...]:
+    if hasattr(raw_ids, "reshape"):
+        return tuple(int(value) for value in raw_ids.reshape(-1))
+    return tuple(
+        int(value) for row in raw_ids for value in (row if isinstance(row, list) else [row])
+    )
+
+
+def _duplicate_marker_result(raw_ids: Any) -> DetectionBatch | None:
+    ids = _raw_marker_ids(raw_ids)
+    if len(set(ids)) != len(ids):
+        return DetectionBatch("invalid", (), ("duplicate_marker_id",), _provenance())
+    return None
 
 
 def _ordered_corners(
