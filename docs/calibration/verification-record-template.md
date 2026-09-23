@@ -22,7 +22,7 @@ fabricated measurements.
 
 | Field | Nominal mm | Owner measured mm — reading 1 | Owner measured mm — reading 2 | Tolerance | Result |
 | --- | ---: | ---: | ---: | ---: | --- |
-| Page width | `[210 or 297]` | `UNRECORDED` | `UNRECORDED` | `A4 ±1.0 / A3 ±1.0` | `UNRECORDED` |
+| Page width | `[210 or 297]` | `UNRECORDED` | `UNRECORDED` | `A4 ±1.0 / A3 ±1.5` | `UNRECORDED` |
 | Page height | `[297 or 420]` | `UNRECORDED` | `UNRECORDED` | `A4 ±1.0 / A3 ±1.5` | `UNRECORDED` |
 | Marker side — ID 0 | `40` | `UNRECORDED` | `UNRECORDED` | `±0.5` | `UNRECORDED` |
 | Marker side — ID 1 | `40` | `UNRECORDED` | `UNRECORDED` | `±0.5` | `UNRECORDED` |
