@@ -35,6 +35,62 @@ public struct PreviewLifecyclePolicy: Sendable, Equatable {
     public mutating func detach() { attachmentCount = max(0, attachmentCount - 1) }
 }
 
+public enum CameraPosition: String, Sendable, Equatable, Codable {
+    case front
+    case back
+    case unspecified
+}
+
+public enum CameraDeviceKind: String, Sendable, Equatable, Codable {
+    case wideAngle
+    case ultraWide
+    case telephoto
+    case dual
+    case dualWide
+    case triple
+    case other
+}
+
+public struct CameraDeviceDescriptor: Sendable, Equatable, Codable {
+    public let position: CameraPosition
+    public let kind: CameraDeviceKind
+    public let stableID: String
+
+    public init(position: CameraPosition, kind: CameraDeviceKind, stableID: String) {
+        self.position = position
+        self.kind = kind
+        self.stableID = stableID
+    }
+}
+
+public struct CameraLensIdentity: Sendable, Equatable, Codable {
+    public let identifier: String
+    public let position: CameraPosition
+    public let kind: CameraDeviceKind
+
+    public init(identifier: String, position: CameraPosition, kind: CameraDeviceKind) {
+        self.identifier = identifier
+        self.position = position
+        self.kind = kind
+    }
+}
+
+public enum CameraSelectionResult: Sendable, Equatable {
+    case selected(CameraLensIdentity)
+    case unavailable
+    case ambiguous([CameraDeviceDescriptor])
+    case unsupported
+}
+
+public enum CameraDeviceSelector {
+    public static func selectMainRearWide(from candidates: [CameraDeviceDescriptor]) -> CameraSelectionResult {
+        let rearWide = candidates.filter { $0.position == .back && $0.kind == .wideAngle }
+        guard !rearWide.isEmpty else { return candidates.isEmpty ? .unavailable : .unsupported }
+        guard rearWide.count == 1, let selected = rearWide.first else { return .ambiguous(rearWide) }
+        return .selected(CameraLensIdentity(identifier: selected.stableID, position: selected.position, kind: selected.kind))
+    }
+}
+
 #if canImport(UIKit) && canImport(AVFoundation) && canImport(NextLevel)
 import AVFoundation
 import NextLevel
@@ -110,6 +166,37 @@ public struct NextLevelPreviewBridge: UIViewControllerRepresentable {
     public init() {}
     public func makeUIViewController(context: Context) -> NextLevelPreviewViewController { NextLevelPreviewViewController() }
     public func updateUIViewController(_ controller: NextLevelPreviewViewController, context: Context) {}
+}
+
+@available(iOS 17.0, *)
+public enum AVFoundationCameraDiscovery {
+    public static func rearCandidates() -> [CameraDeviceDescriptor] {
+        let types: [AVCaptureDevice.DeviceType] = [
+            .builtInWideAngleCamera, .builtInUltraWideCamera, .builtInTelephotoCamera,
+            .builtInDualCamera, .builtInDualWideCamera, .builtInTripleCamera
+        ]
+        let session = AVCaptureDevice.DiscoverySession(
+            deviceTypes: types,
+            mediaType: .video,
+            position: .back
+        )
+        return session.devices.map(descriptor(for:)).sorted { $0.stableID < $1.stableID }
+    }
+
+    private static func descriptor(for device: AVCaptureDevice) -> CameraDeviceDescriptor {
+        let kind: CameraDeviceKind
+        switch device.deviceType {
+        case .builtInWideAngleCamera: kind = .wideAngle
+        case .builtInUltraWideCamera: kind = .ultraWide
+        case .builtInTelephotoCamera: kind = .telephoto
+        case .builtInDualCamera: kind = .dual
+        case .builtInDualWideCamera: kind = .dualWide
+        case .builtInTripleCamera: kind = .triple
+        default: kind = .other
+        }
+        let position: CameraPosition = device.position == .back ? .back : device.position == .front ? .front : .unspecified
+        return CameraDeviceDescriptor(position: position, kind: kind, stableID: device.uniqueID)
+    }
 }
 #else
 /// Simulator and non-Apple builds never manufacture image data.

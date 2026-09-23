@@ -17,6 +17,31 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(policy.attachmentCount, 0)
     }
 
+    func testMainRearWideSelectionRejectsFrontAndUnsupportedLenses() {
+        let candidates = [
+            CameraDeviceDescriptor(position: .front, kind: .wideAngle, stableID: "front"),
+            CameraDeviceDescriptor(position: .back, kind: .ultraWide, stableID: "ultra"),
+            CameraDeviceDescriptor(position: .back, kind: .wideAngle, stableID: "main")
+        ]
+        XCTAssertEqual(
+            CameraDeviceSelector.selectMainRearWide(from: candidates),
+            .selected(CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle))
+        )
+        XCTAssertEqual(CameraDeviceSelector.selectMainRearWide(from: []), .unavailable)
+        XCTAssertEqual(
+            CameraDeviceSelector.selectMainRearWide(from: [candidates[1]]),
+            .unsupported
+        )
+    }
+
+    func testMainRearWideSelectionIsExplicitlyAmbiguous() {
+        let candidates = [
+            CameraDeviceDescriptor(position: .back, kind: .wideAngle, stableID: "a"),
+            CameraDeviceDescriptor(position: .back, kind: .wideAngle, stableID: "b")
+        ]
+        XCTAssertEqual(CameraDeviceSelector.selectMainRearWide(from: candidates), .ambiguous(candidates))
+    }
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(
