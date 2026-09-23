@@ -247,6 +247,41 @@ public struct CameraRecoveryMachine: Sendable, Equatable {
     }
 }
 
+public enum ThermalCondition: String, Sendable, Codable, Equatable { case nominal, fair, serious, critical, unavailable }
+public struct DeviceHealthSnapshot: Sendable, Equatable {
+    public let thermal: ThermalCondition
+    public let availableStorageBytes: Int64?
+    public let batteryLevel: Double?
+    public let batteryStateAvailable: Bool
+    public init(thermal: ThermalCondition, availableStorageBytes: Int64?, batteryLevel: Double?, batteryStateAvailable: Bool) { self.thermal = thermal; self.availableStorageBytes = availableStorageBytes; self.batteryLevel = batteryLevel; self.batteryStateAvailable = batteryStateAvailable }
+}
+public enum HealthSeverity: String, Sendable, Codable, Equatable { case normal, warning, hardStop }
+public struct HealthDecision: Sendable, Equatable { public let severity: HealthSeverity; public let messages: [String]; public init(severity: HealthSeverity, messages: [String]) { self.severity = severity; self.messages = messages } }
+
+public enum DeviceHealthPolicy {
+    public static let minimumStorageBytes: Int64 = 250 * 1024 * 1024
+    public static let warningStorageBytes: Int64 = 1024 * 1024 * 1024
+    public static func evaluate(_ snapshot: DeviceHealthSnapshot) -> HealthDecision {
+        var messages: [String] = []; var severity = HealthSeverity.normal
+        switch snapshot.thermal {
+        case .critical: severity = .hardStop; messages.append("Thermal state is critical; stop capture.")
+        case .serious: severity = maxSeverity(severity, .warning); messages.append("Device is hot; capture may stop.")
+        case .fair: severity = maxSeverity(severity, .warning); messages.append("Device temperature is elevated.")
+        default: break
+        }
+        if let storage = snapshot.availableStorageBytes {
+            if storage < minimumStorageBytes { severity = .hardStop; messages.append("Storage is critically low.") }
+            else if storage < warningStorageBytes { severity = maxSeverity(severity, .warning); messages.append("Storage is running low.") }
+        }
+        if let battery = snapshot.batteryLevel, battery < 0.10 { severity = maxSeverity(severity, .warning); messages.append("Battery is below 10%.") }
+        return HealthDecision(severity: severity, messages: messages)
+    }
+    private static func maxSeverity(_ lhs: HealthSeverity, _ rhs: HealthSeverity) -> HealthSeverity {
+        [lhs, rhs].max { rank($0) < rank($1) } ?? .normal
+    }
+    private static func rank(_ severity: HealthSeverity) -> Int { severity == .normal ? 0 : severity == .warning ? 1 : 2 }
+}
+
 public enum FocusState: String, Sendable, Codable, Equatable { case unavailable, focusing, continuous, locked, failed }
 public struct FocusCapabilities: Sendable, Equatable { public let point: Bool; public let lock: Bool; public init(point: Bool, lock: Bool) { self.point = point; self.lock = lock } }
 

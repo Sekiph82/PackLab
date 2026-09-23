@@ -132,6 +132,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(machine.apply(.stop), .idle)
     }
 
+    func testDeviceHealthPolicyUsesConservativeHardStops() {
+        let warning = DeviceHealthPolicy.evaluate(DeviceHealthSnapshot(thermal: .fair, availableStorageBytes: 500_000_000, batteryLevel: 0.5, batteryStateAvailable: true))
+        XCTAssertEqual(warning.severity, .warning)
+        let stop = DeviceHealthPolicy.evaluate(DeviceHealthSnapshot(thermal: .critical, availableStorageBytes: 100, batteryLevel: 0.02, batteryStateAvailable: true))
+        XCTAssertEqual(stop.severity, .hardStop)
+        let unavailable = DeviceHealthPolicy.evaluate(DeviceHealthSnapshot(thermal: .unavailable, availableStorageBytes: nil, batteryLevel: nil, batteryStateAvailable: false))
+        XCTAssertEqual(unavailable.severity, .normal)
+    }
+
     func testStableTrackedSampleIsAccepted() async {
         let service = FoundationCaptureQualityService(maximumMotionMagnitude: 1.0)
         let result = await service.evaluate(
