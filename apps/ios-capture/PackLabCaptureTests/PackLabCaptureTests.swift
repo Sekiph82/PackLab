@@ -754,6 +754,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PackScanCoordinateContract.basisConversion, "arkit_to_packscan_identity_shared_right_handed_basis_v1")
     }
 
+    func testPL0083TrackingRecoveryHysteresisRetainsDiagnostics() {
+        var recovery = TrackingRecoveryPolicy(requiredStableNormalFrames: 2)
+        XCTAssertFalse(recovery.update(state: .normal).poseEvidenceEligible)
+        XCTAssertFalse(recovery.update(state: .limited, limitation: .insufficientFeatures).poseEvidenceEligible)
+        XCTAssertFalse(recovery.update(state: .normal).poseEvidenceEligible)
+        XCTAssertTrue(recovery.update(state: .normal).poseEvidenceEligible)
+        XCTAssertEqual(recovery.diagnostics.count, 4)
+    }
+
     func testPreviewAuthorizationAndFailureLifecycleRecover() {
         var lifecycle = PreviewLifecyclePolicy()
         XCTAssertFalse(lifecycle.beginAuthorizedStart(.denied))
