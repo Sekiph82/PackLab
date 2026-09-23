@@ -135,6 +135,18 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertNil(unavailable.temperatureKelvin)
     }
 
+    func testCameraControlModelRetainsSelectedLensAndIndependentStates() {
+        let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)
+        var model = CameraCaptureControlModel(lens: lens)
+        model.setFocus(.continuous)
+        model.setExposure(.metering)
+        model.setWhiteBalance(.stabilizing)
+        XCTAssertEqual(model.state.lens, lens)
+        XCTAssertEqual(model.state.focus, .continuous)
+        XCTAssertEqual(model.state.exposure, .metering)
+        XCTAssertEqual(model.state.whiteBalance, .stabilizing)
+    }
+
     func testPhotoMetadataBindingFailsClosedForMismatchedSource() throws {
         let bytes = Data([1, 2, 3])
         let dims = CaptureDimensions(width: 12, height: 8)

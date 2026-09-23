@@ -404,6 +404,26 @@ public actor CameraConfigurationCoordinator {
     public func perform<T: Sendable>(_ operation: @Sendable () throws -> T) rethrows -> T { try operation() }
 }
 
+public struct CameraCaptureControlState: Sendable, Equatable {
+    public let lens: CameraLensIdentity?
+    public let focus: FocusState
+    public let exposure: ExposureState
+    public let whiteBalance: WhiteBalanceState
+    public let message: String?
+    public init(lens: CameraLensIdentity?, focus: FocusState = .unavailable, exposure: ExposureState = .unavailable, whiteBalance: WhiteBalanceState = .unavailable, message: String? = nil) {
+        self.lens = lens; self.focus = focus; self.exposure = exposure; self.whiteBalance = whiteBalance; self.message = message
+    }
+}
+
+public struct CameraCaptureControlModel: Sendable, Equatable {
+    public private(set) var state: CameraCaptureControlState
+    public init(lens: CameraLensIdentity? = nil) { state = CameraCaptureControlState(lens: lens) }
+    public mutating func setFocus(_ value: FocusState) { state = CameraCaptureControlState(lens: state.lens, focus: value, exposure: state.exposure, whiteBalance: state.whiteBalance, message: state.message) }
+    public mutating func setExposure(_ value: ExposureState) { state = CameraCaptureControlState(lens: state.lens, focus: state.focus, exposure: value, whiteBalance: state.whiteBalance, message: state.message) }
+    public mutating func setWhiteBalance(_ value: WhiteBalanceState) { state = CameraCaptureControlState(lens: state.lens, focus: state.focus, exposure: state.exposure, whiteBalance: value, message: state.message) }
+    public mutating func message(_ value: String?) { state = CameraCaptureControlState(lens: state.lens, focus: state.focus, exposure: state.exposure, whiteBalance: state.whiteBalance, message: value) }
+}
+
 public enum ExposureState: String, Sendable, Codable, Equatable { case unavailable, metering, locked, failed }
 public struct ExposureCapabilities: Sendable, Equatable { public let minBias: Float; public let maxBias: Float; public let lock: Bool; public init(minBias: Float, maxBias: Float, lock: Bool) { self.minBias = minBias; self.maxBias = maxBias; self.lock = lock } }
 
@@ -443,36 +463,76 @@ public struct WhiteBalancePolicy: Sendable, Equatable {
 #if canImport(AVFoundation)
 @available(iOS 17.0, *)
 public enum AVFoundationWhiteBalanceAdapter {
-    public static func configure(device: AVCaptureDevice, lock: Bool) throws -> WhiteBalanceState {
+    public static func configure(device: AVCaptureDevice, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> WhiteBalanceState {
         guard device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) else { return .unavailable }
-        try device.lockForConfiguration()
-        defer { device.unlockForConfiguration() }
+        guard !lock else { return try lock(device: device, coordinator: coordinator) }
+        if let coordinator { return try coordinator.withLockedDevice { $0.whiteBalanceMode = .continuousAutoWhiteBalance; return .stabilizing } }
+        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }
         device.whiteBalanceMode = .continuousAutoWhiteBalance
-        if lock {
-            guard device.isWhiteBalanceModeSupported(.locked) else { return .failed }
-            device.whiteBalanceMode = .locked
-            return .locked
-        }
         return .stabilizing
+    }
+
+    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> WhiteBalanceState {
+        guard device.isWhiteBalanceModeSupported(.locked) else { return .failed }
+        if let coordinator { return try coordinator.withLockedDevice { $0.whiteBalanceMode = .locked; return .locked } }
+        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }
+        device.whiteBalanceMode = .locked
+        return .locked
     }
 }
 #endif
 
 #if canImport(AVFoundation)
 @available(iOS 17.0, *)
-public enum AVFoundationExposureAdapter {
-    public static func configure(device: AVCaptureDevice, bias: Float, lock: Bool) throws -> ExposureState {
-        guard device.isExposureModeSupported(.continuousAutoExposure) else { return .unavailable }
+@MainActor
+public final class CameraDeviceConfigurationCoordinator {
+    public let selectedLens: CameraLensIdentity
+    public let device: AVCaptureDevice
+
+    public init(device: AVCaptureDevice, selectedLens: CameraLensIdentity) {
+        self.device = device
+        self.selectedLens = selectedLens
+    }
+
+    public var isSelectedDevice: Bool {
+        device.uniqueID == selectedLens.identifier && device.position == .back && selectedLens.position == .back && selectedLens.kind == .wideAngle
+    }
+
+    public func withLockedDevice<T>(_ operation: (AVCaptureDevice) throws -> T) throws -> T {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
-        device.exposureMode = .continuousAutoExposure
-        device.setExposureTargetBias(min(max(bias, device.minExposureTargetBias), device.maxExposureTargetBias))
-        if lock {
-            guard device.isExposureModeSupported(.locked) else { return .failed }
-            device.exposureMode = .locked
-            return .locked
+        return try operation(device)
+    }
+}
+
+@available(iOS 17.0, *)
+public enum AVFoundationExposureAdapter {
+    public static func configure(device: AVCaptureDevice, bias: Float, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> ExposureState {
+        guard device.isExposureModeSupported(.continuousAutoExposure) else { return .unavailable }
+        let result = try withConfiguration(device: device, coordinator: coordinator) { configuredDevice in
+            configuredDevice.exposureMode = .continuousAutoExposure
+            configuredDevice.setExposureTargetBias(min(max(bias, configuredDevice.minExposureTargetBias), configuredDevice.maxExposureTargetBias))
+            return ExposureState.metering
         }
-        return .metering
+        // Locking is a separate operation so callers can wait for observed
+        // metering stabilization. The legacy flag is intentionally ignored.
+        _ = lock
+        return result
+    }
+
+    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> ExposureState {
+        guard device.isExposureModeSupported(.locked) else { return .failed }
+        return try configureLocked(device: device, coordinator: coordinator) { $0.exposureMode = .locked; return .locked }
+    }
+
+    private static func configureLocked<T>(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator?, operation: (AVCaptureDevice) throws -> T) throws -> T {
+        if let coordinator { return try coordinator.withLockedDevice(operation) }
+        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }; return try operation(device)
+    }
+
+    private static func withConfiguration<T>(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator?, operation: (AVCaptureDevice) throws -> T) throws -> T {
+        if let coordinator { return try coordinator.withLockedDevice(operation) }
+        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }; return try operation(device)
     }
 }
 #endif
@@ -483,21 +543,27 @@ import CoreGraphics
 
 @available(iOS 17.0, *)
 public enum AVFoundationFocusAdapter {
-    public static func configure(device: AVCaptureDevice, point: CGPoint?, lock: Bool) throws -> FocusState {
+    public static func configure(device: AVCaptureDevice, point: CGPoint?, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> FocusState {
         guard device.isFocusModeSupported(.continuousAutoFocus) else { return .unavailable }
-        try device.lockForConfiguration()
-        defer { device.unlockForConfiguration() }
-        if let point {
-            guard device.isFocusPointOfInterestSupported else { return .unavailable }
-            device.focusPointOfInterest = point
+        guard !lock else { return try lock(device: device, coordinator: coordinator) }
+        let operation: (AVCaptureDevice) throws -> FocusState = { configuredDevice in
+            if let point {
+                guard configuredDevice.isFocusPointOfInterestSupported else { return .unavailable }
+                configuredDevice.focusPointOfInterest = point
+            }
+            configuredDevice.focusMode = .continuousAutoFocus
+            return .continuous
         }
-        device.focusMode = .continuousAutoFocus
-        if lock {
-            guard device.isFocusModeSupported(.locked) else { return .failed }
-            device.focusMode = .locked
-            return .locked
-        }
-        return .continuous
+        if let coordinator { return try coordinator.withLockedDevice(operation) }
+        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }; return try operation(device)
+    }
+
+    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator? = nil) throws -> FocusState {
+        guard device.isFocusModeSupported(.locked) else { return .failed }
+        if let coordinator { return try coordinator.withLockedDevice { $0.focusMode = .locked; return .locked } }
+        try device.lockForConfiguration(); defer { device.unlockForConfiguration() }
+        device.focusMode = .locked
+        return .locked
     }
 }
 #endif
