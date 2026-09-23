@@ -483,6 +483,25 @@ public struct WhiteBalancePolicy: Sendable, Equatable {
     }
 }
 
+public struct WhiteBalanceCaptureReading: Sendable, Equatable {
+    public let temperatureKelvin: Double
+    public init(temperatureKelvin: Double) { self.temperatureKelvin = temperatureKelvin }
+    public var isValid: Bool { temperatureKelvin.isFinite && temperatureKelvin >= 1000 && temperatureKelvin <= 100000 }
+}
+
+public enum WhiteBalanceCaptureBindingError: Error, Sendable, Equatable { case unavailable, invalidReading }
+
+public struct WhiteBalanceCaptureBinding: Sendable, Equatable {
+    public let reading: WhiteBalanceCaptureReading
+    public private(set) var state: WhiteBalanceState
+    public init(reading: WhiteBalanceCaptureReading, state: WhiteBalanceState = .stabilizing) throws {
+        guard reading.isValid else { throw WhiteBalanceCaptureBindingError.invalidReading }
+        guard state == .stabilizing || state == .locked else { throw WhiteBalanceCaptureBindingError.unavailable }
+        self.reading = reading; self.state = state
+    }
+    public mutating func lock() { state = .locked }
+}
+
 #if canImport(AVFoundation)
 @available(iOS 17.0, *)
 public enum AVFoundationWhiteBalanceAdapter {
@@ -501,6 +520,12 @@ public enum AVFoundationWhiteBalanceAdapter {
         try device.lockForConfiguration(); defer { device.unlockForConfiguration() }
         device.whiteBalanceMode = .locked
         return .locked
+    }
+
+    public static func observedTemperatureKelvin(device: AVCaptureDevice) -> WhiteBalanceCaptureReading? {
+        let values = device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains)
+        let reading = WhiteBalanceCaptureReading(temperatureKelvin: Double(values.temperature))
+        return reading.isValid ? reading : nil
     }
 }
 #endif

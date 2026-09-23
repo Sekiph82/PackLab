@@ -146,6 +146,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertNil(unavailable.temperatureKelvin)
     }
 
+    func testWhiteBalanceCaptureBindingRequiresObservedTemperature() throws {
+        var binding = try WhiteBalanceCaptureBinding(reading: WhiteBalanceCaptureReading(temperatureKelvin: 5200))
+        XCTAssertEqual(binding.state, .stabilizing)
+        XCTAssertTrue(binding.reading.isValid)
+        binding.lock()
+        XCTAssertEqual(binding.state, .locked)
+        XCTAssertThrowsError(try WhiteBalanceCaptureBinding(reading: WhiteBalanceCaptureReading(temperatureKelvin: .infinity))) { error in
+            XCTAssertEqual(error as? WhiteBalanceCaptureBindingError, .invalidReading)
+        }
+    }
+
     func testCameraControlModelRetainsSelectedLensAndIndependentStates() {
         let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)
         var model = CameraCaptureControlModel(lens: lens)
