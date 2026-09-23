@@ -1,8 +1,8 @@
 # M03-BATCH-003 — Master Remediation Codex Log V02
 
-Milestone: M03 — iOS Capture Foundation  
-Scope: PL-0069, PL-0071 through PL-0093; PL-0070 preserved as accepted  
-Starting canonical commit: `aa0dc80ec771e8fcd15945908eb09d017c183172`  
+Milestone: M03 — iOS Capture Foundation
+Scope: PL-0069, PL-0071 through PL-0093; PL-0070 preserved as accepted
+Starting canonical commit: `aa0dc80ec771e8fcd15945908eb09d017c183172`
 Final implementation/evidence commit: `8210bff03801e9a316babf483213a377401bb3cb`
 
 ## Authority and synchronization
