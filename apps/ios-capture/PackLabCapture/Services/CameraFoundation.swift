@@ -34,6 +34,40 @@ public struct PreviewLifecyclePolicy: Sendable, Equatable {
 
     public mutating func attach() { attachmentCount += 1 }
     public mutating func detach() { attachmentCount = max(0, attachmentCount - 1) }
+
+    @discardableResult
+    public mutating func attachIfNeeded() -> Bool {
+        guard attachmentCount == 0 else { return false }
+        attach()
+        return true
+    }
+
+    @discardableResult
+    public mutating func detachIfNeeded() -> Bool {
+        guard attachmentCount > 0 else { return false }
+        detach()
+        return true
+    }
+}
+
+public enum PreviewAuthorizationResolver {
+    public static func state(for status: CameraAuthorizationStatus) -> PreviewSurfaceState {
+        switch status {
+        case .unknown: return .loading
+        case .authorized: return .loading
+        case .denied: return .denied
+        case .restricted: return .restricted
+        }
+    }
+
+    public static func state(for error: CameraServiceError) -> PreviewSurfaceState {
+        switch error {
+        case .permissionDenied: return .denied
+        case .restricted: return .restricted
+        case .unavailable: return .unavailable
+        case .failed(let message): return .error(message)
+        }
+    }
 }
 
 public enum CameraPosition: String, Sendable, Equatable, Codable {
@@ -456,9 +490,29 @@ public final class NextLevelPreviewViewController: UIViewController {
 
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if previewLayer == nil { attachPreviewIfPossible() }
         guard lifecycle.startIfNeeded() else { return }
-        nextLevel.start()
-        statusLabel.text = "Camera preview running"
+        let authorization = AVCaptureDevice.authorizationStatus(for: .video)
+        switch authorization {
+        case .denied:
+            statusLabel.isHidden = false; statusLabel.text = "Camera permission is denied. Enable it in Settings."
+            return
+        case .restricted:
+            statusLabel.isHidden = false; statusLabel.text = "Camera access is restricted on this device."
+            return
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+                Task { @MainActor in
+                    guard let self else { return }
+                    if granted { self.startAuthorizedPreview() }
+                    else { self.show(.denied) }
+                }
+            }
+        case .authorized:
+            startAuthorizedPreview()
+        @unknown default:
+            show(.unavailable)
+        }
     }
 
     public override func viewDidDisappear(_ animated: Bool) {
@@ -471,7 +525,7 @@ public final class NextLevelPreviewViewController: UIViewController {
     deinit { nextLevel.stop() }
 
     private func attachPreviewIfPossible() {
-        lifecycle.attach()
+        lifecycle.attachIfNeeded()
         let layer = nextLevel.previewLayer
         layer.videoGravity = .resizeAspectFill
         layer.frame = view.bounds
@@ -483,7 +537,23 @@ public final class NextLevelPreviewViewController: UIViewController {
     private func detachPreview() {
         previewLayer?.removeFromSuperlayer()
         previewLayer = nil
-        lifecycle.detach()
+        lifecycle.detachIfNeeded()
+    }
+
+    private func startAuthorizedPreview() {
+        nextLevel.start()
+        statusLabel.isHidden = true
+    }
+
+    private func show(_ state: PreviewSurfaceState) {
+        statusLabel.isHidden = false
+        switch state {
+        case .denied: statusLabel.text = "Camera permission is denied. Enable it in Settings."
+        case .restricted: statusLabel.text = "Camera access is restricted on this device."
+        case .unavailable, .simulatorUnavailable: statusLabel.text = "Camera is unavailable on this device."
+        case .error(let message): statusLabel.text = message
+        default: statusLabel.text = "Camera is unavailable."
+        }
     }
 }
 
