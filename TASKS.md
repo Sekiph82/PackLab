@@ -5,12 +5,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M04
-- Current Sprint: M04-BATCH-001 — Guided Capture & Quality Intelligence
-- Current Task: M04-BATCH-001 — Execute PL-0094 through PL-0118
+- Current Sprint: M04-BATCH-002 — Production integration remediation
+- Current Task: M04-BATCH-002 — Remediate PL-0094–PL-0110 and PL-0112–PL-0118
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0094 through PL-0118 in frozen order using each child prompt/criteria, preserve the accepted M03 architecture, publish one implementation boundary and one child log per task, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M05, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve accepted PL-0111 and all M03 behavior, remediate exactly the 24 failed M04 children using their frozen V02 work orders, converge on one production M04 quality/guided-capture runtime, repair the declared test environment so authoritative schema tests collect, publish distinct implementation/log commits per child, then publish MASTER_REMEDIATION_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M05, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Latest M03 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V05.md — AUDITED_PASS (25/25 M03 children accepted)
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED (1/25 M04 children accepted; PL-0111 only)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -226,7 +226,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M04-S03 - Packaging-specific modes
 
-- [ ] **PL-0111** Implement Matte/HDPE capture preset.
+- [x] **PL-0111** Implement Matte/HDPE capture preset.
 - [ ] **PL-0112** Implement Glossy/PET preset emphasizing highlight control and denser coverage.
 - [ ] **PL-0113** Implement Transparent packaging warning mode with instructions for temporary scanning treatment/background preparation.
 - [ ] **PL-0114** Implement Asymmetric/Jerrycan mode with stronger front/back/handle coverage requirements.
