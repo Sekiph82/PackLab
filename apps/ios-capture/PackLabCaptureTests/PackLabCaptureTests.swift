@@ -2183,6 +2183,40 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(model.snapshot().isComplete)
     }
 
+    @MainActor
+    func testPL0116TurntableRuntimeBlocksRepeatedAnglesPersistsEvidenceAndKeepsPoseSeparate() async throws {
+        struct Backend: StillPhotoBackend, Sendable {
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([7, 8]), CaptureDimensions(width: 2, height: 1)) }
+        }
+        let orbit = OrbitCoverageConfiguration(azimuthBinCount: 2)
+        let preset = PackagingPreset(id: .turntable, version: "test", displayName: "Turntable", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: orbit), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "turntable")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "turntable", packageName: "Bottle", packageType: .bottle, captureMode: .turntable))
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset))
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset, layout: layout)
+        await vm.bindStillCaptureBackend(Backend())
+        XCTAssertTrue(vm.evaluateTurntableAngle(0).allowed)
+        let first = vm.observeTurntableAngle(captureID: "angle-0", angleDegrees: 0)
+        XCTAssertEqual(first?.source, .turntableAngle)
+        XCTAssertFalse(vm.evaluateTurntableAngle(360).allowed)
+        XCTAssertNil(vm.observeTurntableAngle(captureID: "repeat", angleDegrees: 360))
+        let record = AcceptedCaptureRecord(captureID: "captured-angle", sequence: 0, sourceFilename: "captured-angle.heic", metadataFilename: "captured-angle.json")
+        let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "turntable", nextSequence: 1, epoch: 0, acceptedIDs: ["captured-angle"]))
+        let outcome = try await vm.captureAndPersistTurntable(captureID: "captured-angle", angleDegrees: 180, record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
+        XCTAssertTrue(outcome.decision.allowed)
+        XCTAssertEqual(outcome.observation?.source, .turntableAngle)
+        let persisted = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("captured-angle.json")))
+        XCTAssertEqual(persisted.turntableEvidence?.source, .turntableAngle)
+        XCTAssertNil(persisted.poseBinding)
+        for _ in 0..<3 { await Task.yield() }
+        let loaded = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertEqual(loaded.turntableCoverage?.capturedSectorIndices, [0, 1])
+        XCTAssertTrue(loaded.turntableCoverage?.isComplete == true)
+    }
+
     func testPL0117CaptureProtocolIsPresetDrivenAndAcknowledgementScoped() {
         for id in PackagingPresetID.allCases {
             let model = CaptureProtocolViewModel(preset: PackagingPresetCatalog.preset(for: id))

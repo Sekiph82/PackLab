@@ -1118,7 +1118,8 @@ public struct M04ScanContext: Codable, Sendable, Equatable {
     public let completion: CompletionDiagnostics?
     public let qualityGuidance: M04QualityGuidanceState?
     public let asymmetricCoverage: AsymmetricCoverageEvaluation?
-    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil, asymmetricCoverage: AsymmetricCoverageEvaluation? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance; self.asymmetricCoverage = asymmetricCoverage }
+    public let turntableCoverage: TurntableCoverageSnapshot?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil, asymmetricCoverage: AsymmetricCoverageEvaluation? = nil, turntableCoverage: TurntableCoverageSnapshot? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance; self.asymmetricCoverage = asymmetricCoverage; self.turntableCoverage = turntableCoverage }
 }
 
 public extension SessionStorageLayout {
@@ -1190,9 +1191,15 @@ public struct TurntableCoverageModel: Sendable, Equatable {
     private var repeats: [String] = []
     private var observations: [TurntableObservation] = []
     public init(policy: TurntablePolicy = TurntablePolicy()) { self.policy = policy }
+    public init(snapshot: TurntableCoverageSnapshot) { self.policy = snapshot.policy; self.captured = Set(snapshot.capturedSectorIndices); self.repeats = snapshot.repeatedCaptureIDs; self.observations = snapshot.observations }
+    public func sectorIndex(for angleDegrees: Double) -> Int {
+        let normalized = (angleDegrees.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        return min(policy.expectedAngleCount - 1, Int((normalized / 360) * Double(policy.expectedAngleCount)))
+    }
+    public func isSectorCaptured(angleDegrees: Double) -> Bool { captured.contains(sectorIndex(for: angleDegrees)) }
     public mutating func observe(captureID: String, angleDegrees: Double) -> TurntableObservation {
         let normalized = (angleDegrees.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
-        let index = min(policy.expectedAngleCount - 1, Int((normalized / 360) * Double(policy.expectedAngleCount)))
+        let index = sectorIndex(for: angleDegrees)
         let status = captured.contains(index) ? "repeated_angle" : "captured"
         if captured.contains(index) { repeats.append(captureID) } else { captured.insert(index) }
         let observation = TurntableObservation(captureID: captureID, normalizedAngle: normalized, sectorIndex: index, source: .turntableAngle, status: status); observations.append(observation); return observation

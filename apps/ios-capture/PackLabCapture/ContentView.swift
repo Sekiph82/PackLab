@@ -30,6 +30,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var m04ActivePreset = PackagingPresetCatalog.matteHDPE
     @Published private(set) var m04ReflectionGuidance: [String] = []
     @Published private(set) var m04AsymmetricCoverage: AsymmetricCoverageEvaluation?
+    @Published private(set) var m04TurntableCoverage: TurntableCoverageSnapshot?
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
@@ -49,6 +50,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var m04SessionLayout: SessionStorageLayout?
     private var m04AsymmetricPolicy: AsymmetricCoveragePolicy?
     private var m04AsymmetricObservedRegions: [AsymmetricCoverageRegion: Int] = [:]
+    private var m04TurntableModel: TurntableCoverageModel?
     private var m04ConsecutiveHighlightBlocks = 0
     private let m04HighlightGuidanceThreshold = 3
     private var m04DetailEvaluations: [CapturePassID: DetailPassEvaluation] = [:]
@@ -147,6 +149,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04AsymmetricPolicy = preset.coverage.asymmetricCoverage
         m04AsymmetricObservedRegions = [:]
         m04AsymmetricCoverage = preset.coverage.asymmetricCoverage.map { AsymmetricCoverageEvaluation(observedRegions: [:], policy: $0) }
+        m04TurntableModel = preset.id == .turntable ? TurntableCoverageModel(policy: TurntablePolicy(expectedAngleCount: preset.coverage.orbit.azimuthBinCount)) : nil
+        m04TurntableCoverage = m04TurntableModel?.snapshot()
         m04ConsecutiveHighlightBlocks = 0
         m04ReflectionGuidance = []
         m04QualityRuntime = M04CandidateQualityRuntime(preset: preset)
@@ -236,6 +240,29 @@ final class CaptureRuntimeViewModel: ObservableObject {
         recomputeM04Completion()
     }
 
+    func restoreTurntableCoverage(_ snapshot: TurntableCoverageSnapshot?) {
+        guard snapshot != nil, m04ActivePreset.id == .turntable else { return }
+        m04TurntableModel = snapshot.map { TurntableCoverageModel(snapshot: $0) }
+        m04TurntableCoverage = m04TurntableModel?.snapshot()
+        recomputeM04Completion()
+    }
+
+    func evaluateTurntableAngle(_ angleDegrees: Double) -> AutoCaptureDecision {
+        guard let model = m04TurntableModel else { return AutoCaptureDecision(allowed: false, reasons: ["turntable_mode_inactive"]) }
+        guard angleDegrees.isFinite else { return AutoCaptureDecision(allowed: false, reasons: ["turntable_angle_unavailable"]) }
+        return model.isSectorCaptured(angleDegrees: angleDegrees) ? AutoCaptureDecision(allowed: false, reasons: ["repeated_turntable_angle"]) : AutoCaptureDecision(allowed: true, reasons: [])
+    }
+
+    @discardableResult
+    func observeTurntableAngle(captureID: String, angleDegrees: Double) -> TurntableObservation? {
+        guard var model = m04TurntableModel, evaluateTurntableAngle(angleDegrees).allowed else { return nil }
+        let observation = model.observe(captureID: captureID, angleDegrees: angleDegrees)
+        m04TurntableModel = model
+        m04TurntableCoverage = model.snapshot()
+        recomputeM04Completion()
+        return observation
+    }
+
     func evaluateBasePass(quality: QualityDecision, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?) -> BasePassAcceptanceDecision {
         BasePassAcceptanceDecision(snapshot: m04BaseCoverageModel.snapshot(), availability: m04BaseAvailability, quality: quality, poseBinding: poseBinding, duplicateDecision: duplicateDecision)
     }
@@ -319,7 +346,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard let service = guidedAutoCaptureService else { throw CameraServiceError.failed("capture_backend_unavailable") }
         let result = await service.requestManual(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
         guard case .accepted(let still) = result else { return (decision, nil) }
-        let manualRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: record.poseBinding, motionBinding: record.motionBinding, passMetadata: record.passMetadata, manualAudit: audit)
+        let manualRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: record.poseBinding, motionBinding: record.motionBinding, passMetadata: record.passMetadata, manualAudit: audit, turntableEvidence: record.turntableEvidence)
         let manualMetadata = (try? JSONEncoder().encode(manualRecord)) ?? metadata
         try await store.storeAcceptedCapture(still: still, record: manualRecord, metadata: manualMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
         recordAcceptedCaptureCoverage(manualRecord)
@@ -338,12 +365,26 @@ final class CaptureRuntimeViewModel: ObservableObject {
         return result ?? (manualCaptureDecision ?? ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: ["manual_capture_failed"]), nil)
     }
 
+    func captureAndPersistTurntable(captureID: String = UUID().uuidString, angleDegrees: Double, monotonicTimestamp: TimeInterval = ProcessInfo.processInfo.systemUptime, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) async throws -> (decision: AutoCaptureDecision, observation: TurntableObservation?, still: AcceptedStill?) {
+        let decision = evaluateTurntableAngle(angleDegrees)
+        guard decision.allowed else { return (decision, nil, nil) }
+        guard let service = guidedAutoCaptureService else { throw CameraServiceError.failed("capture_backend_unavailable") }
+        let result = await service.requestManual(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
+        guard case .accepted(let still) = result else { return (decision, nil, nil) }
+        guard let observation = observeTurntableAngle(captureID: record.captureID, angleDegrees: angleDegrees) else { return (AutoCaptureDecision(allowed: false, reasons: ["turntable_angle_unavailable"]), nil, nil) }
+        let enriched = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: record.poseBinding, motionBinding: record.motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit, turntableEvidence: observation)
+        let enrichedMetadata = (try? JSONEncoder().encode(enriched)) ?? metadata
+        try await store.storeAcceptedCapture(still: still, record: enriched, metadata: enrichedMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
+        recordAcceptedCaptureCoverage(enriched)
+        return (decision, observation, still)
+    }
+
     func requestAutoCaptureAndPersist(captureID: String = UUID().uuidString, monotonicTimestamp: TimeInterval, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) async throws -> (decision: AutoCaptureDecision, still: AcceptedStill?) {
         let outcome = await requestAutoCapture(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
         guard case .accepted(let still) = outcome.result else { return (outcome.decision, nil) }
         try await store.storeAcceptedCapture(still: still, record: record, metadata: metadata, state: state, poses: poses, motion: motion, bridge: bridge)
         let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
-        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit))
+        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit, turntableEvidence: record.turntableEvidence))
         return (outcome.decision, still)
     }
 
@@ -353,7 +394,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard let service = captureAdmissionService else { throw CameraServiceError.failed("capture_backend_unavailable") }
         let result = await service.capture(captureID: captureID)
         guard case .accepted(let still) = result else { return (decision, nil) }
-        let detailRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: decision.metadata, manualAudit: record.manualAudit)
+        let detailRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: decision.metadata, manualAudit: record.manualAudit, turntableEvidence: record.turntableEvidence)
         let detailMetadata = (try? JSONEncoder().encode(detailRecord)) ?? metadata
         try await store.storeAcceptedCapture(still: still, record: detailRecord, metadata: detailMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
         recordAcceptedCaptureCoverage(detailRecord)
@@ -366,7 +407,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard let service = captureAdmissionService else { throw CameraServiceError.failed("capture_backend_unavailable") }
         let result = await service.capture(captureID: captureID)
         guard case .accepted(let still) = result else { return (decision, nil) }
-        let baseRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: CapturePassMetadata(passID: .base, required: false, evidenceStatus: decision.evaluation.status), manualAudit: record.manualAudit)
+        let baseRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: CapturePassMetadata(passID: .base, required: false, evidenceStatus: decision.evaluation.status), manualAudit: record.manualAudit, turntableEvidence: record.turntableEvidence)
         let baseMetadata = (try? JSONEncoder().encode(baseRecord)) ?? metadata
         try await store.storeAcceptedCapture(still: still, record: baseRecord, metadata: baseMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
         recordAcceptedCaptureCoverage(baseRecord)
@@ -375,7 +416,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
 
     private func persistBasePassContext() async {
         guard let layout = m04SessionLayout, let existing = try? await M04SessionContextStore(layout: layout).load() else { return }
-        let context = M04ScanContext(preset: existing.preset, preparationAcknowledged: existing.preparationAcknowledged, treatmentMode: existing.treatmentMode, preflight: existing.preflight, basePass: m04BasePass, completion: m04Completion, qualityGuidance: m04QualityGuidanceState, asymmetricCoverage: m04AsymmetricCoverage)
+        let context = M04ScanContext(preset: existing.preset, preparationAcknowledged: existing.preparationAcknowledged, treatmentMode: existing.treatmentMode, preflight: existing.preflight, basePass: m04BasePass, completion: m04Completion, qualityGuidance: m04QualityGuidanceState, asymmetricCoverage: m04AsymmetricCoverage, turntableCoverage: m04TurntableCoverage)
         try? await M04SessionContextStore(layout: layout).persist(context)
     }
 
@@ -399,7 +440,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
 
     private func recomputeM04Completion() {
         let asymmetricMissing = m04AsymmetricCoverage?.missingRegions.map { "asymmetric_\($0.rawValue)" } ?? []
-        m04Completion = CompletionDiagnostics(rings: m04RingCoverage, detailPasses: Array(m04DetailEvaluations.values), base: m04BasePass, additionalMandatoryMissingAreas: asymmetricMissing, additionalMandatoryAreaCount: m04AsymmetricPolicy?.requiredRegions.count ?? 0)
+        let turntableMissing = m04TurntableCoverage?.missingSectorIndices.map { "turntable_sector_\($0)" } ?? []
+        m04Completion = CompletionDiagnostics(rings: m04RingCoverage, detailPasses: Array(m04DetailEvaluations.values), base: m04BasePass, additionalMandatoryMissingAreas: asymmetricMissing + turntableMissing, additionalMandatoryAreaCount: (m04AsymmetricPolicy?.requiredRegions.count ?? 0) + (m04TurntableCoverage?.policy.expectedAngleCount ?? 0))
         Task { await persistBasePassContext() }
     }
 
@@ -427,7 +469,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard case .accepted(let still) = result else { throw CameraServiceError.failed("capture_rejected") }
         try await store.storeAcceptedCapture(still: still, record: record, metadata: metadata, state: state, poses: poses, motion: motion, bridge: bridge)
         let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
-        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit))
+        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit, turntableEvidence: record.turntableEvidence))
         return still
     }
 
@@ -482,6 +524,7 @@ struct ContentView: View {
     @State private var showPoseDebug = false
     @State private var showNewScan = false
     @State private var showResume = false
+    @State private var turntableAngleText = "0"
     @StateObject private var runtime = CaptureRuntimeViewModel()
 
     var body: some View {
@@ -538,6 +581,16 @@ struct ContentView: View {
                         Text("Preset: \(runtime.m04ActivePreset.displayName) v\(runtime.m04ActivePreset.version)")
                             .font(.caption2.monospaced()).foregroundStyle(.white)
                         ForEach(runtime.m04ReflectionGuidance, id: \.self) { Text($0) }
+                        if let turntable = runtime.m04TurntableCoverage {
+                            Text("Turntable: \(turntable.capturedSectorIndices.count)/\(turntable.policy.expectedAngleCount) sectors")
+                            HStack {
+                                TextField("Angle degrees", text: $turntableAngleText).keyboardType(.decimalPad)
+                                Button("Record angle evidence") {
+                                    if let angle = Double(turntableAngleText) { _ = runtime.observeTurntableAngle(captureID: UUID().uuidString, angleDegrees: angle) }
+                                }
+                            }
+                            ForEach(turntable.missingSectorIndices, id: \.self) { Text("Missing turntable sector \($0)") }
+                        }
                         CoverageGridView(model: CoverageViewModel(snapshot: runtime.m04Coverage, targeted: runtime.m04CoverageTarget))
                             .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
                             .padding(.horizontal, 8)
@@ -596,11 +649,11 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button(showPoseDebug ? "Hide Debug" : "Show Debug") { showPoseDebug.toggle() } }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission) { draft in
-                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
+                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
                 showNewScan = false
             } } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
-                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; if let completion = context.completion { runtime.restoreCompletion(completion) }; runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
+                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; if let completion = context.completion { runtime.restoreCompletion(completion) }; runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
                 Task { let plan = SessionDeletionPlan(root: ContentView.sessionRoot, candidate: candidate); _ = try? await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true) }
