@@ -20,6 +20,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var cameraRecoveryMessage = ""
     @Published private(set) var m04Evaluation: M04CandidateQualityEvaluation?
     @Published private(set) var m04Coverage = OrbitCoverageModel().snapshot()
+    @Published private(set) var m04CoverageTarget: CoverageSector?
+    @Published private(set) var m04CoverageActive = false
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
@@ -123,6 +125,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04QualityLogStore = layout.map { QualityCandidateLogStore(layout: $0) }
         m04CoverageModel = OrbitCoverageModel(configuration: preset.coverage.orbit)
         m04Coverage = m04CoverageModel.snapshot()
+        m04CoverageTarget = m04Coverage.missingSectors.first
+        m04CoverageActive = true
         m04Evaluation = nil
     }
 
@@ -130,6 +134,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     func recordAcceptedCaptureCoverage(_ record: AcceptedCaptureRecord) -> CoveragePoseObservation {
         let observation = m04CoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding)
         m04Coverage = m04CoverageModel.snapshot()
+        m04CoverageTarget = m04Coverage.missingSectors.first
         return observation
     }
 
@@ -290,6 +295,11 @@ struct ContentView: View {
                         }
                         .font(.caption2.monospaced()).foregroundStyle(.white)
                         .padding(6).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+                    }
+                    if runtime.m04CoverageActive {
+                        CoverageGridView(model: CoverageViewModel(snapshot: runtime.m04Coverage, targeted: runtime.m04CoverageTarget))
+                            .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+                            .padding(.horizontal, 8)
                     }
                     Spacer()
                     if runtime.tracking.poseEvidenceEligible == false {

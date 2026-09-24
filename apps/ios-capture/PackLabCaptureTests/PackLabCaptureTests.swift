@@ -1683,6 +1683,20 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(CoverageViewModel(snapshot: complete.snapshot()).statusText, "Coverage complete")
     }
 
+    @MainActor
+    func testPL0103ActiveRuntimeCoverageTargetAdvancesAfterAcceptedEvidence() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
+        let preset = PackagingPreset(id: .matteHDPE, version: "test", displayName: "Test", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset)
+        XCTAssertTrue(vm.m04CoverageActive)
+        XCTAssertEqual(vm.m04CoverageTarget, CoverageSector(ringID: "middle", azimuthIndex: 0))
+        let pose = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
+        _ = vm.recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: "accepted", sequence: 0, sourceFilename: "a.heic", metadataFilename: "a.json", poseBinding: acceptedPoseBinding(captureID: "accepted", pose: pose)))
+        XCTAssertEqual(vm.m04CoverageTarget, CoverageSector(ringID: "middle", azimuthIndex: 1))
+        XCTAssertTrue(CoverageViewModel(snapshot: vm.m04Coverage, targeted: vm.m04CoverageTarget).accessibilityText.contains("middle sector 2 targeted"))
+    }
+
     func testPL0104AutoCaptureRequiresAllGatesAndRearmsAfterCooldown() {
         let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
         let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
