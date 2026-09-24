@@ -1487,6 +1487,35 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(FramingAnalyzer.analyze(.unavailable).band, .unavailable)
     }
 
+    func testPL0098CandidateRuntimePublishesFramingStateAtSizeAndMarginBoundaries() {
+        let pixels = [Double](repeating: 0.5, count: 100)
+        let smallMask = (0..<100).map { $0 == 44 }
+        let centeredMask = (0..<100).map { index in
+            let x = index % 10; let y = index / 10
+            return (2...7).contains(x) && (2...7).contains(y)
+        }
+        let edgeMask = (0..<100).map { index in index % 10 < 9 && index / 10 > 0 && index / 10 < 9 }
+        let oversizedMask = (0..<100).map { index in index % 10 != 0 }
+        let runtime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
+        func framing(_ mask: [Bool]?, id: String) -> FramingMetric {
+            let frame = QualityImageFrame(width: 10, height: 10, luminance: pixels, objectMask: mask)
+            return runtime.evaluate(M04CandidateFrameInput(sessionID: "s", captureID: id, sequence: 1, monotonicTimestamp: 1, frame: frame)).quality.metrics.framing
+        }
+        XCTAssertEqual(framing(smallMask, id: "small").band, .tooSmall)
+        XCTAssertEqual(framing(centeredMask, id: "centered").band, .acceptable)
+        XCTAssertEqual(framing(edgeMask, id: "edge").band, .cropped)
+        XCTAssertEqual(framing(oversizedMask, id: "oversized").band, .cropped)
+        XCTAssertEqual(framing(nil, id: "unavailable").band, .unavailable)
+        XCTAssertEqual(framing(centeredMask, id: "centered").objectFraction, 0.36)
+
+        let exactSizePreset = PackagingPreset(id: .matteHDPE, version: "test", displayName: "Test", quality: QualityPolicyConfiguration(framing: FramingThresholds(minimumObjectFraction: 0.36, maximumObjectFraction: 0.82, minimumMargin: 0.19)), coverage: PackagingPresetCatalog.matteHDPE.coverage, lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let exactSize = M04CandidateQualityRuntime(preset: exactSizePreset).evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "exact-size", sequence: 1, monotonicTimestamp: 1, frame: QualityImageFrame(width: 10, height: 10, luminance: pixels, objectMask: centeredMask))).quality.metrics.framing
+        XCTAssertEqual(exactSize.band, .acceptable)
+        let exactMarginPreset = PackagingPreset(id: .matteHDPE, version: "test", displayName: "Test", quality: QualityPolicyConfiguration(framing: FramingThresholds(minimumObjectFraction: 0.36, maximumObjectFraction: 0.82, minimumMargin: 0.2)), coverage: PackagingPresetCatalog.matteHDPE.coverage, lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let exactMargin = M04CandidateQualityRuntime(preset: exactMarginPreset).evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "exact-margin", sequence: 1, monotonicTimestamp: 1, frame: QualityImageFrame(width: 10, height: 10, luminance: pixels, objectMask: centeredMask))).quality.metrics.framing
+        XCTAssertEqual(exactMargin.band, .cropped)
+    }
+
     func testPL0099BackgroundComplexityExcludesObjectAndWarnsOnClutter() {
         let cleanPixels = [Double](repeating: 0.5, count: 100)
         let mask = (0..<100).map { index in (3...6).contains(index % 10) && (3...6).contains(index / 10) }

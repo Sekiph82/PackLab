@@ -263,6 +263,9 @@ struct ContentView: View {
                             Text("Highlights: \(clippingFractionText(highlight)) · Shadows: \(clippingFractionText(shadow))")
                             let clippingReasons = highlight.reasons + shadow.reasons
                             if !clippingReasons.isEmpty { Text(clippingReasons.joined(separator: ", ")) }
+                            let framing = evaluation.quality.metrics.framing
+                            Text("Framing: \(framing.band.rawValue) · Object: \(framingObjectFractionText(framing))")
+                            if !framing.reasons.isEmpty { Text(framing.reasons.joined(separator: ", ")) }
                         }
                         .font(.caption2.monospaced()).foregroundStyle(.white)
                         .padding(6).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
@@ -310,6 +313,11 @@ struct ContentView: View {
     private func clippingFractionText(_ metric: ClippingMetric) -> String {
         guard let fraction = metric.objectClippedFraction ?? metric.clippedFraction else { return "unavailable" }
         return String(format: "%.1f%% (%@)", fraction * 100, metric.band.rawValue)
+    }
+
+    private func framingObjectFractionText(_ metric: FramingMetric) -> String {
+        guard let fraction = metric.objectFraction else { return "unavailable" }
+        return String(format: "%.1f%%", fraction * 100)
     }
 
     private static var sessionRoot: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("PackLabSessions", isDirectory: true) }
