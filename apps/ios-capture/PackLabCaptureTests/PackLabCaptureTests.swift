@@ -1599,6 +1599,18 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(glossy.lightingGuidance.contains { $0.localizedCaseInsensitiveContains("reflection") })
     }
 
+    func testPL0113TransparentModeRequiresAcknowledgementWithoutFalseSuitability() {
+        let preset = PackagingPresetCatalog.preset(for: .transparent)
+        XCTAssertTrue(preset.requiresPreparationAcknowledgement)
+        let notAcknowledged = TransparentPreparationEvaluation(acknowledged: false, treatment: .none)
+        XCTAssertFalse(notAcknowledged.mayStart)
+        XCTAssertEqual(notAcknowledged.suitability, "warning_only_not_physically_verified")
+        let acknowledged = TransparentPreparationEvaluation(acknowledged: true, treatment: .temporaryMatte)
+        XCTAssertTrue(acknowledged.mayStart)
+        XCTAssertTrue(acknowledged.warningCodes.contains("transparent_reconstruction_unproven"))
+        XCTAssertEqual(M04ScanContext(preset: preset, preparationAcknowledged: true, treatmentMode: TransparentTreatmentMode.temporaryMatte.rawValue).treatmentMode, "temporaryMatte")
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

@@ -893,7 +893,8 @@ public struct PackagingPreset: Codable, Sendable, Equatable, Identifiable {
 public enum PackagingPresetCatalog {
     public static let matteHDPE = PackagingPreset(id: .matteHDPE, version: "1.0.0", displayName: "Matte / HDPE", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use broad diffuse lighting.", "Keep exposure stable and avoid hard shadows."], preparationGuidance: ["Use a clean matte or simple background.", "Keep the package dry and free of loose labels."], requiresPreparationAcknowledgement: false)
     public static let glossyPET = PackagingPreset(id: .glossyPET, version: "1.0.0", displayName: "Glossy / PET", quality: QualityPolicyConfiguration(highlight: ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.005, warningFraction: 0.025, rejectFraction: 0.12)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12)), lightingGuidance: ["Use large diffuse sources and avoid direct reflections.", "Reframe if highlights spread across the package."], preparationGuidance: ["Keep the glossy surface clean.", "Use a simple non-reflective background."], requiresPreparationAcknowledgement: false)
-    public static func preset(for id: PackagingPresetID) -> PackagingPreset { id == .glossyPET ? glossyPET : matteHDPE }
+    public static let transparent = PackagingPreset(id: .transparent, version: "1.0.0", displayName: "Transparent", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use diffuse lighting and avoid transparent-surface reflections."], preparationGuidance: ["Photogrammetry may fail without temporary matte treatment, textured inserts or background preparation."], requiresPreparationAcknowledgement: true)
+    public static func preset(for id: PackagingPresetID) -> PackagingPreset { switch id { case .glossyPET: return glossyPET; case .transparent: return transparent; default: return matteHDPE } }
 }
 
 public struct M04ScanContext: Codable, Sendable, Equatable {
@@ -912,6 +913,18 @@ public actor M04SessionContextStore {
     public init(layout: SessionStorageLayout) { self.layout = layout }
     public func persist(_ context: M04ScanContext) throws { let data = try JSONEncoder().encode(context); try FileManager.default.createDirectory(at: layout.sessionRoot, withIntermediateDirectories: true); try data.write(to: layout.m04Context, options: .atomic) }
     public func load() throws -> M04ScanContext { try JSONDecoder().decode(M04ScanContext.self, from: Data(contentsOf: layout.m04Context)) }
+}
+
+public enum TransparentTreatmentMode: String, Codable, Sendable, Equatable, CaseIterable { case none, temporaryMatte, texturedInsert, preparedBackground }
+
+public struct TransparentPreparationEvaluation: Codable, Sendable, Equatable {
+    public let warningCodes: [String]
+    public let acknowledgementRequired: Bool
+    public let acknowledged: Bool
+    public let treatment: TransparentTreatmentMode
+    public let suitability: String
+    public init(acknowledged: Bool, treatment: TransparentTreatmentMode) { self.warningCodes = ["transparent_reconstruction_unproven", "transparent_preparation_required"]; self.acknowledgementRequired = true; self.acknowledged = acknowledged; self.treatment = treatment; self.suitability = "warning_only_not_physically_verified" }
+    public var mayStart: Bool { acknowledged }
 }
 
 #if canImport(SwiftUI)
