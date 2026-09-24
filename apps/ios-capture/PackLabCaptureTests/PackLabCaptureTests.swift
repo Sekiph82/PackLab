@@ -1606,6 +1606,25 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: layout.qualityLog.path))
     }
 
+    @MainActor
+    func testPL0101CandidateRuntimeLogsAcceptedAndRejectedEntriesAndReopens() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "runtime-session")
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
+        let acceptedFrame = QualityImageFrame(width: 10, height: 10, luminance: (0..<100).map { (($0 / 10 + $0 % 10) % 2 == 0) ? 0.2 : 0.8 }, objectMask: (0..<100).map { index in let x = index % 10; let y = index / 10; return (2...7).contains(x) && (2...7).contains(y) })
+        let rejectedFrame = QualityImageFrame(width: 10, height: 10, luminance: [Double](repeating: 0.5, count: 100), objectMask: (0..<100).map { $0 == 44 })
+        let accepted = await vm.analyzeM04Candidate(M04CandidateFrameInput(sessionID: "runtime-session", captureID: "accepted", sequence: 0, monotonicTimestamp: 10, frame: acceptedFrame))
+        let rejected = await vm.analyzeM04Candidate(M04CandidateFrameInput(sessionID: "runtime-session", captureID: "rejected", sequence: 1, monotonicTimestamp: 11, frame: rejectedFrame))
+        XCTAssertEqual(accepted.quality.decision, .accept)
+        XCTAssertEqual(rejected.quality.decision, .reject)
+        let reopened = try await QualityCandidateLogStore(layout: layout).snapshot()
+        XCTAssertEqual(reopened.map(\.captureID), ["accepted", "rejected"])
+        XCTAssertEqual(reopened.map(\.sequence), [0, 1])
+        XCTAssertEqual(reopened.map(\.monotonicTimestamp), [10, 11])
+    }
+
     func testPL0102CoverageMapsWrapAroundAndRejectsUnavailablePose() {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
         var model = OrbitCoverageModel(configuration: configuration)

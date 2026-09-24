@@ -27,6 +27,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var updateTask: Task<Void, Never>?
     private var captureAdmissionService: AdmissionControlledStillCaptureService?
     private var m04QualityRuntime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
+    private var m04QualityLogStore: QualityCandidateLogStore?
     private var cameraControlBridge: CameraControlRuntimeBridge?
     #if canImport(AVFoundation)
     let cameraRecoveryOwner = CameraRecoveryOwner()
@@ -115,15 +116,19 @@ final class CaptureRuntimeViewModel: ObservableObject {
         admission.allowsCapture
     }
 
-    func configureM04QualityRuntime(preset: PackagingPreset) {
+    func configureM04QualityRuntime(preset: PackagingPreset, layout: SessionStorageLayout? = nil) {
         m04QualityRuntime = M04CandidateQualityRuntime(preset: preset)
+        m04QualityLogStore = layout.map { QualityCandidateLogStore(layout: $0) }
         m04Evaluation = nil
     }
 
     @discardableResult
-    func analyzeM04Candidate(_ input: M04CandidateFrameInput) -> M04CandidateQualityEvaluation {
+    func analyzeM04Candidate(_ input: M04CandidateFrameInput) async -> M04CandidateQualityEvaluation {
         let evaluation = m04QualityRuntime.evaluate(input)
         m04Evaluation = evaluation
+        if let store = m04QualityLogStore {
+            try? await store.append(QualityCandidateLog(sessionID: input.sessionID, captureID: input.captureID, sequence: input.sequence, monotonicTimestamp: input.monotonicTimestamp, decision: evaluation.quality))
+        }
         return evaluation
     }
 
@@ -132,7 +137,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @discardableResult
     func analyzeM04Candidate(sessionID: String, captureID: String, sequence: Int, monotonicTimestamp: TimeInterval, frame: QualityImageFrame, pose: PoseCaptureBinding? = nil) async -> M04CandidateQualityEvaluation {
         let motionBinding = await motionService.bindCandidateMotion(captureID: captureID, timestamp: monotonicTimestamp)
-        return analyzeM04Candidate(M04CandidateFrameInput(sessionID: sessionID, captureID: captureID, sequence: sequence, monotonicTimestamp: monotonicTimestamp, frame: frame, motion: motionBinding, pose: pose))
+        return await analyzeM04Candidate(M04CandidateFrameInput(sessionID: sessionID, captureID: captureID, sequence: sequence, monotonicTimestamp: monotonicTimestamp, frame: frame, motion: motionBinding, pose: pose))
     }
 
     /// Installs the same health-gated backend used by the production camera
@@ -299,11 +304,11 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button(showPoseDebug ? "Hide Debug" : "Show Debug") { showPoseDebug.toggle() } }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission) { draft in
-                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, preflight: draft.preflight); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
+                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, preflight: draft.preflight); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
                 showNewScan = false
             } } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
-                if let draft = candidate.draft, let state = candidate.state { Task { await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
+                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
                 Task { let plan = SessionDeletionPlan(root: ContentView.sessionRoot, candidate: candidate); _ = try? await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true) }
