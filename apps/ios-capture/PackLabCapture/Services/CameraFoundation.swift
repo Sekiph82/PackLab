@@ -1137,198 +1137,172 @@ public struct WhiteBalanceCaptureBinding: Sendable, Equatable {
     public mutating func lock() { state = .locked }
 }
 
-#if canImport(AVFoundation)
+#if canImport(AVFoundation) && canImport(CoreGraphics)
+import AVFoundation
+import CoreGraphics
+
 public enum CameraConfigurationError: Error, Sendable, Equatable { case nonSelectedDevice, stabilizationRequired }
+public enum CameraDeviceFocusMode: String, Sendable, Equatable { case continuousAutoFocus, locked }
+public enum CameraDeviceExposureMode: String, Sendable, Equatable { case continuousAutoExposure, locked }
+public enum CameraDeviceWhiteBalanceMode: String, Sendable, Equatable { case continuousAutoWhiteBalance, locked }
+
+/// Production-used seam for the physical AVCaptureDevice and deterministic adapter fixtures.
+@MainActor
+public protocol CameraDeviceControlDriver: AnyObject {
+    var uniqueID: String { get }
+    var position: AVCaptureDevice.Position { get }
+    var supportsContinuousFocus: Bool { get }
+    var supportsLockedFocus: Bool { get }
+    var supportsFocusPoint: Bool { get }
+    var isAdjustingFocus: Bool { get }
+    func setFocusPoint(_ point: CGPoint)
+    func setFocusMode(_ mode: CameraDeviceFocusMode)
+    var supportsContinuousExposure: Bool { get }
+    var supportsLockedExposure: Bool { get }
+    var minExposureTargetBias: Float { get }
+    var maxExposureTargetBias: Float { get }
+    var exposureDurationSeconds: Double { get }
+    var iso: Float { get }
+    var exposureTargetBias: Float { get }
+    func setExposureTargetBias(_ bias: Float)
+    func setExposureMode(_ mode: CameraDeviceExposureMode)
+    var supportsContinuousWhiteBalance: Bool { get }
+    var supportsLockedWhiteBalance: Bool { get }
+    var isAdjustingWhiteBalance: Bool { get }
+    func observedTemperatureKelvin() -> Double?
+    func setWhiteBalanceMode(_ mode: CameraDeviceWhiteBalanceMode)
+    func lockForConfiguration() throws
+    func unlockForConfiguration()
+}
 
 @available(iOS 17.0, *)
-public enum AVFoundationWhiteBalanceAdapter {
-    public static func configure(device: AVCaptureDevice, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState {
-        try coordinator.requireSelected(device)
-        guard device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) else { return .unavailable }
-        guard !lock else { return try self.lock(device: device, coordinator: coordinator) }
-        return try coordinator.withLockedDevice { $0.whiteBalanceMode = .continuousAutoWhiteBalance; return .stabilizing }
-    }
-
-    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState {
-        try coordinator.requireSelected(device)
-        guard coordinator.whiteBalanceIsStable, !device.isAdjustingWhiteBalance else { throw CameraConfigurationError.stabilizationRequired }
-        guard device.isWhiteBalanceModeSupported(.locked) else { return .failed }
-        return try coordinator.withLockedDevice { $0.whiteBalanceMode = .locked; return .locked }
-    }
-
-    public static func observedTemperatureKelvin(device: AVCaptureDevice) -> WhiteBalanceCaptureReading? {
+@MainActor
+public final class AVFoundationCameraDeviceControlDriver: CameraDeviceControlDriver {
+    public let device: AVCaptureDevice
+    public init(device: AVCaptureDevice) { self.device = device }
+    public var uniqueID: String { device.uniqueID }
+    public var position: AVCaptureDevice.Position { device.position }
+    public var supportsContinuousFocus: Bool { device.isFocusModeSupported(.continuousAutoFocus) }
+    public var supportsLockedFocus: Bool { device.isFocusModeSupported(.locked) }
+    public var supportsFocusPoint: Bool { device.isFocusPointOfInterestSupported }
+    public var isAdjustingFocus: Bool { device.isAdjustingFocus }
+    public func setFocusPoint(_ point: CGPoint) { device.focusPointOfInterest = point }
+    public func setFocusMode(_ mode: CameraDeviceFocusMode) { device.focusMode = mode == .continuousAutoFocus ? .continuousAutoFocus : .locked }
+    public var supportsContinuousExposure: Bool { device.isExposureModeSupported(.continuousAutoExposure) }
+    public var supportsLockedExposure: Bool { device.isExposureModeSupported(.locked) }
+    public var minExposureTargetBias: Float { device.minExposureTargetBias }
+    public var maxExposureTargetBias: Float { device.maxExposureTargetBias }
+    public var exposureDurationSeconds: Double { device.exposureDuration.seconds }
+    public var iso: Float { device.iso }
+    public var exposureTargetBias: Float { device.exposureTargetBias }
+    public func setExposureTargetBias(_ bias: Float) { device.setExposureTargetBias(bias, completionHandler: nil) }
+    public func setExposureMode(_ mode: CameraDeviceExposureMode) { device.exposureMode = mode == .continuousAutoExposure ? .continuousAutoExposure : .locked }
+    public var supportsContinuousWhiteBalance: Bool { device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) }
+    public var supportsLockedWhiteBalance: Bool { device.isWhiteBalanceModeSupported(.locked) }
+    public var isAdjustingWhiteBalance: Bool { device.isAdjustingWhiteBalance }
+    public func observedTemperatureKelvin() -> Double? {
         let values = device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains)
-        let reading = WhiteBalanceCaptureReading(temperatureKelvin: Double(values.temperature))
-        return reading.isValid ? reading : nil
+        return Double(values.temperature)
     }
-
-    public static func observe(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState {
-        try coordinator.requireSelected(device)
-        try coordinator.observeWhiteBalance(isAdjusting: device.isAdjustingWhiteBalance)
-        return device.isAdjustingWhiteBalance ? .stabilizing : .stabilizing
-    }
+    public func setWhiteBalanceMode(_ mode: CameraDeviceWhiteBalanceMode) { device.whiteBalanceMode = mode == .continuousAutoWhiteBalance ? .continuousAutoWhiteBalance : .locked }
+    public func lockForConfiguration() throws { try device.lockForConfiguration() }
+    public func unlockForConfiguration() { device.unlockForConfiguration() }
 }
-#endif
 
-#if canImport(AVFoundation)
 @available(iOS 17.0, *)
 @MainActor
 public final class CameraDeviceConfigurationCoordinator {
     public let selectedLens: CameraLensIdentity
-    public let device: AVCaptureDevice
+    public let driver: any CameraDeviceControlDriver
     private var focusObservedStable = false
     private var whiteBalanceObservedStable = false
 
-    public init(device: AVCaptureDevice, selectedLens: CameraLensIdentity) {
-        self.device = device
-        self.selectedLens = selectedLens
-    }
-
-    public var isSelectedDevice: Bool {
-        device.uniqueID == selectedLens.identifier && device.position == .back && selectedLens.position == .back && selectedLens.kind == .wideAngle
-    }
-
-    public func requireSelected(_ candidate: AVCaptureDevice) throws {
-        guard isSelectedDevice, candidate.uniqueID == device.uniqueID else { throw CameraConfigurationError.nonSelectedDevice }
-    }
-    public func observeFocus(isAdjusting: Bool) throws { try requireSelected(device); if !isAdjusting { focusObservedStable = true } }
-    public func observeWhiteBalance(isAdjusting: Bool) throws { try requireSelected(device); if !isAdjusting { whiteBalanceObservedStable = true } }
+    public init(driver: any CameraDeviceControlDriver, selectedLens: CameraLensIdentity) { self.driver = driver; self.selectedLens = selectedLens }
+    public convenience init(device: AVCaptureDevice, selectedLens: CameraLensIdentity) { self.init(driver: AVFoundationCameraDeviceControlDriver(device: device), selectedLens: selectedLens) }
+    public var selectedDeviceIdentifier: String { driver.uniqueID }
+    public var isSelectedDevice: Bool { driver.uniqueID == selectedLens.identifier && driver.position == .back && selectedLens.position == .back && selectedLens.kind == .wideAngle }
+    public func requireSelected(_ candidate: any CameraDeviceControlDriver) throws { guard isSelectedDevice, candidate.uniqueID == driver.uniqueID else { throw CameraConfigurationError.nonSelectedDevice } }
+    public func requireSelected(_ candidate: AVCaptureDevice) throws { guard isSelectedDevice, candidate.uniqueID == driver.uniqueID else { throw CameraConfigurationError.nonSelectedDevice } }
+    public func observeFocus(isAdjusting: Bool) throws { try requireSelected(driver); if !isAdjusting { focusObservedStable = true } }
+    public func observeWhiteBalance(isAdjusting: Bool) throws { try requireSelected(driver); if !isAdjusting { whiteBalanceObservedStable = true } }
     public var focusIsStable: Bool { focusObservedStable }
     public var whiteBalanceIsStable: Bool { whiteBalanceObservedStable }
-
-    public func withLockedDevice<T>(_ operation: (AVCaptureDevice) throws -> T) throws -> T {
-        try device.lockForConfiguration()
-        defer { device.unlockForConfiguration() }
-        return try operation(device)
+    public func withLockedDevice<T>(_ operation: (any CameraDeviceControlDriver) throws -> T) throws -> T {
+        try driver.lockForConfiguration(); defer { driver.unlockForConfiguration() }; return try operation(driver)
     }
 }
 
-#if canImport(CoreGraphics)
 @available(iOS 17.0, *)
 @MainActor
 public final class AVFoundationCameraControlComposition {
     public let coordinator: CameraDeviceConfigurationCoordinator
     public let controls: CameraControlRuntimeBridge
-    public init(device: AVCaptureDevice, selectedLens: CameraLensIdentity) {
-        coordinator = CameraDeviceConfigurationCoordinator(device: device, selectedLens: selectedLens)
-        controls = CameraControlRuntimeBridge(lens: selectedLens)
-    }
-    public var selectedDeviceIdentifier: String { coordinator.device.uniqueID }
-    public func configureFocus() {
-        do { controls.setFocus(try AVFoundationFocusAdapter.configure(device: coordinator.device, point: nil, coordinator: coordinator)) }
-        catch { controls.setFocus(.failed); controls.setMessage("Focus unavailable") }
-    }
-    public func observeFocus() {
-        do { controls.setFocus(try AVFoundationFocusAdapter.observe(device: coordinator.device, coordinator: coordinator)) }
-        catch { controls.setFocus(.failed); controls.setMessage("Focus unavailable") }
-    }
-    public func lockFocus() {
-        do { controls.setFocus(try AVFoundationFocusAdapter.lock(device: coordinator.device, coordinator: coordinator)) }
-        catch { controls.setFocus(.failed); controls.setMessage("Focus is still stabilizing") }
-    }
-    public func configureExposure(bias: Float) {
-        do { controls.setExposure(try AVFoundationExposureAdapter.configure(device: coordinator.device, bias: bias, coordinator: coordinator)) }
-        catch { controls.setExposure(.failed); controls.setMessage("Exposure unavailable") }
-    }
-    public func lockExposure() {
-        do { controls.setExposure(try AVFoundationExposureAdapter.lock(device: coordinator.device, coordinator: coordinator)) }
-        catch { controls.setExposure(.failed); controls.setMessage("Exposure unavailable") }
-    }
-    public func configureWhiteBalance() {
-        do { controls.setWhiteBalance(try AVFoundationWhiteBalanceAdapter.configure(device: coordinator.device, coordinator: coordinator)) }
-        catch { controls.setWhiteBalance(.failed); controls.setMessage("White balance unavailable") }
-    }
-    public func observeWhiteBalance() {
-        do { controls.setWhiteBalance(try AVFoundationWhiteBalanceAdapter.observe(device: coordinator.device, coordinator: coordinator)) }
-        catch { controls.setWhiteBalance(.failed); controls.setMessage("White balance unavailable") }
-    }
-    public func lockWhiteBalance() {
-        do { controls.setWhiteBalance(try AVFoundationWhiteBalanceAdapter.lock(device: coordinator.device, coordinator: coordinator)) }
-        catch { controls.setWhiteBalance(.failed); controls.setMessage("White balance is still stabilizing") }
-    }
+    public init(device: AVCaptureDevice, selectedLens: CameraLensIdentity) { self.init(driver: AVFoundationCameraDeviceControlDriver(device: device), selectedLens: selectedLens) }
+    public init(driver: any CameraDeviceControlDriver, selectedLens: CameraLensIdentity) { coordinator = CameraDeviceConfigurationCoordinator(driver: driver, selectedLens: selectedLens); controls = CameraControlRuntimeBridge(lens: selectedLens) }
+    public var selectedDeviceIdentifier: String { coordinator.selectedDeviceIdentifier }
+    public func configureFocus() { do { controls.setFocus(try AVFoundationFocusAdapter.configure(driver: coordinator.driver, point: nil, coordinator: coordinator)) } catch { controls.setFocus(.failed); controls.setMessage("Focus unavailable") } }
+    public func observeFocus() { do { controls.setFocus(try AVFoundationFocusAdapter.observe(driver: coordinator.driver, coordinator: coordinator)) } catch { controls.setFocus(.failed); controls.setMessage("Focus unavailable") } }
+    public func lockFocus() { do { controls.setFocus(try AVFoundationFocusAdapter.lock(driver: coordinator.driver, coordinator: coordinator)) } catch { controls.setFocus(.failed); controls.setMessage("Focus is still stabilizing") } }
+    public func configureExposure(bias: Float) { do { controls.setExposure(try AVFoundationExposureAdapter.configure(driver: coordinator.driver, bias: bias, coordinator: coordinator)) } catch { controls.setExposure(.failed); controls.setMessage("Exposure unavailable") } }
+    public func lockExposure() { do { controls.setExposure(try AVFoundationExposureAdapter.lock(driver: coordinator.driver, coordinator: coordinator)) } catch { controls.setExposure(.failed); controls.setMessage("Exposure unavailable") } }
+    public func configureWhiteBalance() { do { controls.setWhiteBalance(try AVFoundationWhiteBalanceAdapter.configure(driver: coordinator.driver, coordinator: coordinator)) } catch { controls.setWhiteBalance(.failed); controls.setMessage("White balance unavailable") } }
+    public func observeWhiteBalance() { do { controls.setWhiteBalance(try AVFoundationWhiteBalanceAdapter.observe(driver: coordinator.driver, coordinator: coordinator)) } catch { controls.setWhiteBalance(.failed); controls.setMessage("White balance unavailable") } }
+    public func lockWhiteBalance() { do { controls.setWhiteBalance(try AVFoundationWhiteBalanceAdapter.lock(driver: coordinator.driver, coordinator: coordinator)) } catch { controls.setWhiteBalance(.failed); controls.setMessage("White balance is still stabilizing") } }
     public func acceptedMetadata(_ base: PhotoCaptureMetadata) throws -> PhotoCaptureMetadata {
-        let exposure = try ExposureCaptureBinding(reading: AVFoundationExposureAdapter.observedReading(device: coordinator.device, coordinator: coordinator), state: .locked)
-        guard let temperature = AVFoundationWhiteBalanceAdapter.observedTemperatureKelvin(device: coordinator.device) else { throw WhiteBalanceCaptureBindingError.invalidReading }
+        let exposure = try ExposureCaptureBinding(reading: AVFoundationExposureAdapter.observedReading(driver: coordinator.driver, coordinator: coordinator), state: .locked)
+        guard let temperature = AVFoundationWhiteBalanceAdapter.observedTemperatureKelvin(driver: coordinator.driver) else { throw WhiteBalanceCaptureBindingError.invalidReading }
         let whiteBalance = try WhiteBalanceCaptureBinding(reading: temperature, state: .locked)
         return AcceptedPhotoMetadataFactory.withCaptureReadings(base, exposure: exposure, whiteBalance: whiteBalance)
     }
 }
-#endif
 
 @available(iOS 17.0, *)
-public enum AVFoundationExposureAdapter {
-    public static func configure(device: AVCaptureDevice, bias: Float, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureState {
-        try coordinator.requireSelected(device)
-        guard device.isExposureModeSupported(.continuousAutoExposure) else { return .unavailable }
-        let result = try withConfiguration(device: device, coordinator: coordinator) { configuredDevice in
-            configuredDevice.exposureMode = .continuousAutoExposure
-            configuredDevice.setExposureTargetBias(min(max(bias, configuredDevice.minExposureTargetBias), configuredDevice.maxExposureTargetBias))
-            return ExposureState.metering
-        }
-        // Locking is a separate operation so callers can wait for observed
-        // metering stabilization. The legacy flag is intentionally ignored.
-        _ = lock
-        return result
-    }
-
-    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureState {
-        try coordinator.requireSelected(device)
-        guard device.isExposureModeSupported(.locked) else { return .failed }
-        return try configureLocked(device: device, coordinator: coordinator) { $0.exposureMode = .locked; return .locked }
-    }
-
-    public static func observedReading(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureCaptureReading {
-        try coordinator.requireSelected(device)
-        let reading = ExposureCaptureReading(exposureSeconds: device.exposureDuration.seconds, iso: Int(device.iso), bias: device.exposureTargetBias)
-        guard reading.isValid else { throw ExposureCaptureBindingError.invalidReading }
-        return reading
-    }
-
-    private static func configureLocked<T>(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator, operation: (AVCaptureDevice) throws -> T) throws -> T {
-        try coordinator.requireSelected(device)
-        return try coordinator.withLockedDevice(operation)
-    }
-
-    private static func withConfiguration<T>(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator, operation: (AVCaptureDevice) throws -> T) throws -> T {
-        try coordinator.requireSelected(device)
-        return try coordinator.withLockedDevice(operation)
-    }
-}
-#endif
-
-#if canImport(AVFoundation) && canImport(CoreGraphics)
-import AVFoundation
-import CoreGraphics
-
-@available(iOS 17.0, *)
+@MainActor
 public enum AVFoundationFocusAdapter {
-    public static func configure(device: AVCaptureDevice, point: CGPoint?, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState {
-        try coordinator.requireSelected(device)
-        guard device.isFocusModeSupported(.continuousAutoFocus) else { return .unavailable }
-        guard !lock else { return try lock(device: device, coordinator: coordinator) }
-        let operation: (AVCaptureDevice) throws -> FocusState = { configuredDevice in
-            if let point {
-                guard configuredDevice.isFocusPointOfInterestSupported else { return .unavailable }
-                configuredDevice.focusPointOfInterest = point
-            }
-            configuredDevice.focusMode = .continuousAutoFocus
-            return .focusing
+    public static func configure(driver: any CameraDeviceControlDriver, point: CGPoint?, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState {
+        try coordinator.requireSelected(driver); guard driver.supportsContinuousFocus else { return .unavailable }; guard !lock else { return try lock(driver: driver, coordinator: coordinator) }
+        return try coordinator.withLockedDevice { configuredDriver in
+            if let point { guard configuredDriver.supportsFocusPoint else { return .unavailable }; configuredDriver.setFocusPoint(point) }
+            configuredDriver.setFocusMode(.continuousAutoFocus); return .focusing
         }
-        return try coordinator.withLockedDevice(operation)
     }
+    public static func configure(device: AVCaptureDevice, point: CGPoint?, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState { try configure(driver: AVFoundationCameraDeviceControlDriver(device: device), point: point, lock: lock, coordinator: coordinator) }
+    public static func lock(driver: any CameraDeviceControlDriver, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState {
+        try coordinator.requireSelected(driver); guard coordinator.focusIsStable, !driver.isAdjustingFocus else { throw CameraConfigurationError.stabilizationRequired }; guard driver.supportsLockedFocus else { return .failed }; return try coordinator.withLockedDevice { $0.setFocusMode(.locked); return .locked }
+    }
+    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState { try lock(driver: AVFoundationCameraDeviceControlDriver(device: device), coordinator: coordinator) }
+    public static func observe(driver: any CameraDeviceControlDriver, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState { try coordinator.requireSelected(driver); try coordinator.observeFocus(isAdjusting: driver.isAdjustingFocus); return driver.isAdjustingFocus ? .focusing : .continuous }
+    public static func observe(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState { try observe(driver: AVFoundationCameraDeviceControlDriver(device: device), coordinator: coordinator) }
+}
 
-    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState {
-        try coordinator.requireSelected(device)
-        guard coordinator.focusIsStable, !device.isAdjustingFocus else { throw CameraConfigurationError.stabilizationRequired }
-        guard device.isFocusModeSupported(.locked) else { return .failed }
-        return try coordinator.withLockedDevice { $0.focusMode = .locked; return .locked }
+@available(iOS 17.0, *)
+@MainActor
+public enum AVFoundationExposureAdapter {
+    public static func configure(driver: any CameraDeviceControlDriver, bias: Float, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureState {
+        try coordinator.requireSelected(driver); guard driver.supportsContinuousExposure else { return .unavailable }
+        let result = try coordinator.withLockedDevice { configuredDriver in configuredDriver.setExposureMode(.continuousAutoExposure); configuredDriver.setExposureTargetBias(min(max(bias, configuredDriver.minExposureTargetBias), configuredDriver.maxExposureTargetBias)); return ExposureState.metering }
+        _ = lock; return result
     }
+    public static func configure(device: AVCaptureDevice, bias: Float, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureState { try configure(driver: AVFoundationCameraDeviceControlDriver(device: device), bias: bias, lock: lock, coordinator: coordinator) }
+    public static func lock(driver: any CameraDeviceControlDriver, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureState { try coordinator.requireSelected(driver); guard driver.supportsLockedExposure else { return .failed }; return try coordinator.withLockedDevice { $0.setExposureMode(.locked); return .locked } }
+    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureState { try lock(driver: AVFoundationCameraDeviceControlDriver(device: device), coordinator: coordinator) }
+    public static func observedReading(driver: any CameraDeviceControlDriver, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureCaptureReading { try coordinator.requireSelected(driver); let reading = ExposureCaptureReading(exposureSeconds: driver.exposureDurationSeconds, iso: Int(driver.iso), bias: driver.exposureTargetBias); guard reading.isValid else { throw ExposureCaptureBindingError.invalidReading }; return reading }
+    public static func observedReading(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureCaptureReading { try observedReading(driver: AVFoundationCameraDeviceControlDriver(device: device), coordinator: coordinator) }
+}
 
-    public static func observe(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState {
-        try coordinator.requireSelected(device)
-        try coordinator.observeFocus(isAdjusting: device.isAdjustingFocus)
-        return device.isAdjustingFocus ? .focusing : .continuous
+@available(iOS 17.0, *)
+@MainActor
+public enum AVFoundationWhiteBalanceAdapter {
+    public static func configure(driver: any CameraDeviceControlDriver, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState {
+        try coordinator.requireSelected(driver); guard driver.supportsContinuousWhiteBalance else { return .unavailable }; guard !lock else { return try self.lock(driver: driver, coordinator: coordinator) }; return try coordinator.withLockedDevice { $0.setWhiteBalanceMode(.continuousAutoWhiteBalance); return .stabilizing }
     }
+    public static func configure(device: AVCaptureDevice, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState { try configure(driver: AVFoundationCameraDeviceControlDriver(device: device), lock: lock, coordinator: coordinator) }
+    public static func lock(driver: any CameraDeviceControlDriver, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState { try coordinator.requireSelected(driver); guard coordinator.whiteBalanceIsStable, !driver.isAdjustingWhiteBalance else { throw CameraConfigurationError.stabilizationRequired }; guard driver.supportsLockedWhiteBalance else { return .failed }; return try coordinator.withLockedDevice { $0.setWhiteBalanceMode(.locked); return .locked } }
+    public static func lock(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState { try lock(driver: AVFoundationCameraDeviceControlDriver(device: device), coordinator: coordinator) }
+    public static func observedTemperatureKelvin(driver: any CameraDeviceControlDriver) -> WhiteBalanceCaptureReading? { guard let temperature = driver.observedTemperatureKelvin() else { return nil }; let reading = WhiteBalanceCaptureReading(temperatureKelvin: temperature); return reading.isValid ? reading : nil }
+    public static func observedTemperatureKelvin(device: AVCaptureDevice) -> WhiteBalanceCaptureReading? { observedTemperatureKelvin(driver: AVFoundationCameraDeviceControlDriver(device: device)) }
+    public static func observe(driver: any CameraDeviceControlDriver, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState { try coordinator.requireSelected(driver); try coordinator.observeWhiteBalance(isAdjusting: driver.isAdjustingWhiteBalance); return .stabilizing }
+    public static func observe(device: AVCaptureDevice, coordinator: CameraDeviceConfigurationCoordinator) throws -> WhiteBalanceState { try observe(driver: AVFoundationCameraDeviceControlDriver(device: device), coordinator: coordinator) }
 }
 #endif
 

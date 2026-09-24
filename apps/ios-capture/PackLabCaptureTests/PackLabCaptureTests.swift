@@ -12,6 +12,46 @@ import UIKit
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
+#if canImport(AVFoundation) && canImport(CoreGraphics)
+import CoreGraphics
+
+@MainActor
+private final class FakeCameraDeviceControlDriver: CameraDeviceControlDriver {
+    let uniqueID: String
+    let position: AVCaptureDevice.Position
+    var supportsContinuousFocus = true
+    var supportsLockedFocus = true
+    var supportsFocusPoint = true
+    var isAdjustingFocus = false
+    var focusMode: CameraDeviceFocusMode?
+    var focusPoint: CGPoint?
+    var supportsContinuousExposure = true
+    var supportsLockedExposure = true
+    var minExposureTargetBias: Float = -2
+    var maxExposureTargetBias: Float = 2
+    var exposureDurationSeconds = 0.008
+    var iso: Float = 200
+    var exposureTargetBias: Float = 0
+    var exposureMode: CameraDeviceExposureMode?
+    var supportsContinuousWhiteBalance = true
+    var supportsLockedWhiteBalance = true
+    var isAdjustingWhiteBalance = false
+    var temperatureKelvin: Double? = 4500
+    var whiteBalanceMode: CameraDeviceWhiteBalanceMode?
+    private(set) var configurationCount = 0
+    private(set) var configurationDepth = 0
+    private(set) var maximumConfigurationDepth = 0
+
+    init(uniqueID: String, position: AVCaptureDevice.Position = .back) { self.uniqueID = uniqueID; self.position = position }
+    func setFocusPoint(_ point: CGPoint) { focusPoint = point }
+    func setFocusMode(_ mode: CameraDeviceFocusMode) { focusMode = mode }
+    func setExposureTargetBias(_ bias: Float) { exposureTargetBias = bias }
+    func setExposureMode(_ mode: CameraDeviceExposureMode) { exposureMode = mode }
+    func observedTemperatureKelvin() -> Double? { temperatureKelvin }
+    func setWhiteBalanceMode(_ mode: CameraDeviceWhiteBalanceMode) { whiteBalanceMode = mode }
+    func lockForConfiguration() throws { configurationCount += 1; configurationDepth += 1; maximumConfigurationDepth = max(maximumConfigurationDepth, configurationDepth) }
+    func unlockForConfiguration() { configurationDepth -= 1 }
+}
 
 @MainActor
 private final class SequenceTrackingService: ARTrackingService {
@@ -1201,6 +1241,35 @@ final class PackLabCaptureTests: XCTestCase {
         owner.onStateChange = { state, _ in observed.append(state) }; _ = owner.addStateObserver { state, _ in observed.append(state) }; owner.setInFlightCancellation { cancellations += 1 }; owner.setSessionRestart { restarts += 1 }; owner.register(session: session, notificationCenter: center); owner.register(session: session, notificationCenter: center); XCTAssertEqual(owner.registrationCount, 1)
         owner.handle(.permission(.denied)); XCTAssertEqual(owner.machine.state, .denied); owner.handle(.permission(.authorized)); owner.handle(.started); owner.handle(.interruption); XCTAssertEqual(cancellations, 1); owner.handle(.interruptionEnded); XCTAssertEqual(restarts, 1); owner.handle(.restartSucceeded); owner.handle(.runtimeError); XCTAssertEqual(cancellations, 2); XCTAssertEqual(restarts, 2); XCTAssertTrue(observed.contains(.running)); owner.unregister(notificationCenter: center)
         let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())); vm.cameraRecoveryOwner.handle(.permission(.denied)); XCTAssertEqual(vm.cameraRecoveryState, .denied)
+    }
+
+    @MainActor
+    func testPL0073PhysicalFocusAdapterSeamCoversDeviceSelectionStabilityLockAndRuntime() throws {
+        let lens = CameraLensIdentity(identifier: "selected", position: .back, kind: .wideAngle); let selected = FakeCameraDeviceControlDriver(uniqueID: "selected"); let wrong = FakeCameraDeviceControlDriver(uniqueID: "other"); let coordinator = CameraDeviceConfigurationCoordinator(driver: selected, selectedLens: lens)
+        XCTAssertThrowsError(try AVFoundationFocusAdapter.configure(driver: wrong, point: nil, coordinator: coordinator)) { XCTAssertEqual($0 as? CameraConfigurationError, .nonSelectedDevice) }
+        XCTAssertEqual(try AVFoundationFocusAdapter.configure(driver: selected, point: CGPoint(x: 0.5, y: 0.5), coordinator: coordinator), .focusing); XCTAssertEqual(selected.focusMode, .continuousAutoFocus); XCTAssertEqual(selected.maximumConfigurationDepth, 1)
+        selected.isAdjustingFocus = true; XCTAssertEqual(try AVFoundationFocusAdapter.observe(driver: selected, coordinator: coordinator), .focusing); XCTAssertThrowsError(try AVFoundationFocusAdapter.lock(driver: selected, coordinator: coordinator)) { XCTAssertEqual($0 as? CameraConfigurationError, .stabilizationRequired) }
+        selected.isAdjustingFocus = false; XCTAssertEqual(try AVFoundationFocusAdapter.observe(driver: selected, coordinator: coordinator), .continuous); XCTAssertEqual(try AVFoundationFocusAdapter.lock(driver: selected, coordinator: coordinator), .locked); XCTAssertEqual(selected.focusMode, .locked)
+        let composition = AVFoundationCameraControlComposition(driver: selected, selectedLens: lens); let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())); vm.bindCameraControls(composition.controls); composition.configureFocus(); XCTAssertEqual(vm.controls.state.focus, .focusing); composition.observeFocus(); XCTAssertEqual(vm.controls.state.focus, .continuous)
+    }
+
+    @MainActor
+    func testPL0074PhysicalExposureAdapterSeamClampsSerializesPropagatesAndPersists() throws {
+        let lens = CameraLensIdentity(identifier: "selected", position: .back, kind: .wideAngle); let selected = FakeCameraDeviceControlDriver(uniqueID: "selected"); let wrong = FakeCameraDeviceControlDriver(uniqueID: "other"); let coordinator = CameraDeviceConfigurationCoordinator(driver: selected, selectedLens: lens)
+        XCTAssertThrowsError(try AVFoundationExposureAdapter.configure(driver: wrong, bias: 0, coordinator: coordinator)) { XCTAssertEqual($0 as? CameraConfigurationError, .nonSelectedDevice) }
+        XCTAssertEqual(try AVFoundationExposureAdapter.configure(driver: selected, bias: 99, coordinator: coordinator), .metering); XCTAssertEqual(selected.exposureTargetBias, selected.maxExposureTargetBias); XCTAssertEqual(selected.exposureMode, .continuousAutoExposure); XCTAssertEqual(selected.maximumConfigurationDepth, 1); XCTAssertEqual(try AVFoundationExposureAdapter.lock(driver: selected, coordinator: coordinator), .locked); XCTAssertEqual(selected.exposureMode, .locked)
+        let composition = AVFoundationCameraControlComposition(driver: selected, selectedLens: lens); let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())); vm.bindCameraControls(composition.controls); composition.configureExposure(bias: -99); XCTAssertEqual(vm.controls.state.exposure, .metering); XCTAssertEqual(selected.exposureTargetBias, selected.minExposureTargetBias)
+        let base = PhotoCaptureMetadata(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: "portrait", lensIdentity: lens, focalLengthMM: SourceMeasurement(status: .unavailable), exposureSeconds: SourceMeasurement(status: .unavailable), iso: SourceMeasurement(status: .unavailable), whiteBalanceKelvin: SourceMeasurement(status: .unavailable), captureTimestamp: Date()); let accepted = try composition.acceptedMetadata(base); XCTAssertEqual(accepted.exposureSeconds.status, .available); XCTAssertEqual(accepted.exposureSeconds.value, selected.exposureDurationSeconds); XCTAssertEqual(accepted.iso.value, Double(selected.iso)); XCTAssertEqual(accepted.exposureSeconds.source, "device_api")
+    }
+
+    @MainActor
+    func testPL0075PhysicalWhiteBalanceAdapterSeamStabilizesLocksObservesAndPersists() throws {
+        let lens = CameraLensIdentity(identifier: "selected", position: .back, kind: .wideAngle); let selected = FakeCameraDeviceControlDriver(uniqueID: "selected"); let wrong = FakeCameraDeviceControlDriver(uniqueID: "other"); let coordinator = CameraDeviceConfigurationCoordinator(driver: selected, selectedLens: lens)
+        XCTAssertThrowsError(try AVFoundationWhiteBalanceAdapter.configure(driver: wrong, coordinator: coordinator)) { XCTAssertEqual($0 as? CameraConfigurationError, .nonSelectedDevice) }
+        XCTAssertEqual(try AVFoundationWhiteBalanceAdapter.configure(driver: selected, coordinator: coordinator), .stabilizing); XCTAssertEqual(selected.whiteBalanceMode, .continuousAutoWhiteBalance); selected.isAdjustingWhiteBalance = true; XCTAssertEqual(try AVFoundationWhiteBalanceAdapter.observe(driver: selected, coordinator: coordinator), .stabilizing); XCTAssertThrowsError(try AVFoundationWhiteBalanceAdapter.lock(driver: selected, coordinator: coordinator)) { XCTAssertEqual($0 as? CameraConfigurationError, .stabilizationRequired) }
+        selected.isAdjustingWhiteBalance = false; XCTAssertEqual(try AVFoundationWhiteBalanceAdapter.observe(driver: selected, coordinator: coordinator), .stabilizing); XCTAssertEqual(try AVFoundationWhiteBalanceAdapter.lock(driver: selected, coordinator: coordinator), .locked); XCTAssertEqual(selected.whiteBalanceMode, .locked); XCTAssertEqual(AVFoundationWhiteBalanceAdapter.observedTemperatureKelvin(driver: selected)?.temperatureKelvin, 4500)
+        let composition = AVFoundationCameraControlComposition(driver: selected, selectedLens: lens); let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())); vm.bindCameraControls(composition.controls); composition.configureWhiteBalance(); XCTAssertEqual(vm.controls.state.whiteBalance, .stabilizing); composition.observeWhiteBalance(); XCTAssertEqual(vm.controls.state.whiteBalance, .stabilizing); composition.lockWhiteBalance(); XCTAssertEqual(vm.controls.state.whiteBalance, .locked)
+        let base = PhotoCaptureMetadata(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: "portrait", lensIdentity: lens, focalLengthMM: SourceMeasurement(status: .unavailable), exposureSeconds: SourceMeasurement(status: .unavailable), iso: SourceMeasurement(status: .unavailable), whiteBalanceKelvin: SourceMeasurement(status: .unavailable), captureTimestamp: Date()); let accepted = try composition.acceptedMetadata(base); XCTAssertEqual(accepted.whiteBalanceKelvin.status, .available); XCTAssertEqual(accepted.whiteBalanceKelvin.value, 4500); XCTAssertEqual(accepted.whiteBalanceKelvin.unit, "K"); XCTAssertEqual(accepted.whiteBalanceKelvin.source, "device_api")
     }
     #endif
 

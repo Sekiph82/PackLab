@@ -100,3 +100,9 @@ def test_camera_controls_and_recovery_share_the_production_runtime_composition(r
     assert "NextLevelPreviewBridge(recoveryOwner: runtime.cameraRecoveryOwner)" in content
     assert "recoveryOwner: cameraRecoveryOwner" in content
     assert "recoveryOwner.addStateObserver" in camera
+    assert "public protocol CameraDeviceControlDriver" in camera
+    assert "public init(driver: any CameraDeviceControlDriver" in camera
+    assert "AVFoundationCameraDeviceControlDriver(device: device)" in camera
+    assert "AVFoundationFocusAdapter.configure(driver:" in camera
+    assert "AVFoundationExposureAdapter.configure(driver:" in camera
+    assert "AVFoundationWhiteBalanceAdapter.configure(driver:" in camera
