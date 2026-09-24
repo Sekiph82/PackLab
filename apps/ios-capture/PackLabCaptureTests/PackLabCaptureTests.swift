@@ -1920,6 +1920,41 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertLessThan(diagnostics.score, 1)
     }
 
+    func testPL0109CompletionDiagnosticsDistinguishesCompleteAndUnavailableEvidence() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 1, rings: [CoverageRingDefinition(id: "lower", minimumElevation: -90, maximumElevation: 90)])
+        let policy = StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 1)])
+        let completeSnapshot = OrbitCoverageSnapshot(configuration: configuration, capturedSectors: [CoverageSector(ringID: "lower", azimuthIndex: 0)], missingSectors: [], duplicateCaptureIDs: [], invalidCaptureIDs: [], observations: [])
+        let complete = CompletionDiagnostics(rings: RingCoverageEvaluation(snapshot: completeSnapshot, policy: policy))
+        XCTAssertEqual(complete.status, .complete)
+        XCTAssertEqual(complete.score, 1)
+        let unavailable = CompletionDiagnostics(rings: RingCoverageEvaluation(snapshot: OrbitCoverageModel().snapshot()))
+        XCTAssertEqual(unavailable.status, .unavailable)
+        XCTAssertEqual(unavailable.score, 0)
+    }
+
+    @MainActor
+    func testPL0109ActiveCompletionPropagatesAndPersistsWithOptionalBaseState() async throws {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
+        let policy = StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "middle", minimumSectorCount: 1)])
+        let preset = PackagingPreset(id: .matteHDPE, version: "test", displayName: "Test", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration, ringRequirements: policy), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "completion")
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset))
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset, layout: layout)
+        XCTAssertEqual(vm.m04Completion.status, .incomplete)
+        XCTAssertTrue(vm.m04Completion.mandatoryMissingAreas.contains("middle"))
+        vm.setBasePassAvailability(BasePassAvailability(physicallyFeasible: false, reasonCode: "base_unavailable"))
+        for _ in 0..<3 { await Task.yield() }
+        let loaded = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertEqual(loaded.completion, vm.m04Completion)
+        XCTAssertTrue(loaded.completion?.mandatoryMissingAreas.contains("middle") == true)
+        let optionalBase = BasePassEvaluation(snapshot: vm.m04Coverage, availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "base_unavailable"))
+        let optionalDiagnostics = CompletionDiagnostics(rings: vm.m04RingCoverage, base: optionalBase)
+        XCTAssertTrue(optionalDiagnostics.optionalUnavailableAreas.contains("base"))
+    }
+
     func testPL0110ManualCaptureAllowsQualityWarningButNeverSafetyOrEvidenceBypass() {
         let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.001, sampleCount: 10, band: .reject, reasonCode: "sharpness_reject")
         let motion = MotionBlurAssessment(risk: .warning, availability: .available, rotationRateMagnitude: 0.5, reasons: ["image_blur_with_motion"])

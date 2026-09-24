@@ -930,12 +930,16 @@ public struct CompletionDiagnostics: Codable, Sendable, Equatable {
         let completeRingCount = rings.statuses.filter { !$0.missing }.count
         let requiredDetails = detailPasses.filter { $0.metadata.required }
         let completeDetails = requiredDetails.filter(\.isComplete).count
-        let denominator = max(1, requiredRingCount + requiredDetails.count)
-        score = Double(completeRingCount + completeDetails) / Double(denominator)
+        let requiredBase = base?.metadata.required == true
+        let completeBase = requiredBase && base?.isComplete == true ? 1 : 0
+        let denominator = max(1, requiredRingCount + requiredDetails.count + (requiredBase ? 1 : 0))
+        score = Double(completeRingCount + completeDetails + completeBase) / Double(denominator)
         mandatoryMissingAreas = rings.missingRingIDs + requiredDetails.filter { !$0.isComplete }.map { $0.metadata.passID.rawValue }
+        if requiredBase, base?.isComplete != true { mandatoryMissingAreas.append(CapturePassID.base.rawValue) }
         optionalUnavailableAreas = base?.status == "unavailable" ? [CapturePassID.base.rawValue] : []
         guidance = mandatoryMissingAreas.map { "Capture missing \($0) coverage" } + optionalUnavailableAreas.map { "Optional \($0) pass unavailable; completion is not claimed" }
-        status = mandatoryMissingAreas.isEmpty ? (rings.statuses.isEmpty ? .unavailable : .complete) : .incomplete
+        let hasCompletionEvidence = !rings.statuses.isEmpty || !requiredDetails.isEmpty || base != nil
+        status = mandatoryMissingAreas.isEmpty ? (hasCompletionEvidence ? .complete : .unavailable) : .incomplete
     }
 }
 
@@ -1072,7 +1076,8 @@ public struct M04ScanContext: Codable, Sendable, Equatable {
     public let treatmentMode: String?
     public let preflight: ScanPreflightResult?
     public let basePass: BasePassEvaluation?
-    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass }
+    public let completion: CompletionDiagnostics?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion }
 }
 
 public extension SessionStorageLayout {
