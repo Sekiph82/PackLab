@@ -900,11 +900,63 @@ public enum PackagingPresetCatalog {
     public static func preset(for id: PackagingPresetID) -> PackagingPreset { switch id { case .glossyPET: return glossyPET; case .transparent: return transparent; case .asymmetricJerrycan: return asymmetricJerrycan; case .closureCap: return closureCap; case .turntable: return turntable; default: return matteHDPE } }
 }
 
+public enum CalibrationAvailability: String, Codable, Sendable, Equatable { case ownerVerified = "owner_verified", provisionalTestCalibrated = "provisional_test_calibrated", ownerRequired = "owner_required", unavailable }
+
+public enum PreflightIssueSeverity: String, Codable, Sendable, Equatable { case blocker, warning, information }
+
+public struct PreflightIssue: Codable, Sendable, Equatable, Identifiable {
+    public let code: String
+    public let severity: PreflightIssueSeverity
+    public let message: String
+    public var id: String { code }
+    public init(code: String, severity: PreflightIssueSeverity, message: String) { self.code = code; self.severity = severity; self.message = message }
+}
+
+public struct ScanPreflightInput: Sendable, Equatable {
+    public let preset: PackagingPreset
+    public let admission: CaptureAdmissionController
+    public let cameraReady: Bool
+    public let sessionReady: Bool
+    public let storageAvailable: Bool
+    public let calibration: CalibrationAvailability
+    public let preparationAcknowledged: Bool
+    public let environmentGuidanceAcknowledged: Bool
+    public init(preset: PackagingPreset, admission: CaptureAdmissionController = CaptureAdmissionController(), cameraReady: Bool, sessionReady: Bool, storageAvailable: Bool, calibration: CalibrationAvailability, preparationAcknowledged: Bool, environmentGuidanceAcknowledged: Bool) { self.preset = preset; self.admission = admission; self.cameraReady = cameraReady; self.sessionReady = sessionReady; self.storageAvailable = storageAvailable; self.calibration = calibration; self.preparationAcknowledged = preparationAcknowledged; self.environmentGuidanceAcknowledged = environmentGuidanceAcknowledged }
+}
+
+public struct ScanPreflightResult: Codable, Sendable, Equatable {
+    public let canStart: Bool
+    public let issues: [PreflightIssue]
+    public let calibration: CalibrationAvailability
+    public let preparationAcknowledged: Bool
+    public let environmentGuidanceAcknowledged: Bool
+    public init(canStart: Bool, issues: [PreflightIssue], calibration: CalibrationAvailability, preparationAcknowledged: Bool, environmentGuidanceAcknowledged: Bool) { self.canStart = canStart; self.issues = issues; self.calibration = calibration; self.preparationAcknowledged = preparationAcknowledged; self.environmentGuidanceAcknowledged = environmentGuidanceAcknowledged }
+}
+
+public enum ScanSuitabilityPreflight {
+    public static func evaluate(_ input: ScanPreflightInput) -> ScanPreflightResult {
+        var issues: [PreflightIssue] = []
+        if case .hardStop = input.admission.gate { issues.append(PreflightIssue(code: "health_hard_stop", severity: .blocker, message: "Device health does not admit capture.")) }
+        else if case .warning = input.admission.gate { issues.append(PreflightIssue(code: "health_warning", severity: .warning, message: "Device health is degraded.")) }
+        if !input.cameraReady { issues.append(PreflightIssue(code: "camera_unavailable", severity: .blocker, message: "The selected camera is unavailable.")) }
+        if !input.sessionReady { issues.append(PreflightIssue(code: "session_unready", severity: .blocker, message: "The scan session is not ready.")) }
+        if !input.storageAvailable { issues.append(PreflightIssue(code: "storage_unavailable", severity: .blocker, message: "Storage admission is unavailable.")) }
+        if input.calibration != .ownerVerified { issues.append(PreflightIssue(code: "calibration_owner_required", severity: .warning, message: "Owner-verified physical calibration is unavailable; thresholds remain provisional.")) }
+        if input.preset.requiresPreparationAcknowledgement && !input.preparationAcknowledged { issues.append(PreflightIssue(code: "preparation_acknowledgement_required", severity: .blocker, message: "Required preparation guidance has not been acknowledged.")) }
+        if !input.environmentGuidanceAcknowledged { issues.append(PreflightIssue(code: "environment_guidance_required", severity: .blocker, message: "Minimum lighting/background guidance has not been acknowledged.")) }
+        else { issues.append(PreflightIssue(code: "environment_guidance_acknowledged", severity: .information, message: "Minimum lighting/background guidance is acknowledged.")) }
+        if input.preset.id == .transparent { issues.append(PreflightIssue(code: "transparent_reconstruction_unproven", severity: .warning, message: "Transparent reconstruction reliability is not established.")) }
+        let canStart = !issues.contains { $0.severity == .blocker }
+        return ScanPreflightResult(canStart: canStart, issues: issues, calibration: input.calibration, preparationAcknowledged: input.preparationAcknowledged, environmentGuidanceAcknowledged: input.environmentGuidanceAcknowledged)
+    }
+}
+
 public struct M04ScanContext: Codable, Sendable, Equatable {
     public let preset: PackagingPreset
     public let preparationAcknowledged: Bool
     public let treatmentMode: String?
-    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode }
+    public let preflight: ScanPreflightResult?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight }
 }
 
 public extension SessionStorageLayout {

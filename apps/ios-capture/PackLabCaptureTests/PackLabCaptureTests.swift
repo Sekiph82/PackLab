@@ -1656,6 +1656,56 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(CaptureProtocolViewModel(preset: PackagingPresetCatalog.preset(for: .matteHDPE)).canContinue)
     }
 
+    func testPL0118PreflightBlocksMissingGuidanceAndPreservesCalibrationWarning() {
+        let preset = PackagingPresetCatalog.preset(for: .transparent)
+        let result = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: false, environmentGuidanceAcknowledged: false))
+        XCTAssertFalse(result.canStart)
+        XCTAssertEqual(result.calibration, .ownerRequired)
+        XCTAssertTrue(result.issues.contains { $0.code == "preparation_acknowledgement_required" && $0.severity == .blocker })
+        XCTAssertTrue(result.issues.contains { $0.code == "environment_guidance_required" && $0.severity == .blocker })
+        XCTAssertTrue(result.issues.contains { $0.code == "calibration_owner_required" && $0.severity == .warning })
+        XCTAssertTrue(result.issues.contains { $0.code == "transparent_reconstruction_unproven" && $0.severity == .warning })
+    }
+
+    func testPL0118PreflightAllowsAdmittedSessionWithExplicitOwnerRequiredCalibration() {
+        let preset = PackagingPresetCatalog.preset(for: .matteHDPE)
+        let result = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: true, environmentGuidanceAcknowledged: true))
+        XCTAssertTrue(result.canStart)
+        XCTAssertEqual(result.issues.map(\.code), ["calibration_owner_required", "environment_guidance_acknowledged"])
+        let draft = try? NewScanDraftValidator.make(name: "Bottle", type: .bottle, mode: .guidedOrbit, sessionID: "preflight-session", presetID: .matteHDPE, preflight: result)
+        XCTAssertEqual(draft?.presetID, .matteHDPE)
+        XCTAssertEqual(draft?.preflight, result)
+    }
+
+    func testPL0118PreflightBlocksCameraAndStorageFailures() {
+        let preset = PackagingPresetCatalog.preset(for: .matteHDPE)
+        let result = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, cameraReady: false, sessionReady: true, storageAvailable: false, calibration: .provisionalTestCalibrated, preparationAcknowledged: true, environmentGuidanceAcknowledged: true))
+        XCTAssertFalse(result.canStart)
+        XCTAssertTrue(result.issues.contains { $0.code == "camera_unavailable" && $0.severity == .blocker })
+        XCTAssertTrue(result.issues.contains { $0.code == "storage_unavailable" && $0.severity == .blocker })
+        XCTAssertTrue(result.issues.contains { $0.code == "calibration_owner_required" && $0.severity == .warning })
+    }
+
+    func testPL0118PreflightIsTableDrivenAcrossPresetsAndHealthConditions() {
+        for id in PackagingPresetID.allCases {
+            let result = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: PackagingPresetCatalog.preset(for: id), cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerVerified, preparationAcknowledged: true, environmentGuidanceAcknowledged: true))
+            XCTAssertTrue(result.canStart, id.rawValue)
+            XCTAssertTrue(result.issues.contains { $0.severity == .information && $0.code == "environment_guidance_acknowledged" })
+            if id == .transparent { XCTAssertTrue(result.issues.contains { $0.code == "transparent_reconstruction_unproven" && $0.severity == .warning }) }
+        }
+
+        var admission = CaptureAdmissionController()
+        admission.update(.warning(HealthDecision(severity: .warning, messages: ["battery_low"])))
+        let warning = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: PackagingPresetCatalog.matteHDPE, admission: admission, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerVerified, preparationAcknowledged: true, environmentGuidanceAcknowledged: true))
+        XCTAssertTrue(warning.canStart)
+        XCTAssertTrue(warning.issues.contains { $0.code == "health_warning" && $0.severity == .warning })
+
+        admission.update(.hardStop(HealthDecision(severity: .hardStop, messages: ["thermal_critical", "storage_critical"])))
+        let hardStop = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: PackagingPresetCatalog.matteHDPE, admission: admission, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerVerified, preparationAcknowledged: true, environmentGuidanceAcknowledged: true))
+        XCTAssertFalse(hardStop.canStart)
+        XCTAssertTrue(hardStop.issues.contains { $0.code == "health_hard_stop" && $0.severity == .blocker })
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
