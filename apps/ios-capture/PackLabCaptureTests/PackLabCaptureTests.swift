@@ -1789,6 +1789,21 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(RingCoverageEvaluation(snapshot: model.snapshot(), policy: policy).isComplete)
     }
 
+    @MainActor
+    func testPL0106ActivePresetRingPolicyPublishesUnevenGuidance() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "lower", minimumElevation: -30, maximumElevation: -5), CoverageRingDefinition(id: "middle", minimumElevation: -5, maximumElevation: 5), CoverageRingDefinition(id: "upper", minimumElevation: 5, maximumElevation: 30)])
+        let policy = StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 1), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 1), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 1)])
+        let preset = PackagingPreset(id: .matteHDPE, version: "test", displayName: "Test", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration, ringRequirements: policy), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset)
+        XCTAssertEqual(vm.m04RingCoverage.missingRingIDs, ["lower", "middle", "upper"])
+        let lower = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: -0.2, z: -1).values, tracking: .normal)
+        _ = vm.recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: "lower", sequence: 0, sourceFilename: "l.heic", metadataFilename: "l.json", poseBinding: acceptedPoseBinding(captureID: "lower", pose: lower)))
+        XCTAssertEqual(vm.m04RingCoverage.missingRingIDs, ["middle", "upper"])
+        XCTAssertTrue(vm.m04RingCoverage.guidance.contains("Capture more middle ring sectors"))
+        XCTAssertFalse(vm.m04RingCoverage.isComplete)
+    }
+
     func testPL0107DetailPassRequiresCoverageQualityAndExplicitMetadata() {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "neck", minimumElevation: 15, maximumElevation: 45)])
         let policy = DetailPassPolicy(passID: .neck, minimumFramingFraction: 0.2, minimumSectorCount: 1)

@@ -22,6 +22,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var m04Coverage = OrbitCoverageModel().snapshot()
     @Published private(set) var m04CoverageTarget: CoverageSector?
     @Published private(set) var m04CoverageActive = false
+    @Published private(set) var m04RingCoverage = RingCoverageEvaluation(snapshot: OrbitCoverageModel().snapshot())
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
@@ -33,6 +34,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var m04QualityRuntime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
     private var m04QualityLogStore: QualityCandidateLogStore?
     private var m04CoverageModel = OrbitCoverageModel()
+    private var m04RingPolicy = StandardBottleCoveragePolicy.standard
     private var m04AcceptedDuplicateEvidence: [DuplicateEvidence] = []
     private var cameraControlBridge: CameraControlRuntimeBridge?
     #if canImport(AVFoundation)
@@ -128,6 +130,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04CoverageModel = OrbitCoverageModel(configuration: preset.coverage.orbit)
         m04Coverage = m04CoverageModel.snapshot()
         m04CoverageTarget = m04Coverage.missingSectors.first
+        m04RingPolicy = preset.coverage.ringRequirements
+        m04RingCoverage = RingCoverageEvaluation(snapshot: m04Coverage, policy: m04RingPolicy)
         m04CoverageActive = true
         m04AcceptedDuplicateEvidence = []
         m04Evaluation = nil
@@ -138,6 +142,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let observation = m04CoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding)
         m04Coverage = m04CoverageModel.snapshot()
         m04CoverageTarget = m04Coverage.missingSectors.first
+        m04RingCoverage = RingCoverageEvaluation(snapshot: m04Coverage, policy: m04RingPolicy)
         m04AcceptedDuplicateEvidence.append(DuplicateEvidence(captureID: record.captureID, poseBinding: record.poseBinding))
         return observation
     }
@@ -330,6 +335,14 @@ struct ContentView: View {
                         CoverageGridView(model: CoverageViewModel(snapshot: runtime.m04Coverage, targeted: runtime.m04CoverageTarget))
                             .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
                             .padding(.horizontal, 8)
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(runtime.m04RingCoverage.statuses) { status in
+                                Text("\(status.ringID): \(status.capturedSectorCount)/\(status.minimumSectorCount)\(status.missing ? " · missing" : " · ready")")
+                            }
+                            ForEach(runtime.m04RingCoverage.guidance, id: \.self) { Text($0) }
+                        }
+                        .font(.caption2.monospaced()).foregroundStyle(.white)
+                        .padding(.horizontal, 12)
                     }
                     Spacer()
                     if runtime.tracking.poseEvidenceEligible == false {
