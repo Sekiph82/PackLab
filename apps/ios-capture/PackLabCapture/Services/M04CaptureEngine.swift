@@ -985,6 +985,40 @@ public struct TurntableCoverageModel: Sendable, Equatable {
     public func snapshot() -> TurntableCoverageSnapshot { let missing = (0..<policy.expectedAngleCount).filter { !captured.contains($0) }; return TurntableCoverageSnapshot(policy: policy, capturedSectorIndices: captured.sorted(), missingSectorIndices: missing, repeatedCaptureIDs: repeats, observations: observations, isComplete: missing.isEmpty) }
 }
 
+public struct CaptureProtocolSection: Sendable, Equatable, Identifiable {
+    public let title: String
+    public let lines: [String]
+    public var id: String { title }
+    public init(title: String, lines: [String]) { self.title = title; self.lines = lines }
+}
+
+public struct CaptureProtocolViewModel: Sendable {
+    public let preset: PackagingPreset
+    public let sections: [CaptureProtocolSection]
+    public private(set) var acknowledgementGiven: Bool
+    public init(preset: PackagingPreset, acknowledgementGiven: Bool = false) { self.preset = preset; self.acknowledgementGiven = acknowledgementGiven; sections = [CaptureProtocolSection(title: "Lighting", lines: preset.lightingGuidance), CaptureProtocolSection(title: "Background and reflections", lines: preset.preparationGuidance), CaptureProtocolSection(title: "Handling and working distance", lines: ["Keep the package stable and centered.", "Use the supported main camera and preserve safe margins."])] }
+    public var acknowledgementRequired: Bool { preset.requiresPreparationAcknowledgement }
+    public var canContinue: Bool { !acknowledgementRequired || acknowledgementGiven }
+    public mutating func acknowledgePreparation() { acknowledgementGiven = true }
+}
+
+#if canImport(SwiftUI)
+public struct CaptureProtocolView: View {
+    public let preset: PackagingPreset
+    public let onContinue: (Bool) -> Void
+    @State private var acknowledged: Bool
+    public init(preset: PackagingPreset, onContinue: @escaping (Bool) -> Void) { self.preset = preset; self.onContinue = onContinue; _acknowledged = State(initialValue: !preset.requiresPreparationAcknowledgement) }
+    public var body: some View {
+        Form {
+            Text(preset.displayName).font(.headline)
+            ForEach(CaptureProtocolViewModel(preset: preset).sections) { section in Section(section.title) { ForEach(section.lines, id: \.self) { Text($0) } } }
+            if preset.requiresPreparationAcknowledgement { Toggle("I understand the preparation warnings", isOn: $acknowledged) }
+            Button("Continue") { onContinue(acknowledged) }.disabled(preset.requiresPreparationAcknowledgement && !acknowledged)
+        }.navigationTitle("Capture protocol")
+    }
+}
+#endif
+
 #if canImport(SwiftUI)
 public struct CoverageGridView: View {
     public let model: CoverageViewModel

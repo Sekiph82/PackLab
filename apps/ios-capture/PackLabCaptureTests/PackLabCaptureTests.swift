@@ -1641,6 +1641,21 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(model.snapshot().isComplete)
     }
 
+    func testPL0117CaptureProtocolIsPresetDrivenAndAcknowledgementScoped() {
+        for id in PackagingPresetID.allCases {
+            let model = CaptureProtocolViewModel(preset: PackagingPresetCatalog.preset(for: id))
+            XCTAssertFalse(model.sections.isEmpty)
+            XCTAssertFalse(model.sections.flatMap { $0.lines }.isEmpty)
+        }
+        let transparent = PackagingPresetCatalog.preset(for: .transparent)
+        var required = CaptureProtocolViewModel(preset: transparent)
+        XCTAssertTrue(required.acknowledgementRequired)
+        XCTAssertFalse(required.canContinue)
+        required.acknowledgePreparation()
+        XCTAssertTrue(required.canContinue)
+        XCTAssertTrue(CaptureProtocolViewModel(preset: PackagingPresetCatalog.preset(for: .matteHDPE)).canContinue)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
