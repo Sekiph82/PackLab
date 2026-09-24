@@ -1502,6 +1502,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(controller.evaluate(AutoCaptureInput(monotonicTimestamp: 11.1, poseEligible: false, targetSector: target, quality: quality, overlapAllowed: true, admission: admission)).reasons.contains("pose_ineligible"))
     }
 
+    func testPL0105NearDuplicateDetectionPreservesUsefulParallaxAndFailsSafeWithoutPose() {
+        let base = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
+        let accepted = DuplicateEvidence(captureID: "accepted", pose: base, visualSignature: [1, 2, 3])
+        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", pose: base, visualSignature: [1, 2, 3]), accepted: [accepted])
+        XCTAssertTrue(duplicate.isDuplicate)
+        let parallax = PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: 0.2, y: 0, z: -1).values, tracking: .normal)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "parallax", pose: parallax), accepted: [accepted]).isDuplicate)
+        let stale = PoseSample(timestamp: 3, transform: base.transform, tracking: .limited)
+        XCTAssertEqual(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "stale", pose: stale), accepted: [accepted]).reasonCode, "duplicate_pose_unavailable")
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

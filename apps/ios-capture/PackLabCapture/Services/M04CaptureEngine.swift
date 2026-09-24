@@ -666,6 +666,50 @@ public actor GuidedAutoCaptureService {
     public func resetForManualCapture() { controller.resetAfterRejectedCandidate() }
 }
 
+public struct DuplicatePolicy: Codable, Sendable, Equatable {
+    public let maximumTranslationMeters: Double
+    public let maximumElevationDifference: Double
+    public let maximumSignatureDistance: Int
+    public init(maximumTranslationMeters: Double = 0.04, maximumElevationDifference: Double = 4, maximumSignatureDistance: Int = 2) { self.maximumTranslationMeters = max(0, maximumTranslationMeters); self.maximumElevationDifference = max(0, maximumElevationDifference); self.maximumSignatureDistance = max(0, maximumSignatureDistance) }
+    public static let provisional = DuplicatePolicy()
+}
+
+public struct DuplicateEvidence: Sendable, Equatable {
+    public let captureID: String
+    public let pose: PoseSample?
+    public let visualSignature: [UInt8]?
+    public init(captureID: String, pose: PoseSample?, visualSignature: [UInt8]? = nil) { self.captureID = captureID; self.pose = pose; self.visualSignature = visualSignature }
+}
+
+public struct DuplicateDecision: Sendable, Equatable {
+    public let isDuplicate: Bool
+    public let reasonCode: String
+    public let matchedCaptureID: String?
+    public init(isDuplicate: Bool, reasonCode: String, matchedCaptureID: String? = nil) { self.isDuplicate = isDuplicate; self.reasonCode = reasonCode; self.matchedCaptureID = matchedCaptureID }
+}
+
+public enum NearDuplicateDetector {
+    public static func evaluate(candidate: DuplicateEvidence, accepted: [DuplicateEvidence], configuration: OrbitCoverageConfiguration = OrbitCoverageConfiguration(), policy: DuplicatePolicy = .provisional) -> DuplicateDecision {
+        guard let pose = candidate.pose, pose.tracking == .normal, pose.hasValidTransform else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
+        guard let candidatePosition = position(pose) else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
+        let candidateObservation = CoveragePoseMapper.map(captureID: candidate.captureID, pose: pose, configuration: configuration)
+        for previous in accepted {
+            guard let previousPose = previous.pose, previousPose.tracking == .normal, let previousPosition = position(previousPose) else { continue }
+            let previousObservation = CoveragePoseMapper.map(captureID: previous.captureID, pose: previousPose, configuration: configuration)
+            let distance = sqrt(zip(candidatePosition, previousPosition).reduce(0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) })
+            let elevationDelta = abs((candidateObservation.elevationDegrees ?? 0) - (previousObservation.elevationDegrees ?? 0))
+            let signatureMatch = signaturesMatch(candidate.visualSignature, previous.visualSignature, maximumDistance: policy.maximumSignatureDistance)
+            if candidateObservation.sector != nil, candidateObservation.sector == previousObservation.sector, (distance <= policy.maximumTranslationMeters && elevationDelta <= policy.maximumElevationDifference) || signatureMatch {
+                return DuplicateDecision(isDuplicate: true, reasonCode: "near_duplicate_candidate", matchedCaptureID: previous.captureID)
+            }
+        }
+        return DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate")
+    }
+
+    private static func position(_ pose: PoseSample) -> [Double]? { guard pose.transform.count == 16 else { return nil }; return [pose.transform[3], pose.transform[7], pose.transform[11]] }
+    private static func signaturesMatch(_ lhs: [UInt8]?, _ rhs: [UInt8]?, maximumDistance: Int) -> Bool { guard let lhs, let rhs, lhs.count == rhs.count else { return false }; return zip(lhs, rhs).reduce(0) { $0 + ($1.0 == $1.1 ? 0 : 1) } <= maximumDistance }
+}
+
 #if canImport(SwiftUI)
 public struct CoverageGridView: View {
     public let model: CoverageViewModel
