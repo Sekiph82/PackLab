@@ -894,7 +894,8 @@ public enum PackagingPresetCatalog {
     public static let matteHDPE = PackagingPreset(id: .matteHDPE, version: "1.0.0", displayName: "Matte / HDPE", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use broad diffuse lighting.", "Keep exposure stable and avoid hard shadows."], preparationGuidance: ["Use a clean matte or simple background.", "Keep the package dry and free of loose labels."], requiresPreparationAcknowledgement: false)
     public static let glossyPET = PackagingPreset(id: .glossyPET, version: "1.0.0", displayName: "Glossy / PET", quality: QualityPolicyConfiguration(highlight: ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.005, warningFraction: 0.025, rejectFraction: 0.12)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12)), lightingGuidance: ["Use large diffuse sources and avoid direct reflections.", "Reframe if highlights spread across the package."], preparationGuidance: ["Keep the glossy surface clean.", "Use a simple non-reflective background."], requiresPreparationAcknowledgement: false)
     public static let transparent = PackagingPreset(id: .transparent, version: "1.0.0", displayName: "Transparent", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use diffuse lighting and avoid transparent-surface reflections."], preparationGuidance: ["Photogrammetry may fail without temporary matte treatment, textured inserts or background preparation."], requiresPreparationAcknowledgement: true)
-    public static func preset(for id: PackagingPresetID) -> PackagingPreset { switch id { case .glossyPET: return glossyPET; case .transparent: return transparent; default: return matteHDPE } }
+    public static let asymmetricJerrycan = PackagingPreset(id: .asymmetricJerrycan, version: "1.0.0", displayName: "Asymmetric / Jerrycan", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12)), lightingGuidance: ["Use even diffuse lighting across front, back and handle regions."], preparationGuidance: ["Keep the handle unobstructed and capture front/back/side regions."], requiresPreparationAcknowledgement: false)
+    public static func preset(for id: PackagingPresetID) -> PackagingPreset { switch id { case .glossyPET: return glossyPET; case .transparent: return transparent; case .asymmetricJerrycan: return asymmetricJerrycan; default: return matteHDPE } }
 }
 
 public struct M04ScanContext: Codable, Sendable, Equatable {
@@ -925,6 +926,21 @@ public struct TransparentPreparationEvaluation: Codable, Sendable, Equatable {
     public let suitability: String
     public init(acknowledged: Bool, treatment: TransparentTreatmentMode) { self.warningCodes = ["transparent_reconstruction_unproven", "transparent_preparation_required"]; self.acknowledgementRequired = true; self.acknowledged = acknowledged; self.treatment = treatment; self.suitability = "warning_only_not_physically_verified" }
     public var mayStart: Bool { acknowledged }
+}
+
+public enum AsymmetricCoverageRegion: String, Codable, Sendable, Equatable, CaseIterable { case front, back, left, right, handle, shoulder }
+
+public struct AsymmetricCoveragePolicy: Codable, Sendable, Equatable {
+    public let requiredRegions: [AsymmetricCoverageRegion]
+    public let minimumSectorsPerRegion: Int
+    public init(requiredRegions: [AsymmetricCoverageRegion] = [.front, .back, .left, .right, .handle], minimumSectorsPerRegion: Int = 1) { self.requiredRegions = requiredRegions; self.minimumSectorsPerRegion = max(1, minimumSectorsPerRegion) }
+}
+
+public struct AsymmetricCoverageEvaluation: Codable, Sendable, Equatable {
+    public let missingRegions: [AsymmetricCoverageRegion]
+    public let isComplete: Bool
+    public let guidance: [String]
+    public init(observedRegions: [AsymmetricCoverageRegion: Int], policy: AsymmetricCoveragePolicy = AsymmetricCoveragePolicy()) { missingRegions = policy.requiredRegions.filter { (observedRegions[$0] ?? 0) < policy.minimumSectorsPerRegion }; isComplete = missingRegions.isEmpty; guidance = missingRegions.map { "Capture \($0.rawValue) region evidence" } }
 }
 
 #if canImport(SwiftUI)

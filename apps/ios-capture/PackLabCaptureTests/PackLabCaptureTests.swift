@@ -1611,6 +1611,16 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(M04ScanContext(preset: preset, preparationAcknowledged: true, treatmentMode: TransparentTreatmentMode.temporaryMatte.rawValue).treatmentMode, "temporaryMatte")
     }
 
+    func testPL0114AsymmetricCoverageRequiresHandleAndAllMajorRegions() {
+        let policy = AsymmetricCoveragePolicy()
+        let incomplete = AsymmetricCoverageEvaluation(observedRegions: [.front: 4, .back: 4, .left: 2, .right: 2], policy: policy)
+        XCTAssertFalse(incomplete.isComplete)
+        XCTAssertEqual(incomplete.missingRegions, [.handle])
+        let complete = AsymmetricCoverageEvaluation(observedRegions: [.front: 1, .back: 1, .left: 1, .right: 1, .handle: 1], policy: policy)
+        XCTAssertTrue(complete.isComplete)
+        XCTAssertEqual(PackagingPresetCatalog.preset(for: .asymmetricJerrycan).coverage.orbit.azimuthBinCount, 12)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
