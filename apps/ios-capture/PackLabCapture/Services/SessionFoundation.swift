@@ -597,7 +597,8 @@ public struct NewScanWizard: View {
     @State private var mode: CaptureModeID = .freehand
     @State private var notes = ""
     @State private var presetID: PackagingPresetID = .matteHDPE
-    @State private var guidanceAcknowledged = false
+    @State private var showProtocol = false
+    @State private var protocolAcknowledged = false
     @State private var transparentTreatment: TransparentTreatmentMode = .none
     @State private var validationMessage: String?
     @State private var workflow = NewScanWorkflowModel()
@@ -614,20 +615,27 @@ public struct NewScanWizard: View {
                 Picker("Transparent preparation treatment", selection: $transparentTreatment) { ForEach(TransparentTreatmentMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 Text("Treatment is operator-selected and not physical verification. None cannot be represented as treated.").font(.caption).foregroundStyle(.orange)
             }
-            Toggle("Lighting and preparation guidance understood", isOn: $guidanceAcknowledged)
+            Button("Review Capture Protocol") { showProtocol = true }
             TextField("Notes (optional)", text: $notes, axis: .vertical)
             if let validationMessage { Text(validationMessage).foregroundStyle(.red).accessibilityAddTraits(.isStaticText) }
             HStack {
                 Button("Cancel") { NewScanActionCoordinator.cancel(workflow: &workflow); dismiss() }
                 Spacer()
-                Button("Start") {
+                Button("Start") { showProtocol = true }
+            }
+        }.navigationTitle("New Scan")
+        .sheet(isPresented: $showProtocol) {
+            NavigationStack {
+                CaptureProtocolView(preset: PackagingPresetCatalog.preset(for: presetID)) { acknowledged in
+                    protocolAcknowledged = acknowledged
+                    showProtocol = false
                     let preset = PackagingPresetCatalog.preset(for: presetID)
                     let selectedTreatment = presetID == .transparent ? transparentTreatment : nil
-                    if presetID == .transparent && !TransparentPreparationEvaluation(acknowledged: guidanceAcknowledged, treatment: transparentTreatment).mayStart {
+                    if presetID == .transparent && !TransparentPreparationEvaluation(acknowledged: acknowledged, treatment: transparentTreatment).mayStart {
                         validationMessage = "Transparent preparation acknowledgement and a non-none treatment are required."
                         return
                     }
-                    let preflight = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, admission: admission, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: guidanceAcknowledged, environmentGuidanceAcknowledged: guidanceAcknowledged, transparentTreatment: transparentTreatment))
+                    let preflight = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, admission: admission, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: acknowledged, environmentGuidanceAcknowledged: acknowledged, transparentTreatment: transparentTreatment))
                     guard preflight.canStart else {
                         validationMessage = preflight.issues.filter { $0.severity == .blocker }.map(\.message).joined(separator: " ")
                         return
@@ -636,7 +644,7 @@ public struct NewScanWizard: View {
                     else if case .validationFailed(let message) = workflow.state { validationMessage = "Cannot start scan: \(message)" }
                 }
             }
-        }.navigationTitle("New Scan")
+        }
     }
 }
 

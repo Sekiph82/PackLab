@@ -524,6 +524,7 @@ struct ContentView: View {
     @State private var showPoseDebug = false
     @State private var showNewScan = false
     @State private var showResume = false
+    @State private var showActiveProtocol = false
     @State private var turntableAngleText = "0"
     @StateObject private var runtime = CaptureRuntimeViewModel()
 
@@ -646,6 +647,7 @@ struct ContentView: View {
             .navigationTitle("PackLab")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("New Scan") { showNewScan = true } }
+                ToolbarItem(placement: .topBarTrailing) { Button("Protocol") { showActiveProtocol = true } }
                 ToolbarItem(placement: .topBarTrailing) { Button(showPoseDebug ? "Hide Debug" : "Show Debug") { showPoseDebug.toggle() } }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission) { draft in
@@ -659,6 +661,11 @@ struct ContentView: View {
                 Task { let plan = SessionDeletionPlan(root: ContentView.sessionRoot, candidate: candidate); _ = try? await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true) }
                 showResume = false
             }) } }
+            .sheet(isPresented: $showActiveProtocol) {
+                NavigationStack {
+                    CaptureProtocolView(preset: runtime.m04ActivePreset) { _ in showActiveProtocol = false }
+                }
+            }
             .task { await runtime.start(); let candidates = await SessionDiscoveryService(root: ContentView.sessionRoot).discover(); showResume = !candidates.isEmpty }
         }
     }

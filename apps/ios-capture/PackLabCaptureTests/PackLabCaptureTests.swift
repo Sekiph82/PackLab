@@ -2232,6 +2232,25 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(CaptureProtocolViewModel(preset: PackagingPresetCatalog.preset(for: .matteHDPE)).canContinue)
     }
 
+    func testPL0117ProtocolContinueFeedsNewScanDraftAndPersistedAcknowledgement() async throws {
+        let preset = PackagingPresetCatalog.preset(for: .transparent)
+        var protocolModel = CaptureProtocolViewModel(preset: preset)
+        XCTAssertFalse(protocolModel.canContinue)
+        protocolModel.acknowledgePreparation()
+        XCTAssertTrue(protocolModel.canContinue)
+        let preflight = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: true, environmentGuidanceAcknowledged: true, transparentTreatment: .texturedInsert))
+        var workflow = NewScanWorkflowModel()
+        var draft: NewScanDraft?
+        XCTAssertTrue(NewScanActionCoordinator.start(workflow: &workflow, name: "Transparent", type: .bottle, mode: .guidedOrbit, notes: "", presetID: .transparent, preflight: preflight, treatmentMode: .texturedInsert) { draft = $0 })
+        XCTAssertEqual(draft?.preflight?.preparationAcknowledged, true)
+        XCTAssertEqual(draft?.treatmentMode, .texturedInsert)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "protocol")
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset, preparationAcknowledged: draft?.preflight?.preparationAcknowledged ?? false, treatmentMode: draft?.treatmentMode?.rawValue, preflight: draft?.preflight))
+        let loaded = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertTrue(loaded.preparationAcknowledged)
+    }
+
     func testPL0118PreflightBlocksMissingGuidanceAndPreservesCalibrationWarning() {
         let preset = PackagingPresetCatalog.preset(for: .transparent)
         let result = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: false, environmentGuidanceAcknowledged: false))
