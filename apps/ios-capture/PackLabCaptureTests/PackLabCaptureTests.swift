@@ -1590,6 +1590,15 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PackagingPresetCatalog.preset(for: .matteHDPE).quality, preset.quality)
     }
 
+    func testPL0112GlossyPresetTightensHighlightsAndCoverage() {
+        let matte = PackagingPresetCatalog.preset(for: .matteHDPE)
+        let glossy = PackagingPresetCatalog.preset(for: .glossyPET)
+        XCTAssertEqual(glossy.id, .glossyPET)
+        XCTAssertLessThan(glossy.quality.highlight.rejectFraction, matte.quality.highlight.rejectFraction)
+        XCTAssertGreaterThan(glossy.coverage.orbit.azimuthBinCount, matte.coverage.orbit.azimuthBinCount)
+        XCTAssertTrue(glossy.lightingGuidance.contains { $0.localizedCaseInsensitiveContains("reflection") })
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

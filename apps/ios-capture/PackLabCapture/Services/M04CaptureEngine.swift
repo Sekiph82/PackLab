@@ -892,7 +892,8 @@ public struct PackagingPreset: Codable, Sendable, Equatable, Identifiable {
 
 public enum PackagingPresetCatalog {
     public static let matteHDPE = PackagingPreset(id: .matteHDPE, version: "1.0.0", displayName: "Matte / HDPE", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use broad diffuse lighting.", "Keep exposure stable and avoid hard shadows."], preparationGuidance: ["Use a clean matte or simple background.", "Keep the package dry and free of loose labels."], requiresPreparationAcknowledgement: false)
-    public static func preset(for id: PackagingPresetID) -> PackagingPreset { id == .matteHDPE ? matteHDPE : matteHDPE }
+    public static let glossyPET = PackagingPreset(id: .glossyPET, version: "1.0.0", displayName: "Glossy / PET", quality: QualityPolicyConfiguration(highlight: ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.005, warningFraction: 0.025, rejectFraction: 0.12)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12)), lightingGuidance: ["Use large diffuse sources and avoid direct reflections.", "Reframe if highlights spread across the package."], preparationGuidance: ["Keep the glossy surface clean.", "Use a simple non-reflective background."], requiresPreparationAcknowledgement: false)
+    public static func preset(for id: PackagingPresetID) -> PackagingPreset { id == .glossyPET ? glossyPET : matteHDPE }
 }
 
 public struct M04ScanContext: Codable, Sendable, Equatable {
