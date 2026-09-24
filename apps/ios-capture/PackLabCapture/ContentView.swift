@@ -29,6 +29,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var manualCaptureDecision: ManualCaptureDecision?
     @Published private(set) var m04ActivePreset = PackagingPresetCatalog.matteHDPE
     @Published private(set) var m04ReflectionGuidance: [String] = []
+    @Published private(set) var m04AsymmetricCoverage: AsymmetricCoverageEvaluation?
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
@@ -46,6 +47,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var m04BaseCoverageModel = OrbitCoverageModel(configuration: OrbitCoverageConfiguration(rings: [CoverageRingDefinition(id: "base", minimumElevation: -90, maximumElevation: 90)]))
     private var m04BaseAvailability = BasePassAvailability(physicallyFeasible: false, reasonCode: "base_pass_unavailable")
     private var m04SessionLayout: SessionStorageLayout?
+    private var m04AsymmetricPolicy: AsymmetricCoveragePolicy?
+    private var m04AsymmetricObservedRegions: [AsymmetricCoverageRegion: Int] = [:]
     private var m04ConsecutiveHighlightBlocks = 0
     private let m04HighlightGuidanceThreshold = 3
     private var m04DetailEvaluations: [CapturePassID: DetailPassEvaluation] = [:]
@@ -141,6 +144,9 @@ final class CaptureRuntimeViewModel: ObservableObject {
 
     func configureM04QualityRuntime(preset: PackagingPreset, layout: SessionStorageLayout? = nil) {
         m04ActivePreset = preset
+        m04AsymmetricPolicy = preset.coverage.asymmetricCoverage
+        m04AsymmetricObservedRegions = [:]
+        m04AsymmetricCoverage = preset.coverage.asymmetricCoverage.map { AsymmetricCoverageEvaluation(observedRegions: [:], policy: $0) }
         m04ConsecutiveHighlightBlocks = 0
         m04ReflectionGuidance = []
         m04QualityRuntime = M04CandidateQualityRuntime(preset: preset)
@@ -210,6 +216,20 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard let state, state.presetID == m04ActivePreset.id else { return }
         m04ConsecutiveHighlightBlocks = state.consecutiveHighlightBlocks
         m04ReflectionGuidance = state.guidanceActive ? state.guidance : []
+    }
+
+    func observeAsymmetricRegion(_ region: AsymmetricCoverageRegion) {
+        guard let policy = m04AsymmetricPolicy else { return }
+        m04AsymmetricObservedRegions[region, default: 0] += 1
+        m04AsymmetricCoverage = AsymmetricCoverageEvaluation(observedRegions: m04AsymmetricObservedRegions, policy: policy)
+        recomputeM04Completion()
+    }
+
+    func restoreAsymmetricCoverage(_ evaluation: AsymmetricCoverageEvaluation?) {
+        guard m04AsymmetricPolicy != nil else { return }
+        m04AsymmetricObservedRegions = evaluation?.observedRegions ?? [:]
+        m04AsymmetricCoverage = evaluation
+        recomputeM04Completion()
     }
 
     func evaluateBasePass(quality: QualityDecision, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?) -> BasePassAcceptanceDecision {
@@ -351,7 +371,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
 
     private func persistBasePassContext() async {
         guard let layout = m04SessionLayout, let existing = try? await M04SessionContextStore(layout: layout).load() else { return }
-        let context = M04ScanContext(preset: existing.preset, preparationAcknowledged: existing.preparationAcknowledged, treatmentMode: existing.treatmentMode, preflight: existing.preflight, basePass: m04BasePass, completion: m04Completion, qualityGuidance: m04QualityGuidanceState)
+        let context = M04ScanContext(preset: existing.preset, preparationAcknowledged: existing.preparationAcknowledged, treatmentMode: existing.treatmentMode, preflight: existing.preflight, basePass: m04BasePass, completion: m04Completion, qualityGuidance: m04QualityGuidanceState, asymmetricCoverage: m04AsymmetricCoverage)
         try? await M04SessionContextStore(layout: layout).persist(context)
     }
 
@@ -374,7 +394,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
     }
 
     private func recomputeM04Completion() {
-        m04Completion = CompletionDiagnostics(rings: m04RingCoverage, detailPasses: Array(m04DetailEvaluations.values), base: m04BasePass)
+        let asymmetricMissing = m04AsymmetricCoverage?.missingRegions.map { "asymmetric_\($0.rawValue)" } ?? []
+        m04Completion = CompletionDiagnostics(rings: m04RingCoverage, detailPasses: Array(m04DetailEvaluations.values), base: m04BasePass, additionalMandatoryMissingAreas: asymmetricMissing, additionalMandatoryAreaCount: m04AsymmetricPolicy?.requiredRegions.count ?? 0)
         Task { await persistBasePassContext() }
     }
 
@@ -524,6 +545,10 @@ struct ContentView: View {
                             ForEach(runtime.m04DetailGuidance, id: \.self) { Text($0) }
                             Text("Base: \(runtime.m04BasePass.status)")
                             ForEach(runtime.m04BasePass.guidance, id: \.self) { Text($0) }
+                            if let asymmetric = runtime.m04AsymmetricCoverage {
+                                Text("Asymmetric: \(asymmetric.isComplete ? "complete" : "missing")")
+                                ForEach(asymmetric.guidance, id: \.self) { Text($0) }
+                            }
                             Text("Completion: \(Int(runtime.m04Completion.score * 100))% · \(runtime.m04Completion.status.rawValue)")
                             ForEach(runtime.m04Completion.mandatoryMissingAreas, id: \.self) { Text("Missing: \($0)") }
                             ForEach(runtime.m04Completion.optionalUnavailableAreas, id: \.self) { Text("Optional unavailable: \($0)") }
@@ -567,11 +592,11 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button(showPoseDebug ? "Hide Debug" : "Show Debug") { showPoseDebug.toggle() } }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission) { draft in
-                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
+                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
                 showNewScan = false
             } } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
-                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; if let completion = context.completion { runtime.restoreCompletion(completion) }; runtime.restoreQualityGuidance(context.qualityGuidance) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
+                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; if let completion = context.completion { runtime.restoreCompletion(completion) }; runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
                 Task { let plan = SessionDeletionPlan(root: ContentView.sessionRoot, candidate: candidate); _ = try? await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true) }

@@ -952,16 +952,18 @@ public struct CompletionDiagnostics: Codable, Sendable, Equatable {
     public let mandatoryMissingAreas: [String]
     public let optionalUnavailableAreas: [String]
     public let guidance: [String]
-    public init(rings: RingCoverageEvaluation, detailPasses: [DetailPassEvaluation] = [], base: BasePassEvaluation? = nil) {
+    public init(rings: RingCoverageEvaluation, detailPasses: [DetailPassEvaluation] = [], base: BasePassEvaluation? = nil, additionalMandatoryMissingAreas: [String] = [], additionalMandatoryAreaCount: Int = 0) {
         let requiredRingCount = rings.statuses.filter { $0.missing || $0.minimumSectorCount > 0 }.count
         let completeRingCount = rings.statuses.filter { !$0.missing }.count
         let requiredDetails = detailPasses.filter { $0.metadata.required }
         let completeDetails = requiredDetails.filter(\.isComplete).count
         let requiredBase = base?.metadata.required == true
         let completeBase = requiredBase && base?.isComplete == true ? 1 : 0
-        let denominator = max(1, requiredRingCount + requiredDetails.count + (requiredBase ? 1 : 0))
-        score = Double(completeRingCount + completeDetails + completeBase) / Double(denominator)
-        mandatoryMissingAreas = rings.missingRingIDs + requiredDetails.filter { !$0.isComplete }.map { $0.metadata.passID.rawValue }
+        let additionalRequired = max(additionalMandatoryAreaCount, additionalMandatoryMissingAreas.count)
+        let additionalComplete = max(0, additionalRequired - additionalMandatoryMissingAreas.count)
+        let denominator = max(1, requiredRingCount + requiredDetails.count + (requiredBase ? 1 : 0) + additionalRequired)
+        score = Double(completeRingCount + completeDetails + completeBase + additionalComplete) / Double(denominator)
+        mandatoryMissingAreas = rings.missingRingIDs + requiredDetails.filter { !$0.isComplete }.map { $0.metadata.passID.rawValue } + additionalMandatoryMissingAreas
         if requiredBase, base?.isComplete != true { mandatoryMissingAreas.append(CapturePassID.base.rawValue) }
         optionalUnavailableAreas = base?.status == "unavailable" ? [CapturePassID.base.rawValue] : []
         guidance = mandatoryMissingAreas.map { "Capture missing \($0) coverage" } + optionalUnavailableAreas.map { "Optional \($0) pass unavailable; completion is not claimed" }
@@ -1027,7 +1029,8 @@ public struct QualityPolicyConfiguration: Codable, Sendable, Equatable {
 public struct CoveragePolicyConfiguration: Codable, Sendable, Equatable {
     public let orbit: OrbitCoverageConfiguration
     public let ringRequirements: StandardBottleCoveragePolicy
-    public init(orbit: OrbitCoverageConfiguration = OrbitCoverageConfiguration(), ringRequirements: StandardBottleCoveragePolicy = .standard) { self.orbit = orbit; self.ringRequirements = ringRequirements }
+    public let asymmetricCoverage: AsymmetricCoveragePolicy?
+    public init(orbit: OrbitCoverageConfiguration = OrbitCoverageConfiguration(), ringRequirements: StandardBottleCoveragePolicy = .standard, asymmetricCoverage: AsymmetricCoveragePolicy? = nil) { self.orbit = orbit; self.ringRequirements = ringRequirements; self.asymmetricCoverage = asymmetricCoverage }
 }
 
 public struct PackagingPreset: Codable, Sendable, Equatable, Identifiable {
@@ -1047,7 +1050,7 @@ public enum PackagingPresetCatalog {
     public static let matteHDPE = PackagingPreset(id: .matteHDPE, version: "1.0.0", displayName: "Matte / HDPE", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use broad diffuse lighting.", "Keep exposure stable and avoid hard shadows."], preparationGuidance: ["Use a clean matte or simple background.", "Keep the package dry and free of loose labels."], requiresPreparationAcknowledgement: false)
     public static let glossyPET = PackagingPreset(id: .glossyPET, version: "1.0.0", displayName: "Glossy / PET", quality: QualityPolicyConfiguration(highlight: ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.005, warningFraction: 0.025, rejectFraction: 0.12)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12)), lightingGuidance: ["Use large diffuse sources and avoid direct reflections.", "Reframe if highlights spread across the package."], preparationGuidance: ["Keep the glossy surface clean.", "Use a simple non-reflective background."], requiresPreparationAcknowledgement: false)
     public static let transparent = PackagingPreset(id: .transparent, version: "1.0.0", displayName: "Transparent", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use diffuse lighting and avoid transparent-surface reflections."], preparationGuidance: ["Photogrammetry may fail without temporary matte treatment, textured inserts or background preparation."], requiresPreparationAcknowledgement: true)
-    public static let asymmetricJerrycan = PackagingPreset(id: .asymmetricJerrycan, version: "1.0.0", displayName: "Asymmetric / Jerrycan", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12)), lightingGuidance: ["Use even diffuse lighting across front, back and handle regions."], preparationGuidance: ["Keep the handle unobstructed and capture front/back/side regions."], requiresPreparationAcknowledgement: false)
+    public static let asymmetricJerrycan = PackagingPreset(id: .asymmetricJerrycan, version: "1.0.0", displayName: "Asymmetric / Jerrycan", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12), asymmetricCoverage: AsymmetricCoveragePolicy()), lightingGuidance: ["Use even diffuse lighting across front, back and handle regions."], preparationGuidance: ["Keep the handle unobstructed and capture front/back/side regions."], requiresPreparationAcknowledgement: false)
     public static let closureCap = PackagingPreset(id: .closureCap, version: "1.0.0", displayName: "Closure / Cap", quality: QualityPolicyConfiguration(framing: FramingThresholds(minimumObjectFraction: 0.14, maximumObjectFraction: 0.65, minimumMargin: 0.05)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "closure", minimumElevation: 10, maximumElevation: 55)])), lightingGuidance: ["Use even diffuse lighting over threads, pump or cap details."], preparationGuidance: ["Move to a safe working distance and keep the cap centered without edge cropping."], requiresPreparationAcknowledgement: false)
     public static let turntable = PackagingPreset(id: .turntable, version: "1.0.0", displayName: "Turntable", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 24)), lightingGuidance: ["Keep the camera and background static while the object rotates."], preparationGuidance: ["Use a stable turntable and record angle evidence for each frame."], requiresPreparationAcknowledgement: false)
     public static func preset(for id: PackagingPresetID) -> PackagingPreset { switch id { case .glossyPET: return glossyPET; case .transparent: return transparent; case .asymmetricJerrycan: return asymmetricJerrycan; case .closureCap: return closureCap; case .turntable: return turntable; default: return matteHDPE } }
@@ -1114,7 +1117,8 @@ public struct M04ScanContext: Codable, Sendable, Equatable {
     public let basePass: BasePassEvaluation?
     public let completion: CompletionDiagnostics?
     public let qualityGuidance: M04QualityGuidanceState?
-    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance }
+    public let asymmetricCoverage: AsymmetricCoverageEvaluation?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil, asymmetricCoverage: AsymmetricCoverageEvaluation? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance; self.asymmetricCoverage = asymmetricCoverage }
 }
 
 public extension SessionStorageLayout {
@@ -1149,10 +1153,11 @@ public struct AsymmetricCoveragePolicy: Codable, Sendable, Equatable {
 }
 
 public struct AsymmetricCoverageEvaluation: Codable, Sendable, Equatable {
+    public let observedRegions: [AsymmetricCoverageRegion: Int]
     public let missingRegions: [AsymmetricCoverageRegion]
     public let isComplete: Bool
     public let guidance: [String]
-    public init(observedRegions: [AsymmetricCoverageRegion: Int], policy: AsymmetricCoveragePolicy = AsymmetricCoveragePolicy()) { missingRegions = policy.requiredRegions.filter { (observedRegions[$0] ?? 0) < policy.minimumSectorsPerRegion }; isComplete = missingRegions.isEmpty; guidance = missingRegions.map { "Capture \($0.rawValue) region evidence" } }
+    public init(observedRegions: [AsymmetricCoverageRegion: Int], policy: AsymmetricCoveragePolicy = AsymmetricCoveragePolicy()) { self.observedRegions = observedRegions; missingRegions = policy.requiredRegions.filter { (observedRegions[$0] ?? 0) < policy.minimumSectorsPerRegion }; isComplete = missingRegions.isEmpty; guidance = missingRegions.map { "Capture \($0.rawValue) region evidence" } }
 }
 
 public enum CoverageEvidenceSource: String, Codable, Sendable, Equatable { case arWorldPose = "ar_world_pose", turntableAngle = "turntable_angle" }

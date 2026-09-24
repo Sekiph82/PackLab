@@ -2114,6 +2114,32 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PackagingPresetCatalog.preset(for: .asymmetricJerrycan).coverage.orbit.azimuthBinCount, 12)
     }
 
+    @MainActor
+    func testPL0114AsymmetricPresetDrivesActiveGuidanceAndPersistsObservedRegions() async throws {
+        let preset = PackagingPresetCatalog.preset(for: .asymmetricJerrycan)
+        XCTAssertEqual(preset.coverage.asymmetricCoverage?.requiredRegions, AsymmetricCoveragePolicy().requiredRegions)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "jerrycan")
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset))
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset, layout: layout)
+        XCTAssertTrue(vm.m04AsymmetricCoverage?.missingRegions.contains(.handle) == true)
+        for region in [AsymmetricCoverageRegion.front, .back, .left, .right] {
+            for _ in 0..<12 { vm.observeAsymmetricRegion(region) }
+        }
+        XCTAssertFalse(vm.m04AsymmetricCoverage?.isComplete == true)
+        XCTAssertTrue(vm.m04Completion.mandatoryMissingAreas.contains("asymmetric_handle"))
+        vm.observeAsymmetricRegion(.handle)
+        XCTAssertTrue(vm.m04AsymmetricCoverage?.isComplete == true)
+        XCTAssertFalse(vm.m04Completion.mandatoryMissingAreas.contains("asymmetric_handle"))
+        for _ in 0..<3 { await Task.yield() }
+        let loaded = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertEqual(loaded.preset.coverage.asymmetricCoverage, preset.coverage.asymmetricCoverage)
+        XCTAssertEqual(loaded.asymmetricCoverage?.observedRegions[.handle], 1)
+        XCTAssertTrue(loaded.asymmetricCoverage?.isComplete == true)
+    }
+
     func testPL0115ClosurePresetUsesMainLensInvariantAndTighterFraming() {
         let preset = PackagingPresetCatalog.preset(for: .closureCap)
         XCTAssertEqual(preset.supportedLensRule, "selected_rear_main_wide_only")
