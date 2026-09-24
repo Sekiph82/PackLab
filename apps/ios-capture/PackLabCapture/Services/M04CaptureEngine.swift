@@ -236,6 +236,9 @@ public struct ClippingMetric: Codable, Sendable, Equatable {
 }
 
 public enum LuminanceClippingAnalyzer {
+    /// Highlight and shadow measurements share one explicit fraction policy:
+    /// tolerated fractions pass within tolerance, the configured warning
+    /// fraction starts a warning, and the reject fraction is hard failure.
     public static func highlight(_ frame: QualityImageFrame, thresholds: ClippingThresholds = .highlightProvisional) -> ClippingMetric {
         analyze(frame, thresholds: thresholds, predicate: { $0 >= thresholds.luminanceCutoff }, reasonPrefix: "highlight")
     }

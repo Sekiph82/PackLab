@@ -1443,6 +1443,36 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(noMask.reasons.contains("shadow_object_region_unavailable"))
     }
 
+    func testPL0097CandidateRuntimePublishesShadowBandsAndRawObjectFraction() {
+        let mask = (0..<100).map { index in
+            let x = index % 10; let y = index / 10
+            return (1...8).contains(x) && (1...8).contains(y)
+        }
+        let normal = [Double](repeating: 0.5, count: 100)
+        let objectIndices = mask.indices.filter { mask[$0] }
+        func withClippedObjectPixels(_ count: Int) -> [Double] {
+            var pixels = normal
+            objectIndices.prefix(count).forEach { pixels[$0] = 0.01 }
+            return pixels
+        }
+        let localized = withClippedObjectPixels(1)
+        let warning = withClippedObjectPixels(6)
+        let broad = withClippedObjectPixels(16)
+        let runtime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
+        func evaluate(_ luminance: [Double], id: String) -> ClippingMetric {
+            let frame = QualityImageFrame(width: 10, height: 10, luminance: luminance, objectMask: mask)
+            return runtime.evaluate(M04CandidateFrameInput(sessionID: "s", captureID: id, sequence: 1, monotonicTimestamp: 1, frame: frame)).quality.metrics.shadowClipping
+        }
+        XCTAssertEqual(evaluate(normal, id: "normal").band, .pass)
+        XCTAssertEqual(evaluate(localized, id: "localized").band, .pass)
+        XCTAssertEqual(evaluate(warning, id: "warning").band, .warn)
+        XCTAssertEqual(evaluate(warning, id: "warning").objectClippedFraction, 0.125)
+        XCTAssertEqual(evaluate(broad, id: "broad").band, .reject)
+        let noMask = runtime.evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "no-mask", sequence: 1, monotonicTimestamp: 1, frame: QualityImageFrame(width: 10, height: 10, luminance: normal))).quality.metrics.shadowClipping
+        XCTAssertNil(noMask.objectClippedFraction)
+        XCTAssertTrue(noMask.reasons.contains("shadow_object_region_unavailable"))
+    }
+
     func testPL0098FramingDistinguishesSmallAcceptableAndCroppedObjects() {
         let pixels = [Double](repeating: 0.5, count: 100)
         let smallMask = (0..<100).map { $0 == 44 }
