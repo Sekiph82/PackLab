@@ -1081,6 +1081,15 @@ public struct ScanPreflightInput: Sendable, Equatable {
     public init(preset: PackagingPreset, admission: CaptureAdmissionController = CaptureAdmissionController(), cameraReady: Bool, sessionReady: Bool, storageAvailable: Bool, calibration: CalibrationAvailability, preparationAcknowledged: Bool, environmentGuidanceAcknowledged: Bool, transparentTreatment: TransparentTreatmentMode = .none) { self.preset = preset; self.admission = admission; self.cameraReady = cameraReady; self.sessionReady = sessionReady; self.storageAvailable = storageAvailable; self.calibration = calibration; self.preparationAcknowledged = preparationAcknowledged; self.environmentGuidanceAcknowledged = environmentGuidanceAcknowledged; self.transparentTreatment = transparentTreatment }
 }
 
+public struct ScanRuntimeReadiness: Sendable, Equatable {
+    public let cameraReady: Bool
+    public let sessionReady: Bool
+    public let storageAvailable: Bool
+    public let calibration: CalibrationAvailability
+    public init(cameraReady: Bool, sessionReady: Bool, storageAvailable: Bool, calibration: CalibrationAvailability = .ownerRequired) { self.cameraReady = cameraReady; self.sessionReady = sessionReady; self.storageAvailable = storageAvailable; self.calibration = calibration }
+    public static let unavailable = ScanRuntimeReadiness(cameraReady: false, sessionReady: false, storageAvailable: false, calibration: .ownerRequired)
+}
+
 public struct ScanPreflightResult: Codable, Sendable, Equatable {
     public let canStart: Bool
     public let issues: [PreflightIssue]

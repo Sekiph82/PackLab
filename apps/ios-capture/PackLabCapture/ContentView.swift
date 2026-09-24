@@ -517,6 +517,13 @@ final class CaptureRuntimeViewModel: ObservableObject {
         }
     }
 
+    var newScanReadiness: ScanRuntimeReadiness {
+        let supportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("PackLabSessions", isDirectory: true)
+        let parent = supportRoot?.deletingLastPathComponent()
+        let storageAvailable = supportRoot.map { FileManager.default.fileExists(atPath: $0.path) ? FileManager.default.isWritableFile(atPath: $0.path) : (parent.map { FileManager.default.isWritableFile(atPath: $0.path) } ?? false) } ?? false
+        return ScanRuntimeReadiness(cameraReady: captureAdmissionService != nil && cameraRecoveryState == .running, sessionReady: isRunning, storageAvailable: storageAvailable, calibration: .ownerRequired)
+    }
+
     deinit { updateTask?.cancel() }
 }
 
@@ -650,7 +657,7 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button("Protocol") { showActiveProtocol = true } }
                 ToolbarItem(placement: .topBarTrailing) { Button(showPoseDebug ? "Hide Debug" : "Show Debug") { showPoseDebug.toggle() } }
             }
-            .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission) { draft in
+            .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission, readiness: runtime.newScanReadiness) { draft in
                 Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
                 showNewScan = false
             } } }

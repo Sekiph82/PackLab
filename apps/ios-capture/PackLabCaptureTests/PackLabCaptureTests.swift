@@ -2301,6 +2301,21 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(hardStop.issues.contains { $0.code == "health_hard_stop" && $0.severity == .blocker })
     }
 
+    @MainActor
+    func testPL0118RuntimeReadinessTransitionsFeedExactPreflightEligibility() async {
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        XCTAssertFalse(vm.newScanReadiness.sessionReady)
+        await vm.start()
+        XCTAssertTrue(vm.newScanReadiness.sessionReady)
+        let unavailable = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: PackagingPresetCatalog.matteHDPE, admission: vm.admission, cameraReady: vm.newScanReadiness.cameraReady, sessionReady: vm.newScanReadiness.sessionReady, storageAvailable: vm.newScanReadiness.storageAvailable, calibration: vm.newScanReadiness.calibration, preparationAcknowledged: true, environmentGuidanceAcknowledged: true))
+        XCTAssertFalse(unavailable.canStart)
+        XCTAssertTrue(unavailable.issues.contains { $0.code == "camera_unavailable" && $0.severity == .blocker })
+        let admitted = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: PackagingPresetCatalog.matteHDPE, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: true, environmentGuidanceAcknowledged: true))
+        XCTAssertTrue(admitted.canStart)
+        await vm.stop()
+        XCTAssertFalse(vm.newScanReadiness.sessionReady)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

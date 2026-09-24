@@ -603,8 +603,9 @@ public struct NewScanWizard: View {
     @State private var validationMessage: String?
     @State private var workflow = NewScanWorkflowModel()
     public let admission: CaptureAdmissionController
+    public let readiness: ScanRuntimeReadiness
     public let onStart: (NewScanDraft) -> Void
-    public init(admission: CaptureAdmissionController = CaptureAdmissionController(), onStart: @escaping (NewScanDraft) -> Void) { self.admission = admission; self.onStart = onStart }
+    public init(admission: CaptureAdmissionController = CaptureAdmissionController(), readiness: ScanRuntimeReadiness = .unavailable, onStart: @escaping (NewScanDraft) -> Void) { self.admission = admission; self.readiness = readiness; self.onStart = onStart }
     public var body: some View {
         Form {
             TextField("Package name", text: $name)
@@ -635,7 +636,7 @@ public struct NewScanWizard: View {
                         validationMessage = "Transparent preparation acknowledgement and a non-none treatment are required."
                         return
                     }
-                    let preflight = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, admission: admission, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: acknowledged, environmentGuidanceAcknowledged: acknowledged, transparentTreatment: transparentTreatment))
+                    let preflight = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, admission: admission, cameraReady: readiness.cameraReady, sessionReady: readiness.sessionReady, storageAvailable: readiness.storageAvailable, calibration: readiness.calibration, preparationAcknowledged: acknowledged, environmentGuidanceAcknowledged: acknowledged, transparentTreatment: transparentTreatment))
                     guard preflight.canStart else {
                         validationMessage = preflight.issues.filter { $0.severity == .blocker }.map(\.message).joined(separator: " ")
                         return
