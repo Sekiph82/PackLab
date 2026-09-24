@@ -1394,6 +1394,20 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(noMask.reasons.contains("shadow_object_region_unavailable"))
     }
 
+    func testPL0098FramingDistinguishesSmallAcceptableAndCroppedObjects() {
+        let pixels = [Double](repeating: 0.5, count: 100)
+        let smallMask = (0..<100).map { $0 == 44 }
+        XCTAssertEqual(FramingAnalyzer.analyze(QualityImageFrame(width: 10, height: 10, luminance: pixels, objectMask: smallMask)).band, .tooSmall)
+        let goodMask = (0..<100).map { index in
+            let x = index % 10; let y = index / 10
+            return (2...7).contains(x) && (2...7).contains(y)
+        }
+        XCTAssertEqual(FramingAnalyzer.analyze(QualityImageFrame(width: 10, height: 10, luminance: pixels, objectMask: goodMask)).band, .acceptable)
+        let edgeMask = (0..<100).map { index in index % 10 < 9 && index / 10 > 0 && index / 10 < 9 }
+        XCTAssertEqual(FramingAnalyzer.analyze(QualityImageFrame(width: 10, height: 10, luminance: pixels, objectMask: edgeMask)).band, .cropped)
+        XCTAssertEqual(FramingAnalyzer.analyze(.unavailable).band, .unavailable)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

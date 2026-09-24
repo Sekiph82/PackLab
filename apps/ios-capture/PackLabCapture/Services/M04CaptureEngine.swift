@@ -265,3 +265,59 @@ public enum LuminanceClippingAnalyzer {
         return ClippingMetric(availability: .available, clippedFraction: overall, objectClippedFraction: objectFraction, clippedPixelCount: allClipped, analyzedPixelCount: allCount, band: band, reasons: reasons)
     }
 }
+
+public struct NormalizedBounds: Codable, Sendable, Equatable {
+    public let minX: Double
+    public let minY: Double
+    public let maxX: Double
+    public let maxY: Double
+    public init(minX: Double, minY: Double, maxX: Double, maxY: Double) { self.minX = minX; self.minY = minY; self.maxX = maxX; self.maxY = maxY }
+    public var width: Double { max(0, maxX - minX) }
+    public var height: Double { max(0, maxY - minY) }
+    public var area: Double { width * height }
+}
+
+public enum FramingBand: String, Codable, Sendable, Equatable { case tooSmall = "too_small", acceptable, cropped, unavailable }
+
+public struct FramingThresholds: Codable, Sendable, Equatable {
+    public let minimumObjectFraction: Double
+    public let maximumObjectFraction: Double
+    public let minimumMargin: Double
+    public init(minimumObjectFraction: Double = 0.08, maximumObjectFraction: Double = 0.82, minimumMargin: Double = 0.03) {
+        self.minimumObjectFraction = max(0, min(1, minimumObjectFraction))
+        self.maximumObjectFraction = max(self.minimumObjectFraction, min(1, maximumObjectFraction))
+        self.minimumMargin = max(0, min(0.5, minimumMargin))
+    }
+    public static let provisional = FramingThresholds()
+}
+
+public struct FramingMetric: Codable, Sendable, Equatable {
+    public let availability: QualityMetricAvailability
+    public let objectFraction: Double?
+    public let bounds: NormalizedBounds?
+    public let margins: [String: Double]
+    public let band: FramingBand
+    public let reasons: [String]
+    public init(availability: QualityMetricAvailability, objectFraction: Double?, bounds: NormalizedBounds?, margins: [String: Double], band: FramingBand, reasons: [String]) { self.availability = availability; self.objectFraction = objectFraction; self.bounds = bounds; self.margins = margins; self.band = band; self.reasons = reasons }
+}
+
+public enum FramingAnalyzer {
+    public static func analyze(_ frame: QualityImageFrame, thresholds: FramingThresholds = .provisional) -> FramingMetric {
+        guard frame.isAvailable, let mask = frame.objectMask, mask.count == frame.luminance.count, mask.contains(true) else {
+            return FramingMetric(availability: .unavailable, objectFraction: nil, bounds: nil, margins: [:], band: .unavailable, reasons: ["framing_object_region_unavailable"])
+        }
+        let objectIndices = mask.indices.filter { mask[$0] }
+        let minX = objectIndices.map { $0 % frame.width }.min() ?? 0
+        let maxX = objectIndices.map { $0 % frame.width }.max() ?? 0
+        let minY = objectIndices.map { $0 / frame.width }.min() ?? 0
+        let maxY = objectIndices.map { $0 / frame.width }.max() ?? 0
+        let bounds = NormalizedBounds(minX: Double(minX) / Double(frame.width), minY: Double(minY) / Double(frame.height), maxX: Double(maxX + 1) / Double(frame.width), maxY: Double(maxY + 1) / Double(frame.height))
+        let objectFraction = Double(objectIndices.count) / Double(mask.count)
+        let margins = ["left": bounds.minX, "top": bounds.minY, "right": 1 - bounds.maxX, "bottom": 1 - bounds.maxY]
+        let touchesEdge = margins.values.contains { $0 <= thresholds.minimumMargin }
+        let band: FramingBand = objectFraction < thresholds.minimumObjectFraction ? .tooSmall : (objectFraction > thresholds.maximumObjectFraction || touchesEdge ? .cropped : .acceptable)
+        var reasons = ["framing_\(band.rawValue)"]
+        if touchesEdge { reasons.append("framing_edge_margin") }
+        return FramingMetric(availability: .available, objectFraction: objectFraction, bounds: bounds, margins: margins, band: band, reasons: reasons)
+    }
+}
