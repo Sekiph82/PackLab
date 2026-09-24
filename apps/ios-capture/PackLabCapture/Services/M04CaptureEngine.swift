@@ -829,7 +829,7 @@ public struct RingCoverageEvaluation: Codable, Sendable, Equatable {
     }
 }
 
-public enum CapturePassID: String, Codable, Sendable, Equatable, CaseIterable { case standard, shoulder, neck, closure, base }
+public enum CapturePassID: String, Codable, Sendable, Equatable, Hashable, CaseIterable { case standard, shoulder, neck, closure, base }
 
 public struct CapturePassMetadata: Codable, Sendable, Equatable {
     public let passID: CapturePassID
@@ -858,6 +858,23 @@ public struct DetailPassEvaluation: Codable, Sendable, Equatable {
         missingGuidance = count < policy.minimumSectorCount ? ["Capture missing \(policy.passID.rawValue) detail sectors"] : (framingOkay ? [] : ["Move closer while keeping the supported main camera lens and safe margins"])
         isComplete = policy.required && count >= policy.minimumSectorCount && framingOkay
         metadata = CapturePassMetadata(passID: policy.passID, required: policy.required, evidenceStatus: isComplete ? "complete" : (snapshot.invalidCaptureIDs.isEmpty ? "incomplete" : "pose_evidence_unavailable"))
+    }
+}
+
+public struct DetailPassAcceptanceDecision: Sendable, Equatable {
+    public let allowed: Bool
+    public let metadata: CapturePassMetadata
+    public let reasons: [String]
+    public init(snapshot: OrbitCoverageSnapshot, policy: DetailPassPolicy, quality: QualityDecision, framing: FramingMetric, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?) {
+        var reasons: [String] = []
+        guard let poseBinding, poseBinding.aligned.status == "available", poseBinding.aligned.sample != nil else { reasons.append("pose_evidence_unavailable") }
+        if !quality.isAcceptable { reasons.append(contentsOf: quality.reasons) }
+        if framing.band != .acceptable || (framing.objectFraction ?? 0) < policy.minimumFramingFraction { reasons.append("detail_framing_unacceptable") }
+        if duplicateDecision == nil { reasons.append("duplicate_evidence_unavailable") }
+        else if duplicateDecision?.isDuplicate == true { reasons.append(duplicateDecision?.reasonCode ?? "near_duplicate_candidate") }
+        self.allowed = reasons.isEmpty
+        self.reasons = reasons
+        self.metadata = CapturePassMetadata(passID: policy.passID, required: policy.required, evidenceStatus: reasons.isEmpty ? "accepted" : (reasons.contains("pose_evidence_unavailable") ? "pose_evidence_unavailable" : "rejected"))
     }
 }
 

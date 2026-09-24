@@ -1817,6 +1817,46 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(unavailable.metadata.evidenceStatus, "pose_evidence_unavailable")
     }
 
+    @MainActor
+    func testPL0107DetailPassRuntimeGatesAndPersistsPassMetadata() async throws {
+        struct Backend: StillPhotoBackend, Sendable {
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([7, 8, 9]), CaptureDimensions(width: 2, height: 1)) }
+        }
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
+        let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
+        let clip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let framing = FramingMetric(availability: .available, objectFraction: 0.25, bounds: nil, margins: ["left": 0.2], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let quality = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: framing, background: background))
+        let pose = PoseSample(timestamp: 10, transform: CoordinateTransform.translation(x: 0, y: 0.3, z: -1).values, tracking: .normal)
+        let binding = acceptedPoseBinding(captureID: "detail", pose: pose)
+        let useful = DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate")
+        let accepted = vm.evaluateDetailPass(passID: .neck, quality: quality, framing: framing, poseBinding: binding, duplicateDecision: useful)
+        XCTAssertTrue(accepted.allowed)
+        XCTAssertEqual(accepted.metadata.passID, .neck)
+        let rejected = vm.evaluateDetailPass(passID: .neck, quality: QualityDecision(decision: .reject, reasons: ["sharpness_reject"], warnings: [], metrics: quality.metrics), framing: framing, poseBinding: binding, duplicateDecision: useful)
+        XCTAssertFalse(rejected.allowed)
+        XCTAssertTrue(rejected.reasons.contains("sharpness_reject"))
+        let duplicate = vm.evaluateDetailPass(passID: .neck, quality: quality, framing: framing, poseBinding: binding, duplicateDecision: DuplicateDecision(isDuplicate: true, reasonCode: "near_duplicate_candidate", matchedCaptureID: "old"))
+        XCTAssertFalse(duplicate.allowed)
+        let unavailable = vm.evaluateDetailPass(passID: .neck, quality: quality, framing: framing, poseBinding: nil, duplicateDecision: useful)
+        XCTAssertTrue(unavailable.reasons.contains("pose_evidence_unavailable"))
+
+        await vm.bindStillCaptureBackend(Backend())
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "detail")
+        let store = ScanSessionStore(layout: layout); try await store.create(NewScanDraft(sessionID: "detail", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        let record = AcceptedCaptureRecord(captureID: "detail", sequence: 0, sourceFilename: "detail.heic", metadataFilename: "detail.json")
+        let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "detail", nextSequence: 1, epoch: 0, acceptedIDs: ["detail"]))
+        let outcome = try await vm.captureAndPersistDetailPass(passID: .neck, quality: quality, framing: framing, poseBinding: binding, duplicateDecision: useful, record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
+        XCTAssertNotNil(outcome.still)
+        let persisted = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("detail.json")))
+        XCTAssertEqual(persisted.passMetadata?.passID, .neck)
+        XCTAssertEqual(persisted.passMetadata?.evidenceStatus, "accepted")
+    }
+
     func testPL0108BasePassSeparatesFeasibleIncompleteAndUnavailableStates() {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "base", minimumElevation: -60, maximumElevation: -35)])
         var model = OrbitCoverageModel(configuration: configuration)

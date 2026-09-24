@@ -23,6 +23,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var m04CoverageTarget: CoverageSector?
     @Published private(set) var m04CoverageActive = false
     @Published private(set) var m04RingCoverage = RingCoverageEvaluation(snapshot: OrbitCoverageModel().snapshot())
+    @Published private(set) var m04DetailGuidance: [String] = []
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
@@ -35,6 +36,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var m04QualityLogStore: QualityCandidateLogStore?
     private var m04CoverageModel = OrbitCoverageModel()
     private var m04RingPolicy = StandardBottleCoveragePolicy.standard
+    private var m04DetailPolicies: [CapturePassID: DetailPassPolicy] = [:]
+    private var m04DetailCoverageModels: [CapturePassID: OrbitCoverageModel] = [:]
     private var m04AcceptedDuplicateEvidence: [DuplicateEvidence] = []
     private var cameraControlBridge: CameraControlRuntimeBridge?
     #if canImport(AVFoundation)
@@ -132,6 +135,11 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04CoverageTarget = m04Coverage.missingSectors.first
         m04RingPolicy = preset.coverage.ringRequirements
         m04RingCoverage = RingCoverageEvaluation(snapshot: m04Coverage, policy: m04RingPolicy)
+        m04DetailPolicies = [.shoulder: DetailPassPolicy(passID: .shoulder, minimumFramingFraction: 0.18), .neck: DetailPassPolicy(passID: .neck, minimumFramingFraction: 0.20), .closure: DetailPassPolicy(passID: .closure, minimumFramingFraction: 0.22)]
+        m04DetailCoverageModels = Dictionary(uniqueKeysWithValues: m04DetailPolicies.keys.map { passID in
+            (passID, OrbitCoverageModel(configuration: OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: passID.rawValue, minimumElevation: passID == .closure ? 10 : 15, maximumElevation: passID == .shoulder ? 60 : 45)])))
+        })
+        m04DetailGuidance = m04DetailPolicies.values.map { "Capture missing \($0.passID.rawValue) detail sectors" }
         m04CoverageActive = true
         m04AcceptedDuplicateEvidence = []
         m04Evaluation = nil
@@ -144,7 +152,23 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04CoverageTarget = m04Coverage.missingSectors.first
         m04RingCoverage = RingCoverageEvaluation(snapshot: m04Coverage, policy: m04RingPolicy)
         m04AcceptedDuplicateEvidence.append(DuplicateEvidence(captureID: record.captureID, poseBinding: record.poseBinding))
+        if let passID = record.passMetadata?.passID, var detailModel = m04DetailCoverageModels[passID] {
+            _ = detailModel.observe(captureID: record.captureID, poseBinding: record.poseBinding)
+            m04DetailCoverageModels[passID] = detailModel
+            if let policy = m04DetailPolicies[passID] {
+                let evaluation = DetailPassEvaluation(snapshot: detailModel.snapshot(), framing: FramingMetric(availability: .available, objectFraction: policy.minimumFramingFraction, bounds: nil, margins: [:], band: .acceptable, reasons: []), policy: policy)
+                m04DetailGuidance = m04DetailGuidance.filter { !$0.contains("\(passID.rawValue) detail") } + evaluation.missingGuidance
+            }
+        }
         return observation
+    }
+
+    func evaluateDetailPass(passID: CapturePassID, quality: QualityDecision, framing: FramingMetric, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?) -> DetailPassAcceptanceDecision {
+        let policy = m04DetailPolicies[passID] ?? DetailPassPolicy(passID: passID)
+        let snapshot = m04DetailCoverageModels[passID]?.snapshot() ?? OrbitCoverageModel().snapshot()
+        let decision = DetailPassAcceptanceDecision(snapshot: snapshot, policy: policy, quality: quality, framing: framing, poseBinding: poseBinding, duplicateDecision: duplicateDecision)
+        m04DetailGuidance = decision.reasons
+        return decision
     }
 
     func autoCaptureInput(monotonicTimestamp: TimeInterval) -> AutoCaptureInput? {
@@ -196,8 +220,21 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard case .accepted(let still) = outcome.result else { return (outcome.decision, nil) }
         try await store.storeAcceptedCapture(still: still, record: record, metadata: metadata, state: state, poses: poses, motion: motion, bridge: bridge)
         let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
-        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding))
+        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata))
         return (outcome.decision, still)
+    }
+
+    func captureAndPersistDetailPass(captureID: String = UUID().uuidString, passID: CapturePassID, quality: QualityDecision, framing: FramingMetric, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) async throws -> (decision: DetailPassAcceptanceDecision, still: AcceptedStill?) {
+        let decision = evaluateDetailPass(passID: passID, quality: quality, framing: framing, poseBinding: poseBinding, duplicateDecision: duplicateDecision)
+        guard decision.allowed else { return (decision, nil) }
+        guard let service = captureAdmissionService else { throw CameraServiceError.failed("capture_backend_unavailable") }
+        let result = await service.capture(captureID: captureID)
+        guard case .accepted(let still) = result else { return (decision, nil) }
+        let detailRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: decision.metadata)
+        let detailMetadata = (try? JSONEncoder().encode(detailRecord)) ?? metadata
+        try await store.storeAcceptedCapture(still: still, record: detailRecord, metadata: detailMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
+        recordAcceptedCaptureCoverage(detailRecord)
+        return (decision, still)
     }
 
     #if canImport(AVFoundation) && canImport(NextLevel)
@@ -224,7 +261,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard case .accepted(let still) = result else { throw CameraServiceError.failed("capture_rejected") }
         try await store.storeAcceptedCapture(still: still, record: record, metadata: metadata, state: state, poses: poses, motion: motion, bridge: bridge)
         let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
-        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding))
+        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata))
         return still
     }
 
@@ -340,6 +377,7 @@ struct ContentView: View {
                                 Text("\(status.ringID): \(status.capturedSectorCount)/\(status.minimumSectorCount)\(status.missing ? " · missing" : " · ready")")
                             }
                             ForEach(runtime.m04RingCoverage.guidance, id: \.self) { Text($0) }
+                            ForEach(runtime.m04DetailGuidance, id: \.self) { Text($0) }
                         }
                         .font(.caption2.monospaced()).foregroundStyle(.white)
                         .padding(.horizontal, 12)

@@ -74,7 +74,8 @@ public struct AcceptedCaptureRecord: Codable, Sendable, Equatable {
     public let acceptedAt: Date
     public let poseBinding: PoseCaptureBinding?
     public let motionBinding: MotionCaptureBinding?
-    public init(captureID: String, sequence: Int, sourceFilename: String, metadataFilename: String, acceptedAt: Date = Date(), poseBinding: PoseCaptureBinding? = nil, motionBinding: MotionCaptureBinding? = nil) { self.captureID = captureID; self.sequence = sequence; self.sourceFilename = sourceFilename; self.metadataFilename = metadataFilename; self.acceptedAt = acceptedAt; self.poseBinding = poseBinding; self.motionBinding = motionBinding }
+    public let passMetadata: CapturePassMetadata?
+    public init(captureID: String, sequence: Int, sourceFilename: String, metadataFilename: String, acceptedAt: Date = Date(), poseBinding: PoseCaptureBinding? = nil, motionBinding: MotionCaptureBinding? = nil, passMetadata: CapturePassMetadata? = nil) { self.captureID = captureID; self.sequence = sequence; self.sourceFilename = sourceFilename; self.metadataFilename = metadataFilename; self.acceptedAt = acceptedAt; self.poseBinding = poseBinding; self.motionBinding = motionBinding; self.passMetadata = passMetadata }
 }
 
 public enum SessionReopenDisposition: Sendable, Equatable { case resumable(PersistedSessionState), blocked(String) }
@@ -145,7 +146,7 @@ public actor ScanSessionStore {
     /// record enters the same source/record/state transaction.
     public func storeAcceptedCapture(still: AcceptedStill, record: AcceptedCaptureRecord, metadata: Data, state: Data, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) throws {
         let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
-        let enriched = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose, motionBinding: evidence.motion)
+        let enriched = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata)
         try storeAcceptedCapture(source: still.sourceBytes, record: enriched, metadata: metadata, state: state)
     }
 
