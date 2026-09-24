@@ -1466,6 +1466,23 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(model.snapshot().isComplete)
     }
 
+    func testPL0103CoverageViewModelLabelsEmptyPartialCompleteAndUnavailableStates() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
+        let emptyModel = CoverageViewModel(snapshot: OrbitCoverageModel(configuration: configuration).snapshot())
+        XCTAssertTrue(emptyModel.statusText.contains("missing"))
+        var unavailable = OrbitCoverageModel(configuration: configuration)
+        _ = unavailable.observe(captureID: "unavailable", pose: nil)
+        XCTAssertEqual(CoverageViewModel(snapshot: unavailable.snapshot()).statusText, "Coverage evidence unavailable")
+        var partial = OrbitCoverageModel(configuration: configuration)
+        _ = partial.observe(captureID: "one", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
+        let partialModel = CoverageViewModel(snapshot: partial.snapshot(), targeted: CoverageSector(ringID: "middle", azimuthIndex: 1))
+        XCTAssertTrue(partialModel.items.contains { $0.status == .targeted })
+        var complete = OrbitCoverageModel(configuration: configuration)
+        _ = complete.observe(captureID: "one", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
+        _ = complete.observe(captureID: "two", pose: PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: -1, y: 0, z: 0).values, tracking: .normal))
+        XCTAssertEqual(CoverageViewModel(snapshot: complete.snapshot()).statusText, "Coverage complete")
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

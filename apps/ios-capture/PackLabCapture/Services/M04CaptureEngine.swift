@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(SwiftUI)
+import SwiftUI
+#endif
 
 /// The quality engine consumes normalized luminance samples produced by the
 /// camera adapter.  Keeping this value type independent of UIKit/Core Image
@@ -585,3 +588,47 @@ public struct OrbitCoverageModel: Sendable, Equatable {
         return OrbitCoverageSnapshot(configuration: configuration, capturedSectors: all.filter { captured.contains($0) }, missingSectors: all.filter { !captured.contains($0) }, duplicateCaptureIDs: duplicateIDs, invalidCaptureIDs: invalidIDs, observations: recordedObservations)
     }
 }
+
+public enum CoverageDisplayStatus: String, Codable, Sendable, Equatable { case captured, targeted, missing, unavailable }
+
+public struct CoverageDisplayItem: Sendable, Equatable, Identifiable {
+    public let sector: CoverageSector
+    public let status: CoverageDisplayStatus
+    public let label: String
+    public init(sector: CoverageSector, status: CoverageDisplayStatus) { self.sector = sector; self.status = status; self.label = "\(sector.ringID) sector \(sector.azimuthIndex + 1) \(status.rawValue)" }
+    public var id: String { sector.id }
+}
+
+public struct CoverageViewModel: Sendable, Equatable {
+    public let items: [CoverageDisplayItem]
+    public let statusText: String
+    public let accessibilityText: String
+    public init(snapshot: OrbitCoverageSnapshot, targeted: CoverageSector? = nil) {
+        let unavailable = snapshot.configuration.rings.isEmpty || (!snapshot.invalidCaptureIDs.isEmpty && snapshot.capturedSectors.isEmpty)
+        items = snapshot.missingSectors.sorted { $0.id < $1.id }.map { CoverageDisplayItem(sector: $0, status: $0 == targeted ? .targeted : (unavailable ? .unavailable : .missing)) } + snapshot.capturedSectors.sorted { $0.id < $1.id }.map { CoverageDisplayItem(sector: $0, status: .captured) }
+        if unavailable { statusText = "Coverage evidence unavailable" }
+        else if snapshot.isComplete { statusText = "Coverage complete" }
+        else { statusText = "Coverage \(Int(snapshot.completionFraction * 100)) percent; \(snapshot.missingSectors.count) sectors missing" }
+        accessibilityText = items.map { $0.label }.joined(separator: ", ")
+    }
+}
+
+#if canImport(SwiftUI)
+public struct CoverageGridView: View {
+    public let model: CoverageViewModel
+    public init(model: CoverageViewModel) { self.model = model }
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(model.statusText).accessibilityAddTraits(.isHeader)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 90))], spacing: 6) {
+                ForEach(model.items) { item in
+                    Text(item.label).font(.caption2).padding(6).frame(maxWidth: .infinity).background(color(for: item.status).opacity(0.2)).clipShape(RoundedRectangle(cornerRadius: 6)).accessibilityLabel(item.label)
+                }
+            }
+        }.accessibilityElement(children: .contain).accessibilityLabel(model.accessibilityText)
+    }
+    private func color(for status: CoverageDisplayStatus) -> Color {
+        switch status { case .captured: return .green; case .targeted: return .blue; case .missing: return .orange; case .unavailable: return .gray }
+    }
+}
+#endif
