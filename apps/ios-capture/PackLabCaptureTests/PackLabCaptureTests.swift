@@ -1366,6 +1366,24 @@ final class PackLabCaptureTests: XCTestCase {
         let stale = MotionCaptureBinding(captureID: "c3", captureTimestamp: 30, sample: nil, delta: 1, status: "stale")
         XCTAssertEqual(MotionBlurAnalyzer.analyze(sharpness: SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept"), motion: stale).availability, .stale)
     }
+
+    func testPL0096HighlightClippingToleratesLocalizedSpecularPixelsAndRejectsBroadClipping() {
+        let localized = [Double](repeating: 0.5, count: 99) + [1.0]
+        let localizedMetric = LuminanceClippingAnalyzer.highlight(QualityImageFrame(width: 10, height: 10, luminance: localized, objectMask: [Bool](repeating: true, count: 100)))
+        XCTAssertEqual(localizedMetric.band, .pass)
+        XCTAssertEqual(localizedMetric.clippedPixelCount, 1)
+        let broad = [Double](repeating: 1.0, count: 25) + [Double](repeating: 0.5, count: 75)
+        let broadMetric = LuminanceClippingAnalyzer.highlight(QualityImageFrame(width: 10, height: 10, luminance: broad, objectMask: [Bool](repeating: true, count: 100)))
+        XCTAssertEqual(broadMetric.band, .reject)
+        XCTAssertEqual(LuminanceClippingAnalyzer.highlight(.unavailable).band, .unavailable)
+    }
+
+    func testPL0096HighlightThresholdBoundaryIsDeterministic() {
+        let thresholds = ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.10, warningFraction: 0.20, rejectFraction: 0.30)
+        let atReject = [Double](repeating: 1.0, count: 3) + [Double](repeating: 0.5, count: 7)
+        XCTAssertEqual(LuminanceClippingAnalyzer.highlight(QualityImageFrame(width: 10, height: 1, luminance: atReject, objectMask: [Bool](repeating: true, count: 10)), thresholds: thresholds).band, .reject)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

@@ -195,3 +195,68 @@ public enum MotionBlurAnalyzer {
         return MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: magnitude, reasons: [])
     }
 }
+
+public enum ClippingBand: String, Codable, Sendable, Equatable { case pass, warn, reject, unavailable }
+
+public struct ClippingThresholds: Codable, Sendable, Equatable {
+    public let luminanceCutoff: Double
+    public let toleratedFraction: Double
+    public let warningFraction: Double
+    public let rejectFraction: Double
+    public init(luminanceCutoff: Double, toleratedFraction: Double = 0.01, warningFraction: Double = 0.05, rejectFraction: Double = 0.20) {
+        self.luminanceCutoff = min(1, max(0, luminanceCutoff))
+        self.toleratedFraction = min(1, max(0, toleratedFraction))
+        self.warningFraction = min(1, max(self.toleratedFraction, warningFraction))
+        self.rejectFraction = min(1, max(self.warningFraction, rejectFraction))
+    }
+    public static let highlightProvisional = ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.01, warningFraction: 0.05, rejectFraction: 0.20)
+}
+
+public struct ClippingMetric: Codable, Sendable, Equatable {
+    public let availability: QualityMetricAvailability
+    public let clippedFraction: Double?
+    public let objectClippedFraction: Double?
+    public let clippedPixelCount: Int
+    public let analyzedPixelCount: Int
+    public let band: ClippingBand
+    public let reasons: [String]
+    public init(availability: QualityMetricAvailability, clippedFraction: Double?, objectClippedFraction: Double?, clippedPixelCount: Int, analyzedPixelCount: Int, band: ClippingBand, reasons: [String]) {
+        self.availability = availability
+        self.clippedFraction = clippedFraction
+        self.objectClippedFraction = objectClippedFraction
+        self.clippedPixelCount = clippedPixelCount
+        self.analyzedPixelCount = analyzedPixelCount
+        self.band = band
+        self.reasons = reasons
+    }
+}
+
+public enum LuminanceClippingAnalyzer {
+    public static func highlight(_ frame: QualityImageFrame, thresholds: ClippingThresholds = .highlightProvisional) -> ClippingMetric {
+        analyze(frame, thresholds: thresholds, predicate: { $0 >= thresholds.luminanceCutoff }, reasonPrefix: "highlight")
+    }
+
+    private static func analyze(_ frame: QualityImageFrame, thresholds: ClippingThresholds, predicate: (Double) -> Bool, reasonPrefix: String) -> ClippingMetric {
+        guard frame.isAvailable, !frame.luminance.isEmpty else {
+            return ClippingMetric(availability: .unavailable, clippedFraction: nil, objectClippedFraction: nil, clippedPixelCount: 0, analyzedPixelCount: 0, band: .unavailable, reasons: ["\(reasonPrefix)_clipping_unavailable"])
+        }
+        let clipped = frame.luminance.map(predicate)
+        let allCount = clipped.count
+        let allClipped = clipped.filter { $0 }.count
+        let overall = Double(allClipped) / Double(allCount)
+        var selectedFraction: Double = overall
+        var objectFraction: Double?
+        var reasons: [String] = []
+        if let mask = frame.objectMask, mask.count == clipped.count, mask.contains(true) {
+            let objectIndices = clipped.indices.filter { mask[$0] }
+            let objectClipped = objectIndices.filter { clipped[$0] }.count
+            objectFraction = Double(objectClipped) / Double(objectIndices.count)
+            selectedFraction = objectFraction ?? overall
+        } else {
+            reasons.append("\(reasonPrefix)_object_region_unavailable")
+        }
+        let band: ClippingBand = selectedFraction >= thresholds.rejectFraction ? .reject : (selectedFraction > thresholds.toleratedFraction ? .warn : .pass)
+        reasons.append("\(reasonPrefix)_clipping_\(band.rawValue)")
+        return ClippingMetric(availability: .available, clippedFraction: overall, objectClippedFraction: objectFraction, clippedPixelCount: allClipped, analyzedPixelCount: allCount, band: band, reasons: reasons)
+    }
+}
