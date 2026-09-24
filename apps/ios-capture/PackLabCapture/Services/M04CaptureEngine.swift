@@ -382,3 +382,55 @@ public enum BackgroundComplexityAnalyzer {
         return BackgroundComplexityMetric(availability: .available, score: score, luminanceVariance: variance, edgeDensity: edgeDensity, sampledPixelCount: min(samples.count, maximumSamples), band: band, reasons: ["background_complexity_\(band.rawValue)"])
     }
 }
+
+public enum CandidateQualityDecision: String, Codable, Sendable, Equatable { case accept, reject }
+
+public struct CandidateQualityMetrics: Codable, Sendable, Equatable {
+    public let sharpness: SharpnessMetric
+    public let motionBlur: MotionBlurAssessment
+    public let highlightClipping: ClippingMetric
+    public let shadowClipping: ClippingMetric
+    public let framing: FramingMetric
+    public let background: BackgroundComplexityMetric
+    public init(sharpness: SharpnessMetric, motionBlur: MotionBlurAssessment, highlightClipping: ClippingMetric, shadowClipping: ClippingMetric, framing: FramingMetric, background: BackgroundComplexityMetric) { self.sharpness = sharpness; self.motionBlur = motionBlur; self.highlightClipping = highlightClipping; self.shadowClipping = shadowClipping; self.framing = framing; self.background = background }
+}
+
+public struct QualityDecisionPolicy: Codable, Sendable, Equatable {
+    public let rejectUnavailableSharpness: Bool
+    public let rejectUnavailableFraming: Bool
+    public let rejectUnavailableClipping: Bool
+    public init(rejectUnavailableSharpness: Bool = true, rejectUnavailableFraming: Bool = true, rejectUnavailableClipping: Bool = false) { self.rejectUnavailableSharpness = rejectUnavailableSharpness; self.rejectUnavailableFraming = rejectUnavailableFraming; self.rejectUnavailableClipping = rejectUnavailableClipping }
+    public static let provisional = QualityDecisionPolicy()
+}
+
+public struct QualityDecision: Codable, Sendable, Equatable {
+    public let decision: CandidateQualityDecision
+    public let reasons: [String]
+    public let warnings: [String]
+    public let metrics: CandidateQualityMetrics
+    public init(decision: CandidateQualityDecision, reasons: [String], warnings: [String], metrics: CandidateQualityMetrics) { self.decision = decision; self.reasons = reasons; self.warnings = warnings; self.metrics = metrics }
+    public var isAcceptable: Bool { decision == .accept }
+}
+
+/// Authoritative M04 candidate decision. Reason ordering is fixed so logs and
+/// later Windows analysis are stable across platforms and repeated runs.
+public enum QualityDecisionEngine {
+    public static func evaluate(_ metrics: CandidateQualityMetrics, policy: QualityDecisionPolicy = .provisional) -> QualityDecision {
+        var hard: [String] = []
+        var warnings: [String] = []
+        if metrics.sharpness.band == .reject || (metrics.sharpness.band == .unavailable && policy.rejectUnavailableSharpness) { hard.append(metrics.sharpness.band == .unavailable ? "sharpness_unavailable" : metrics.sharpness.reasonCode) }
+        else if metrics.sharpness.band == .warn { warnings.append(metrics.sharpness.reasonCode) }
+        if metrics.motionBlur.risk == .highRisk { hard.append(contentsOf: metrics.motionBlur.reasons) }
+        else if metrics.motionBlur.risk == .warning || metrics.motionBlur.risk == .unavailable { warnings.append(contentsOf: metrics.motionBlur.reasons) }
+        if metrics.highlightClipping.band == .reject { hard.append(contentsOf: metrics.highlightClipping.reasons.filter { $0.hasSuffix("_reject") }) }
+        else if metrics.highlightClipping.band == .warn || (metrics.highlightClipping.band == .unavailable && !policy.rejectUnavailableClipping) { warnings.append(contentsOf: metrics.highlightClipping.reasons) }
+        if metrics.shadowClipping.band == .reject { hard.append(contentsOf: metrics.shadowClipping.reasons.filter { $0.hasSuffix("_reject") }) }
+        else if metrics.shadowClipping.band == .warn || (metrics.shadowClipping.band == .unavailable && !policy.rejectUnavailableClipping) { warnings.append(contentsOf: metrics.shadowClipping.reasons) }
+        if metrics.framing.band == .tooSmall || metrics.framing.band == .cropped || (metrics.framing.band == .unavailable && policy.rejectUnavailableFraming) { hard.append(contentsOf: metrics.framing.reasons) }
+        if metrics.background.band == .warning || metrics.background.band == .unavailable { warnings.append(contentsOf: metrics.background.reasons) }
+        func unique(_ values: [String]) -> [String] { var seen = Set<String>(); return values.filter { seen.insert($0).inserted } }
+        let uniqueHard = unique(hard)
+        let uniqueWarnings = unique(warnings)
+        return QualityDecision(decision: uniqueHard.isEmpty ? .accept : .reject, reasons: uniqueHard, warnings: uniqueWarnings, metrics: metrics)
+    }
+}

@@ -1419,6 +1419,20 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(BackgroundComplexityAnalyzer.analyze(QualityImageFrame(width: 10, height: 10, luminance: cleanPixels)).band, .unavailable)
     }
 
+    func testPL0100QualityDecisionHasStablePrecedenceAndRetainsWarnings() {
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
+        let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
+        let passClip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let frame = FramingMetric(availability: .available, objectFraction: 0.3, bounds: NormalizedBounds(minX: 0.2, minY: 0.2, maxX: 0.8, maxY: 0.8), margins: ["left": 0.2], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0.3, luminanceVariance: 0.01, edgeDensity: 0.2, sampledPixelCount: 10, band: .warning, reasons: ["background_complexity_warning"])
+        let warningDecision = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: passClip, shadowClipping: passClip, framing: frame, background: background))
+        XCTAssertEqual(warningDecision.decision, .accept)
+        XCTAssertTrue(warningDecision.warnings.contains("background_complexity_warning"))
+        let rejected = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: passClip, shadowClipping: passClip, framing: FramingMetric(availability: .available, objectFraction: 0.01, bounds: nil, margins: [:], band: .tooSmall, reasons: ["framing_too_small"]), background: background))
+        XCTAssertEqual(rejected.decision, .reject)
+        XCTAssertEqual(rejected.reasons, ["framing_too_small"])
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
