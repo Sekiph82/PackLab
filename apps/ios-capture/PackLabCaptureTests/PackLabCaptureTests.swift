@@ -83,6 +83,12 @@ private final class SequenceMotionService: MotionService {
     func advance() { index += 1 }
 }
 
+private func acceptedPoseBinding(captureID: String, pose: PoseSample?) -> PoseCaptureBinding? {
+    guard let pose else { return nil }
+    let status = pose.tracking == .normal && pose.hasValidTransform ? "available" : "unavailable"
+    return PoseCaptureBinding(captureID: captureID, captureTimestamp: pose.timestamp, aligned: AlignedPose(sample: status == "available" ? pose : nil, delta: 0, status: status))
+}
+
 final class PackLabCaptureTests: XCTestCase {
     func testPreviewLifecyclePolicyIsIdempotent() {
         var policy = PreviewLifecyclePolicy()
@@ -1630,13 +1636,34 @@ final class PackLabCaptureTests: XCTestCase {
         var model = OrbitCoverageModel(configuration: configuration)
         let zero = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
         let wrap = PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: -0.01, y: 0, z: -1).values, tracking: .normal)
-        XCTAssertEqual(model.observe(captureID: "zero", pose: zero).sector?.azimuthIndex, 0)
-        XCTAssertEqual(model.observe(captureID: "wrap", pose: wrap).sector?.azimuthIndex, 3)
-        XCTAssertEqual(model.observe(captureID: "duplicate", pose: zero).status, "available")
-        XCTAssertEqual(model.observe(captureID: "missing", pose: nil).status, "pose_unavailable")
+        XCTAssertEqual(model.observe(captureID: "zero", poseBinding: acceptedPoseBinding(captureID: "zero", pose: zero)).sector?.azimuthIndex, 0)
+        XCTAssertEqual(model.observe(captureID: "wrap", poseBinding: acceptedPoseBinding(captureID: "wrap", pose: wrap)).sector?.azimuthIndex, 3)
+        XCTAssertEqual(model.observe(captureID: "duplicate", poseBinding: acceptedPoseBinding(captureID: "duplicate", pose: zero)).status, "available")
+        XCTAssertEqual(model.observe(captureID: "missing", poseBinding: nil).status, "pose_unavailable")
         XCTAssertEqual(model.snapshot().duplicateCaptureIDs, ["duplicate"])
         XCTAssertEqual(model.snapshot().invalidCaptureIDs, ["missing"])
         XCTAssertFalse(model.snapshot().isComplete)
+    }
+
+    @MainActor
+    func testPL0102CoverageAcceptsOnlyAuthoritativeAlignedBindingAndUpdatesActiveRuntime() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
+        var model = OrbitCoverageModel(configuration: configuration)
+        let availablePose = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
+        let stale = PoseCaptureBinding(captureID: "stale", captureTimestamp: 1, aligned: AlignedPose(sample: nil, delta: 1, status: "stale"))
+        let invalid = PoseCaptureBinding(captureID: "invalid", captureTimestamp: 1, aligned: AlignedPose(sample: nil, delta: 0, status: "invalid_transform"))
+        XCTAssertEqual(model.observe(captureID: "stale", poseBinding: stale).status, "pose_stale")
+        XCTAssertEqual(model.observe(captureID: "invalid", poseBinding: invalid).status, "pose_invalid_transform")
+        XCTAssertEqual(model.observe(captureID: "mismatch", poseBinding: acceptedPoseBinding(captureID: "other", pose: availablePose)).status, "pose_capture_mismatch")
+        XCTAssertEqual(model.snapshot().capturedSectors.count, 0)
+
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        let preset = PackagingPreset(id: .matteHDPE, version: "test", displayName: "Test", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        vm.configureM04QualityRuntime(preset: preset)
+        let record = AcceptedCaptureRecord(captureID: "accepted", sequence: 0, sourceFilename: "accepted.heic", metadataFilename: "accepted.json", poseBinding: acceptedPoseBinding(captureID: "accepted", pose: availablePose))
+        XCTAssertEqual(vm.recordAcceptedCaptureCoverage(record).status, "available")
+        XCTAssertEqual(vm.m04Coverage.capturedSectors.count, 1)
+        XCTAssertEqual(vm.m04Coverage.invalidCaptureIDs, [])
     }
 
     func testPL0103CoverageViewModelLabelsEmptyPartialCompleteAndUnavailableStates() {
@@ -1644,15 +1671,15 @@ final class PackLabCaptureTests: XCTestCase {
         let emptyModel = CoverageViewModel(snapshot: OrbitCoverageModel(configuration: configuration).snapshot())
         XCTAssertTrue(emptyModel.statusText.contains("missing"))
         var unavailable = OrbitCoverageModel(configuration: configuration)
-        _ = unavailable.observe(captureID: "unavailable", pose: nil)
+        _ = unavailable.observe(captureID: "unavailable", poseBinding: nil)
         XCTAssertEqual(CoverageViewModel(snapshot: unavailable.snapshot()).statusText, "Coverage evidence unavailable")
         var partial = OrbitCoverageModel(configuration: configuration)
-        _ = partial.observe(captureID: "one", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
+        _ = partial.observe(captureID: "one", poseBinding: acceptedPoseBinding(captureID: "one", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)))
         let partialModel = CoverageViewModel(snapshot: partial.snapshot(), targeted: CoverageSector(ringID: "middle", azimuthIndex: 1))
         XCTAssertTrue(partialModel.items.contains { $0.status == .targeted })
         var complete = OrbitCoverageModel(configuration: configuration)
-        _ = complete.observe(captureID: "one", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
-        _ = complete.observe(captureID: "two", pose: PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: -1, y: 0, z: 0).values, tracking: .normal))
+        _ = complete.observe(captureID: "one", poseBinding: acceptedPoseBinding(captureID: "one", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)))
+        _ = complete.observe(captureID: "two", poseBinding: acceptedPoseBinding(captureID: "two", pose: PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: -1, y: 0, z: 0).values, tracking: .normal)))
         XCTAssertEqual(CoverageViewModel(snapshot: complete.snapshot()).statusText, "Coverage complete")
     }
 
@@ -1690,11 +1717,11 @@ final class PackLabCaptureTests: XCTestCase {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "lower", minimumElevation: -30, maximumElevation: -5), CoverageRingDefinition(id: "middle", minimumElevation: -5, maximumElevation: 5), CoverageRingDefinition(id: "upper", minimumElevation: 5, maximumElevation: 30)])
         let policy = StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 1), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 1), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 1)])
         var model = OrbitCoverageModel(configuration: configuration)
-        _ = model.observe(captureID: "lower", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: -0.2, z: -1).values, tracking: .normal))
-        _ = model.observe(captureID: "middle", pose: PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
+        _ = model.observe(captureID: "lower", poseBinding: acceptedPoseBinding(captureID: "lower", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: -0.2, z: -1).values, tracking: .normal)))
+        _ = model.observe(captureID: "middle", poseBinding: acceptedPoseBinding(captureID: "middle", pose: PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)))
         XCTAssertFalse(RingCoverageEvaluation(snapshot: model.snapshot(), policy: policy).isComplete)
         XCTAssertEqual(RingCoverageEvaluation(snapshot: model.snapshot(), policy: policy).missingRingIDs, ["upper"])
-        _ = model.observe(captureID: "upper", pose: PoseSample(timestamp: 3, transform: CoordinateTransform.translation(x: 0, y: 0.2, z: -1).values, tracking: .normal))
+        _ = model.observe(captureID: "upper", poseBinding: acceptedPoseBinding(captureID: "upper", pose: PoseSample(timestamp: 3, transform: CoordinateTransform.translation(x: 0, y: 0.2, z: -1).values, tracking: .normal)))
         XCTAssertTrue(RingCoverageEvaluation(snapshot: model.snapshot(), policy: policy).isComplete)
     }
 
@@ -1702,7 +1729,7 @@ final class PackLabCaptureTests: XCTestCase {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "neck", minimumElevation: 15, maximumElevation: 45)])
         let policy = DetailPassPolicy(passID: .neck, minimumFramingFraction: 0.2, minimumSectorCount: 1)
         var model = OrbitCoverageModel(configuration: configuration)
-        _ = model.observe(captureID: "neck", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0.4, z: -1).values, tracking: .normal))
+        _ = model.observe(captureID: "neck", poseBinding: acceptedPoseBinding(captureID: "neck", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0.4, z: -1).values, tracking: .normal)))
         let framing = FramingMetric(availability: .available, objectFraction: 0.25, bounds: nil, margins: ["left": 0.2], band: .acceptable, reasons: [])
         let evaluation = DetailPassEvaluation(snapshot: model.snapshot(), framing: framing, policy: policy)
         XCTAssertTrue(evaluation.isComplete)
@@ -1714,7 +1741,7 @@ final class PackLabCaptureTests: XCTestCase {
     func testPL0108BasePassSeparatesFeasibleIncompleteAndUnavailableStates() {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "base", minimumElevation: -60, maximumElevation: -35)])
         var model = OrbitCoverageModel(configuration: configuration)
-        _ = model.observe(captureID: "base-1", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: -1, z: -1).values, tracking: .normal))
+        _ = model.observe(captureID: "base-1", poseBinding: acceptedPoseBinding(captureID: "base-1", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: -1, z: -1).values, tracking: .normal)))
         let incomplete = BasePassEvaluation(snapshot: model.snapshot(), availability: BasePassAvailability(physicallyFeasible: true, reasonCode: "operator_confirmed_feasible"), minimumSectorCount: 2)
         XCTAssertEqual(incomplete.status, "incomplete")
         let unavailable = BasePassEvaluation(snapshot: model.snapshot(), availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "object_cannot_be_safely_tilted"))

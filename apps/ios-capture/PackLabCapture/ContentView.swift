@@ -19,6 +19,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var cameraRecoveryState: CameraRecoveryState = .idle
     @Published private(set) var cameraRecoveryMessage = ""
     @Published private(set) var m04Evaluation: M04CandidateQualityEvaluation?
+    @Published private(set) var m04Coverage = OrbitCoverageModel().snapshot()
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
@@ -28,6 +29,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var captureAdmissionService: AdmissionControlledStillCaptureService?
     private var m04QualityRuntime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
     private var m04QualityLogStore: QualityCandidateLogStore?
+    private var m04CoverageModel = OrbitCoverageModel()
     private var cameraControlBridge: CameraControlRuntimeBridge?
     #if canImport(AVFoundation)
     let cameraRecoveryOwner = CameraRecoveryOwner()
@@ -119,7 +121,16 @@ final class CaptureRuntimeViewModel: ObservableObject {
     func configureM04QualityRuntime(preset: PackagingPreset, layout: SessionStorageLayout? = nil) {
         m04QualityRuntime = M04CandidateQualityRuntime(preset: preset)
         m04QualityLogStore = layout.map { QualityCandidateLogStore(layout: $0) }
+        m04CoverageModel = OrbitCoverageModel(configuration: preset.coverage.orbit)
+        m04Coverage = m04CoverageModel.snapshot()
         m04Evaluation = nil
+    }
+
+    @discardableResult
+    func recordAcceptedCaptureCoverage(_ record: AcceptedCaptureRecord) -> CoveragePoseObservation {
+        let observation = m04CoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding)
+        m04Coverage = m04CoverageModel.snapshot()
+        return observation
     }
 
     @discardableResult
@@ -172,6 +183,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let result = await service.capture(captureID: captureID)
         guard case .accepted(let still) = result else { throw CameraServiceError.failed("capture_rejected") }
         try await store.storeAcceptedCapture(still: still, record: record, metadata: metadata, state: state, poses: poses, motion: motion, bridge: bridge)
+        let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
+        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding))
         return still
     }
 

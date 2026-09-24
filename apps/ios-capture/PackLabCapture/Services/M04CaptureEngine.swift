@@ -635,8 +635,20 @@ public struct OrbitCoverageModel: Sendable, Equatable {
     private var invalidIDs: [String] = []
     private var recordedObservations: [CoveragePoseObservation] = []
     public init(configuration: OrbitCoverageConfiguration = OrbitCoverageConfiguration()) { self.configuration = configuration }
-    public mutating func observe(captureID: String, pose: PoseSample?) -> CoveragePoseObservation {
-        let observation = CoveragePoseMapper.map(captureID: captureID, pose: pose, configuration: configuration); recordedObservations.append(observation)
+    /// Coverage is admitted only from the accepted-capture pose binding. Raw
+    /// preview poses cannot create coverage evidence.
+    public mutating func observe(captureID: String, poseBinding: PoseCaptureBinding?) -> CoveragePoseObservation {
+        let observation: CoveragePoseObservation
+        guard let poseBinding, poseBinding.captureID == captureID else {
+            observation = CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: poseBinding == nil ? "pose_unavailable" : "pose_capture_mismatch")
+            recordedObservations.append(observation); invalidIDs.append(captureID); return observation
+        }
+        guard poseBinding.aligned.status == "available", let pose = poseBinding.aligned.sample else {
+            observation = CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: "pose_\(poseBinding.aligned.status)")
+            recordedObservations.append(observation); invalidIDs.append(captureID); return observation
+        }
+        observation = CoveragePoseMapper.map(captureID: captureID, pose: pose, configuration: configuration)
+        recordedObservations.append(observation)
         guard let sector = observation.sector, observation.status == "available" else { invalidIDs.append(captureID); return observation }
         if captured.contains(sector) { duplicateIDs.append(captureID) } else { captured.insert(sector) }
         return observation
