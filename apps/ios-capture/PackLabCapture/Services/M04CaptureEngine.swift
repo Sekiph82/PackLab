@@ -896,7 +896,8 @@ public enum PackagingPresetCatalog {
     public static let transparent = PackagingPreset(id: .transparent, version: "1.0.0", displayName: "Transparent", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use diffuse lighting and avoid transparent-surface reflections."], preparationGuidance: ["Photogrammetry may fail without temporary matte treatment, textured inserts or background preparation."], requiresPreparationAcknowledgement: true)
     public static let asymmetricJerrycan = PackagingPreset(id: .asymmetricJerrycan, version: "1.0.0", displayName: "Asymmetric / Jerrycan", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12)), lightingGuidance: ["Use even diffuse lighting across front, back and handle regions."], preparationGuidance: ["Keep the handle unobstructed and capture front/back/side regions."], requiresPreparationAcknowledgement: false)
     public static let closureCap = PackagingPreset(id: .closureCap, version: "1.0.0", displayName: "Closure / Cap", quality: QualityPolicyConfiguration(framing: FramingThresholds(minimumObjectFraction: 0.14, maximumObjectFraction: 0.65, minimumMargin: 0.05)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "closure", minimumElevation: 10, maximumElevation: 55)])), lightingGuidance: ["Use even diffuse lighting over threads, pump or cap details."], preparationGuidance: ["Move to a safe working distance and keep the cap centered without edge cropping."], requiresPreparationAcknowledgement: false)
-    public static func preset(for id: PackagingPresetID) -> PackagingPreset { switch id { case .glossyPET: return glossyPET; case .transparent: return transparent; case .asymmetricJerrycan: return asymmetricJerrycan; case .closureCap: return closureCap; default: return matteHDPE } }
+    public static let turntable = PackagingPreset(id: .turntable, version: "1.0.0", displayName: "Turntable", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 24)), lightingGuidance: ["Keep the camera and background static while the object rotates."], preparationGuidance: ["Use a stable turntable and record angle evidence for each frame."], requiresPreparationAcknowledgement: false)
+    public static func preset(for id: PackagingPresetID) -> PackagingPreset { switch id { case .glossyPET: return glossyPET; case .transparent: return transparent; case .asymmetricJerrycan: return asymmetricJerrycan; case .closureCap: return closureCap; case .turntable: return turntable; default: return matteHDPE } }
 }
 
 public struct M04ScanContext: Codable, Sendable, Equatable {
@@ -942,6 +943,46 @@ public struct AsymmetricCoverageEvaluation: Codable, Sendable, Equatable {
     public let isComplete: Bool
     public let guidance: [String]
     public init(observedRegions: [AsymmetricCoverageRegion: Int], policy: AsymmetricCoveragePolicy = AsymmetricCoveragePolicy()) { missingRegions = policy.requiredRegions.filter { (observedRegions[$0] ?? 0) < policy.minimumSectorsPerRegion }; isComplete = missingRegions.isEmpty; guidance = missingRegions.map { "Capture \($0.rawValue) region evidence" } }
+}
+
+public enum CoverageEvidenceSource: String, Codable, Sendable, Equatable { case arWorldPose = "ar_world_pose", turntableAngle = "turntable_angle" }
+
+public struct TurntablePolicy: Codable, Sendable, Equatable {
+    public let expectedAngleCount: Int
+    public init(expectedAngleCount: Int = 24) { self.expectedAngleCount = max(1, expectedAngleCount) }
+}
+
+public struct TurntableObservation: Codable, Sendable, Equatable {
+    public let captureID: String
+    public let normalizedAngle: Double
+    public let sectorIndex: Int
+    public let source: CoverageEvidenceSource
+    public let status: String
+}
+
+public struct TurntableCoverageSnapshot: Codable, Sendable, Equatable {
+    public let policy: TurntablePolicy
+    public let capturedSectorIndices: [Int]
+    public let missingSectorIndices: [Int]
+    public let repeatedCaptureIDs: [String]
+    public let observations: [TurntableObservation]
+    public let isComplete: Bool
+}
+
+public struct TurntableCoverageModel: Sendable, Equatable {
+    public let policy: TurntablePolicy
+    private var captured: Set<Int> = []
+    private var repeats: [String] = []
+    private var observations: [TurntableObservation] = []
+    public init(policy: TurntablePolicy = TurntablePolicy()) { self.policy = policy }
+    public mutating func observe(captureID: String, angleDegrees: Double) -> TurntableObservation {
+        let normalized = (angleDegrees.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        let index = min(policy.expectedAngleCount - 1, Int((normalized / 360) * Double(policy.expectedAngleCount)))
+        let status = captured.contains(index) ? "repeated_angle" : "captured"
+        if captured.contains(index) { repeats.append(captureID) } else { captured.insert(index) }
+        let observation = TurntableObservation(captureID: captureID, normalizedAngle: normalized, sectorIndex: index, source: .turntableAngle, status: status); observations.append(observation); return observation
+    }
+    public func snapshot() -> TurntableCoverageSnapshot { let missing = (0..<policy.expectedAngleCount).filter { !captured.contains($0) }; return TurntableCoverageSnapshot(policy: policy, capturedSectorIndices: captured.sorted(), missingSectorIndices: missing, repeatedCaptureIDs: repeats, observations: observations, isComplete: missing.isEmpty) }
 }
 
 #if canImport(SwiftUI)

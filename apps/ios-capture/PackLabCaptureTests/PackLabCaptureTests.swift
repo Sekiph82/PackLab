@@ -1629,6 +1629,18 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(preset.preparationGuidance.contains { $0.localizedCaseInsensitiveContains("working distance") })
     }
 
+    func testPL0116TurntableCoverageNormalizesAnglesAndLabelsEvidenceSource() {
+        var model = TurntableCoverageModel(policy: TurntablePolicy(expectedAngleCount: 4))
+        let first = model.observe(captureID: "zero", angleDegrees: 0)
+        let wrap = model.observe(captureID: "wrap", angleDegrees: 360)
+        XCTAssertEqual(first.source, .turntableAngle)
+        XCTAssertEqual(first.sectorIndex, 0)
+        XCTAssertEqual(wrap.status, "repeated_angle")
+        XCTAssertEqual(model.snapshot().repeatedCaptureIDs, ["wrap"])
+        XCTAssertEqual(model.snapshot().missingSectorIndices, [1, 2, 3])
+        XCTAssertFalse(model.snapshot().isComplete)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
