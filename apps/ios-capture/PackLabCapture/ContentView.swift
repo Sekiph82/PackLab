@@ -29,6 +29,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var trackingRecoveryPolicy = TrackingRecoveryPolicy(requiredStableNormalFrames: 3)
     private var updateTask: Task<Void, Never>?
     private var captureAdmissionService: AdmissionControlledStillCaptureService?
+    private var guidedAutoCaptureService: GuidedAutoCaptureService?
     private var m04QualityRuntime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
     private var m04QualityLogStore: QualityCandidateLogStore?
     private var m04CoverageModel = OrbitCoverageModel()
@@ -138,6 +139,13 @@ final class CaptureRuntimeViewModel: ObservableObject {
         return observation
     }
 
+    func autoCaptureInput(monotonicTimestamp: TimeInterval) -> AutoCaptureInput? {
+        guard let evaluation = m04Evaluation else { return nil }
+        let target = m04CoverageTarget
+        let overlapAllowed = target.map { !m04Coverage.capturedSectors.contains($0) } ?? false
+        return AutoCaptureInput(monotonicTimestamp: monotonicTimestamp, poseEligible: tracking.poseEvidenceEligible, targetSector: target, quality: evaluation.quality, overlapAllowed: overlapAllowed, admission: admission)
+    }
+
     @discardableResult
     func analyzeM04Candidate(_ input: M04CandidateFrameInput) async -> M04CandidateQualityEvaluation {
         let evaluation = m04QualityRuntime.evaluate(input)
@@ -163,6 +171,23 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let service = AdmissionControlledStillCaptureService(backend: backend)
         await service.updateAdmission(admission)
         captureAdmissionService = service
+        guidedAutoCaptureService = GuidedAutoCaptureService(stillCapture: service)
+    }
+
+    func requestAutoCapture(captureID: String = UUID().uuidString, monotonicTimestamp: TimeInterval) async -> (decision: AutoCaptureDecision, result: StillCaptureResult?) {
+        guard let service = guidedAutoCaptureService, let input = autoCaptureInput(monotonicTimestamp: monotonicTimestamp) else {
+            return (AutoCaptureDecision(allowed: false, reasons: [guidedAutoCaptureService == nil ? "auto_capture_service_unavailable" : "quality_unavailable"]), nil)
+        }
+        return await service.request(captureID: captureID, input: input)
+    }
+
+    func requestAutoCaptureAndPersist(captureID: String = UUID().uuidString, monotonicTimestamp: TimeInterval, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) async throws -> (decision: AutoCaptureDecision, still: AcceptedStill?) {
+        let outcome = await requestAutoCapture(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
+        guard case .accepted(let still) = outcome.result else { return (outcome.decision, nil) }
+        try await store.storeAcceptedCapture(still: still, record: record, metadata: metadata, state: state, poses: poses, motion: motion, bridge: bridge)
+        let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
+        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding))
+        return (outcome.decision, still)
     }
 
     #if canImport(AVFoundation) && canImport(NextLevel)

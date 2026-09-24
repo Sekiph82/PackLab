@@ -1716,6 +1716,36 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(controller.evaluate(AutoCaptureInput(monotonicTimestamp: 11.1, poseEligible: false, targetSector: target, quality: quality, overlapAllowed: true, admission: admission)).reasons.contains("pose_ineligible"))
     }
 
+    @MainActor
+    func testPL0104ProductionAutoCaptureUsesHealthGatedBackendAndAcceptedTransaction() async throws {
+        struct Backend: StillPhotoBackend, Sendable {
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([1, 2, 3]), CaptureDimensions(width: 2, height: 1)) }
+        }
+        let vm = CaptureRuntimeViewModel(trackingService: SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal)]), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
+        let preset = PackagingPreset(id: .matteHDPE, version: "test", displayName: "Test", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "auto")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "auto", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        vm.configureM04QualityRuntime(preset: preset, layout: layout)
+        await vm.bindStillCaptureBackend(Backend())
+        await vm.start(); await vm.refresh()
+        let frame = QualityImageFrame(width: 10, height: 10, luminance: (0..<100).map { (($0 / 10 + $0 % 10) % 2 == 0) ? 0.2 : 0.8 }, objectMask: (0..<100).map { index in let x = index % 10; let y = index / 10; return (2...7).contains(x) && (2...7).contains(y) })
+        _ = await vm.analyzeM04Candidate(M04CandidateFrameInput(sessionID: "auto", captureID: "candidate", sequence: 0, monotonicTimestamp: 10, frame: frame))
+        var poses = PoseBuffer(); poses.append(PoseSample(timestamp: 10, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
+        let record = AcceptedCaptureRecord(captureID: "auto-capture", sequence: 0, sourceFilename: "auto-capture.heic", metadataFilename: "auto-capture.json")
+        let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "auto", nextSequence: 1, epoch: 0, acceptedIDs: ["auto-capture"]))
+        let metadata = try JSONEncoder().encode(record)
+        let outcome = try await vm.requestAutoCaptureAndPersist(captureID: "auto-capture", monotonicTimestamp: 10, record: record, metadata: metadata, state: state, store: store, poses: poses, motion: MotionBuffer())
+        XCTAssertTrue(outcome.decision.allowed)
+        XCTAssertNotNil(outcome.still)
+        XCTAssertEqual(vm.m04Coverage.capturedSectors.count, 1)
+        let cooldown = await vm.requestAutoCapture(captureID: "cooldown", monotonicTimestamp: 10.1)
+        XCTAssertTrue(cooldown.decision.reasons.contains("auto_capture_cooldown"))
+        await vm.stop()
+    }
+
     func testPL0105NearDuplicateDetectionPreservesUsefulParallaxAndFailsSafeWithoutPose() {
         let base = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
         let accepted = DuplicateEvidence(captureID: "accepted", pose: base, visualSignature: [1, 2, 3])
