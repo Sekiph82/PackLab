@@ -1576,6 +1576,20 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(ManualCaptureCoordinator.evaluate(ManualCaptureInput(automaticDecision: automatic, quality: quality, admission: admission, cameraReady: true, sessionReady: true, sourceIntegrityReady: true, metadataReady: true, poseEvidenceReady: false)).blockingReasons.contains("pose_evidence_unavailable"))
     }
 
+    func testPL0111MattePresetIsVersionedConfigDrivenAndPersisted() async throws {
+        let preset = PackagingPresetCatalog.preset(for: .matteHDPE)
+        XCTAssertEqual(preset.id, .matteHDPE)
+        XCTAssertFalse(preset.version.isEmpty)
+        XCTAssertFalse(preset.lightingGuidance.isEmpty)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "preset-session")
+        let store = M04SessionContextStore(layout: layout)
+        try await store.persist(M04ScanContext(preset: preset))
+        let loaded = try await store.load()
+        XCTAssertEqual(loaded, M04ScanContext(preset: preset))
+        XCTAssertEqual(PackagingPresetCatalog.preset(for: .matteHDPE).quality, preset.quality)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

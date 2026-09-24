@@ -860,6 +860,59 @@ public enum ManualCaptureCoordinator {
     }
 }
 
+public enum PackagingPresetID: String, Codable, Sendable, Equatable, CaseIterable { case matteHDPE = "matte_hdpe", glossyPET = "glossy_pet", transparent, asymmetricJerrycan = "asymmetric_jerrycan", closureCap = "closure_cap", turntable }
+
+public struct QualityPolicyConfiguration: Codable, Sendable, Equatable {
+    public let sharpness: SharpnessThresholds
+    public let highlight: ClippingThresholds
+    public let shadow: ClippingThresholds
+    public let framing: FramingThresholds
+    public let background: BackgroundComplexityThresholds
+    public init(sharpness: SharpnessThresholds = .provisional, highlight: ClippingThresholds = .highlightProvisional, shadow: ClippingThresholds = .shadowProvisional, framing: FramingThresholds = .provisional, background: BackgroundComplexityThresholds = .provisional) { self.sharpness = sharpness; self.highlight = highlight; self.shadow = shadow; self.framing = framing; self.background = background }
+}
+
+public struct CoveragePolicyConfiguration: Codable, Sendable, Equatable {
+    public let orbit: OrbitCoverageConfiguration
+    public let ringRequirements: StandardBottleCoveragePolicy
+    public init(orbit: OrbitCoverageConfiguration = OrbitCoverageConfiguration(), ringRequirements: StandardBottleCoveragePolicy = .standard) { self.orbit = orbit; self.ringRequirements = ringRequirements }
+}
+
+public struct PackagingPreset: Codable, Sendable, Equatable, Identifiable {
+    public let id: PackagingPresetID
+    public let version: String
+    public let displayName: String
+    public let quality: QualityPolicyConfiguration
+    public let coverage: CoveragePolicyConfiguration
+    public let lightingGuidance: [String]
+    public let preparationGuidance: [String]
+    public let requiresPreparationAcknowledgement: Bool
+    public let supportedLensRule: String
+    public init(id: PackagingPresetID, version: String, displayName: String, quality: QualityPolicyConfiguration, coverage: CoveragePolicyConfiguration, lightingGuidance: [String], preparationGuidance: [String], requiresPreparationAcknowledgement: Bool, supportedLensRule: String = "selected_rear_main_wide_only") { self.id = id; self.version = version; self.displayName = displayName; self.quality = quality; self.coverage = coverage; self.lightingGuidance = lightingGuidance; self.preparationGuidance = preparationGuidance; self.requiresPreparationAcknowledgement = requiresPreparationAcknowledgement; self.supportedLensRule = supportedLensRule }
+}
+
+public enum PackagingPresetCatalog {
+    public static let matteHDPE = PackagingPreset(id: .matteHDPE, version: "1.0.0", displayName: "Matte / HDPE", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use broad diffuse lighting.", "Keep exposure stable and avoid hard shadows."], preparationGuidance: ["Use a clean matte or simple background.", "Keep the package dry and free of loose labels."], requiresPreparationAcknowledgement: false)
+    public static func preset(for id: PackagingPresetID) -> PackagingPreset { id == .matteHDPE ? matteHDPE : matteHDPE }
+}
+
+public struct M04ScanContext: Codable, Sendable, Equatable {
+    public let preset: PackagingPreset
+    public let preparationAcknowledged: Bool
+    public let treatmentMode: String?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode }
+}
+
+public extension SessionStorageLayout {
+    var m04Context: URL { sessionRoot.appendingPathComponent("m04-context.json") }
+}
+
+public actor M04SessionContextStore {
+    private let layout: SessionStorageLayout
+    public init(layout: SessionStorageLayout) { self.layout = layout }
+    public func persist(_ context: M04ScanContext) throws { let data = try JSONEncoder().encode(context); try FileManager.default.createDirectory(at: layout.sessionRoot, withIntermediateDirectories: true); try data.write(to: layout.m04Context, options: .atomic) }
+    public func load() throws -> M04ScanContext { try JSONDecoder().decode(M04ScanContext.self, from: Data(contentsOf: layout.m04Context)) }
+}
+
 #if canImport(SwiftUI)
 public struct CoverageGridView: View {
     public let model: CoverageViewModel
