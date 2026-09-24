@@ -1337,6 +1337,24 @@ final class PackLabCaptureTests: XCTestCase {
     func testPL0093RealSymlinkEscapeIsRejectedBeforeDeletion() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let session = root.appendingPathComponent("s1"); let outside = root.deletingLastPathComponent().appendingPathComponent("packlab-outside-\(UUID().uuidString)"); try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true); try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true); let link = session.appendingPathComponent("linked"); do { try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside) } catch { throw XCTSkip("symlinks unavailable on this test host") }; let candidate = SessionResumeCandidate(id: "s1", draft: nil, disposition: .resumable, state: nil); XCTAssertThrowsError(try SessionDeletionPlan(root: root, candidate: candidate).validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .symlinkEscape) }
     }
+
+    func testPL0094SharpnessIsDimensionStableAndHasExplicitBands() {
+        let sharpPixels = (0..<64).flatMap { y in (0..<64).map { x in ((x + y) % 2 == 0) ? 1.0 : 0.0 } }
+        let resizedPixels = (0..<128).flatMap { y in (0..<128).map { x in ((x / 2 + y / 2) % 2 == 0) ? 1.0 : 0.0 } }
+        let sharp = SharpnessAnalyzer.analyze(QualityImageFrame(width: 64, height: 64, luminance: sharpPixels))
+        let resized = SharpnessAnalyzer.analyze(QualityImageFrame(width: 128, height: 128, luminance: resizedPixels))
+        XCTAssertEqual(sharp.band, .accept)
+        XCTAssertEqual(resized.band, sharp.band)
+        XCTAssertNotNil(sharp.normalizedLaplacianVariance)
+        XCTAssertEqual(SharpnessAnalyzer.analyze(.unavailable).band, .unavailable)
+    }
+
+    func testPL0094SharpnessBoundariesAndProvisionalCalibration() {
+        let thresholds = SharpnessThresholds(acceptMinimum: 0.018, warnMinimum: 0.006)
+        XCTAssertEqual(SharpnessCalibrationHarness.suggestThresholds(from: [SharpnessCalibrationSample(label: .blurred, metric: 0.002), SharpnessCalibrationSample(label: .usable, metric: 0.008), SharpnessCalibrationSample(label: .sharp, metric: 0.02)]).calibrationStatus, "provisional_test_calibrated")
+        XCTAssertEqual(thresholds.warnMinimum, 0.006)
+        XCTAssertEqual(SharpnessThresholds(acceptMinimum: 0.01, warnMinimum: 0.2).warnMinimum, 0.01)
+    }
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
