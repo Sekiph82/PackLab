@@ -931,6 +931,21 @@ public struct BasePassAcceptanceDecision: Sendable, Equatable {
 
 public enum CompletionEvidenceStatus: String, Codable, Sendable, Equatable { case complete, incomplete, unavailable }
 
+public struct M04QualityGuidanceState: Codable, Sendable, Equatable {
+    public let presetID: PackagingPresetID
+    public let consecutiveHighlightBlocks: Int
+    public let triggerThreshold: Int
+    public let guidanceActive: Bool
+    public let guidance: [String]
+    public init(presetID: PackagingPresetID, consecutiveHighlightBlocks: Int, triggerThreshold: Int = 3, guidanceActive: Bool, guidance: [String]) {
+        self.presetID = presetID
+        self.consecutiveHighlightBlocks = max(0, consecutiveHighlightBlocks)
+        self.triggerThreshold = max(1, triggerThreshold)
+        self.guidanceActive = guidanceActive
+        self.guidance = guidance
+    }
+}
+
 public struct CompletionDiagnostics: Codable, Sendable, Equatable {
     public let score: Double
     public let status: CompletionEvidenceStatus
@@ -1096,7 +1111,8 @@ public struct M04ScanContext: Codable, Sendable, Equatable {
     public let preflight: ScanPreflightResult?
     public let basePass: BasePassEvaluation?
     public let completion: CompletionDiagnostics?
-    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion }
+    public let qualityGuidance: M04QualityGuidanceState?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance }
 }
 
 public extension SessionStorageLayout {

@@ -2045,6 +2045,34 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(glossy.lightingGuidance.contains { $0.localizedCaseInsensitiveContains("reflection") })
     }
 
+    @MainActor
+    func testPL0112GlossyPresetDrivesLiveRuntimeRepeatedBlockGuidanceAndPersistence() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "glossy")
+        let store = M04SessionContextStore(layout: layout)
+        try await store.persist(M04ScanContext(preset: PackagingPresetCatalog.glossyPET))
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.glossyPET, layout: layout)
+        XCTAssertEqual(vm.m04ActivePreset.id, .glossyPET)
+        XCTAssertEqual(vm.m04ActivePreset.quality, PackagingPresetCatalog.glossyPET.quality)
+        let blockedFrame = QualityImageFrame(width: 10, height: 1, luminance: [Double](repeating: 1, count: 10), objectMask: [Bool](repeating: true, count: 10))
+        for sequence in 0..<3 {
+            let evaluation = await vm.analyzeM04Candidate(M04CandidateFrameInput(sessionID: "glossy", captureID: "blocked-\(sequence)", sequence: sequence, monotonicTimestamp: Double(sequence), frame: blockedFrame))
+            XCTAssertEqual(evaluation.quality.metrics.highlightClipping.band, .reject)
+        }
+        XCTAssertEqual(vm.m04QualityGuidanceState.consecutiveHighlightBlocks, 3)
+        XCTAssertTrue(vm.m04ReflectionGuidance.first?.localizedCaseInsensitiveContains("reframe") == true)
+        let recoveryFrame = QualityImageFrame(width: 10, height: 1, luminance: [Double](repeating: 0.5, count: 10), objectMask: [Bool](repeating: true, count: 10))
+        _ = await vm.analyzeM04Candidate(M04CandidateFrameInput(sessionID: "glossy", captureID: "recovery", sequence: 3, monotonicTimestamp: 3, frame: recoveryFrame))
+        XCTAssertTrue(vm.m04ReflectionGuidance.isEmpty)
+        for _ in 0..<3 { await Task.yield() }
+        let loaded = try await store.load()
+        XCTAssertEqual(loaded.preset.id, .glossyPET)
+        XCTAssertEqual(loaded.qualityGuidance?.consecutiveHighlightBlocks, 0)
+        XCTAssertEqual(loaded.qualityGuidance?.presetID, .glossyPET)
+    }
+
     func testPL0113TransparentModeRequiresAcknowledgementWithoutFalseSuitability() {
         let preset = PackagingPresetCatalog.preset(for: .transparent)
         XCTAssertTrue(preset.requiresPreparationAcknowledgement)
