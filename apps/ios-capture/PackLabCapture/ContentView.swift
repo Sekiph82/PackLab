@@ -157,7 +157,11 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04CoverageTarget = m04Coverage.missingSectors.first
         m04RingPolicy = preset.coverage.ringRequirements
         m04RingCoverage = RingCoverageEvaluation(snapshot: m04Coverage, policy: m04RingPolicy)
-        m04DetailPolicies = [.shoulder: DetailPassPolicy(passID: .shoulder, minimumFramingFraction: 0.18), .neck: DetailPassPolicy(passID: .neck, minimumFramingFraction: 0.20), .closure: DetailPassPolicy(passID: .closure, minimumFramingFraction: 0.22)]
+        if preset.id == .closureCap {
+            m04DetailPolicies = [.closure: DetailPassPolicy(passID: .closure, minimumFramingFraction: preset.quality.framing.minimumObjectFraction, minimumSectorCount: 4)]
+        } else {
+            m04DetailPolicies = [.shoulder: DetailPassPolicy(passID: .shoulder, minimumFramingFraction: 0.18), .neck: DetailPassPolicy(passID: .neck, minimumFramingFraction: 0.20), .closure: DetailPassPolicy(passID: .closure, minimumFramingFraction: 0.22)]
+        }
         m04DetailCoverageModels = Dictionary(uniqueKeysWithValues: m04DetailPolicies.keys.map { passID in
             (passID, OrbitCoverageModel(configuration: OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: passID.rawValue, minimumElevation: passID == .closure ? 10 : 15, maximumElevation: passID == .shoulder ? 60 : 45)])))
         })

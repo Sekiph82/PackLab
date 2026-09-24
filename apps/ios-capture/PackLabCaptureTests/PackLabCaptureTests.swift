@@ -2148,6 +2148,29 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(preset.preparationGuidance.contains { $0.localizedCaseInsensitiveContains("working distance") })
     }
 
+    @MainActor
+    func testPL0115ClosurePresetDrivesRuntimeFramingDetailAndRingPersistence() async throws {
+        let preset = PackagingPresetCatalog.preset(for: .closureCap)
+        XCTAssertEqual(preset.coverage.ringRequirements.requirements, [RingCoverageRequirement(ringID: "closure", minimumSectorCount: 8)])
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset)
+        XCTAssertEqual(vm.m04ActivePreset.id, .closureCap)
+        XCTAssertEqual(vm.m04RingCoverage.statuses.map(\.ringID), ["closure"])
+        let quality = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept"), motionBlur: MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: []), highlightClipping: ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: []), shadowClipping: ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: []), framing: FramingMetric(availability: .available, objectFraction: 0.2, bounds: nil, margins: [:], band: .acceptable, reasons: []), background: BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])))
+        let pose = acceptedPoseBinding(captureID: "closure", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0.3, z: -1).values, tracking: .normal))
+        let useful = DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate")
+        let tightRejected = vm.evaluateDetailPass(passID: .closure, quality: quality, framing: FramingMetric(availability: .available, objectFraction: 0.13, bounds: nil, margins: [:], band: .acceptable, reasons: []), poseBinding: pose, duplicateDecision: useful)
+        XCTAssertFalse(tightRejected.allowed)
+        let accepted = vm.evaluateDetailPass(passID: .closure, quality: quality, framing: FramingMetric(availability: .available, objectFraction: 0.20, bounds: nil, margins: [:], band: .acceptable, reasons: []), poseBinding: pose, duplicateDecision: useful)
+        XCTAssertTrue(accepted.allowed)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "closure")
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset))
+        let loaded = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertEqual(loaded.preset.supportedLensRule, "selected_rear_main_wide_only")
+        XCTAssertEqual(loaded.preset.coverage.ringRequirements, preset.coverage.ringRequirements)
+    }
+
     func testPL0116TurntableCoverageNormalizesAnglesAndLabelsEvidenceSource() {
         var model = TurntableCoverageModel(policy: TurntablePolicy(expectedAngleCount: 4))
         let first = model.observe(captureID: "zero", angleDegrees: 0)
