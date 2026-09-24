@@ -507,3 +507,81 @@ public actor QualityCandidateLogStore {
         try data.write(to: url, options: .atomic)
     }
 }
+
+public struct CoverageRingDefinition: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let minimumElevation: Double
+    public let maximumElevation: Double
+    public let required: Bool
+    public init(id: String, minimumElevation: Double, maximumElevation: Double, required: Bool = true) { self.id = id; self.minimumElevation = minimumElevation; self.maximumElevation = max(minimumElevation, maximumElevation); self.required = required }
+}
+
+public struct OrbitCoverageConfiguration: Codable, Sendable, Equatable {
+    public let azimuthBinCount: Int
+    public let rings: [CoverageRingDefinition]
+    public init(azimuthBinCount: Int = 8, rings: [CoverageRingDefinition] = OrbitCoverageConfiguration.standardRings) { self.azimuthBinCount = max(1, azimuthBinCount); self.rings = rings }
+    public static let standardRings = [CoverageRingDefinition(id: "lower", minimumElevation: -35, maximumElevation: -10), CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15), CoverageRingDefinition(id: "upper", minimumElevation: 15, maximumElevation: 40)]
+}
+
+public struct CoverageSector: Codable, Sendable, Equatable, Hashable, Identifiable {
+    public let ringID: String
+    public let azimuthIndex: Int
+    public let id: String
+    public init(ringID: String, azimuthIndex: Int) { self.ringID = ringID; self.azimuthIndex = azimuthIndex; self.id = "\(ringID)-a\(azimuthIndex)" }
+}
+
+public struct CoveragePoseObservation: Codable, Sendable, Equatable {
+    public let captureID: String
+    public let sector: CoverageSector?
+    public let azimuthDegrees: Double?
+    public let elevationDegrees: Double?
+    public let status: String
+    public init(captureID: String, sector: CoverageSector?, azimuthDegrees: Double?, elevationDegrees: Double?, status: String) { self.captureID = captureID; self.sector = sector; self.azimuthDegrees = azimuthDegrees; self.elevationDegrees = elevationDegrees; self.status = status }
+}
+
+public struct OrbitCoverageSnapshot: Codable, Sendable, Equatable {
+    public let configuration: OrbitCoverageConfiguration
+    public let capturedSectors: [CoverageSector]
+    public let missingSectors: [CoverageSector]
+    public let duplicateCaptureIDs: [String]
+    public let invalidCaptureIDs: [String]
+    public let observations: [CoveragePoseObservation]
+    public let completionFraction: Double
+    public let isComplete: Bool
+    public init(configuration: OrbitCoverageConfiguration, capturedSectors: [CoverageSector], missingSectors: [CoverageSector], duplicateCaptureIDs: [String], invalidCaptureIDs: [String], observations: [CoveragePoseObservation]) {
+        self.configuration = configuration; self.capturedSectors = capturedSectors; self.missingSectors = missingSectors; self.duplicateCaptureIDs = duplicateCaptureIDs; self.invalidCaptureIDs = invalidCaptureIDs; self.completionFraction = missingSectors.isEmpty && !capturedSectors.isEmpty ? 1 : Double(capturedSectors.count) / Double(max(1, capturedSectors.count + missingSectors.count)); self.isComplete = missingSectors.isEmpty && !capturedSectors.isEmpty
+    }
+}
+
+public enum CoveragePoseMapper {
+    public static func map(captureID: String, pose: PoseSample?, configuration: OrbitCoverageConfiguration) -> CoveragePoseObservation {
+        guard let pose, pose.tracking == .normal, pose.hasValidTransform, pose.transform.count == 16 else { return CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: "pose_unavailable") }
+        let x = pose.transform[3], y = pose.transform[7], z = pose.transform[11]
+        let radius = sqrt(x * x + z * z)
+        guard radius > 1e-9 else { return CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: "pose_radius_unavailable") }
+        let azimuth = (atan2(x, -z) * 180 / Double.pi + 360).truncatingRemainder(dividingBy: 360)
+        let elevation = atan2(y, radius) * 180 / Double.pi
+        guard let ring = configuration.rings.first(where: { elevation >= $0.minimumElevation && elevation < $0.maximumElevation }) else { return CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: azimuth, elevationDegrees: elevation, status: "elevation_out_of_range") }
+        let index = min(configuration.azimuthBinCount - 1, max(0, Int(azimuth / 360 * Double(configuration.azimuthBinCount))))
+        return CoveragePoseObservation(captureID: captureID, sector: CoverageSector(ringID: ring.id, azimuthIndex: index), azimuthDegrees: azimuth, elevationDegrees: elevation, status: "available")
+    }
+}
+
+public struct OrbitCoverageModel: Sendable, Equatable {
+    public let configuration: OrbitCoverageConfiguration
+    private var captured: Set<CoverageSector> = []
+    private var duplicateIDs: [String] = []
+    private var invalidIDs: [String] = []
+    private var recordedObservations: [CoveragePoseObservation] = []
+    public init(configuration: OrbitCoverageConfiguration = OrbitCoverageConfiguration()) { self.configuration = configuration }
+    public mutating func observe(captureID: String, pose: PoseSample?) -> CoveragePoseObservation {
+        let observation = CoveragePoseMapper.map(captureID: captureID, pose: pose, configuration: configuration); recordedObservations.append(observation)
+        guard let sector = observation.sector, observation.status == "available" else { invalidIDs.append(captureID); return observation }
+        if captured.contains(sector) { duplicateIDs.append(captureID) } else { captured.insert(sector) }
+        return observation
+    }
+    public func snapshot() -> OrbitCoverageSnapshot {
+        let all = configuration.rings.flatMap { ring in (0..<configuration.azimuthBinCount).map { CoverageSector(ringID: ring.id, azimuthIndex: $0) } }
+        return OrbitCoverageSnapshot(configuration: configuration, capturedSectors: all.filter { captured.contains($0) }, missingSectors: all.filter { !captured.contains($0) }, duplicateCaptureIDs: duplicateIDs, invalidCaptureIDs: invalidIDs, observations: recordedObservations)
+    }
+}

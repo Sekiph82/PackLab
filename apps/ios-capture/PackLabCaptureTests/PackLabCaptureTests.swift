@@ -1452,6 +1452,20 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: layout.qualityLog.path))
     }
 
+    func testPL0102CoverageMapsWrapAroundAndRejectsUnavailablePose() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
+        var model = OrbitCoverageModel(configuration: configuration)
+        let zero = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
+        let wrap = PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: -0.01, y: 0, z: -1).values, tracking: .normal)
+        XCTAssertEqual(model.observe(captureID: "zero", pose: zero).sector?.azimuthIndex, 0)
+        XCTAssertEqual(model.observe(captureID: "wrap", pose: wrap).sector?.azimuthIndex, 3)
+        XCTAssertEqual(model.observe(captureID: "duplicate", pose: zero).status, "available")
+        XCTAssertEqual(model.observe(captureID: "missing", pose: nil).status, "pose_unavailable")
+        XCTAssertEqual(model.snapshot().duplicateCaptureIDs, ["duplicate"])
+        XCTAssertEqual(model.snapshot().invalidCaptureIDs, ["missing"])
+        XCTAssertFalse(model.snapshot().isComplete)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
