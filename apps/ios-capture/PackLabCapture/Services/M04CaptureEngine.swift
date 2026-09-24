@@ -139,3 +139,59 @@ public enum SharpnessCalibrationHarness {
         return SharpnessCalibrationResult(thresholds: SharpnessThresholds(acceptMinimum: accept, warnMinimum: warn), sampleCount: finite.count, calibrationStatus: ownerDeviceVerified ? "owner_device_labelled" : "provisional_test_calibrated")
     }
 }
+
+public enum MotionBlurRisk: String, Codable, Sendable, Equatable {
+    case none
+    case warning
+    case highRisk = "high_risk"
+    case unavailable
+}
+
+public struct MotionBlurThresholds: Codable, Sendable, Equatable {
+    public let warningRotationRate: Double
+    public let highRotationRate: Double
+    public init(warningRotationRate: Double = 0.35, highRotationRate: Double = 1.2) {
+        self.warningRotationRate = max(0, warningRotationRate)
+        self.highRotationRate = max(self.warningRotationRate, highRotationRate)
+    }
+    public static let provisional = MotionBlurThresholds()
+}
+
+public struct MotionBlurAssessment: Codable, Sendable, Equatable {
+    public let risk: MotionBlurRisk
+    public let availability: QualityMetricAvailability
+    public let rotationRateMagnitude: Double?
+    public let reasons: [String]
+    public init(risk: MotionBlurRisk, availability: QualityMetricAvailability, rotationRateMagnitude: Double?, reasons: [String]) {
+        self.risk = risk
+        self.availability = availability
+        self.rotationRateMagnitude = rotationRateMagnitude
+        self.reasons = reasons
+    }
+}
+
+/// Motion blur is an explainable warning layer, not a second capture gate.
+/// The input binding is the M03 timestamp-domain binding; no wall-clock value
+/// is compared with a CoreMotion timestamp here.
+public enum MotionBlurAnalyzer {
+    public static func analyze(sharpness: SharpnessMetric, motion: MotionCaptureBinding?, thresholds: MotionBlurThresholds = .provisional) -> MotionBlurAssessment {
+        let imageBlurred = sharpness.band == .reject
+        guard let motion else {
+            return MotionBlurAssessment(risk: imageBlurred ? .warning : .unavailable, availability: .unavailable, rotationRateMagnitude: nil, reasons: imageBlurred ? ["image_blur_motion_unavailable"] : ["motion_unavailable"])
+        }
+        guard motion.status == "available", let sample = motion.sample, sample.isValid else {
+            return MotionBlurAssessment(risk: imageBlurred ? .warning : .unavailable, availability: motion.status == "stale" ? .stale : .unavailable, rotationRateMagnitude: nil, reasons: imageBlurred ? ["image_blur_motion_stale"] : ["motion_(motion.status)"])
+        }
+        let magnitude = sqrt(sample.rotationRate.reduce(0) { $0 + $1 * $1 })
+        if imageBlurred && magnitude >= thresholds.highRotationRate {
+            return MotionBlurAssessment(risk: .highRisk, availability: .available, rotationRateMagnitude: magnitude, reasons: ["combined_blur_and_high_motion"])
+        }
+        if imageBlurred {
+            return MotionBlurAssessment(risk: .warning, availability: .available, rotationRateMagnitude: magnitude, reasons: [magnitude <= thresholds.warningRotationRate ? "image_blur_low_motion" : "image_blur_with_motion"])
+        }
+        if magnitude >= thresholds.highRotationRate {
+            return MotionBlurAssessment(risk: .warning, availability: .available, rotationRateMagnitude: magnitude, reasons: ["high_motion_sharp_frame"])
+        }
+        return MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: magnitude, reasons: [])
+    }
+}

@@ -1355,6 +1355,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(thresholds.warnMinimum, 0.006)
         XCTAssertEqual(SharpnessThresholds(acceptMinimum: 0.01, warnMinimum: 0.2).warnMinimum, 0.01)
     }
+
+    func testPL0095MotionBlurUsesMonotonicBindingAndExplainsUnavailableMotion() {
+        let blurred = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.001, sampleCount: 10, band: .reject, reasonCode: "sharpness_reject")
+        let lowMotion = MotionCaptureBinding(captureID: "c1", captureTimestamp: 10, sample: MotionSampleRecord(monotonicTimestamp: 10, attitude: [0, 0, 0, 1], rotationRate: [0.1, 0, 0]), delta: 0, status: "available")
+        let highMotion = MotionCaptureBinding(captureID: "c2", captureTimestamp: 20, sample: MotionSampleRecord(monotonicTimestamp: 20, attitude: [0, 0, 0, 1], rotationRate: [2, 0, 0]), delta: 0, status: "available")
+        XCTAssertEqual(MotionBlurAnalyzer.analyze(sharpness: blurred, motion: lowMotion).reasons, ["image_blur_low_motion"])
+        XCTAssertEqual(MotionBlurAnalyzer.analyze(sharpness: blurred, motion: highMotion).risk, .highRisk)
+        XCTAssertEqual(MotionBlurAnalyzer.analyze(sharpness: blurred, motion: nil).reasons, ["image_blur_motion_unavailable"])
+        let stale = MotionCaptureBinding(captureID: "c3", captureTimestamp: 30, sample: nil, delta: 1, status: "stale")
+        XCTAssertEqual(MotionBlurAnalyzer.analyze(sharpness: SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept"), motion: stale).availability, .stale)
+    }
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
