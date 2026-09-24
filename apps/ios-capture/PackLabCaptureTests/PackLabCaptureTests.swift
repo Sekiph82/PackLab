@@ -1527,6 +1527,26 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(BackgroundComplexityAnalyzer.analyze(QualityImageFrame(width: 10, height: 10, luminance: cleanPixels)).band, .unavailable)
     }
 
+    func testPL0099CandidateRuntimePublishesBoundedBackgroundMetricAndFallback() {
+        let mask = (0..<100).map { index in (3...6).contains(index % 10) && (3...6).contains(index / 10) }
+        let cleanPixels = [Double](repeating: 0.5, count: 100)
+        let moderatePixels = (0..<100).map { index in mask[index] ? 0.5 : ((index % 5 == 0) ? 0.4 : 0.5) }
+        let clutterPixels = (0..<100).map { index in mask[index] ? 0.5 : ((index % 2 == 0) ? 0.0 : 1.0) }
+        let runtime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
+        func background(_ luminance: [Double], mask: [Bool]?, id: String) -> BackgroundComplexityMetric {
+            let frame = QualityImageFrame(width: 10, height: 10, luminance: luminance, objectMask: mask)
+            return runtime.evaluate(M04CandidateFrameInput(sessionID: "s", captureID: id, sequence: 1, monotonicTimestamp: 1, frame: frame)).quality.metrics.background
+        }
+        XCTAssertEqual(background(cleanPixels, mask: mask, id: "clean").band, .clean)
+        XCTAssertEqual(background(moderatePixels, mask: mask, id: "moderate").band, .clean)
+        let clutter = background(clutterPixels, mask: mask, id: "clutter")
+        XCTAssertEqual(clutter.band, .warning)
+        XCTAssertGreaterThan(clutter.edgeDensity ?? 0, 0)
+        let unavailable = background(cleanPixels, mask: nil, id: "unavailable")
+        XCTAssertEqual(unavailable.band, .unavailable)
+        XCTAssertTrue(unavailable.reasons.contains("background_object_region_unavailable"))
+    }
+
     func testPL0100QualityDecisionHasStablePrecedenceAndRetainsWarnings() {
         let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
         let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])

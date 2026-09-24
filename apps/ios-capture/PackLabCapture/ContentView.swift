@@ -266,6 +266,9 @@ struct ContentView: View {
                             let framing = evaluation.quality.metrics.framing
                             Text("Framing: \(framing.band.rawValue) · Object: \(framingObjectFractionText(framing))")
                             if !framing.reasons.isEmpty { Text(framing.reasons.joined(separator: ", ")) }
+                            let background = evaluation.quality.metrics.background
+                            Text("Background: \(background.band.rawValue) · Score: \(backgroundScoreText(background))")
+                            if !background.reasons.isEmpty { Text(background.reasons.joined(separator: ", ")) }
                         }
                         .font(.caption2.monospaced()).foregroundStyle(.white)
                         .padding(6).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
@@ -318,6 +321,11 @@ struct ContentView: View {
     private func framingObjectFractionText(_ metric: FramingMetric) -> String {
         guard let fraction = metric.objectFraction else { return "unavailable" }
         return String(format: "%.1f%%", fraction * 100)
+    }
+
+    private func backgroundScoreText(_ metric: BackgroundComplexityMetric) -> String {
+        guard let score = metric.score else { return "unavailable" }
+        return String(format: "%.3f", score)
     }
 
     private static var sessionRoot: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("PackLabSessions", isDirectory: true) }
