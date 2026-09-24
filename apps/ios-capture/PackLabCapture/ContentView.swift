@@ -25,6 +25,10 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var updateTask: Task<Void, Never>?
     private var captureAdmissionService: AdmissionControlledStillCaptureService?
     private var cameraControlBridge: CameraControlRuntimeBridge?
+    #if canImport(AVFoundation)
+    let cameraRecoveryOwner = CameraRecoveryOwner()
+    private var cameraControlComposition: AVFoundationCameraControlComposition?
+    #endif
     private var isRunning = false
 
     init() {
@@ -41,12 +45,18 @@ final class CaptureRuntimeViewModel: ObservableObject {
         motionService = FoundationMotionService()
         healthMonitor = DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())
         #endif
+        #if canImport(AVFoundation)
+        cameraRecoveryOwner.onStateChange = { [weak self] state, message in self?.updateCameraRecovery(state: state, message: message) }
+        #endif
     }
 
     init(trackingService: any ARTrackingService, motionService: any MotionService, healthMonitor: DeviceHealthMonitor) {
         self.trackingService = trackingService
         self.motionService = motionService
         self.healthMonitor = healthMonitor
+        #if canImport(AVFoundation)
+        cameraRecoveryOwner.onStateChange = { [weak self] state, message in self?.updateCameraRecovery(state: state, message: message) }
+        #endif
     }
 
     func start() async {
@@ -112,9 +122,14 @@ final class CaptureRuntimeViewModel: ObservableObject {
     }
 
     #if canImport(AVFoundation) && canImport(NextLevel)
-    func bindProductionCamera(nextLevel: NextLevel, recoveryOwner: CameraRecoveryOwner, activeLensIdentifier: @escaping () -> String?) async throws {
-        let composition = try NextLevelStillCaptureComposition(nextLevel: nextLevel, candidates: AVFoundationCameraDiscovery.rearCandidates(), activeLensIdentifier: activeLensIdentifier, recoveryOwner: recoveryOwner)
-        recoveryOwner.onStateChange = { [weak self] state, message in self?.updateCameraRecovery(state: state, message: message) }
+    func bindProductionCamera(nextLevel: NextLevel, activeLensIdentifier: @escaping () -> String?) async throws {
+        let candidates = AVFoundationCameraDiscovery.rearCandidates()
+        guard case .selected(let lens) = CameraDeviceSelector.selectMainRearWide(from: candidates),
+              let device = AVFoundationCameraDiscovery.rearDevice(for: lens) else { throw CameraServiceError.unavailable }
+        let controls = AVFoundationCameraControlComposition(device: device, selectedLens: lens)
+        cameraControlComposition = controls
+        bindCameraControls(controls.controls)
+        let composition = try NextLevelStillCaptureComposition(nextLevel: nextLevel, candidates: candidates, activeLensIdentifier: activeLensIdentifier, recoveryOwner: cameraRecoveryOwner)
         await bindStillCaptureBackend(composition.adapter)
     }
     #endif
@@ -122,6 +137,28 @@ final class CaptureRuntimeViewModel: ObservableObject {
     func captureAcceptedStill(captureID: String = UUID().uuidString) async -> StillCaptureResult {
         guard let service = captureAdmissionService else { return .rejected("capture_backend_unavailable") }
         return await service.capture(captureID: captureID)
+    }
+
+    func captureAndPersistAcceptedStill(captureID: String = UUID().uuidString, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) async throws -> AcceptedStill {
+        guard let service = captureAdmissionService else { throw CameraServiceError.failed("capture_backend_unavailable") }
+        let result = await service.capture(captureID: captureID)
+        guard case .accepted(let still) = result else { throw CameraServiceError.failed("capture_rejected") }
+        try await store.storeAcceptedCapture(still: still, record: record, metadata: metadata, state: state, poses: poses, motion: motion, bridge: bridge)
+        return still
+    }
+
+    func captureAndPersistAcceptedPhoto(captureID: String = UUID().uuidString, filename: String, metadata: PhotoCaptureMetadata, store: AcceptedPhotoMetadataStore) async throws -> PhotoCaptureMetadata {
+        guard let service = captureAdmissionService else { throw CameraServiceError.failed("capture_backend_unavailable") }
+        let result = await service.capture(captureID: captureID)
+        guard case .accepted(let still) = result else { throw CameraServiceError.failed("capture_rejected") }
+        let source = try OriginalSourceRecord.fromSource(captureID: still.captureID, filename: filename, dimensions: still.dimensions, orientation: metadata.orientation, bytes: still.sourceBytes)
+        #if canImport(AVFoundation)
+        let acceptedMetadata = try cameraControlComposition?.acceptedMetadata(metadata) ?? metadata
+        #else
+        let acceptedMetadata = metadata
+        #endif
+        try await store.persist(metadata: acceptedMetadata, source: source, bytes: still.sourceBytes)
+        return acceptedMetadata
     }
 
     func updateCameraRecovery(state: CameraRecoveryState, message: String) {
@@ -174,7 +211,17 @@ struct ContentView: View {
                         .multilineTextAlignment(.center).foregroundStyle(.secondary)
                 }.padding()
                 #else
+                #if canImport(AVFoundation) && canImport(NextLevel)
+                NextLevelPreviewBridge(recoveryOwner: runtime.cameraRecoveryOwner) { nextLevel in
+                    Task {
+                        try? await runtime.bindProductionCamera(nextLevel: nextLevel, activeLensIdentifier: {
+                            AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)?.uniqueID
+                        })
+                    }
+                }.ignoresSafeArea()
+                #else
                 NextLevelPreviewBridge().ignoresSafeArea()
+                #endif
                 #endif
 
                 VStack {

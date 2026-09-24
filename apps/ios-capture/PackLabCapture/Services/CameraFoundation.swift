@@ -345,7 +345,7 @@ public final class StillPhotoAdapterCore: NSObject, TimestampedStillPhotoBackend
     }
 }
 
-public actor HealthGatedStillPhotoBackend: StillPhotoBackend {
+public actor HealthGatedStillPhotoBackend: TimestampedStillPhotoBackend {
     private let backend: any StillPhotoBackend
     private var admission = CaptureAdmissionController()
     public init(backend: any StillPhotoBackend) { self.backend = backend }
@@ -353,6 +353,10 @@ public actor HealthGatedStillPhotoBackend: StillPhotoBackend {
     public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
         guard admission.allowsCapture else { throw CameraServiceError.failed(admission.rejectReason() ?? "capture_blocked") }
         return try await backend.requestOriginalStill()
+    }
+    public func lastCaptureMonotonicTimestamp() async -> TimeInterval? {
+        guard let timestamped = backend as? any TimestampedStillPhotoBackend else { return nil }
+        return await timestamped.lastCaptureMonotonicTimestamp()
     }
 }
 
@@ -791,7 +795,7 @@ public struct CameraRecoveryMachine: Sendable, Equatable {
     }
 }
 
-public enum CameraRecoverySignal: Sendable, Equatable { case permission(CameraAuthorizationStatus), interruption, interruptionEnded, runtimeError, started, stopped }
+public enum CameraRecoverySignal: Sendable, Equatable { case permission(CameraAuthorizationStatus), interruption, interruptionEnded, runtimeError, started, restartSucceeded, restartFailed, stopped }
 
 public struct CameraRecoveryIntegrationModel: Sendable, Equatable {
     public private(set) var machine = CameraRecoveryMachine()
@@ -815,6 +819,8 @@ public struct CameraRecoveryIntegrationModel: Sendable, Equatable {
         case .permission(.restricted): _ = machine.apply(.permissionRestricted)
         case .permission: _ = machine.apply(.requestStart)
         case .started: _ = machine.apply(.started)
+        case .restartSucceeded: _ = machine.apply(.restartSucceeded)
+        case .restartFailed: _ = machine.apply(.restartFailed)
         case .stopped: _ = machine.apply(.stop)
         }
     }
@@ -829,11 +835,21 @@ public final class CameraRecoveryOwner {
     public private(set) var machine = CameraRecoveryMachine()
     public private(set) var registrationCount = 0
     private var observerTokens: [NSObjectProtocol] = []
+    private var stateObservers: [UUID: (CameraRecoveryState, String) -> Void] = [:]
     private var cancelInFlight: (() -> Void)?
     private var restartSession: (() -> Void)?
     public var onStateChange: ((CameraRecoveryState, String) -> Void)?
 
     public init() {}
+
+    @discardableResult
+    public func addStateObserver(_ observer: @escaping (CameraRecoveryState, String) -> Void) -> UUID {
+        let token = UUID()
+        stateObservers[token] = observer
+        return token
+    }
+
+    public func removeStateObserver(_ token: UUID) { stateObservers.removeValue(forKey: token) }
 
     public func setInFlightCancellation(_ cancellation: (() -> Void)?) { cancelInFlight = cancellation }
     public func setSessionRestart(_ restart: (() -> Void)?) { restartSession = restart }
@@ -870,9 +886,12 @@ public final class CameraRecoveryOwner {
             cancelInFlight?()
             if machine.apply(.runtimeError) == .restarting { restartSession?() }
         case .started: _ = machine.apply(.started)
+        case .restartSucceeded: _ = machine.apply(.restartSucceeded)
+        case .restartFailed: _ = machine.apply(.restartFailed)
         case .stopped: _ = machine.apply(.stop)
         }
         onStateChange?(machine.state, machine.userMessage)
+        for observer in stateObservers.values { observer(machine.state, machine.userMessage) }
     }
 
 }
@@ -1194,6 +1213,7 @@ public final class AVFoundationCameraControlComposition {
         coordinator = CameraDeviceConfigurationCoordinator(device: device, selectedLens: selectedLens)
         controls = CameraControlRuntimeBridge(lens: selectedLens)
     }
+    public var selectedDeviceIdentifier: String { coordinator.device.uniqueID }
     public func configureFocus() {
         do { controls.setFocus(try AVFoundationFocusAdapter.configure(device: coordinator.device, point: nil, coordinator: coordinator)) }
         catch { controls.setFocus(.failed); controls.setMessage("Focus unavailable") }
@@ -1414,10 +1434,15 @@ public final class NextLevelPreviewViewController: UIViewController {
     private let previewDriver: NextLevelPreviewDriver
     private lazy var bridge = PreviewBridgeController(driver: previewDriver)
     private var previewLayer: AVCaptureVideoPreviewLayer?
-    private let recoveryOwner = CameraRecoveryOwner()
+    private let recoveryOwner: CameraRecoveryOwner
+    private let onReady: ((NextLevel) -> Void)?
+    private var recoveryObserverToken: UUID?
+    private var didNotifyReady = false
 
-    public init(nextLevel: NextLevel = .shared) {
+    public init(nextLevel: NextLevel = .shared, recoveryOwner: CameraRecoveryOwner, onReady: ((NextLevel) -> Void)? = nil) {
         self.nextLevel = nextLevel
+        self.recoveryOwner = recoveryOwner
+        self.onReady = onReady
         self.previewDriver = NextLevelPreviewDriver(nextLevel: nextLevel)
         super.init(nibName: nil, bundle: nil)
     }
@@ -1442,7 +1467,7 @@ public final class NextLevelPreviewViewController: UIViewController {
         previewDriver.attachHandler = { [weak self] in self?.attachPreviewIfPossible() }
         previewDriver.detachHandler = { [weak self] in self?.detachPreview() }
         bridge.onStateChange = { [weak self] state in self?.show(state) }
-        recoveryOwner.onStateChange = { [weak self] state, message in
+        recoveryObserverToken = recoveryOwner.addStateObserver { [weak self] state, message in
             guard let self else { return }
             if message.isEmpty { self.show(state == .running ? .running : .loading) }
             else { self.show(.error(message)) }
@@ -1477,6 +1502,7 @@ public final class NextLevelPreviewViewController: UIViewController {
         @unknown default:
             show(.unavailable)
         }
+        if bridge.state == .running { notifyReadyIfNeeded() }
     }
 
     public override func viewDidDisappear(_ animated: Bool) {
@@ -1486,7 +1512,10 @@ public final class NextLevelPreviewViewController: UIViewController {
         recoveryOwner.unregister()
     }
 
-    deinit { nextLevel.stop() }
+    deinit {
+        if let recoveryObserverToken { recoveryOwner.removeStateObserver(recoveryObserverToken) }
+        nextLevel.stop()
+    }
 
     private func attachPreviewIfPossible() {
         guard previewLayer == nil else { return }
@@ -1504,8 +1533,14 @@ public final class NextLevelPreviewViewController: UIViewController {
 
     private func startAuthorizedPreview() {
         bridge.appear(authorization: .authorized)
-        if bridge.state == .running { if let session = previewLayer?.session { recoveryOwner.register(session: session) }; recoveryOwner.handle(.started) }
+        if bridge.state == .running { if let session = previewLayer?.session { recoveryOwner.register(session: session) }; recoveryOwner.handle(.started); notifyReadyIfNeeded() }
         else if case .error = bridge.state { recoveryOwner.handle(.runtimeError) }
+    }
+
+    private func notifyReadyIfNeeded() {
+        guard !didNotifyReady else { return }
+        didNotifyReady = true
+        onReady?(nextLevel)
     }
 
     private func restartAuthorizedPreview() {
@@ -1530,8 +1565,10 @@ public final class NextLevelPreviewViewController: UIViewController {
 }
 
 public struct NextLevelPreviewBridge: UIViewControllerRepresentable {
-    public init() {}
-    public func makeUIViewController(context: Context) -> NextLevelPreviewViewController { NextLevelPreviewViewController() }
+    private let recoveryOwner: CameraRecoveryOwner
+    private let onReady: ((NextLevel) -> Void)?
+    public init(recoveryOwner: CameraRecoveryOwner, onReady: ((NextLevel) -> Void)? = nil) { self.recoveryOwner = recoveryOwner; self.onReady = onReady }
+    public func makeUIViewController(context: Context) -> NextLevelPreviewViewController { NextLevelPreviewViewController(recoveryOwner: recoveryOwner, onReady: onReady) }
     public func updateUIViewController(_ controller: NextLevelPreviewViewController, context: Context) {}
 }
 
@@ -1548,6 +1585,15 @@ public enum AVFoundationCameraDiscovery {
             position: .back
         )
         return session.devices.map(descriptor(for:)).sorted { $0.stableID < $1.stableID }
+    }
+
+    public static func rearDevice(for lens: CameraLensIdentity) -> AVCaptureDevice? {
+        let types: [AVCaptureDevice.DeviceType] = [
+            .builtInWideAngleCamera, .builtInUltraWideCamera, .builtInTelephotoCamera,
+            .builtInDualCamera, .builtInDualWideCamera, .builtInTripleCamera
+        ]
+        return AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .video, position: .back)
+            .devices.first { $0.uniqueID == lens.identifier }
     }
 
     private static func descriptor(for device: AVCaptureDevice) -> CameraDeviceDescriptor {

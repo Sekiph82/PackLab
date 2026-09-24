@@ -440,7 +440,7 @@ public struct SessionFinalizer: Sendable {
             var packageCommitted = false
             do {
                 try PackScanWriter().write(manifestJSON: input.manifest, payloads: input.payloads, to: packageTemp)
-                let record = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: "exported", packagePath: input.destination.path)
+                let record = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: .exported, packagePath: input.destination.path)
                 if failureInjector?("finalization.record") == true { throw FinalizationError.packagingFailed }
                 try JSONEncoder().encode(record).write(to: recordTemp, options: .atomic)
                 if failureInjector?("finalization.packageCommit") == true { throw FinalizationError.packagingFailed }
@@ -480,12 +480,12 @@ public struct ScanHistoryIndex: Sendable, Equatable {
     public func degraded(id: String, reason: String) -> ScanHistoryEntry { ScanHistoryEntry(id: id, packageName: "Unavailable scan", packageType: nil, date: nil, previewPath: nil, exportState: "unavailable", degradedReason: reason) }
 }
 
+public enum SessionFinalizationState: String, Codable, Sendable, Equatable { case inProgress = "in_progress", exported }
 public struct SessionFinalizationRecord: Codable, Sendable, Equatable {
     public let sessionID: String
-    public let state: String
+    public let state: SessionFinalizationState
     public let packagePath: String?
-    public init(sessionID: String, state: String, packagePath: String? = nil) { self.sessionID = sessionID; self.state = state; self.packagePath = packagePath }
-    public var isKnownState: Bool { state == "in_progress" || state == "exported" }
+    public init(sessionID: String, state: SessionFinalizationState, packagePath: String? = nil) { self.sessionID = sessionID; self.state = state; self.packagePath = packagePath }
 }
 
 public actor LocalScanHistoryStore {
@@ -504,15 +504,15 @@ public actor LocalScanHistoryStore {
             let finalizationData = try? Data(contentsOf: finalizationURL)
             let finalization = finalizationData.flatMap { try? JSONDecoder().decode(SessionFinalizationRecord.self, from: $0) }
             if finalizationData != nil && finalization == nil { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview?.path, exportState: "corrupt", degradedReason: "corrupt_finalization") }
-            if let finalization, (!finalization.isKnownState || finalization.sessionID != id) { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview?.path, exportState: "corrupt", degradedReason: "invalid_finalization_identity") }
-            guard let preview else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: nil, exportState: finalization?.state ?? "in_progress", degradedReason: "missing_preview") }
+            if let finalization, finalization.sessionID != id { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview?.path, exportState: "corrupt", degradedReason: "invalid_finalization_identity") }
+            guard let preview else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: nil, exportState: finalization?.state.rawValue ?? "in_progress", degradedReason: "missing_preview") }
             guard let finalization else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: "in_progress") }
-            if finalization.state == "exported" {
+            if finalization.state == .exported {
                 guard let packagePath = finalization.packagePath, fileManager.fileExists(atPath: packagePath), (try? URL(fileURLWithPath: packagePath).resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
                     return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: "corrupt", degradedReason: "missing_exported_package")
                 }
             }
-            return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: finalization.state)
+            return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: finalization.state.rawValue)
         })
     }
 }

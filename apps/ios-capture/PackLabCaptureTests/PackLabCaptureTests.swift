@@ -5,6 +5,13 @@ import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 #endif
+#if canImport(ARKit) && canImport(UIKit)
+import ARKit
+import UIKit
+#endif
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
 
 @MainActor
 private final class SequenceTrackingService: ARTrackingService {
@@ -856,6 +863,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(SessionResumeValidator.disposition(state: PersistedSessionState(sessionID: "s", nextSequence: 1, epoch: 0, acceptedIDs: ["missing"]), requiredSourceIDs: []), .blocked("missing_source"))
     }
 
+    func testPL0090DiscoveryUsesRecoveredStateBlocksCorruptionAndDiscardsOnlyResumableSessions() async throws {
+        let stages = ["transaction.prepare", "transaction.sourceStage", "transaction.recordStage", "transaction.stateStage", "transaction.sourceCommit", "transaction.recordCommit", "transaction.stateCommit"]
+        for stage in stages {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let layout = SessionStorageLayout(root: root, sessionID: "resume"); let store = ScanSessionStore(layout: layout, failureInjector: { $0 == stage }); try await store.create(NewScanDraft(sessionID: "resume", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); let record = AcceptedCaptureRecord(captureID: "capture", sequence: 0, sourceFilename: "capture.heic", metadataFilename: "capture.json"); do { try await store.storeAcceptedCapture(source: Data([1]), record: record, metadata: try JSONEncoder().encode(record), state: try JSONEncoder().encode(PersistedSessionState(sessionID: "resume", nextSequence: 1, epoch: 0, acceptedIDs: ["capture"]))) } catch { }; let candidates = await SessionDiscoveryService(root: root).discover(); XCTAssertEqual(candidates.first?.disposition, .resumable, stage); XCTAssertEqual(candidates.first?.state?.acceptedIDs, [], stage)
+        }
+        let staleRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: staleRoot) }; let staleLayout = SessionStorageLayout(root: staleRoot, sessionID: "stale"); let staleStore = ScanSessionStore(layout: staleLayout); try await staleStore.create(NewScanDraft(sessionID: "stale", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); try FileManager.default.createDirectory(at: staleLayout.temporary.appendingPathComponent(".txn-stale"), withIntermediateDirectories: true); let stale = await SessionDiscoveryService(root: staleRoot).discover(); XCTAssertEqual(stale.first?.disposition, .blocked("corrupt_transaction"))
+        let corruptRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: corruptRoot) }; let corruptLayout = SessionStorageLayout(root: corruptRoot, sessionID: "corrupt"); let corruptStore = ScanSessionStore(layout: corruptLayout); try await corruptStore.create(NewScanDraft(sessionID: "corrupt", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); let corruptRecord = AcceptedCaptureRecord(captureID: "capture", sequence: 0, sourceFilename: "capture.heic", metadataFilename: "capture.json"); try await corruptStore.storeAcceptedCapture(source: Data([1]), record: corruptRecord, metadata: try JSONEncoder().encode(corruptRecord), state: try JSONEncoder().encode(PersistedSessionState(sessionID: "corrupt", nextSequence: 1, epoch: 0, acceptedIDs: ["capture"]))); try FileManager.default.removeItem(at: corruptLayout.images.appendingPathComponent("capture.heic")); let missingSource = await SessionDiscoveryService(root: corruptRoot).discover(); XCTAssertEqual(missingSource.first?.disposition, .blocked("missing_or_corrupt_record"))
+        let versionRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: versionRoot) }; let versionLayout = SessionStorageLayout(root: versionRoot, sessionID: "version"); let versionStore = ScanSessionStore(layout: versionLayout); try await versionStore.create(NewScanDraft(sessionID: "version", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); try JSONEncoder().encode(PersistedSessionState(sessionID: "version", schemaVersion: "9", nextSequence: 0, epoch: 0, acceptedIDs: [])).write(to: versionLayout.state); let versionCandidate = await SessionDiscoveryService(root: versionRoot).discover(); XCTAssertEqual(versionCandidate.first?.disposition, .blocked("version_mismatch"))
+        let discardRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: discardRoot) }; let discardLayout = SessionStorageLayout(root: discardRoot, sessionID: "discard"); let discardStore = ScanSessionStore(layout: discardLayout); try await discardStore.create(NewScanDraft(sessionID: "discard", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); let discovered = await SessionDiscoveryService(root: discardRoot).discover(); guard let candidate = discovered.first else { return XCTFail("resumable candidate missing") }; XCTAssertEqual(candidate.disposition, .resumable); try await SafeSessionDeleter().delete(plan: SessionDeletionPlan(root: discardRoot, candidate: candidate), confirmed: true); XCTAssertFalse(FileManager.default.fileExists(atPath: discardLayout.sessionRoot.path)); let blocked = SessionResumeCandidate(id: "blocked", draft: nil, disposition: .blocked("corrupt_transaction"), state: nil); XCTAssertThrowsError(try SessionDeletionPlan(root: discardRoot, candidate: blocked).validate(confirmed: true))
+    }
+
     func testPL0091FinalizationCanonicalizationConstantMatchesM02() {
         XCTAssertEqual(PackScanWriter.checksumCanonicalization, "sha256_32_bytes_lowercase_hex_64_chars_v1")
     }
@@ -1032,15 +1050,46 @@ final class PackLabCaptureTests: XCTestCase {
     @MainActor
     func testPL0071StillPhotoDriverCoreUsesSelectedLensAndExactOnceCallbacks() async throws {
         final class Driver: StillPhotoDriver {
-            var canCapturePhoto = true; var delegate: (any StillPhotoDriverDelegate)?; var captures = 0
+            var canCapturePhoto = true; var delegate: (any StillPhotoDriverDelegate)?; var captures = 0; var cancellations = 0
             func capturePhoto() { captures += 1 }
-            func cancelPhotoCapture() {}
+            func cancelPhotoCapture() { cancellations += 1 }
             func finish(_ bytes: Data = Data([1, 2]), dimensions: CaptureDimensions = CaptureDimensions(width: 2, height: 1)) { delegate?.stillPhotoDriver(self, didFinish: bytes, dimensions: dimensions); delegate?.stillPhotoDriverDidFinishWithoutData(self) }
         }
         let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle); let driver = Driver(); let core = StillPhotoAdapterCore(driver: driver, selectedLens: lens, activeLensIdentifier: { "main" })
         let task = Task { try await core.requestOriginalStill() }; await Task.yield(); driver.finish(); let result = try await task.value
         XCTAssertEqual(result.bytes, Data([1, 2])); XCTAssertEqual(driver.captures, 1)
         let wrong = StillPhotoAdapterCore(driver: driver, selectedLens: lens, activeLensIdentifier: { "tele" }); do { _ = try await wrong.requestOriginalStill(); XCTFail("wrong lens must fail") } catch { XCTAssertEqual(error as? CameraServiceError, .failed("selected_lens_mismatch")) }
+    }
+
+    @MainActor
+    func testPL0071StillPhotoAdapterTerminalPathsResumeOnceAndCancelAppropriately() async throws {
+        final class Driver: StillPhotoDriver {
+            var canCapturePhoto = true; var delegate: (any StillPhotoDriverDelegate)?; var captures = 0; var cancellations = 0
+            func capturePhoto() { captures += 1 }
+            func cancelPhotoCapture() { cancellations += 1 }
+            func finishWithoutData() { delegate?.stillPhotoDriverDidFinishWithoutData(self) }
+            func finish(_ bytes: Data = Data([7, 8])) { delegate?.stillPhotoDriver(self, didFinish: bytes, dimensions: CaptureDimensions(width: 2, height: 1)) }
+        }
+        let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)
+        let missingDriver = Driver(); let missing = StillPhotoAdapterCore(driver: missingDriver, selectedLens: lens, activeLensIdentifier: { "main" })
+        let missingTask = Task { try await missing.requestOriginalStill() }; await Task.yield(); missingDriver.finishWithoutData(); missingDriver.finish();
+        do { _ = try await missingTask.value; XCTFail("missing data must fail") } catch { XCTAssertEqual(error as? CameraServiceError, .failed("photo_capture_completed_without_data")) }
+        XCTAssertEqual(missingDriver.cancellations, 0)
+
+        let overlapDriver = Driver(); let overlap = StillPhotoAdapterCore(driver: overlapDriver, selectedLens: lens, activeLensIdentifier: { "main" })
+        let first = Task { try await overlap.requestOriginalStill() }; await Task.yield()
+        do { _ = try await overlap.requestOriginalStill(); XCTFail("overlap must fail") } catch { XCTAssertEqual(error as? CameraServiceError, .failed("capture_in_flight")) }
+        overlapDriver.finish(); _ = try await first.value; XCTAssertEqual(overlapDriver.cancellations, 0)
+
+        let cancelledDriver = Driver(); let cancelled = StillPhotoAdapterCore(driver: cancelledDriver, selectedLens: lens, activeLensIdentifier: { "main" })
+        let cancelledTask = Task { try await cancelled.requestOriginalStill() }; await Task.yield(); cancelledTask.cancel()
+        do { _ = try await cancelledTask.value; XCTFail("task cancellation must fail") } catch { XCTAssertEqual(error as? CameraServiceError, .failed("capture_cancelled")) }
+        XCTAssertEqual(cancelledDriver.cancellations, 1)
+
+        let stoppedDriver = Driver(); let stopped = StillPhotoAdapterCore(driver: stoppedDriver, selectedLens: lens, activeLensIdentifier: { "main" })
+        let stoppedTask = Task { try await stopped.requestOriginalStill() }; await Task.yield(); stopped.cancel()
+        do { _ = try await stoppedTask.value; XCTFail("session stop must fail") } catch { XCTAssertEqual(error as? CameraServiceError, .failed("session_stopped")) }
+        stoppedDriver.finish(); XCTAssertEqual(stoppedDriver.cancellations, 1)
     }
 
     func testPL0072AcceptedStillPipelineRequiresImageSourceAndDecodedDimensions() throws {
@@ -1067,6 +1116,14 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(observed.last?.focus, .continuous); XCTAssertEqual(observed.last?.exposure, .metering); XCTAssertEqual(observed.last?.whiteBalance, .stabilizing)
     }
 
+    @MainActor
+    func testPL0073ToPL0075ViewModelPublishesTheBoundControlRuntimeState() {
+        let tracking = SequenceTrackingService([]); let motion = SequenceMotionService(); let vm = CaptureRuntimeViewModel(trackingService: tracking, motionService: motion, healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        let bridge = CameraControlRuntimeBridge(lens: CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)); vm.bindCameraControls(bridge)
+        bridge.setFocus(.locked); bridge.setExposure(.locked); bridge.setWhiteBalance(.locked)
+        XCTAssertEqual(vm.controls.state.focus, .locked); XCTAssertEqual(vm.controls.state.exposure, .locked); XCTAssertEqual(vm.controls.state.whiteBalance, .locked)
+    }
+
     func testPL0076ISORejectsForbiddenStatusValueAndAcceptsSchemaBoundaries() {
         let lens = CameraLensIdentity(identifier: "main", position: .back, kind: .wideAngle)
         let base = PhotoCaptureMetadata(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: "portrait", lensIdentity: lens, focalLengthMM: SourceMeasurement(status: .unavailable), exposureSeconds: SourceMeasurement(status: .unavailable), iso: SourceMeasurement(status: .unavailable, value: 1, unit: "iso", source: "device_api"), whiteBalanceKelvin: SourceMeasurement(status: .unavailable), captureTimestamp: Date())
@@ -1085,6 +1142,68 @@ final class PackLabCaptureTests: XCTestCase {
         let tracking = SequenceTrackingService([TrackingQualityClassifier.classify(state: .limited), TrackingQualityClassifier.classify(state: .normal), TrackingQualityClassifier.classify(state: .normal)]); let motion = SequenceMotionService(); let vm = CaptureRuntimeViewModel(trackingService: tracking, motionService: motion, healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())); await vm.start(); await vm.refresh(); XCTAssertFalse(vm.tracking.poseEvidenceEligible); await vm.refresh(); XCTAssertFalse(vm.tracking.poseEvidenceEligible); await vm.refresh(); XCTAssertTrue(vm.tracking.poseEvidenceEligible); let count = vm.trackingDiagnostics.count; await vm.stop(); await vm.refresh(); XCTAssertEqual(vm.trackingDiagnostics.count, count)
     }
 
+    @MainActor
+    func testPL0085OverlayPropagatesNewestPoseMotionAndEpochThenStops() async {
+        let tracking = SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal), TrackingQualityClassifier.classify(state: .normal), TrackingQualityClassifier.classify(state: .normal)])
+        let motion = SequenceMotionService()
+        let vm = CaptureRuntimeViewModel(trackingService: tracking, motionService: motion, healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        await vm.start(); await vm.refresh(); let firstPose = vm.pose; let firstMotion = vm.motion; let firstEpoch = vm.epoch
+        await vm.refresh(); XCTAssertNotEqual(vm.pose?.timestamp, firstPose?.timestamp); XCTAssertNotEqual(vm.motion?.monotonicTimestamp, firstMotion?.monotonicTimestamp); XCTAssertGreaterThan(vm.epoch, firstEpoch); XCTAssertTrue(vm.overlay.lines.contains { $0.contains("Epoch: \(vm.epoch)") }); XCTAssertTrue(vm.overlay.lines.contains { $0.contains(String(format: "Pose t=%.3fs", vm.pose?.timestamp ?? -1)) }); XCTAssertTrue(vm.overlay.lines.contains { $0.contains(String(format: "Motion t=%.3fs", vm.motion?.monotonicTimestamp ?? -1)) })
+        let stoppedPose = vm.pose; let stoppedMotion = vm.motion; let stoppedEpoch = vm.epoch; await vm.stop(); await vm.refresh(); XCTAssertEqual(vm.pose, stoppedPose); XCTAssertEqual(vm.motion, stoppedMotion); XCTAssertEqual(vm.epoch, stoppedEpoch)
+    }
+
+    @MainActor
+    func testPL0080AndPL0081AcceptedStillOrchestrationPersistsPoseMotionAndReopens() async throws {
+        struct Backend: TimestampedStillPhotoBackend, Sendable {
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([1, 2, 3]), CaptureDimensions(width: 2, height: 1)) }
+            func lastCaptureMonotonicTimestamp() async -> TimeInterval? { 10 }
+        }
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        await vm.bindStillCaptureBackend(Backend())
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "evidence"); let store = ScanSessionStore(layout: layout); try await store.create(NewScanDraft(sessionID: "evidence", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        var poses = PoseBuffer(); poses.append(PoseSample(timestamp: 11, transform: CoordinateTransform.identity.values, tracking: .normal)); poses.append(PoseSample(timestamp: 9, transform: CoordinateTransform.identity.values, tracking: .normal))
+        var motion = MotionBuffer(); motion.append(MotionSampleRecord(monotonicTimestamp: 10.05, attitude: [0, 0, 0, 1], rotationRate: [1, 2, 3]))
+        let record = AcceptedCaptureRecord(captureID: "capture", sequence: 0, sourceFilename: "capture.heic", metadataFilename: "capture.json")
+        let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "evidence", nextSequence: 1, epoch: 0, acceptedIDs: ["capture"]))
+        let metadata = try JSONEncoder().encode(record)
+        _ = try await vm.captureAndPersistAcceptedStill(captureID: "capture", record: record, metadata: metadata, state: state, store: store, poses: poses, motion: motion)
+        let persisted = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("capture.json")))
+        XCTAssertEqual(persisted.poseBinding?.aligned.status, "available"); XCTAssertEqual(persisted.motionBinding?.status, "available")
+        if case .resumable(let recovered) = try await store.reopen(requiredSourceIDs: []) { XCTAssertEqual(recovered.acceptedIDs, ["capture"]) } else { XCTFail("accepted capture should reopen") }
+        XCTAssertEqual(PoseBuffer().bind(captureID: "missing", timestamp: 10).aligned.status, "unavailable")
+        XCTAssertEqual(poses.bind(captureID: "stale", timestamp: 20).aligned.status, "stale")
+        XCTAssertEqual(MotionCaptureBinder.bind(captureID: "stale", timestamp: 20, records: motion.samples).status, "stale")
+    }
+
+    #if canImport(ARKit) && canImport(UIKit)
+    @MainActor
+    func testPL0079AndPL0084InjectedAROwnerLifecycleResetAndServiceMapping() async {
+        @MainActor final class Driver: ARSessionLifecycleDriver {
+            let session = ARSession(); let isSupported: Bool; var runs: [Bool] = []; var pauses = 0
+            init(isSupported: Bool) { self.isSupported = isSupported }
+            func run(resetTracking: Bool) { runs.append(resetTracking) }
+            func pause() { pauses += 1 }
+        }
+        let unsupportedDriver = Driver(isSupported: false); let unsupportedOwner = SharedARSessionOwner(injectedDriver: unsupportedDriver); unsupportedOwner.start(); XCTAssertEqual(unsupportedOwner.policy.snapshot.quality, .limited); XCTAssertEqual(unsupportedDriver.runs.count, 0)
+        let driver = Driver(isSupported: true); let owner = SharedARSessionOwner(injectedDriver: driver); owner.start(); owner.start(); XCTAssertEqual(driver.runs.count, 1); owner.stop(); owner.stop(); XCTAssertEqual(driver.pauses, 1)
+        owner.start(); owner.applyTrackingEvent(.limited(.insufficientFeatures)); owner.applyTrackingEvent(.limited(.insufficientFeatures)); owner.applyTrackingEvent(.limited(.insufficientFeatures)); XCTAssertEqual(owner.epochCoordinator.lastReason, .trackingDegraded); XCTAssertTrue(owner.resetDiagnostics.contains { $0.reason == .trackingDegraded && $0.state == .relocalizing }); owner.applyTrackingEvent(.normal); XCTAssertEqual(owner.epochCoordinator.state, .recovered); XCTAssertTrue(owner.resetDiagnostics.contains { $0.state == .recovered })
+        owner.reset(reason: .userRequested); let resetEpoch = owner.epochCoordinator.epoch; owner.reset(reason: .runtimeError); XCTAssertEqual(owner.epochCoordinator.epoch, resetEpoch + 1); XCTAssertEqual(Array(driver.runs.suffix(2)), [true, true])
+        owner.sessionWasInterrupted(owner.session); XCTAssertEqual(owner.policy.snapshot.quality, .recovering); owner.sessionInterruptionEnded(owner.session); XCTAssertEqual(owner.policy.snapshot.quality, .recovering); owner.session(owner.session, didFailWithError: NSError(domain: "test", code: 1)); XCTAssertEqual(owner.epochCoordinator.state, .failed)
+        let service = ARKitTrackingService(owner: owner); let state = await service.state(); XCTAssertEqual(state, .limited)
+    }
+    #endif
+
+    #if canImport(AVFoundation)
+    @MainActor
+    func testPL0077UnifiedRecoveryOwnerUsesOneObserverSetCancellationRestartAndRuntimeUI() async {
+        let center = NotificationCenter(); let session = AVCaptureSession(); let owner = CameraRecoveryOwner(); var cancellations = 0; var restarts = 0; var observed: [CameraRecoveryState] = []
+        owner.onStateChange = { state, _ in observed.append(state) }; _ = owner.addStateObserver { state, _ in observed.append(state) }; owner.setInFlightCancellation { cancellations += 1 }; owner.setSessionRestart { restarts += 1 }; owner.register(session: session, notificationCenter: center); owner.register(session: session, notificationCenter: center); XCTAssertEqual(owner.registrationCount, 1)
+        owner.handle(.permission(.denied)); XCTAssertEqual(owner.machine.state, .denied); owner.handle(.permission(.authorized)); owner.handle(.started); owner.handle(.interruption); XCTAssertEqual(cancellations, 1); owner.handle(.interruptionEnded); XCTAssertEqual(restarts, 1); owner.handle(.restartSucceeded); owner.handle(.runtimeError); XCTAssertEqual(cancellations, 2); XCTAssertEqual(restarts, 2); XCTAssertTrue(observed.contains(.running)); owner.unregister(notificationCenter: center)
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())); vm.cameraRecoveryOwner.handle(.permission(.denied)); XCTAssertEqual(vm.cameraRecoveryState, .denied)
+    }
+    #endif
+
     func testPL0086DiagnosticsExactLimitAndRealisticPrivacyBoundary() throws {
         let pose = AlignedPose(sample: PoseSample(timestamp: 1, transform: CoordinateTransform.identity.values, tracking: .normal), delta: 0, status: "available"); let record = PoseDiagnosticRecord(captureID: "C:\\Users\\Alice\\private\\capture", captureTimestamp: 1, pose: pose, motion: nil, epoch: 0); XCTAssertNoThrow(try PoseDiagnosticsExporter.encode(records: [record], maximumRecords: 1)); XCTAssertThrowsError(try PoseDiagnosticsExporter.encode(records: [record, record], maximumRecords: 1)); let text = String(decoding: try PoseDiagnosticsExporter.encode(records: [record]), as: UTF8.self); XCTAssertFalse(text.contains("Alice")); XCTAssertFalse(text.contains("private"))
     }
@@ -1097,8 +1216,28 @@ final class PackLabCaptureTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let layout = SessionStorageLayout(root: root, sessionID: "tx"); let store = ScanSessionStore(layout: layout); try await store.create(NewScanDraft(sessionID: "tx", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); let tx = layout.temporary.appendingPathComponent(".txn-crash", isDirectory: true); try FileManager.default.createDirectory(at: tx, withIntermediateDirectories: true); let oldState = try Data(contentsOf: layout.state); try oldState.write(to: tx.appendingPathComponent("previous-state.json")); try Data([1]).write(to: tx.appendingPathComponent("p.heic")); let record = AcceptedCaptureRecord(captureID: "p", sequence: 0, sourceFilename: "p.heic", metadataFilename: "p.json"); try JSONEncoder().encode(record).write(to: tx.appendingPathComponent("p.json")); try JSONEncoder().encode(PersistedSessionState(sessionID: "tx", nextSequence: 1, epoch: 0, acceptedIDs: ["p"])).write(to: tx.appendingPathComponent("state.json")); try JSONEncoder().encode(SessionTransactionMarker(captureID: "p", sourceFilename: "p.heic", recordFilename: "p.json", stage: .recordCommitted)).write(to: tx.appendingPathComponent("marker.json")); try FileManager.default.moveItem(at: tx.appendingPathComponent("p.heic"), to: layout.images.appendingPathComponent("p.heic")); if case .resumable(let recovered) = try await store.reopen(requiredSourceIDs: []) { XCTAssertTrue(recovered.acceptedIDs.isEmpty) } else { XCTFail("rollback should leave a clean resumable session") }; XCTAssertFalse(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("p.heic").path))
     }
 
+    func testPL0088EveryTransactionFailureStageRecoversCleanPreCaptureState() async throws {
+        let stages = ["transaction.prepare", "transaction.sourceStage", "transaction.recordStage", "transaction.stateStage", "transaction.sourceCommit", "transaction.recordCommit", "transaction.stateCommit"]
+        for stage in stages {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+            let layout = SessionStorageLayout(root: root, sessionID: "stage"); let store = ScanSessionStore(layout: layout, failureInjector: { $0 == stage }); try await store.create(NewScanDraft(sessionID: "stage", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+            let record = AcceptedCaptureRecord(captureID: "capture", sequence: 0, sourceFilename: "capture.heic", metadataFilename: "capture.json"); let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "stage", nextSequence: 1, epoch: 0, acceptedIDs: ["capture"]))
+            do { try await store.storeAcceptedCapture(source: Data([1, 2]), record: record, metadata: try JSONEncoder().encode(record), state: state); XCTFail("injected stage must fail: \(stage)") } catch { }
+            if case .resumable(let recovered) = try await store.reopen(requiredSourceIDs: []) { XCTAssertTrue(recovered.acceptedIDs.isEmpty, stage); XCTAssertFalse(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("capture.heic").path)); XCTAssertFalse(FileManager.default.fileExists(atPath: layout.photoRecords.appendingPathComponent("capture.json").path)) } else { XCTFail("stage must recover cleanly: \(stage)") }
+        }
+        let malformedRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: malformedRoot) }; let malformedLayout = SessionStorageLayout(root: malformedRoot, sessionID: "malformed"); let malformedStore = ScanSessionStore(layout: malformedLayout); try await malformedStore.create(NewScanDraft(sessionID: "malformed", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); let malformedTxn = malformedLayout.temporary.appendingPathComponent(".txn-malformed", isDirectory: true); try FileManager.default.createDirectory(at: malformedTxn, withIntermediateDirectories: true); try Data("not-json".utf8).write(to: malformedTxn.appendingPathComponent("marker.json")); do { _ = try await malformedStore.reopen(requiredSourceIDs: []); XCTFail("malformed marker must surface") } catch { XCTAssertEqual(error as? SessionStorageError, .interruptedWrite) }
+    }
+
     func testPL0089GalleryFailureRestoresFilesStateAndAudit() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let layout = SessionStorageLayout(root: root, sessionID: "gallery"); let session = ScanSessionStore(layout: layout); try await session.create(NewScanDraft(sessionID: "gallery", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); let record = AcceptedCaptureRecord(captureID: "a", sequence: 0, sourceFilename: "a.heic", metadataFilename: "a.json"); try await session.storeAcceptedCapture(source: Data([1]), record: record, metadata: Data("{}".utf8), state: try JSONEncoder().encode(PersistedSessionState(sessionID: "gallery", nextSequence: 1, epoch: 0, acceptedIDs: ["a"]))); let failing = SessionGalleryStore(layout: layout, failureInjector: { $0 == "mutation.auditCommit" }); do { try await failing.delete(id: "a", confirmed: true); XCTFail("failed gallery mutation must throw") } catch { XCTAssertEqual(error as? SessionStorageError, .interruptedWrite) }; XCTAssertTrue(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("a.heic").path)); XCTAssertEqual(try JSONDecoder().decode(PersistedSessionState.self, from: Data(contentsOf: layout.state)).acceptedIDs, ["a"])
+    }
+
+    func testPL0089RetakeCallbackAndDeleteRetakeFailureStagesRollbackCoherently() async throws {
+        let stages = ["retake.source", "retake.record", "mutation.stateStage", "mutation.auditStage", "mutation.stateCommit", "mutation.auditCommit", "retake.remove.a.heic"]
+        for stage in stages {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let layout = SessionStorageLayout(root: root, sessionID: "gallery"); let session = ScanSessionStore(layout: layout); try await session.create(NewScanDraft(sessionID: "gallery", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); let old = AcceptedCaptureRecord(captureID: "a", sequence: 0, sourceFilename: "a.heic", metadataFilename: "a.json"); try await session.storeAcceptedCapture(source: Data([1]), record: old, metadata: try JSONEncoder().encode(old), state: try JSONEncoder().encode(PersistedSessionState(sessionID: "gallery", nextSequence: 1, epoch: 0, acceptedIDs: ["a"]))); try Data([9]).write(to: layout.previews.appendingPathComponent("a-thumbnail.jpg")); let failing = SessionGalleryStore(layout: layout, failureInjector: { $0 == stage }); let entry = try await failing.load().first!; let replacement = AcceptedCaptureRecord(captureID: "b", sequence: 1, sourceFilename: "b.heic", metadataFilename: "b.json"); let callback: (GalleryEntry) async throws -> RetakeCapturePayload = { _ in RetakeCapturePayload(source: Data([2]), record: replacement, metadata: try JSONEncoder().encode(replacement)) }; let payload = try await callback(entry); do { try await failing.retake(replacing: entry.id, source: payload.source, record: payload.record, metadata: payload.metadata); XCTFail("injected retake stage must fail: \(stage)") } catch { }; XCTAssertTrue(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("a.heic").path)); XCTAssertFalse(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("b.heic").path)); XCTAssertEqual(try JSONDecoder().decode(PersistedSessionState.self, from: Data(contentsOf: layout.state)).acceptedIDs, ["a"])
+        }
+        let missingRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: missingRoot) }; try FileManager.default.createDirectory(at: missingRoot, withIntermediateDirectories: true); let missingCandidate = SessionResumeCandidate(id: "missing", draft: nil, disposition: .resumable, state: nil); let missingReport = try await SafeSessionDeleter().deleteDetailed(plan: SessionDeletionPlan(root: missingRoot, candidate: missingCandidate), confirmed: true); XCTAssertEqual(missingReport.failures, ["missing_session"])
     }
 
     func testPL0091FinalizationFailureLeavesFreshDestinationAbsent() throws {
@@ -1106,11 +1245,24 @@ final class PackLabCaptureTests: XCTestCase {
     }
 
     func testPL0092HistoryRejectsForeignAndMissingExportedPackage() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let layout = SessionStorageLayout(root: root, sessionID: "history"); try FileManager.default.createDirectory(at: layout.previews, withIntermediateDirectories: true); try Data([1]).write(to: layout.previews.appendingPathComponent("preview.jpg")); try JSONEncoder().encode(NewScanDraft(sessionID: "history", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: layout.metadata); try JSONEncoder().encode(SessionFinalizationRecord(sessionID: "foreign", state: "exported", packagePath: root.appendingPathComponent("missing.packscan").path)).write(to: layout.finalization); let entries = await LocalScanHistoryStore(root: root).load(); XCTAssertEqual(entries.first?.degradedReason, "invalid_finalization_identity")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let layout = SessionStorageLayout(root: root, sessionID: "history"); try FileManager.default.createDirectory(at: layout.previews, withIntermediateDirectories: true); try Data([1]).write(to: layout.previews.appendingPathComponent("preview.jpg")); try JSONEncoder().encode(NewScanDraft(sessionID: "history", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: layout.metadata); try JSONEncoder().encode(SessionFinalizationRecord(sessionID: "foreign", state: .exported, packagePath: root.appendingPathComponent("missing.packscan").path)).write(to: layout.finalization); let entries = await LocalScanHistoryStore(root: root).load(); XCTAssertEqual(entries.first?.degradedReason, "invalid_finalization_identity")
+    }
+
+    func testPL0092ClosedFinalizationStateAndRealFinalizerTransition() async throws {
+        let unknown = Data("{\"sessionID\":\"s\",\"state\":\"unknown\"}".utf8); XCTAssertNil(try? JSONDecoder().decode(SessionFinalizationRecord.self, from: unknown))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let sessionRoot = root.appendingPathComponent("real"); try FileManager.default.createDirectory(at: sessionRoot.appendingPathComponent("previews"), withIntermediateDirectories: true); try Data([1]).write(to: sessionRoot.appendingPathComponent("previews/preview.jpg")); try JSONEncoder().encode(NewScanDraft(sessionID: "real", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: sessionRoot.appendingPathComponent("metadata.json")); try JSONEncoder().encode(SessionFinalizationRecord(sessionID: "real", state: .inProgress)).write(to: sessionRoot.appendingPathComponent("finalization.json"))
+        let metadata = try JSONEncoder().encode(PackScanPhotoMetadataDocument(photos: [PackScanPhotoMetadataWire(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: PackScanOrientation(value: .unknown, source: .unknown), focalLengthMM: PackScanNumericMeasurement(status: .unavailable), exposure: PackScanNumericMeasurement(status: .unavailable), iso: PackScanISOMeasurement(status: .unavailable), whiteBalanceKelvin: PackScanNumericMeasurement(status: .unavailable))])); let image = Data([1]); let payloads = ["metadata/photos.json": metadata, "images/p.heic": image]; let manifest = try JSONSerialization.data(withJSONObject: ["schema_version": "1.0.0", "capture_id": "real", "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization], "payloads": [["path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": metadata.count, "sha256": SourceIntegrity.digest(metadata)], ["path": "images/p.heic", "kind": "image", "required": true, "authority": "source", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)]]]); let destination = root.appendingPathComponent("real.packscan"); try SessionFinalizer().finalize(FinalizationInput(manifest: manifest, payloads: payloads, destination: destination, sessionRoot: sessionRoot)); let history = await LocalScanHistoryStore(root: root).load(); XCTAssertEqual(history.first?.exportState, "exported"); XCTAssertEqual(history.first?.degradedReason, nil); XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        let corruptRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: corruptRoot) }; let corruptSession = corruptRoot.appendingPathComponent("corrupt"); try FileManager.default.createDirectory(at: corruptSession.appendingPathComponent("previews"), withIntermediateDirectories: true); try Data([1]).write(to: corruptSession.appendingPathComponent("previews/preview.jpg")); try JSONEncoder().encode(NewScanDraft(sessionID: "corrupt", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: corruptSession.appendingPathComponent("metadata.json")); try Data("{\"state\":\"unknown\"}".utf8).write(to: corruptSession.appendingPathComponent("finalization.json")); XCTAssertEqual((await LocalScanHistoryStore(root: corruptRoot).load()).first?.degradedReason, "corrupt_finalization")
     }
 
     func testPL0093DeletionAPIThrowsOnPartialFailure() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let session = root.appendingPathComponent("s1"); try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true); let candidate = SessionResumeCandidate(id: "s1", draft: nil, disposition: .resumable, state: nil); let deleter = SafeSessionDeleter(failureInjector: { _ in true }); do { try await deleter.delete(plan: SessionDeletionPlan(root: root, candidate: candidate), confirmed: true); XCTFail("partial delete must throw") } catch { XCTAssertEqual(error as? DeletionError, .partialFailure) }
+    }
+
+    func testPL0093MissingSessionAndHistoryIndexFailuresNeverReportSuccess() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let missing = SessionResumeCandidate(id: "missing", draft: nil, disposition: .resumable, state: nil); do { try await SafeSessionDeleter().delete(plan: SessionDeletionPlan(root: root, candidate: missing), confirmed: true); XCTFail("missing session must not report success") } catch { XCTAssertEqual(error as? DeletionError, .partialFailure) }
+        let session = root.appendingPathComponent("s2"); try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true); let history = root.appendingPathComponent("history.json"); let entry = ScanHistoryEntry(id: "s2", packageName: "Bottle", packageType: .bottle, date: Date(), previewPath: nil, exportState: "in_progress"); try JSONEncoder().encode([entry]).write(to: history); let candidate = SessionResumeCandidate(id: "s2", draft: nil, disposition: .resumable, state: nil); let failing = SafeSessionDeleter(failureInjector: { $0 == history.path }); let report = try await failing.deleteDetailed(plan: SessionDeletionPlan(root: root, candidate: candidate), confirmed: true, historyIndex: history); XCTAssertEqual(report.failures, [history.path]); XCTAssertFalse(FileManager.default.fileExists(atPath: session.path)); do { try await failing.delete(plan: SessionDeletionPlan(root: root, candidate: candidate), confirmed: true); XCTFail("history failure must not report success") } catch { XCTAssertEqual(error as? DeletionError, .partialFailure) }
     }
 
     func testPL0093RealSymlinkEscapeIsRejectedBeforeDeletion() throws {

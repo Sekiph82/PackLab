@@ -59,6 +59,12 @@ public actor FoundationARTrackingService: ARTrackingService {
 import ARKit
 import UIKit
 
+public enum ARSessionTrackingEvent: Sendable, Equatable {
+    case normal
+    case limited(TrackingLimitation)
+    case unavailable
+}
+
 @MainActor
 public protocol ARSessionLifecycleDriver: AnyObject {
     var session: ARSession { get }
@@ -88,18 +94,22 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
     public private(set) var epochCoordinator = SessionEpochCoordinator()
     public private(set) var resetDiagnostics: [ResetDiagnosticEvent] = []
     private var degradedFrames = 0
+    private var isStarted = false
     private init(driver: any ARSessionLifecycleDriver) { self.driver = driver; session = driver.session; super.init(); session.delegate = self }
     private convenience init() { self.init(driver: DeviceARSessionDriver()) }
     public convenience init(injectedDriver: any ARSessionLifecycleDriver) { self.init(driver: injectedDriver) }
 
     public func start() {
         guard driver.isSupported else { policy.limited(.cameraUnavailable); return }
+        guard !isStarted else { return }
+        isStarted = true
         policy.started()
         driver.run(resetTracking: false)
     }
-    public func stop() { driver.pause() }
+    public func stop() { guard isStarted else { return }; isStarted = false; driver.pause() }
     public func reset(reason: ResetReason = .userRequested, options: ARSession.RunOptions = [.resetTracking, .removeExistingAnchors]) {
         guard driver.isSupported else { policy.limited(.cameraUnavailable); return }
+        isStarted = true
         epochCoordinator.reset(reason: reason)
         resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: reason, state: epochCoordinator.state))
         policy.reset()
@@ -108,14 +118,12 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
     public func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
         switch camera.trackingState {
         case .normal:
-            degradedFrames = 0
-            policy.normal()
-            if epochCoordinator.state == .relocalizing { epochCoordinator.recovered(); resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: epochCoordinator.lastReason ?? .userRequested, state: epochCoordinator.state)) }
+            applyTrackingEvent(.normal)
         case .limited(let reason):
-            degradedFrames += 1
-            switch reason { case .initializing: policy.limited(.initializing); case .excessiveMotion: policy.limited(.excessiveMotion); case .insufficientFeatures: policy.limited(.insufficientFeatures); case .relocalizing: policy.limited(.relocalizing); @unknown default: policy.limited(.unknown) }
-            if degradedFrames >= 3, epochCoordinator.state != .relocalizing { reset(reason: .trackingDegraded) }
-        case .notAvailable: policy.limited(.cameraUnavailable)
+            let limitation: TrackingLimitation
+            switch reason { case .initializing: limitation = .initializing; case .excessiveMotion: limitation = .excessiveMotion; case .insufficientFeatures: limitation = .insufficientFeatures; case .relocalizing: limitation = .relocalizing; @unknown default: limitation = .unknown }
+            applyTrackingEvent(.limited(limitation))
+        case .notAvailable: applyTrackingEvent(.unavailable)
         }
     }
     public func session(_ session: ARSession, didUpdate frame: ARFrame) {
@@ -125,8 +133,23 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
         poseBuffer.append(PoseSample(timestamp: frame.timestamp, transform: values, tracking: tracking))
     }
     public func sessionWasInterrupted(_ session: ARSession) { policy.interrupted(); reset(reason: .interruption, options: []) }
-    public func sessionInterruptionEnded(_ session: ARSession) { driver.run(resetTracking: false); policy.reset() }
-    public func session(_ session: ARSession, didFailWithError error: Error) { epochCoordinator.failed(); resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: .runtimeError, state: epochCoordinator.state)) }
+    public func sessionInterruptionEnded(_ session: ARSession) { if isStarted { driver.run(resetTracking: false) }; policy.reset() }
+    public func session(_ session: ARSession, didFailWithError error: Error) { isStarted = false; epochCoordinator.failed(); resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: .runtimeError, state: epochCoordinator.state)) }
+
+    public func applyTrackingEvent(_ event: ARSessionTrackingEvent) {
+        switch event {
+        case .normal:
+            degradedFrames = 0
+            policy.normal()
+            if epochCoordinator.state == .relocalizing { epochCoordinator.recovered(); resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: epochCoordinator.lastReason ?? .userRequested, state: epochCoordinator.state)) }
+        case .limited(let limitation):
+            degradedFrames += 1
+            policy.limited(limitation)
+            if degradedFrames >= 3, epochCoordinator.state != .relocalizing { reset(reason: .trackingDegraded) }
+        case .unavailable:
+            policy.limited(.cameraUnavailable)
+        }
+    }
 }
 
 @MainActor
