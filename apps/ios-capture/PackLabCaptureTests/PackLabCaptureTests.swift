@@ -1433,6 +1433,25 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(rejected.reasons, ["framing_too_small"])
     }
 
+    func testPL0101QualityCandidateLogIsBoundedOrderedAndSanitized() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "session")
+        let store = QualityCandidateLogStore(layout: layout, maximumRecords: 2)
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
+        let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
+        let clip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let frame = FramingMetric(availability: .available, objectFraction: 0.3, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let decision = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: frame, background: background))
+        for sequence in 0..<3 { try await store.append(QualityCandidateLog(sessionID: "C:/private/session", captureID: "capture/\(sequence)", sequence: sequence, monotonicTimestamp: Double(sequence), decision: decision)) }
+        let entries = try await store.snapshot()
+        XCTAssertEqual(entries.map(\.sequence), [1, 2])
+        XCTAssertFalse(entries[0].sessionID.contains("/"))
+        XCTAssertFalse(entries[0].captureID.contains("/"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.qualityLog.path))
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

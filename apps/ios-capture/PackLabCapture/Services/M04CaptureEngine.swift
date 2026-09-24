@@ -434,3 +434,76 @@ public enum QualityDecisionEngine {
         return QualityDecision(decision: uniqueHard.isEmpty ? .accept : .reject, reasons: uniqueHard, warnings: uniqueWarnings, metrics: metrics)
     }
 }
+
+public struct QualityCandidateLog: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let sessionID: String
+    public let captureID: String
+    public let sequence: Int
+    public let monotonicTimestamp: TimeInterval
+    public let decision: CandidateQualityDecision
+    public let reasons: [String]
+    public let warnings: [String]
+    public let metrics: CandidateQualityMetrics
+    public init(sessionID: String, captureID: String, sequence: Int, monotonicTimestamp: TimeInterval, decision: QualityDecision) {
+        self.sessionID = QualityLogSanitizer.identifier(sessionID)
+        self.captureID = QualityLogSanitizer.identifier(captureID)
+        self.sequence = max(0, sequence)
+        self.monotonicTimestamp = monotonicTimestamp.isFinite ? monotonicTimestamp : 0
+        self.decision = decision.decision
+        self.reasons = Array(decision.reasons.prefix(32)).map(QualityLogSanitizer.reason)
+        self.warnings = Array(decision.warnings.prefix(32)).map(QualityLogSanitizer.reason)
+        self.metrics = decision.metrics
+        self.id = "\(self.sessionID):\(self.captureID):\(self.sequence)"
+    }
+}
+
+public enum QualityLogSanitizer {
+    public static func identifier(_ value: String) -> String {
+        let filtered = value.map { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" ? $0 : "_" }
+        return String(filtered.prefix(96)).isEmpty ? "unavailable" : String(filtered.prefix(96))
+    }
+    public static func reason(_ value: String) -> String { String(value.filter { $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" }.prefix(96)) }
+}
+
+public enum QualityLogStoreError: Error, Sendable, Equatable { case invalidEntry, corruptLog }
+
+public extension SessionStorageLayout {
+    var qualityLog: URL { sessionRoot.appendingPathComponent("quality-candidates.jsonl") }
+}
+
+/// Rejected candidates are diagnostics, not accepted-session records. This
+/// actor writes a bounded JSONL sidecar atomically so a crash during a rejected
+/// candidate cannot corrupt source images or the canonical session state.
+public actor QualityCandidateLogStore {
+    private let url: URL
+    private let fileManager: FileManager
+    private let maximumRecords: Int
+    public init(layout: SessionStorageLayout, maximumRecords: Int = 2048, fileManager: FileManager = .default) { self.url = layout.qualityLog; self.maximumRecords = max(1, maximumRecords); self.fileManager = fileManager }
+
+    public func append(_ entry: QualityCandidateLog) throws {
+        guard entry.sequence >= 0, entry.monotonicTimestamp.isFinite else { throw QualityLogStoreError.invalidEntry }
+        var entries = try load()
+        entries.append(entry)
+        if entries.count > maximumRecords { entries.removeFirst(entries.count - maximumRecords) }
+        try write(entries)
+    }
+
+    public func snapshot() throws -> [QualityCandidateLog] { try load() }
+
+    private func load() throws -> [QualityCandidateLog] {
+        guard fileManager.fileExists(atPath: url.path) else { return [] }
+        do {
+            let data = try Data(contentsOf: url)
+            return try data.split(separator: 10).filter { !$0.isEmpty }.map { try JSONDecoder().decode(QualityCandidateLog.self, from: Data($0)) }
+        } catch { throw QualityLogStoreError.corruptLog }
+    }
+
+    private func write(_ entries: [QualityCandidateLog]) throws {
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        var data = Data()
+        for entry in entries { data.append(try encoder.encode(entry)); data.append(10) }
+        try data.write(to: url, options: .atomic)
+    }
+}
