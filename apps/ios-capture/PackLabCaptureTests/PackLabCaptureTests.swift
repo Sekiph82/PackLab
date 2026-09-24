@@ -1549,6 +1549,16 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(unavailable.isComplete)
     }
 
+    func testPL0109CompletionDiagnosticsNeverHidesMandatoryMissingAreas() {
+        let ring = RingCoverageEvaluation(snapshot: OrbitCoverageSnapshot(configuration: OrbitCoverageConfiguration(), capturedSectors: [CoverageSector(ringID: "lower", azimuthIndex: 0)], missingSectors: [CoverageSector(ringID: "middle", azimuthIndex: 0)], duplicateCaptureIDs: [], invalidCaptureIDs: [], observations: []), policy: StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 1), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 1)]))
+        let base = BasePassEvaluation(snapshot: OrbitCoverageSnapshot(configuration: OrbitCoverageConfiguration(), capturedSectors: [], missingSectors: [], duplicateCaptureIDs: [], invalidCaptureIDs: [], observations: []), availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "base_view_unavailable"))
+        let diagnostics = CompletionDiagnostics(rings: ring, base: base)
+        XCTAssertEqual(diagnostics.status, .incomplete)
+        XCTAssertTrue(diagnostics.mandatoryMissingAreas.contains("middle"))
+        XCTAssertTrue(diagnostics.optionalUnavailableAreas.contains("base"))
+        XCTAssertLessThan(diagnostics.score, 1)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

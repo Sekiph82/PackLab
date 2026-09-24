@@ -802,6 +802,28 @@ public struct BasePassEvaluation: Codable, Sendable, Equatable {
     public var isComplete: Bool { status == "complete" }
 }
 
+public enum CompletionEvidenceStatus: String, Codable, Sendable, Equatable { case complete, incomplete, unavailable }
+
+public struct CompletionDiagnostics: Codable, Sendable, Equatable {
+    public let score: Double
+    public let status: CompletionEvidenceStatus
+    public let mandatoryMissingAreas: [String]
+    public let optionalUnavailableAreas: [String]
+    public let guidance: [String]
+    public init(rings: RingCoverageEvaluation, detailPasses: [DetailPassEvaluation] = [], base: BasePassEvaluation? = nil) {
+        let requiredRingCount = rings.statuses.filter { $0.missing || $0.minimumSectorCount > 0 }.count
+        let completeRingCount = rings.statuses.filter { !$0.missing }.count
+        let requiredDetails = detailPasses.filter { $0.metadata.required }
+        let completeDetails = requiredDetails.filter(\.isComplete).count
+        let denominator = max(1, requiredRingCount + requiredDetails.count)
+        score = Double(completeRingCount + completeDetails) / Double(denominator)
+        mandatoryMissingAreas = rings.missingRingIDs + requiredDetails.filter { !$0.isComplete }.map { $0.metadata.passID.rawValue }
+        optionalUnavailableAreas = base?.status == "unavailable" ? [CapturePassID.base.rawValue] : []
+        guidance = mandatoryMissingAreas.map { "Capture missing \($0) coverage" } + optionalUnavailableAreas.map { "Optional \($0) pass unavailable; completion is not claimed" }
+        status = mandatoryMissingAreas.isEmpty ? (rings.statuses.isEmpty ? .unavailable : .complete) : .incomplete
+    }
+}
+
 #if canImport(SwiftUI)
 public struct CoverageGridView: View {
     public let model: CoverageViewModel
