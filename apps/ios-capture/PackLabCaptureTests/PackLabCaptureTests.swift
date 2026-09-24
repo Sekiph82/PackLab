@@ -1525,6 +1525,19 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(RingCoverageEvaluation(snapshot: model.snapshot(), policy: policy).isComplete)
     }
 
+    func testPL0107DetailPassRequiresCoverageQualityAndExplicitMetadata() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "neck", minimumElevation: 15, maximumElevation: 45)])
+        let policy = DetailPassPolicy(passID: .neck, minimumFramingFraction: 0.2, minimumSectorCount: 1)
+        var model = OrbitCoverageModel(configuration: configuration)
+        _ = model.observe(captureID: "neck", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0.4, z: -1).values, tracking: .normal))
+        let framing = FramingMetric(availability: .available, objectFraction: 0.25, bounds: nil, margins: ["left": 0.2], band: .acceptable, reasons: [])
+        let evaluation = DetailPassEvaluation(snapshot: model.snapshot(), framing: framing, policy: policy)
+        XCTAssertTrue(evaluation.isComplete)
+        XCTAssertEqual(evaluation.metadata.passID, .neck)
+        let unavailable = DetailPassEvaluation(snapshot: OrbitCoverageSnapshot(configuration: configuration, capturedSectors: [], missingSectors: [CoverageSector(ringID: "neck", azimuthIndex: 0)], duplicateCaptureIDs: [], invalidCaptureIDs: ["missing"], observations: []), framing: framing, policy: policy)
+        XCTAssertEqual(unavailable.metadata.evidenceStatus, "pose_evidence_unavailable")
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

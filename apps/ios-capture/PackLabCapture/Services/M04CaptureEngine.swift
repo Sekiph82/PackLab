@@ -748,6 +748,38 @@ public struct RingCoverageEvaluation: Codable, Sendable, Equatable {
     }
 }
 
+public enum CapturePassID: String, Codable, Sendable, Equatable, CaseIterable { case standard, shoulder, neck, closure, base }
+
+public struct CapturePassMetadata: Codable, Sendable, Equatable {
+    public let passID: CapturePassID
+    public let required: Bool
+    public let evidenceStatus: String
+    public init(passID: CapturePassID, required: Bool, evidenceStatus: String) { self.passID = passID; self.required = required; self.evidenceStatus = evidenceStatus }
+}
+
+public struct DetailPassPolicy: Codable, Sendable, Equatable {
+    public let passID: CapturePassID
+    public let minimumFramingFraction: Double
+    public let minimumSectorCount: Int
+    public let required: Bool
+    public init(passID: CapturePassID, minimumFramingFraction: Double = 0.12, minimumSectorCount: Int = 2, required: Bool = true) { self.passID = passID; self.minimumFramingFraction = max(0, min(1, minimumFramingFraction)); self.minimumSectorCount = max(0, minimumSectorCount); self.required = required }
+}
+
+public struct DetailPassEvaluation: Codable, Sendable, Equatable {
+    public let metadata: CapturePassMetadata
+    public let capturedSectorCount: Int
+    public let missingGuidance: [String]
+    public let isComplete: Bool
+    public init(snapshot: OrbitCoverageSnapshot, framing: FramingMetric, policy: DetailPassPolicy) {
+        let count = snapshot.capturedSectors.filter { $0.ringID == policy.passID.rawValue }.count
+        let framingOkay = framing.band == .acceptable && (framing.objectFraction ?? 0) >= policy.minimumFramingFraction
+        capturedSectorCount = count
+        missingGuidance = count < policy.minimumSectorCount ? ["Capture missing \(policy.passID.rawValue) detail sectors"] : (framingOkay ? [] : ["Move closer while keeping the supported main camera lens and safe margins"])
+        isComplete = policy.required && count >= policy.minimumSectorCount && framingOkay
+        metadata = CapturePassMetadata(passID: policy.passID, required: policy.required, evidenceStatus: isComplete ? "complete" : (snapshot.invalidCaptureIDs.isEmpty ? "incomplete" : "pose_evidence_unavailable"))
+    }
+}
+
 #if canImport(SwiftUI)
 public struct CoverageGridView: View {
     public let model: CoverageViewModel
