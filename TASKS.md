@@ -5,12 +5,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M03
-- Current Sprint: M03-BATCH-005 — Final remaining integration/evidence remediation
-- Current Task: M03-BATCH-005 — Remediate 16 remaining M03 children
+- Current Sprint: M03-BATCH-006 — Final camera-control evidence closure
+- Current Task: M03-BATCH-006 — Remediate PL-0073, PL-0074 and PL-0075
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CODEX_PROMPT_V04.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V04.md. Remediate exactly PL-0071, PL-0073, PL-0074, PL-0075, PL-0076, PL-0077, PL-0079, PL-0080, PL-0081, PL-0084, PL-0085, PL-0088, PL-0089, PL-0090, PL-0092, PL-0093 using their frozen V05 work orders. Preserve all 9 accepted M03 children, publish distinct implementation/log commits, then publish MASTER_REMEDIATION_CODEX_LOG_V04.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M04, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CODEX_PROMPT_V05.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V05.md. Preserve the 22 accepted M03 children, remediate only PL-0073, PL-0074 and PL-0075 using their frozen V06 work orders, publish distinct implementation/log commits, then publish MASTER_REMEDIATION_CODEX_LOG_V05.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M04, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V03.md — CHANGES_REQUIRED (9/25 M03 children accepted; 16 remain open)
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V04.md — CHANGES_REQUIRED (22/25 M03 children accepted; PL-0073, PL-0074 and PL-0075 remain open)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner explicitly authorized M03 execution/remediation without closing PL-0068 on 2026-09-23.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -167,35 +167,35 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - [x] **PL-0069** Integrate NextLevel preview into SwiftUI using a controlled UIKit bridge where required.
 - [x] **PL-0070** Enumerate iPhone 16 rear-camera devices and select the intended main lens deterministically.
-- [ ] **PL-0071** Implement high-resolution still-photo capture for reconstruction source images.
+- [x] **PL-0071** Implement high-resolution still-photo capture for reconstruction source images.
 - [x] **PL-0072** Preserve original capture metadata without destructive resizing or social-media style processing.
 - [ ] **PL-0073** Implement focus control with guided autofocus followed by optional focus lock.
 - [ ] **PL-0074** Implement exposure metering and optional exposure lock for consistent image sets.
 - [ ] **PL-0075** Implement white-balance stabilization/lock for texture consistency.
-- [ ] **PL-0076** Capture and persist camera metadata for every accepted still.
-- [ ] **PL-0077** Add camera-error recovery for interruption, permission denial and session restart.
+- [x] **PL-0076** Capture and persist camera metadata for every accepted still.
+- [x] **PL-0077** Add camera-error recovery for interruption, permission denial and session restart.
 - [x] **PL-0078** Add thermal/storage/battery warnings before and during long captures.
 
 ## Sprint M03-S02 - ARKit & motion tracking
 
-- [ ] **PL-0079** Create ARKit world-tracking session without relying on LiDAR.
-- [ ] **PL-0080** Record camera transform and tracking state aligned to capture timestamps.
-- [ ] **PL-0081** Record CoreMotion attitude/rotation-rate data with timestamp alignment.
+- [x] **PL-0079** Create ARKit world-tracking session without relying on LiDAR.
+- [x] **PL-0080** Record camera transform and tracking state aligned to capture timestamps.
+- [x] **PL-0081** Record CoreMotion attitude/rotation-rate data with timestamp alignment.
 - [x] **PL-0082** Define app-local coordinate frame and conversion into PackScan coordinates.
 - [x] **PL-0083** Detect AR tracking degradation and surface a user-visible warning.
-- [ ] **PL-0084** Implement capture-session reset/relocalization behavior.
-- [ ] **PL-0085** Create pose visualizer/debug overlay for development.
+- [x] **PL-0084** Implement capture-session reset/relocalization behavior.
+- [x] **PL-0085** Create pose visualizer/debug overlay for development.
 - [x] **PL-0086** Export pose diagnostics for Windows-side analysis.
 
 ## Sprint M03-S03 - Capture project lifecycle
 
 - [x] **PL-0087** Implement New Scan wizard: package name, package type, capture mode and optional notes.
-- [ ] **PL-0088** Create scan-session storage with crash-safe incremental writes.
-- [ ] **PL-0089** Add photo gallery for accepted frames with delete/retake controls.
-- [ ] **PL-0090** Add session resume after app termination.
+- [x] **PL-0088** Create scan-session storage with crash-safe incremental writes.
+- [x] **PL-0089** Add photo gallery for accepted frames with delete/retake controls.
+- [x] **PL-0090** Add session resume after app termination.
 - [x] **PL-0091** Add session finalization that validates minimum data before creating .packscan.
-- [ ] **PL-0092** Add local scan history with preview, date, package type and export state.
-- [ ] **PL-0093** Add safe deletion requiring confirmation and cleaning all associated data.
+- [x] **PL-0092** Add local scan history with preview, date, package type and export state.
+- [x] **PL-0093** Add safe deletion requiring confirmation and cleaning all associated data.
 
 ---
 
