@@ -1621,6 +1621,14 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PackagingPresetCatalog.preset(for: .asymmetricJerrycan).coverage.orbit.azimuthBinCount, 12)
     }
 
+    func testPL0115ClosurePresetUsesMainLensInvariantAndTighterFraming() {
+        let preset = PackagingPresetCatalog.preset(for: .closureCap)
+        XCTAssertEqual(preset.supportedLensRule, "selected_rear_main_wide_only")
+        XCTAssertEqual(preset.coverage.orbit.rings.first?.id, "closure")
+        XCTAssertGreaterThan(preset.quality.framing.minimumObjectFraction, PackagingPresetCatalog.preset(for: .matteHDPE).quality.framing.minimumObjectFraction)
+        XCTAssertTrue(preset.preparationGuidance.contains { $0.localizedCaseInsensitiveContains("working distance") })
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
