@@ -64,6 +64,78 @@ public struct PreviewLifecyclePolicy: Sendable, Equatable {
     }
 }
 
+/// Platform-neutral driver used by the UIKit bridge.  Keeping the lifecycle
+/// contract here makes the real controller testable without manufacturing an
+/// AVCaptureSession on a developer workstation.
+@MainActor
+public protocol PreviewSessionDriver: AnyObject {
+    var isAttached: Bool { get }
+    var isRunning: Bool { get }
+    func attach() throws
+    func detach()
+    func start() throws
+    func stop()
+}
+
+@MainActor
+public final class PreviewBridgeController {
+    private let driver: any PreviewSessionDriver
+    private var lifecycle = PreviewLifecyclePolicy()
+    public private(set) var state: PreviewSurfaceState = .loading
+    public var onStateChange: ((PreviewSurfaceState) -> Void)?
+
+    public init(driver: any PreviewSessionDriver) { self.driver = driver }
+
+    public func appear(authorization: CameraAuthorizationStatus) {
+        switch authorization {
+        case .denied:
+            stopAndDetach(); publish(.denied)
+        case .restricted:
+            stopAndDetach(); publish(.restricted)
+        case .unknown:
+            publish(.loading)
+        case .authorized:
+            startAuthorized()
+        }
+    }
+
+    public func disappear() {
+        stopAndDetach()
+        publish(.loading)
+    }
+
+    public func restart(authorization: CameraAuthorizationStatus) {
+        stopAndDetach()
+        guard authorization == .authorized else { appear(authorization: authorization); return }
+        startAuthorized()
+    }
+
+    private func startAuthorized() {
+        guard lifecycle.beginAuthorizedStart(.authorized) else { return }
+        do {
+            if lifecycle.attachIfNeeded() { try driver.attach() }
+            try driver.start()
+            lifecycle.markStartedAfterSuccessfulStart()
+            publish(.running)
+        } catch {
+            _ = lifecycle.stopIfNeeded()
+            driver.stop()
+            if lifecycle.detachIfNeeded() { driver.detach() }
+            publish(.error((error as NSError).localizedDescription))
+        }
+    }
+
+    private func stopAndDetach() {
+        if lifecycle.stopIfNeeded() { driver.stop() }
+        if lifecycle.detachIfNeeded() { driver.detach() }
+    }
+
+    private func publish(_ next: PreviewSurfaceState) {
+        state = next
+        onStateChange?(next)
+    }
+}
+
 public enum PreviewAuthorizationResolver {
     public static func state(for status: CameraAuthorizationStatus) -> PreviewSurfaceState {
         switch status {
@@ -193,6 +265,86 @@ public protocol StillPhotoBackend: Sendable {
     func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions)
 }
 
+public protocol TimestampedStillPhotoBackend: StillPhotoBackend {
+    func lastCaptureMonotonicTimestamp() async -> TimeInterval?
+}
+
+@MainActor
+public protocol StillPhotoDriverDelegate: AnyObject {
+    func stillPhotoDriver(_ driver: any StillPhotoDriver, didFinish bytes: Data, dimensions: CaptureDimensions)
+    func stillPhotoDriverDidFinishWithoutData(_ driver: any StillPhotoDriver)
+}
+
+@MainActor
+public protocol StillPhotoDriver: AnyObject {
+    var canCapturePhoto: Bool { get }
+    var delegate: (any StillPhotoDriverDelegate)? { get set }
+    func capturePhoto()
+    func cancelPhotoCapture()
+}
+
+/// The exact-once continuation boundary shared by the production NextLevel
+/// adapter and injected driver tests.  The driver is deliberately tiny: the
+/// Apple framework remains an outer adapter while this object owns admission,
+/// cancellation, duplicate callbacks and lens identity checks.
+@MainActor
+public final class StillPhotoAdapterCore: NSObject, TimestampedStillPhotoBackend, StillPhotoDriverDelegate {
+    private let driver: any StillPhotoDriver
+    public let selectedLens: CameraLensIdentity
+    private let activeLensIdentifier: () -> String?
+    private var continuation: CheckedContinuation<(bytes: Data, dimensions: CaptureDimensions), Error>?
+    private var lastCaptureTimestamp: TimeInterval?
+
+    public init(driver: any StillPhotoDriver, selectedLens: CameraLensIdentity, activeLensIdentifier: @escaping () -> String?) {
+        self.driver = driver
+        self.selectedLens = selectedLens
+        self.activeLensIdentifier = activeLensIdentifier
+        super.init()
+        driver.delegate = self
+    }
+
+    public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
+        guard continuation == nil else { throw CameraServiceError.failed("capture_in_flight") }
+        guard activeLensIdentifier() == selectedLens.identifier else { throw CameraServiceError.failed("selected_lens_mismatch") }
+        guard driver.canCapturePhoto else { throw CameraServiceError.unavailable }
+        lastCaptureTimestamp = nil
+        return try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(bytes: Data, dimensions: CaptureDimensions), Error>) in
+                self.continuation = continuation
+                self.driver.capturePhoto()
+            }
+        }, onCancel: { [weak self] in
+            Task { @MainActor in self?.cancel(reason: "capture_cancelled") }
+        })
+    }
+
+    public func cancel(reason: String = "session_stopped") {
+        driver.cancelPhotoCapture()
+        finish(.failure(CameraServiceError.failed(reason)))
+    }
+
+    public func lastCaptureMonotonicTimestamp() async -> TimeInterval? { lastCaptureTimestamp }
+
+    public func stillPhotoDriver(_ driver: any StillPhotoDriver, didFinish bytes: Data, dimensions: CaptureDimensions) {
+        guard !bytes.isEmpty, dimensions.width > 0, dimensions.height > 0 else {
+            finish(.failure(CameraServiceError.failed("photo_data_or_dimensions_missing")))
+            return
+        }
+        lastCaptureTimestamp = ProcessInfo.processInfo.systemUptime
+        finish(.success((bytes: bytes, dimensions: dimensions)))
+    }
+
+    public func stillPhotoDriverDidFinishWithoutData(_ driver: any StillPhotoDriver) {
+        finish(.failure(CameraServiceError.failed("photo_capture_completed_without_data")))
+    }
+
+    private func finish(_ result: Result<(bytes: Data, dimensions: CaptureDimensions), Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        continuation.resume(with: result)
+    }
+}
+
 public actor HealthGatedStillPhotoBackend: StillPhotoBackend {
     private let backend: any StillPhotoBackend
     private var admission = CaptureAdmissionController()
@@ -202,6 +354,20 @@ public actor HealthGatedStillPhotoBackend: StillPhotoBackend {
         guard admission.allowsCapture else { throw CameraServiceError.failed(admission.rejectReason() ?? "capture_blocked") }
         return try await backend.requestOriginalStill()
     }
+}
+
+/// The capture-runtime-owned admission boundary.  DeviceHealthMonitor updates
+/// this same instance; callers cannot bypass the hard-stop by invoking the
+/// underlying photo backend directly.
+public actor AdmissionControlledStillCaptureService {
+    private let service: HighResolutionStillCaptureService
+    private let gatedBackend: HealthGatedStillPhotoBackend
+    public init(backend: any StillPhotoBackend) {
+        gatedBackend = HealthGatedStillPhotoBackend(backend: backend)
+        service = HighResolutionStillCaptureService(backend: gatedBackend)
+    }
+    public func updateAdmission(_ admission: CaptureAdmissionController) async { await gatedBackend.update(admission) }
+    public func capture(now: Date = Date(), captureID: String = UUID().uuidString) async -> StillCaptureResult { await service.capture(now: now, captureID: captureID) }
 }
 
 public actor HighResolutionStillCaptureService {
@@ -217,8 +383,31 @@ public actor HighResolutionStillCaptureService {
             guard !source.bytes.isEmpty, source.dimensions.width > 0, source.dimensions.height > 0 else {
                 return .rejected("invalid_source")
             }
-            return .accepted(AcceptedStill(captureID: captureID, sourceBytes: source.bytes, dimensions: source.dimensions, capturedAt: now, monotonicTimestamp: ProcessInfo.processInfo.systemUptime))
+            let timestamp: TimeInterval
+            if let timestamped = backend as? any TimestampedStillPhotoBackend { timestamp = await timestamped.lastCaptureMonotonicTimestamp() ?? ProcessInfo.processInfo.systemUptime }
+            else { timestamp = ProcessInfo.processInfo.systemUptime }
+            return .accepted(AcceptedStill(captureID: captureID, sourceBytes: source.bytes, dimensions: source.dimensions, capturedAt: now, monotonicTimestamp: timestamp))
         } catch { return .rejected("capture_failed") }
+    }
+}
+
+/// Production accepted-still boundary.  The source record is derived from
+/// the captured bytes before the immutable source is persisted, so metadata
+/// cannot be supplied by a nearby test helper or caller-side placeholder.
+public actor AcceptedStillCapturePipeline {
+    private let service: HighResolutionStillCaptureService
+    private let sourceStore: OriginalSourceStore
+    public init(backend: any StillPhotoBackend, sourceRoot: URL) {
+        service = HighResolutionStillCaptureService(backend: backend)
+        sourceStore = OriginalSourceStore(root: sourceRoot)
+    }
+
+    public func captureAndPersist(captureID: String, filename: String, orientation: String = "unknown", now: Date = Date()) async throws -> (still: AcceptedStill, source: OriginalSourceRecord) {
+        let result = await service.capture(now: now, captureID: captureID)
+        guard case .accepted(let still) = result else { throw CameraServiceError.failed("capture_rejected") }
+        let source = try OriginalSourceRecord.fromSource(captureID: still.captureID, filename: filename, dimensions: still.dimensions, orientation: orientation, bytes: still.sourceBytes)
+        _ = try await sourceStore.persist(record: source, bytes: still.sourceBytes)
+        return (still, source)
     }
 }
 
@@ -246,6 +435,7 @@ public struct OriginalSourceRecord: Codable, Sendable, Equatable {
     }
 
     public static func fromSource(captureID: String, filename: String, dimensions: CaptureDimensions, orientation: String, bytes: Data) throws -> OriginalSourceRecord {
+        if let decoded = SourceMetadataExtractor.decodedDimensions(from: bytes), decoded != dimensions { throw SourceMetadataError.dimensionMismatch }
         OriginalSourceRecord(captureID: captureID, filename: filename, dimensions: dimensions, orientation: orientation, sha256: SourceIntegrity.digest(bytes), metadataBytes: try SourceMetadataExtractor.extract(from: bytes))
     }
 }
@@ -456,7 +646,10 @@ public struct PackScanPhotoMetadataWire: Codable, Sendable, Equatable {
               !metadata.originalFilename.isEmpty, !metadata.originalFilename.contains("/"), !metadata.originalFilename.contains("\\") else { throw PhotoMetadataBindingError.schemaViolation }
         let isoValue: Int?
         if let raw = metadata.iso.value {
-            guard raw.isFinite, raw.rounded() == raw, raw >= 1, raw <= 1_000_000, source(metadata.iso.source) != nil else { throw PhotoMetadataBindingError.schemaViolation }
+            guard metadata.iso.status == .available || metadata.iso.status == .estimated,
+                  raw.isFinite, raw.rounded() == raw, raw >= 1, raw <= 1_000_000,
+                  metadata.iso.unit == nil || metadata.iso.unit == "iso",
+                  source(metadata.iso.source) != nil else { throw PhotoMetadataBindingError.schemaViolation }
             isoValue = Int(raw)
         } else {
             guard metadata.iso.status == .unavailable || metadata.iso.status == .notRecorded else { throw PhotoMetadataBindingError.schemaViolation }
@@ -833,6 +1026,20 @@ public struct CameraCaptureControlModel: Sendable, Equatable {
     public mutating func message(_ value: String?) { state = CameraCaptureControlState(lens: state.lens, focus: state.focus, exposure: state.exposure, whiteBalance: state.whiteBalance, message: value) }
 }
 
+/// Runtime sink shared by physical AVFoundation controls and the SwiftUI
+/// capture view model.  Physical adapters publish observed state here; the
+/// view never infers focus/exposure/WB from a button tap.
+@MainActor
+public final class CameraControlRuntimeBridge {
+    public private(set) var state: CameraCaptureControlState
+    public var onStateChange: ((CameraCaptureControlState) -> Void)?
+    public init(lens: CameraLensIdentity) { state = CameraCaptureControlState(lens: lens) }
+    public func setFocus(_ value: FocusState) { state = CameraCaptureControlState(lens: state.lens, focus: value, exposure: state.exposure, whiteBalance: state.whiteBalance, message: state.message); onStateChange?(state) }
+    public func setExposure(_ value: ExposureState) { state = CameraCaptureControlState(lens: state.lens, focus: state.focus, exposure: value, whiteBalance: state.whiteBalance, message: state.message); onStateChange?(state) }
+    public func setWhiteBalance(_ value: WhiteBalanceState) { state = CameraCaptureControlState(lens: state.lens, focus: state.focus, exposure: state.exposure, whiteBalance: value, message: state.message); onStateChange?(state) }
+    public func setMessage(_ value: String?) { state = CameraCaptureControlState(lens: state.lens, focus: state.focus, exposure: state.exposure, whiteBalance: state.whiteBalance, message: value); onStateChange?(state) }
+}
+
 public enum ExposureState: String, Sendable, Codable, Equatable { case unavailable, metering, locked, failed }
 public struct ExposureCapabilities: Sendable, Equatable { public let minBias: Float; public let maxBias: Float; public let lock: Bool; public init(minBias: Float, maxBias: Float, lock: Bool) { self.minBias = minBias; self.maxBias = maxBias; self.lock = lock } }
 
@@ -977,6 +1184,57 @@ public final class CameraDeviceConfigurationCoordinator {
     }
 }
 
+#if canImport(CoreGraphics)
+@available(iOS 17.0, *)
+@MainActor
+public final class AVFoundationCameraControlComposition {
+    public let coordinator: CameraDeviceConfigurationCoordinator
+    public let controls: CameraControlRuntimeBridge
+    public init(device: AVCaptureDevice, selectedLens: CameraLensIdentity) {
+        coordinator = CameraDeviceConfigurationCoordinator(device: device, selectedLens: selectedLens)
+        controls = CameraControlRuntimeBridge(lens: selectedLens)
+    }
+    public func configureFocus() {
+        do { controls.setFocus(try AVFoundationFocusAdapter.configure(device: coordinator.device, point: nil, coordinator: coordinator)) }
+        catch { controls.setFocus(.failed); controls.setMessage("Focus unavailable") }
+    }
+    public func observeFocus() {
+        do { controls.setFocus(try AVFoundationFocusAdapter.observe(device: coordinator.device, coordinator: coordinator)) }
+        catch { controls.setFocus(.failed); controls.setMessage("Focus unavailable") }
+    }
+    public func lockFocus() {
+        do { controls.setFocus(try AVFoundationFocusAdapter.lock(device: coordinator.device, coordinator: coordinator)) }
+        catch { controls.setFocus(.failed); controls.setMessage("Focus is still stabilizing") }
+    }
+    public func configureExposure(bias: Float) {
+        do { controls.setExposure(try AVFoundationExposureAdapter.configure(device: coordinator.device, bias: bias, coordinator: coordinator)) }
+        catch { controls.setExposure(.failed); controls.setMessage("Exposure unavailable") }
+    }
+    public func lockExposure() {
+        do { controls.setExposure(try AVFoundationExposureAdapter.lock(device: coordinator.device, coordinator: coordinator)) }
+        catch { controls.setExposure(.failed); controls.setMessage("Exposure unavailable") }
+    }
+    public func configureWhiteBalance() {
+        do { controls.setWhiteBalance(try AVFoundationWhiteBalanceAdapter.configure(device: coordinator.device, coordinator: coordinator)) }
+        catch { controls.setWhiteBalance(.failed); controls.setMessage("White balance unavailable") }
+    }
+    public func observeWhiteBalance() {
+        do { controls.setWhiteBalance(try AVFoundationWhiteBalanceAdapter.observe(device: coordinator.device, coordinator: coordinator)) }
+        catch { controls.setWhiteBalance(.failed); controls.setMessage("White balance unavailable") }
+    }
+    public func lockWhiteBalance() {
+        do { controls.setWhiteBalance(try AVFoundationWhiteBalanceAdapter.lock(device: coordinator.device, coordinator: coordinator)) }
+        catch { controls.setWhiteBalance(.failed); controls.setMessage("White balance is still stabilizing") }
+    }
+    public func acceptedMetadata(_ base: PhotoCaptureMetadata) throws -> PhotoCaptureMetadata {
+        let exposure = try ExposureCaptureBinding(reading: AVFoundationExposureAdapter.observedReading(device: coordinator.device, coordinator: coordinator), state: .locked)
+        guard let temperature = AVFoundationWhiteBalanceAdapter.observedTemperatureKelvin(device: coordinator.device) else { throw WhiteBalanceCaptureBindingError.invalidReading }
+        let whiteBalance = try WhiteBalanceCaptureBinding(reading: temperature, state: .locked)
+        return AcceptedPhotoMetadataFactory.withCaptureReadings(base, exposure: exposure, whiteBalance: whiteBalance)
+    }
+}
+#endif
+
 @available(iOS 17.0, *)
 public enum AVFoundationExposureAdapter {
     public static func configure(device: AVCaptureDevice, bias: Float, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> ExposureState {
@@ -1062,50 +1320,16 @@ import AVFoundation
 #endif
 
 @MainActor
-public final class NextLevelStillCaptureAdapter: NSObject, StillPhotoBackend, NextLevelPhotoDelegate {
+private final class NextLevelStillPhotoDriver: NSObject, StillPhotoDriver, NextLevelPhotoDelegate {
     private let nextLevel: NextLevel
-    public let selectedLens: CameraLensIdentity
-    private let activeLensIdentifier: () -> String?
-    private var continuation: CheckedContinuation<(bytes: Data, dimensions: CaptureDimensions), Error>?
-    public init(nextLevel: NextLevel, selectedLens: CameraLensIdentity, activeLensIdentifier: @escaping () -> String?) {
+    weak var delegate: (any StillPhotoDriverDelegate)?
+    var canCapturePhoto: Bool { nextLevel.canCapturePhoto }
+    init(nextLevel: NextLevel) {
         self.nextLevel = nextLevel
-        self.selectedLens = selectedLens
-        self.activeLensIdentifier = activeLensIdentifier
+        super.init()
     }
-
-    public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
-        guard continuation == nil else { throw CameraServiceError.failed("capture_in_flight") }
-        guard activeLensIdentifier() == selectedLens.identifier else { throw CameraServiceError.failed("selected_lens_mismatch") }
-        nextLevel.photoConfiguration.isHighResolutionEnabled = true
-        nextLevel.photoDelegate = self
-        return try await withTaskCancellationHandler(operation: {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(bytes: Data, dimensions: CaptureDimensions), Error>) in
-                self.continuation = continuation
-                guard self.nextLevel.canCapturePhoto else {
-                    self.finish(.failure(CameraServiceError.unavailable))
-                    return
-                }
-                self.nextLevel.capturePhoto()
-            }
-        }, onCancel: {
-            Task { @MainActor in self.finish(.failure(CameraServiceError.failed("capture_cancelled"))) }
-        })
-    }
-
-    public func sessionDidStop() { finish(.failure(CameraServiceError.failed("session_stopped"))) }
-
-    #if canImport(AVFoundation)
-    public func bind(to recoveryOwner: CameraRecoveryOwner) {
-        recoveryOwner.setInFlightCancellation { [weak self] in self?.sessionDidStop() }
-    }
-    #endif
-
-    private func finish(_ result: Result<(bytes: Data, dimensions: CaptureDimensions), Error>) {
-        guard let continuation else { return }
-        self.continuation = nil
-        if nextLevel.photoDelegate === self { nextLevel.photoDelegate = nil }
-        continuation.resume(with: result)
-    }
+    func capturePhoto() { nextLevel.photoConfiguration.isHighResolutionEnabled = true; nextLevel.photoDelegate = self; nextLevel.capturePhoto() }
+    func cancelPhotoCapture() { if nextLevel.photoDelegate === self { nextLevel.photoDelegate = nil }; nextLevel.stop() }
 
     public func nextLevel(_ nextLevel: NextLevel, output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, photoConfiguration: NextLevelPhotoConfiguration) {}
     public func nextLevel(_ nextLevel: NextLevel, output: AVCapturePhotoOutput, willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings, photoConfiguration: NextLevelPhotoConfiguration) {}
@@ -1113,19 +1337,51 @@ public final class NextLevelStillCaptureAdapter: NSObject, StillPhotoBackend, Ne
 
     public func nextLevel(_ nextLevel: NextLevel, didFinishProcessingPhoto photo: AVCapturePhoto, photoDict: [String: Any], photoConfiguration: NextLevelPhotoConfiguration) {
         guard let bytes = photo.fileDataRepresentation(), !bytes.isEmpty else {
-            finish(.failure(CameraServiceError.failed("photo_data_missing")))
+            delegate?.stillPhotoDriverDidFinishWithoutData(self)
             return
         }
         let dimensions = photo.resolvedSettings.photoDimensions
         guard dimensions.width > 0, dimensions.height > 0 else {
-            finish(.failure(CameraServiceError.failed("photo_dimensions_missing")))
+            delegate?.stillPhotoDriverDidFinishWithoutData(self)
             return
         }
-        finish(.success((bytes: bytes, dimensions: CaptureDimensions(width: Int(dimensions.width), height: Int(dimensions.height)))))
+        delegate?.stillPhotoDriver(self, didFinish: bytes, dimensions: CaptureDimensions(width: Int(dimensions.width), height: Int(dimensions.height)))
     }
 
     public func nextLevelDidCompletePhotoCapture(_ nextLevel: NextLevel) {
-        if continuation != nil { finish(.failure(CameraServiceError.failed("photo_capture_completed_without_data"))) }
+        delegate?.stillPhotoDriverDidFinishWithoutData(self)
+    }
+}
+
+@MainActor
+public final class NextLevelStillCaptureAdapter: NSObject, TimestampedStillPhotoBackend {
+    private let driver: NextLevelStillPhotoDriver
+    private let core: StillPhotoAdapterCore
+    public let selectedLens: CameraLensIdentity
+    public init(nextLevel: NextLevel, selectedLens: CameraLensIdentity, activeLensIdentifier: @escaping () -> String?) {
+        let driver = NextLevelStillPhotoDriver(nextLevel: nextLevel)
+        self.driver = driver
+        self.selectedLens = selectedLens
+        self.core = StillPhotoAdapterCore(driver: driver, selectedLens: selectedLens, activeLensIdentifier: activeLensIdentifier)
+        super.init()
+    }
+    public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { try await core.requestOriginalStill() }
+    public func lastCaptureMonotonicTimestamp() async -> TimeInterval? { await core.lastCaptureMonotonicTimestamp() }
+    public func sessionDidStop() { core.cancel() }
+    #if canImport(AVFoundation)
+    public func bind(to recoveryOwner: CameraRecoveryOwner) { recoveryOwner.setInFlightCancellation { [weak self] in self?.sessionDidStop() } }
+    #endif
+}
+
+@MainActor
+public final class NextLevelStillCaptureComposition {
+    public let selectedLens: CameraLensIdentity
+    public let adapter: NextLevelStillCaptureAdapter
+    public init(nextLevel: NextLevel, candidates: [CameraDeviceDescriptor], activeLensIdentifier: @escaping () -> String?, recoveryOwner: CameraRecoveryOwner) throws {
+        guard case .selected(let lens) = CameraDeviceSelector.selectMainRearWide(from: candidates) else { throw CameraServiceError.unavailable }
+        selectedLens = lens
+        adapter = NextLevelStillCaptureAdapter(nextLevel: nextLevel, selectedLens: lens, activeLensIdentifier: activeLensIdentifier)
+        adapter.bind(to: recoveryOwner)
     }
 }
 #endif
@@ -1135,17 +1391,34 @@ import AVFoundation
 import NextLevel
 import UIKit
 
+@MainActor
+private final class NextLevelPreviewDriver: PreviewSessionDriver {
+    private let nextLevel: NextLevel
+    var attachHandler: (() -> Void)?
+    var detachHandler: (() -> Void)?
+    private(set) var isAttached = false
+    private(set) var isRunning = false
+
+    init(nextLevel: NextLevel) { self.nextLevel = nextLevel }
+    func attach() throws { attachHandler?(); isAttached = true }
+    func detach() { detachHandler?(); isAttached = false }
+    func start() throws { try nextLevel.start(); isRunning = true }
+    func stop() { nextLevel.stop(); isRunning = false }
+}
+
 /// UIKit owns the actual NextLevel preview layer; SwiftUI only presents it.
 @MainActor
 public final class NextLevelPreviewViewController: UIViewController {
     private let nextLevel: NextLevel
     private let statusLabel = UILabel()
-    private var lifecycle = PreviewLifecyclePolicy()
+    private let previewDriver: NextLevelPreviewDriver
+    private lazy var bridge = PreviewBridgeController(driver: previewDriver)
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private let recoveryOwner = CameraRecoveryOwner()
 
     public init(nextLevel: NextLevel = .shared) {
         self.nextLevel = nextLevel
+        self.previewDriver = NextLevelPreviewDriver(nextLevel: nextLevel)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -1166,30 +1439,36 @@ public final class NextLevelPreviewViewController: UIViewController {
             statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             statusLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor)
         ])
-        attachPreviewIfPossible()
+        previewDriver.attachHandler = { [weak self] in self?.attachPreviewIfPossible() }
+        previewDriver.detachHandler = { [weak self] in self?.detachPreview() }
+        bridge.onStateChange = { [weak self] state in self?.show(state) }
+        recoveryOwner.onStateChange = { [weak self] state, message in
+            guard let self else { return }
+            if message.isEmpty { self.show(state == .running ? .running : .loading) }
+            else { self.show(.error(message)) }
+        }
     }
 
     public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if previewLayer == nil { attachPreviewIfPossible() }
         if let session = previewLayer?.session { recoveryOwner.register(session: session) }
         recoveryOwner.setSessionRestart { [weak self] in self?.restartAuthorizedPreview() }
         let authorization = AVCaptureDevice.authorizationStatus(for: .video)
         switch authorization {
         case .denied:
             recoveryOwner.handle(.permission(.denied))
-            statusLabel.isHidden = false; statusLabel.text = "Camera permission is denied. Enable it in Settings."
+            bridge.appear(authorization: .denied)
             return
         case .restricted:
             recoveryOwner.handle(.permission(.restricted))
-            statusLabel.isHidden = false; statusLabel.text = "Camera access is restricted on this device."
+            bridge.appear(authorization: .restricted)
             return
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 Task { @MainActor in
                     guard let self else { return }
                     if granted { self.recoveryOwner.handle(.permission(.authorized)); self.startAuthorizedPreview() }
-                    else { self.recoveryOwner.handle(.permission(.denied)); self.show(.denied) }
+                    else { self.recoveryOwner.handle(.permission(.denied)); self.bridge.appear(authorization: .denied) }
                 }
             }
         case .authorized:
@@ -1202,61 +1481,51 @@ public final class NextLevelPreviewViewController: UIViewController {
 
     public override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        _ = lifecycle.stopIfNeeded()
-        nextLevel.stop()
+        bridge.disappear()
         recoveryOwner.handle(.stopped)
         recoveryOwner.unregister()
-        detachPreview()
     }
 
     deinit { nextLevel.stop() }
 
     private func attachPreviewIfPossible() {
-        lifecycle.attachIfNeeded()
+        guard previewLayer == nil else { return }
         let layer = nextLevel.previewLayer
         layer.videoGravity = .resizeAspectFill
         layer.frame = view.bounds
         view.layer.insertSublayer(layer, at: 0)
         previewLayer = layer
-        statusLabel.isHidden = true
     }
 
     private func detachPreview() {
         previewLayer?.removeFromSuperlayer()
         previewLayer = nil
-        lifecycle.detachIfNeeded()
     }
 
     private func startAuthorizedPreview() {
-        guard lifecycle.beginAuthorizedStart(.authorized) else { return }
-        do {
-            try nextLevel.start()
-            lifecycle.markStartedAfterSuccessfulStart()
-            recoveryOwner.handle(.started)
-            statusLabel.isHidden = true
-        } catch {
-            _ = lifecycle.stopIfNeeded()
-            recoveryOwner.handle(.runtimeError)
-            show(.error("Camera failed to start. Try again."))
-        }
+        bridge.appear(authorization: .authorized)
+        if bridge.state == .running { if let session = previewLayer?.session { recoveryOwner.register(session: session) }; recoveryOwner.handle(.started) }
+        else if case .error = bridge.state { recoveryOwner.handle(.runtimeError) }
     }
 
     private func restartAuthorizedPreview() {
-        guard AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { recoveryOwner.handle(.permission(.denied)); return }
-        nextLevel.stop()
-        do { try nextLevel.start(); recoveryOwner.handle(.restartSucceeded) }
-        catch { recoveryOwner.handle(.restartFailed); show(.error("Camera failed to restart. Try again.")) }
+        let authorization = AVCaptureDevice.authorizationStatus(for: .video) == .authorized ? CameraAuthorizationStatus.authorized : .denied
+        bridge.restart(authorization: authorization)
+        if bridge.state == .running { recoveryOwner.handle(.restartSucceeded) } else { recoveryOwner.handle(.restartFailed) }
     }
 
     private func show(_ state: PreviewSurfaceState) {
-        statusLabel.isHidden = false
         switch state {
+        case .running:
+            statusLabel.isHidden = true
+        case .loading:
+            statusLabel.isHidden = false; statusLabel.text = "Preparing camera…"
         case .denied: statusLabel.text = "Camera permission is denied. Enable it in Settings."
         case .restricted: statusLabel.text = "Camera access is restricted on this device."
         case .unavailable, .simulatorUnavailable: statusLabel.text = "Camera is unavailable on this device."
         case .error(let message): statusLabel.text = message
-        default: statusLabel.text = "Camera is unavailable."
         }
+        if state != .running { statusLabel.isHidden = false }
     }
 }
 

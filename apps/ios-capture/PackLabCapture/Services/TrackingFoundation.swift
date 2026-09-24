@@ -138,6 +138,21 @@ public enum MotionAligner {
     }
 }
 
+public enum MotionCaptureBinder {
+    public static func bind(captureID: String, timestamp: TimeInterval, records: [MotionSampleRecord], tolerance: TimeInterval = 0.1) -> MotionCaptureBinding {
+        var buffer = MotionBuffer(capacity: max(1, records.count))
+        records.forEach { buffer.append($0) }
+        return MotionAligner.bind(captureID: captureID, timestamp: timestamp, buffer: buffer, tolerance: tolerance)
+    }
+}
+
+public enum AcceptedStillEvidenceBinder {
+    public static func bind(still: AcceptedStill, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil, tolerance: TimeInterval = 0.1) -> (pose: PoseCaptureBinding?, motion: MotionCaptureBinding?) {
+        guard let timestamp = still.monotonicTimestamp ?? bridge?.monotonic(for: still.capturedAt) else { return (nil, nil) }
+        return (poses.bind(captureID: still.captureID, timestamp: timestamp, tolerance: tolerance), MotionAligner.bind(captureID: still.captureID, timestamp: timestamp, buffer: motion, tolerance: tolerance))
+    }
+}
+
 /// App-local and PackScan frames share a right-handed metre basis: X right,
 /// Y up, camera-forward is -Z. Matrices are 4x4 row-major values and world
 /// origin is the AR session origin. Image pixels are deliberately excluded.
@@ -363,7 +378,10 @@ public final class CoreMotionController {
     private let service: CoreMotionMotionService
     private let capacity: Int
     public private(set) var buffer: MotionBuffer
-    public init(capacity: Int = 256) { self.capacity = max(1, capacity); service = CoreMotionMotionService(); buffer = MotionBuffer(capacity: capacity) }
+    /// The service is injected from the app composition.  This controller is
+    /// only a view-facing projection and can never allocate a second
+    /// CMMotionManager pipeline.
+    public init(service: CoreMotionMotionService, capacity: Int = 256) { self.capacity = max(1, capacity); self.service = service; buffer = MotionBuffer(capacity: capacity) }
     public func start() {
         Task { await service.start(); buffer = MotionBuffer(capacity: capacity); for record in await service.records() { buffer.append(record) } }
     }

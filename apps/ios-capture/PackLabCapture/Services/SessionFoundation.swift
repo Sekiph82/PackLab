@@ -55,7 +55,7 @@ public struct SessionStorageLayout: Sendable, Equatable {
 
 public enum SessionStorageError: Error, Sendable, Equatable { case invalidID, duplicateID, interruptedWrite, missingRecord }
 
-public enum SessionTransactionStage: String, Codable, Sendable, Equatable { case prepared, sourceStaged, recordStaged, stateStaged, committed }
+public enum SessionTransactionStage: String, Codable, Sendable, Equatable { case prepared, sourceStaged, recordStaged, stateStaged, sourceCommitted, recordCommitted, stateCommitted, committed }
 public struct SessionTransactionMarker: Codable, Sendable, Equatable {
     public let captureID: String
     public let sourceFilename: String
@@ -70,7 +70,9 @@ public struct AcceptedCaptureRecord: Codable, Sendable, Equatable {
     public let sourceFilename: String
     public let metadataFilename: String
     public let acceptedAt: Date
-    public init(captureID: String, sequence: Int, sourceFilename: String, metadataFilename: String, acceptedAt: Date = Date()) { self.captureID = captureID; self.sequence = sequence; self.sourceFilename = sourceFilename; self.metadataFilename = metadataFilename; self.acceptedAt = acceptedAt }
+    public let poseBinding: PoseCaptureBinding?
+    public let motionBinding: MotionCaptureBinding?
+    public init(captureID: String, sequence: Int, sourceFilename: String, metadataFilename: String, acceptedAt: Date = Date(), poseBinding: PoseCaptureBinding? = nil, motionBinding: MotionCaptureBinding? = nil) { self.captureID = captureID; self.sequence = sequence; self.sourceFilename = sourceFilename; self.metadataFilename = metadataFilename; self.acceptedAt = acceptedAt; self.poseBinding = poseBinding; self.motionBinding = motionBinding }
 }
 
 public enum SessionReopenDisposition: Sendable, Equatable { case resumable(PersistedSessionState), blocked(String) }
@@ -78,7 +80,8 @@ public enum SessionReopenDisposition: Sendable, Equatable { case resumable(Persi
 public actor ScanSessionStore {
     private let layout: SessionStorageLayout
     private let fileManager: FileManager
-    public init(layout: SessionStorageLayout, fileManager: FileManager = .default) { self.layout = layout; self.fileManager = fileManager }
+    private let failureInjector: (@Sendable (String) -> Bool)?
+    public init(layout: SessionStorageLayout, fileManager: FileManager = .default, failureInjector: (@Sendable (String) -> Bool)? = nil) { self.layout = layout; self.fileManager = fileManager; self.failureInjector = failureInjector }
     public func create(_ draft: NewScanDraft) throws {
         guard draft.sessionID == layout.sessionID, validID(draft.sessionID) else { throw SessionStorageError.invalidID }
         guard !fileManager.fileExists(atPath: layout.sessionRoot.path) else { throw SessionStorageError.duplicateID }
@@ -110,19 +113,24 @@ public actor ScanSessionStore {
         let sourceStage = transaction.appendingPathComponent(sourceName)
         let recordStage = transaction.appendingPathComponent(recordName)
         let stateStage = transaction.appendingPathComponent("state.json")
+        let previousState = transaction.appendingPathComponent("previous-state.json")
         let markerURL = transaction.appendingPathComponent("marker.json")
         do {
+            try perform("transaction.prepare", { try Data(contentsOf: layout.state).write(to: previousState, options: .atomic) })
             try writeMarker(SessionTransactionMarker(captureID: record.captureID, sourceFilename: sourceName, recordFilename: recordName, stage: .prepared), to: markerURL)
-            try source.write(to: sourceStage, options: .atomic)
+            try perform("transaction.sourceStage", { try source.write(to: sourceStage, options: .atomic) })
             try writeMarker(SessionTransactionMarker(captureID: record.captureID, sourceFilename: sourceName, recordFilename: recordName, stage: .sourceStaged), to: markerURL)
             let canonicalRecord = (try? JSONDecoder().decode(AcceptedCaptureRecord.self, from: metadata)) ?? record
-            try JSONEncoder().encode(canonicalRecord).write(to: recordStage, options: .atomic)
+            try perform("transaction.recordStage", { try JSONEncoder().encode(canonicalRecord).write(to: recordStage, options: .atomic) })
             try writeMarker(SessionTransactionMarker(captureID: record.captureID, sourceFilename: sourceName, recordFilename: recordName, stage: .recordStaged), to: markerURL)
-            try state.write(to: stateStage, options: .atomic)
+            try perform("transaction.stateStage", { try state.write(to: stateStage, options: .atomic) })
             try writeMarker(SessionTransactionMarker(captureID: record.captureID, sourceFilename: sourceName, recordFilename: recordName, stage: .stateStaged), to: markerURL)
-            try fileManager.moveItem(at: sourceStage, to: sourceURL)
-            try fileManager.moveItem(at: recordStage, to: recordURL)
-            try atomicWrite(state, to: layout.state)
+            try perform("transaction.sourceCommit", { try fileManager.moveItem(at: sourceStage, to: sourceURL) })
+            try writeMarker(SessionTransactionMarker(captureID: record.captureID, sourceFilename: sourceName, recordFilename: recordName, stage: .sourceCommitted), to: markerURL)
+            try perform("transaction.recordCommit", { try fileManager.moveItem(at: recordStage, to: recordURL) })
+            try writeMarker(SessionTransactionMarker(captureID: record.captureID, sourceFilename: sourceName, recordFilename: recordName, stage: .recordCommitted), to: markerURL)
+            try perform("transaction.stateCommit", { try atomicWrite(state, to: layout.state) })
+            try writeMarker(SessionTransactionMarker(captureID: record.captureID, sourceFilename: sourceName, recordFilename: recordName, stage: .stateCommitted), to: markerURL)
             try writeMarker(SessionTransactionMarker(captureID: record.captureID, sourceFilename: sourceName, recordFilename: recordName, stage: .committed), to: markerURL)
             try fileManager.removeItem(at: transaction)
         } catch {
@@ -130,12 +138,26 @@ public actor ScanSessionStore {
         }
     }
 
+    /// Accepted capture entry point used by the capture flow.  Pose and motion
+    /// are bound from the shutter-aligned still timestamp before the canonical
+    /// record enters the same source/record/state transaction.
+    public func storeAcceptedCapture(still: AcceptedStill, record: AcceptedCaptureRecord, metadata: Data, state: Data, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) throws {
+        let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
+        let enriched = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose, motionBinding: evidence.motion)
+        try storeAcceptedCapture(source: still.sourceBytes, record: enriched, metadata: metadata, state: state)
+    }
+
     public func reopen(requiredSourceIDs: Set<String>, supportedVersion: String = "1.0.0") throws -> SessionReopenDisposition {
         try recoverStaleTemps()
         guard let stateData = try? Data(contentsOf: layout.state), let state = try? JSONDecoder().decode(PersistedSessionState.self, from: stateData) else { return .blocked("missing_state") }
+        guard state.sessionID == layout.sessionID else { return .blocked("session_id_mismatch") }
         let sourceIDs = Set((try? fileManager.contentsOfDirectory(at: layout.images, includingPropertiesForKeys: nil).map { $0.deletingPathExtension().lastPathComponent }) ?? [])
-        let recordIDs = Set((try? fileManager.contentsOfDirectory(at: layout.photoRecords, includingPropertiesForKeys: nil).compactMap { url -> String? in guard let data = try? Data(contentsOf: url), let record = try? JSONDecoder().decode(AcceptedCaptureRecord.self, from: data) else { return nil }; return record.captureID }) ?? [])
-        guard Set(state.acceptedIDs).isSubset(of: sourceIDs), Set(state.acceptedIDs).isSubset(of: recordIDs) else { return .blocked("missing_or_corrupt_record") }
+        let records = (try? fileManager.contentsOfDirectory(at: layout.photoRecords, includingPropertiesForKeys: nil).compactMap { url -> AcceptedCaptureRecord? in guard let data = try? Data(contentsOf: url) else { return nil }; return try? JSONDecoder().decode(AcceptedCaptureRecord.self, from: data) }) ?? []
+        let recordIDs = Set(records.map(\.captureID))
+        let recordsValid = records.allSatisfy { record in
+            !record.sourceFilename.isEmpty && !record.sourceFilename.contains("/") && !record.sourceFilename.contains("\\") && fileManager.fileExists(atPath: layout.images.appendingPathComponent(record.sourceFilename).path)
+        }
+        guard recordsValid, Set(state.acceptedIDs).isSubset(of: sourceIDs), Set(state.acceptedIDs).isSubset(of: recordIDs) else { return .blocked("missing_or_corrupt_record") }
         let disposition = SessionResumeValidator.disposition(state: state, requiredSourceIDs: sourceIDs.union(requiredSourceIDs), supportedVersion: supportedVersion)
         switch disposition { case .resumable: return .resumable(state); case .blocked(let reason): return .blocked(reason); case .discardRequired: return .blocked("discard_required") }
     }
@@ -143,22 +165,36 @@ public actor ScanSessionStore {
     private func recoverStaleTemps() throws {
         guard let files = try? fileManager.contentsOfDirectory(at: layout.temporary, includingPropertiesForKeys: nil) else { return }
         for file in files {
-            if file.lastPathComponent.hasPrefix(".txn-") { try? recoverTransaction(at: file) }
+            if file.lastPathComponent.hasPrefix(".txn-") { try recoverTransaction(at: file) }
             else if file.lastPathComponent.contains(".tmp-") || file.pathExtension == "tmp" { try? fileManager.removeItem(at: file) }
         }
     }
 
     private func writeMarker(_ marker: SessionTransactionMarker, to url: URL) throws { try JSONEncoder().encode(marker).write(to: url, options: .atomic) }
     private func recoverTransaction(at transaction: URL) throws {
-        guard let markerData = try? Data(contentsOf: transaction.appendingPathComponent("marker.json")), let marker = try? JSONDecoder().decode(SessionTransactionMarker.self, from: markerData) else { try? fileManager.removeItem(at: transaction); return }
+        guard let markerData = try? Data(contentsOf: transaction.appendingPathComponent("marker.json")), let marker = try? JSONDecoder().decode(SessionTransactionMarker.self, from: markerData) else { throw SessionStorageError.interruptedWrite }
         let sourceURL = layout.images.appendingPathComponent(marker.sourceFilename)
         let recordURL = layout.photoRecords.appendingPathComponent(marker.recordFilename)
         let stagedSource = transaction.appendingPathComponent(marker.sourceFilename)
         let stagedRecord = transaction.appendingPathComponent(marker.recordFilename)
-        if marker.stage == .stateStaged, fileManager.fileExists(atPath: stagedSource.path), fileManager.fileExists(atPath: stagedRecord.path), !fileManager.fileExists(atPath: sourceURL.path), !fileManager.fileExists(atPath: recordURL.path) {
-            try fileManager.moveItem(at: stagedSource, to: sourceURL); try fileManager.moveItem(at: stagedRecord, to: recordURL)
+        let stagedState = transaction.appendingPathComponent("state.json")
+        let previousState = transaction.appendingPathComponent("previous-state.json")
+        let hasFinals = fileManager.fileExists(atPath: sourceURL.path) && fileManager.fileExists(atPath: recordURL.path)
+        let stateMatches = (try? Data(contentsOf: layout.state)) == (try? Data(contentsOf: stagedState))
+        if marker.stage == .committed || marker.stage == .stateCommitted || (hasFinals && stateMatches) {
+            try? fileManager.removeItem(at: transaction)
+            return
         }
+        // Any incomplete publication is rolled back to the exact pre-capture
+        // state.  This handles a crash after either final move as well as a
+        // crash before state replacement, without trusting the marker alone.
+        if let oldState = try? Data(contentsOf: previousState) { try atomicWrite(oldState, to: layout.state) }
+        for url in [sourceURL, recordURL, stagedSource, stagedRecord, stagedState] where fileManager.fileExists(atPath: url.path) { try? fileManager.removeItem(at: url) }
         try? fileManager.removeItem(at: transaction)
+    }
+    private func perform(_ label: String, _ operation: () throws -> Void) throws {
+        if failureInjector?(label) == true { throw SessionStorageError.interruptedWrite }
+        try operation()
     }
     private func atomicWrite(_ data: Data, to destination: URL) throws {
         let temporary = layout.temporary.appendingPathComponent(".\(destination.lastPathComponent).tmp-\(UUID().uuidString)")
@@ -203,7 +239,8 @@ public struct GalleryAuditEvent: Codable, Sendable, Equatable {
 public actor SessionGalleryStore {
     private let layout: SessionStorageLayout
     private let fileManager: FileManager
-    public init(layout: SessionStorageLayout, fileManager: FileManager = .default) { self.layout = layout; self.fileManager = fileManager }
+    private let failureInjector: (@Sendable (String) -> Bool)?
+    public init(layout: SessionStorageLayout, fileManager: FileManager = .default, failureInjector: (@Sendable (String) -> Bool)? = nil) { self.layout = layout; self.fileManager = fileManager; self.failureInjector = failureInjector }
 
     public func load() throws -> [GalleryEntry] {
         guard let files = try? fileManager.contentsOfDirectory(at: layout.photoRecords, includingPropertiesForKeys: nil) else { return [] }
@@ -224,8 +261,11 @@ public actor SessionGalleryStore {
         let audit = GalleryAuditEvent(action: "delete", captureID: id)
         var state = try loadState()
         state = PersistedSessionState(sessionID: state.sessionID, schemaVersion: state.schemaVersion, nextSequence: state.nextSequence, epoch: state.epoch, acceptedIDs: state.acceptedIDs.filter { $0 != id }, rejectedIDs: state.rejectedIDs, replacementTrace: state.replacementTrace.filter { $0.key != id && $0.value != id })
-        try persist(state: state, audit: audit)
-        for path in [recordURL.path, entry.sourcePath, entry.previewPath ?? ""] where !path.isEmpty { try? fileManager.removeItem(atPath: path) }
+        let files = [recordURL, URL(fileURLWithPath: entry.sourcePath), entry.previewPath.map(URL.init(fileURLWithPath:))].compactMap { $0 }
+        try mutate(files: files) {
+            for url in files where fileManager.fileExists(atPath: url.path) { try perform("delete.\(url.lastPathComponent)") { try fileManager.removeItem(at: url) } }
+            try persist(state: state, audit: audit)
+        }
     }
 
     public func retake(replacing id: String, source: Data, record: AcceptedCaptureRecord, metadata: Data) throws {
@@ -235,16 +275,20 @@ public actor SessionGalleryStore {
         let recordURL = layout.photoRecords.appendingPathComponent(record.metadataFilename)
         guard !fileManager.fileExists(atPath: sourceURL.path), !fileManager.fileExists(atPath: recordURL.path) else { throw SessionStorageError.duplicateID }
         let canonicalRecord = (try? JSONDecoder().decode(AcceptedCaptureRecord.self, from: metadata)) ?? record
-        try source.write(to: sourceURL, options: .atomic)
-        try JSONEncoder().encode(canonicalRecord).write(to: recordURL, options: .atomic)
+        let oldEntry = try load().first { $0.id == id }
+        let oldFiles = [layout.photoRecords.appendingPathComponent("\(id).json"), layout.images.appendingPathComponent(oldEntry?.sourcePath.split(separator: "/").last.map(String.init) ?? "\(id).heic"), oldEntry?.previewPath.map(URL.init(fileURLWithPath:))].compactMap { $0 }
         var state = try loadState()
         let accepted = state.acceptedIDs.map { $0 == id ? record.captureID : $0 }
         let trace = state.replacementTrace.merging([id: record.captureID]) { _, replacement in replacement }
         let next = max(state.nextSequence, record.sequence + 1)
         let updated = PersistedSessionState(sessionID: state.sessionID, schemaVersion: state.schemaVersion, nextSequence: next, epoch: state.epoch, acceptedIDs: accepted, rejectedIDs: state.rejectedIDs, replacementTrace: trace)
-        try persist(state: updated, audit: GalleryAuditEvent(action: "retake", captureID: id, replacementID: record.captureID))
-        try? fileManager.removeItem(atPath: layout.images.appendingPathComponent("\(id).heic").path)
-        try? fileManager.removeItem(atPath: layout.photoRecords.appendingPathComponent("\(id).json").path)
+        let files = oldFiles + [sourceURL, recordURL]
+        try mutate(files: files) {
+            try perform("retake.source") { try source.write(to: sourceURL, options: .atomic) }
+            try perform("retake.record") { try JSONEncoder().encode(canonicalRecord).write(to: recordURL, options: .atomic) }
+            try persist(state: updated, audit: GalleryAuditEvent(action: "retake", captureID: id, replacementID: record.captureID))
+            for url in oldFiles where url != sourceURL && url != recordURL && fileManager.fileExists(atPath: url.path) { try perform("retake.remove.\(url.lastPathComponent)") { try fileManager.removeItem(at: url) } }
+        }
     }
 
     private func loadState() throws -> PersistedSessionState {
@@ -261,9 +305,31 @@ public actor SessionGalleryStore {
         let auditData = try encoder.encode(events)
         let stateTemp = layout.temporary.appendingPathComponent(".gallery-state-\(UUID().uuidString).tmp")
         let auditTemp = layout.temporary.appendingPathComponent(".gallery-audit-\(UUID().uuidString).tmp")
-        try stateData.write(to: stateTemp, options: .atomic); try auditData.write(to: auditTemp, options: .atomic)
-        if fileManager.fileExists(atPath: layout.state.path) { try fileManager.replaceItemAt(layout.state, withItemAt: stateTemp, backupItemName: nil, options: .usingNewMetadataOnly) } else { try fileManager.moveItem(at: stateTemp, to: layout.state) }
-        if fileManager.fileExists(atPath: url.path) { try fileManager.replaceItemAt(url, withItemAt: auditTemp, backupItemName: nil, options: .usingNewMetadataOnly) } else { try fileManager.moveItem(at: auditTemp, to: url) }
+        try perform("mutation.stateStage") { try stateData.write(to: stateTemp, options: .atomic) }
+        try perform("mutation.auditStage") { try auditData.write(to: auditTemp, options: .atomic) }
+        if fileManager.fileExists(atPath: layout.state.path) { try perform("mutation.stateCommit") { try fileManager.replaceItemAt(layout.state, withItemAt: stateTemp, backupItemName: nil, options: .usingNewMetadataOnly) } } else { try perform("mutation.stateCommit") { try fileManager.moveItem(at: stateTemp, to: layout.state) } }
+        if fileManager.fileExists(atPath: url.path) { try perform("mutation.auditCommit") { try fileManager.replaceItemAt(url, withItemAt: auditTemp, backupItemName: nil, options: .usingNewMetadataOnly) } } else { try perform("mutation.auditCommit") { try fileManager.moveItem(at: auditTemp, to: url) } }
+    }
+
+    private func mutate(files: [URL], operation: () throws -> Void) throws {
+        let stateURL = layout.state
+        let auditURL = layout.galleryAudit
+        var backup: [String: Data?] = [:]
+        for url in files + [stateURL, auditURL] { backup[url.path] = try? Data(contentsOf: url) }
+        do { try operation() }
+        catch {
+            for (path, data) in backup {
+                let url = URL(fileURLWithPath: path)
+                if let data { try? data.write(to: url, options: .atomic) }
+                else { try? fileManager.removeItem(at: url) }
+            }
+            throw error
+        }
+    }
+
+    private func perform(_ label: String, _ operation: () throws -> Void) throws {
+        if failureInjector?(label) == true { throw SessionStorageError.interruptedWrite }
+        try operation()
     }
 }
 
@@ -311,12 +377,15 @@ public actor SessionDiscoveryService {
             let id = directory.lastPathComponent
             let layout = SessionStorageLayout(root: root, sessionID: id)
             let draft = (try? Data(contentsOf: layout.metadata)).flatMap { try? JSONDecoder().decode(NewScanDraft.self, from: $0) }
-            let state = (try? Data(contentsOf: layout.state)).flatMap { try? JSONDecoder().decode(PersistedSessionState.self, from: $0) }
+            var state = (try? Data(contentsOf: layout.state)).flatMap { try? JSONDecoder().decode(PersistedSessionState.self, from: $0) }
             let sourceIDs = Set((try? fileManager.contentsOfDirectory(at: layout.images, includingPropertiesForKeys: nil).map { $0.deletingPathExtension().lastPathComponent }) ?? [])
             let disposition: ResumeDisposition
-            if let state, let reopened = try? await ScanSessionStore(layout: layout).reopen(requiredSourceIDs: []) {
-                switch reopened { case .resumable: disposition = .resumable; case .blocked(let reason): disposition = .blocked(reason) }
-            } else { disposition = SessionResumeValidator.disposition(state: state, requiredSourceIDs: sourceIDs) }
+            if let state {
+                do {
+                    let reopened = try await ScanSessionStore(layout: layout).reopen(requiredSourceIDs: [])
+                    switch reopened { case .resumable(let authoritative): state = authoritative; disposition = .resumable; case .blocked(let reason): disposition = .blocked(reason) }
+                } catch { disposition = .blocked("corrupt_transaction") }
+            } else { disposition = .blocked("missing_state") }
             return SessionResumeCandidate(id: id, draft: draft, disposition: disposition, state: state)
         }.sorted { $0.id < $1.id }
     }
@@ -339,7 +408,8 @@ public actor ActiveScanSessionRegistry {
 public enum FinalizationError: Error, Sendable, Equatable { case missingPhoto, invalidMetadataBinding, checksumFailure, invalidManifest, packagingFailed }
 public struct FinalizationInput: Sendable { public let manifest: Data; public let payloads: [String: Data]; public let destination: URL; public let sessionRoot: URL?; public init(manifest: Data, payloads: [String: Data], destination: URL, sessionRoot: URL? = nil) { self.manifest = manifest; self.payloads = payloads; self.destination = destination; self.sessionRoot = sessionRoot } }
 public struct SessionFinalizer: Sendable {
-    public init() {}
+    private let failureInjector: (@Sendable (String) -> Bool)?
+    public init(failureInjector: (@Sendable (String) -> Bool)? = nil) { self.failureInjector = failureInjector }
     public func validate(_ input: FinalizationInput) throws {
         guard let object = try? JSONSerialization.jsonObject(with: input.manifest) as? [String: Any], object["schema_version"] as? String == PackScanWriter.schemaVersion, let captureID = object["capture_id"] as? String, !captureID.isEmpty, let declared = object["payloads"] as? [[String: Any]], declared.count >= 2, let checksums = object["checksums"] as? [String: Any], checksums["algorithm"] as? String == "sha256", checksums["canonicalization"] as? String == PackScanWriter.checksumCanonicalization else { throw FinalizationError.invalidManifest }
         let paths = declared.compactMap { $0["path"] as? String }
@@ -358,12 +428,33 @@ public struct SessionFinalizer: Sendable {
     public func finalize(_ input: FinalizationInput) throws {
         do {
             try validate(input)
-            try PackScanWriter().write(manifestJSON: input.manifest, payloads: input.payloads, to: input.destination)
-            if let sessionRoot = input.sessionRoot {
+            let fileManager = FileManager.default
+            guard let sessionRoot = input.sessionRoot else {
+                try PackScanWriter().write(manifestJSON: input.manifest, payloads: input.payloads, to: input.destination)
+                return
+            }
+            let finalizationURL = sessionRoot.appendingPathComponent("finalization.json")
+            let packageTemp = input.destination.deletingLastPathComponent().appendingPathComponent(".packscan-\(UUID().uuidString).partial")
+            let recordTemp = sessionRoot.appendingPathComponent(".finalization-\(UUID().uuidString).tmp")
+            let oldRecord = try? Data(contentsOf: finalizationURL)
+            var packageCommitted = false
+            do {
+                try PackScanWriter().write(manifestJSON: input.manifest, payloads: input.payloads, to: packageTemp)
                 let record = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: "exported", packagePath: input.destination.path)
-                let temporary = sessionRoot.appendingPathComponent(".finalization-\(UUID().uuidString).tmp")
-                try JSONEncoder().encode(record).write(to: temporary, options: .atomic)
-                if FileManager.default.fileExists(atPath: sessionRoot.appendingPathComponent("finalization.json").path) { try FileManager.default.replaceItemAt(sessionRoot.appendingPathComponent("finalization.json"), withItemAt: temporary, backupItemName: nil, options: .usingNewMetadataOnly) } else { try FileManager.default.moveItem(at: temporary, to: sessionRoot.appendingPathComponent("finalization.json")) }
+                if failureInjector?("finalization.record") == true { throw FinalizationError.packagingFailed }
+                try JSONEncoder().encode(record).write(to: recordTemp, options: .atomic)
+                if failureInjector?("finalization.packageCommit") == true { throw FinalizationError.packagingFailed }
+                try fileManager.moveItem(at: packageTemp, to: input.destination)
+                packageCommitted = true
+                if failureInjector?("finalization.recordCommit") == true { throw FinalizationError.packagingFailed }
+                if fileManager.fileExists(atPath: finalizationURL.path) { try fileManager.replaceItemAt(finalizationURL, withItemAt: recordTemp, backupItemName: nil, options: .usingNewMetadataOnly) } else { try fileManager.moveItem(at: recordTemp, to: finalizationURL) }
+            } catch {
+                try? fileManager.removeItem(at: packageTemp)
+                if packageCommitted { try? fileManager.removeItem(at: input.destination) }
+                try? fileManager.removeItem(at: recordTemp)
+                if let oldRecord { try? oldRecord.write(to: finalizationURL, options: .atomic) }
+                else { try? fileManager.removeItem(at: finalizationURL) }
+                throw error
             }
         }
         catch let error as FinalizationError { throw error }
@@ -394,6 +485,7 @@ public struct SessionFinalizationRecord: Codable, Sendable, Equatable {
     public let state: String
     public let packagePath: String?
     public init(sessionID: String, state: String, packagePath: String? = nil) { self.sessionID = sessionID; self.state = state; self.packagePath = packagePath }
+    public var isKnownState: Bool { state == "in_progress" || state == "exported" }
 }
 
 public actor LocalScanHistoryStore {
@@ -412,8 +504,14 @@ public actor LocalScanHistoryStore {
             let finalizationData = try? Data(contentsOf: finalizationURL)
             let finalization = finalizationData.flatMap { try? JSONDecoder().decode(SessionFinalizationRecord.self, from: $0) }
             if finalizationData != nil && finalization == nil { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview?.path, exportState: "corrupt", degradedReason: "corrupt_finalization") }
+            if let finalization, (!finalization.isKnownState || finalization.sessionID != id) { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview?.path, exportState: "corrupt", degradedReason: "invalid_finalization_identity") }
             guard let preview else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: nil, exportState: finalization?.state ?? "in_progress", degradedReason: "missing_preview") }
             guard let finalization else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: "in_progress") }
+            if finalization.state == "exported" {
+                guard let packagePath = finalization.packagePath, fileManager.fileExists(atPath: packagePath), (try? URL(fileURLWithPath: packagePath).resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                    return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: "corrupt", degradedReason: "missing_exported_package")
+                }
+            }
             return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: finalization.state)
         })
     }
@@ -437,7 +535,7 @@ public struct SessionDeletionPlan: Sendable, Equatable {
         guard sessionPath != rootPath, sessionPath.hasPrefix(rootPath + "/") || sessionPath.hasPrefix(rootPath + "\\") else { throw DeletionError.outsideRoot }
         guard sessionPath == session.path else { throw DeletionError.symlinkEscape }
         guard !sessionID.isEmpty, sessionID == session.lastPathComponent, sessionID.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { throw DeletionError.outsideRoot }
-        if let enumerator = fileManager.enumerator(at: session, includingPropertiesForKeys: [.isSymbolicLinkKey], options: [.skipsHiddenFiles]) {
+        if let enumerator = fileManager.enumerator(at: session, includingPropertiesForKeys: [.isSymbolicLinkKey], options: []) {
             for case let url as URL in enumerator where (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true { throw DeletionError.symlinkEscape }
         }
     }
@@ -449,7 +547,8 @@ public actor SafeSessionDeleter {
     private let failureInjector: (@Sendable (String) -> Bool)?
     public init(fileManager: FileManager = .default, failureInjector: (@Sendable (String) -> Bool)? = nil) { self.fileManager = fileManager; self.failureInjector = failureInjector }
     public func delete(plan: SessionDeletionPlan, confirmed: Bool) throws {
-        _ = try deleteDetailed(plan: plan, confirmed: confirmed)
+        let report = try deleteDetailed(plan: plan, confirmed: confirmed)
+        if !report.failures.isEmpty { throw DeletionError.partialFailure }
     }
     public func deleteDetailed(plan: SessionDeletionPlan, confirmed: Bool, historyIndex: URL? = nil) throws -> DeletionReport {
         try plan.validate(confirmed: confirmed, fileManager: fileManager)
@@ -468,6 +567,16 @@ public actor SafeSessionDeleter {
         }
         return DeletionReport(sessionID: plan.sessionID, removedPaths: removed, failures: failures)
     }
+}
+
+public enum NewScanActionCoordinator {
+    @discardableResult
+    public static func start(workflow: inout NewScanWorkflowModel, name: String, type: PackageType, mode: CaptureModeID, notes: String, onStart: (NewScanDraft) -> Void) -> Bool {
+        guard let draft = workflow.start(name: name, type: type, mode: mode, notes: notes) else { return false }
+        onStart(draft)
+        return true
+    }
+    public static func cancel(workflow: inout NewScanWorkflowModel) { workflow.cancel() }
 }
 
 #if canImport(SwiftUI)
@@ -493,10 +602,10 @@ public struct NewScanWizard: View {
             TextField("Notes (optional)", text: $notes, axis: .vertical)
             if let validationMessage { Text(validationMessage).foregroundStyle(.red).accessibilityAddTraits(.isStaticText) }
             HStack {
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { NewScanActionCoordinator.cancel(workflow: &workflow); dismiss() }
                 Spacer()
                 Button("Start") {
-                    if let draft = workflow.start(name: name, type: packageType, mode: mode, notes: notes) { onStart(draft); dismiss() }
+                    if NewScanActionCoordinator.start(workflow: &workflow, name: name, type: packageType, mode: mode, notes: notes, onStart: onStart) { dismiss() }
                     else if case .validationFailed(let message) = workflow.state { validationMessage = "Cannot start scan: \(message)" }
                 }
             }
@@ -509,7 +618,8 @@ public struct AcceptedFrameGalleryView: View {
     @State private var message: String?
     @State private var deleteTarget: GalleryEntry?
     private let store: SessionGalleryStore
-    public init(store: SessionGalleryStore) { self.store = store }
+    public let onRetake: ((GalleryEntry) async throws -> RetakeCapturePayload)?
+    public init(store: SessionGalleryStore, onRetake: ((GalleryEntry) async throws -> RetakeCapturePayload)? = nil) { self.store = store; self.onRetake = onRetake }
     public var body: some View {
         List(entries) { entry in
             HStack {
@@ -517,7 +627,16 @@ public struct AcceptedFrameGalleryView: View {
                 else { Image(systemName: "photo.badge.exclamationmark").frame(width: 64, height: 64) }
                 VStack(alignment: .leading) { Text(entry.id); Text(entry.status).font(.caption).foregroundStyle(entry.status == "accepted" ? .secondary : .orange) }
                 Spacer()
-                Button("Retake") { message = "Retake requested for \(entry.id)." }
+                Button("Retake") {
+                    guard let onRetake else { message = "Retake is unavailable for \(entry.id)."; return }
+                    Task {
+                        do {
+                            let replacement = try await onRetake(entry)
+                            try await store.retake(replacing: entry.id, source: replacement.source, record: replacement.record, metadata: replacement.metadata)
+                            entries = try await store.load()
+                        } catch { message = "Retake failed; no state was accepted." }
+                    }
+                }
                 Button("Delete", role: .destructive) { deleteTarget = entry }
             }
         }.overlay { if let message { Text(message).foregroundStyle(.red) } }.confirmationDialog("Delete this accepted frame?", item: $deleteTarget) { entry in
@@ -525,6 +644,13 @@ public struct AcceptedFrameGalleryView: View {
         }.task { do { entries = try await store.load() } catch { message = "Gallery data is unavailable." } }
             .navigationTitle("Accepted Frames")
     }
+}
+
+public struct RetakeCapturePayload: Sendable {
+    public let source: Data
+    public let record: AcceptedCaptureRecord
+    public let metadata: Data
+    public init(source: Data, record: AcceptedCaptureRecord, metadata: Data) { self.source = source; self.record = record; self.metadata = metadata }
 }
 
 public struct SessionResumeView: View {

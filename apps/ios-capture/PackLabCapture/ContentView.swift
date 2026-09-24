@@ -1,4 +1,8 @@
 import SwiftUI
+#if canImport(AVFoundation) && canImport(NextLevel)
+import AVFoundation
+import NextLevel
+#endif
 
 @MainActor
 final class CaptureRuntimeViewModel: ObservableObject {
@@ -11,12 +15,17 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var admission = CaptureAdmissionController()
     @Published private(set) var trackingDiagnostics: [TrackingDiagnosticEvent] = []
     @Published private(set) var resetDiagnostics: [ResetDiagnosticEvent] = []
+    @Published private(set) var cameraRecoveryState: CameraRecoveryState = .idle
+    @Published private(set) var cameraRecoveryMessage = ""
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
     private let diagnostics = DiagnosticsLogger()
     private var trackingRecoveryPolicy = TrackingRecoveryPolicy(requiredStableNormalFrames: 3)
     private var updateTask: Task<Void, Never>?
+    private var captureAdmissionService: AdmissionControlledStillCaptureService?
+    private var cameraControlBridge: CameraControlRuntimeBridge?
+    private var isRunning = false
 
     init() {
         #if targetEnvironment(simulator)
@@ -41,14 +50,20 @@ final class CaptureRuntimeViewModel: ObservableObject {
     }
 
     func start() async {
+        isRunning = true
         await trackingService.start()
         await motionService.start()
         health = await healthMonitor.preflight()
         admission.update(health)
+        if let service = captureAdmissionService { await service.updateAdmission(admission) }
         await healthMonitor.start { [weak self] gate in
             await MainActor.run {
                 self?.health = gate
                 self?.admission.update(gate)
+            }
+            if let service = await MainActor.run(body: { self?.captureAdmissionService }) {
+                let current = await MainActor.run(body: { self?.admission ?? CaptureAdmissionController() })
+                await service.updateAdmission(current)
             }
         }
         updateTask?.cancel()
@@ -62,6 +77,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     }
 
     func stop() async {
+        isRunning = false
         updateTask?.cancel()
         updateTask = nil
         await healthMonitor.stop()
@@ -70,6 +86,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     }
 
     func refresh() async {
+        guard isRunning else { return }
         let raw = await trackingService.snapshot()
         trackingRecoveryPolicy.update(state: raw.quality, limitation: raw.limitation)
         trackingDiagnostics = trackingRecoveryPolicy.diagnostics
@@ -83,6 +100,41 @@ final class CaptureRuntimeViewModel: ObservableObject {
 
     func admitCapture() -> Bool {
         admission.allowsCapture
+    }
+
+    /// Installs the same health-gated backend used by the production camera
+    /// composition. Tests inject a deterministic StillPhotoBackend; the UI
+    /// and physical request therefore share one admission boundary.
+    func bindStillCaptureBackend(_ backend: any StillPhotoBackend) async {
+        let service = AdmissionControlledStillCaptureService(backend: backend)
+        await service.updateAdmission(admission)
+        captureAdmissionService = service
+    }
+
+    #if canImport(AVFoundation) && canImport(NextLevel)
+    func bindProductionCamera(nextLevel: NextLevel, recoveryOwner: CameraRecoveryOwner, activeLensIdentifier: @escaping () -> String?) async throws {
+        let composition = try NextLevelStillCaptureComposition(nextLevel: nextLevel, candidates: AVFoundationCameraDiscovery.rearCandidates(), activeLensIdentifier: activeLensIdentifier, recoveryOwner: recoveryOwner)
+        recoveryOwner.onStateChange = { [weak self] state, message in self?.updateCameraRecovery(state: state, message: message) }
+        await bindStillCaptureBackend(composition.adapter)
+    }
+    #endif
+
+    func captureAcceptedStill(captureID: String = UUID().uuidString) async -> StillCaptureResult {
+        guard let service = captureAdmissionService else { return .rejected("capture_backend_unavailable") }
+        return await service.capture(captureID: captureID)
+    }
+
+    func updateCameraRecovery(state: CameraRecoveryState, message: String) {
+        cameraRecoveryState = state
+        cameraRecoveryMessage = message
+    }
+
+    func bindCameraControls(_ bridge: CameraControlRuntimeBridge) {
+        cameraControlBridge = bridge
+        bridge.onStateChange = { [weak self] state in
+            self?.updateControlState(lens: state.lens, focus: state.focus, exposure: state.exposure, whiteBalance: state.whiteBalance, message: state.message)
+        }
+        updateControlState(lens: bridge.state.lens, focus: bridge.state.focus, exposure: bridge.state.exposure, whiteBalance: bridge.state.whiteBalance, message: bridge.state.message)
     }
 
     func updateControlState(lens: CameraLensIdentity?, focus: FocusState? = nil, exposure: ExposureState? = nil, whiteBalance: WhiteBalanceState? = nil, message: String? = nil) {

@@ -29,6 +29,13 @@ public protocol MotionService: Sendable {
 }
 
 public extension MotionService {
+    func bindAcceptedStill(_ still: AcceptedStill, tolerance: TimeInterval = 0.1) async -> MotionCaptureBinding? {
+        guard let timestamp = still.monotonicTimestamp else { return nil }
+        return MotionCaptureBinder.bind(captureID: still.captureID, timestamp: timestamp, records: [], tolerance: tolerance)
+    }
+}
+
+public extension MotionService {
     func latestRecord() async -> MotionSampleRecord? { nil }
 }
 
@@ -82,6 +89,10 @@ public final class CoreMotionMotionService: MotionService {
     public func latestSample() async -> MotionSample? { latest }
     public func latestRecord() async -> MotionSampleRecord? { buffer.samples.last }
     public func records() async -> [MotionSampleRecord] { buffer.samples }
+    public func bindAcceptedStill(_ still: AcceptedStill, tolerance: TimeInterval = 0.1) async -> MotionCaptureBinding? {
+        guard let timestamp = still.monotonicTimestamp else { return nil }
+        return MotionAligner.bind(captureID: still.captureID, timestamp: timestamp, buffer: buffer, tolerance: tolerance)
+    }
     public func state() async -> MotionServiceState { currentState }
 }
 #endif

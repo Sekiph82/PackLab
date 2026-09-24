@@ -60,28 +60,50 @@ import ARKit
 import UIKit
 
 @MainActor
+public protocol ARSessionLifecycleDriver: AnyObject {
+    var session: ARSession { get }
+    var isSupported: Bool { get }
+    func run(resetTracking: Bool)
+    func pause()
+}
+
+@MainActor
+private final class DeviceARSessionDriver: ARSessionLifecycleDriver {
+    let session = ARSession()
+    var isSupported: Bool { ARWorldTrackingConfiguration.isSupported }
+    func run(resetTracking: Bool) {
+        let configuration = ARWorldTrackingConfiguration()
+        session.run(configuration, options: resetTracking ? [.resetTracking, .removeExistingAnchors] : [])
+    }
+    func pause() { session.pause() }
+}
+
+@MainActor
 public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
     public static let shared = SharedARSessionOwner()
-    public let session = ARSession()
+    public let session: ARSession
+    private let driver: any ARSessionLifecycleDriver
     public private(set) var policy = ARTrackingLifecyclePolicy()
     public private(set) var poseBuffer = PoseBuffer(capacity: 256)
     public private(set) var epochCoordinator = SessionEpochCoordinator()
     public private(set) var resetDiagnostics: [ResetDiagnosticEvent] = []
     private var degradedFrames = 0
-    private override init() { super.init(); session.delegate = self }
+    private init(driver: any ARSessionLifecycleDriver) { self.driver = driver; session = driver.session; super.init(); session.delegate = self }
+    private convenience init() { self.init(driver: DeviceARSessionDriver()) }
+    public convenience init(injectedDriver: any ARSessionLifecycleDriver) { self.init(driver: injectedDriver) }
 
     public func start() {
-        guard ARWorldTrackingConfiguration.isSupported else { policy.limited(.cameraUnavailable); return }
+        guard driver.isSupported else { policy.limited(.cameraUnavailable); return }
         policy.started()
-        session.run(ARWorldTrackingConfiguration())
+        driver.run(resetTracking: false)
     }
-    public func stop() { session.pause() }
+    public func stop() { driver.pause() }
     public func reset(reason: ResetReason = .userRequested, options: ARSession.RunOptions = [.resetTracking, .removeExistingAnchors]) {
-        guard ARWorldTrackingConfiguration.isSupported else { policy.limited(.cameraUnavailable); return }
+        guard driver.isSupported else { policy.limited(.cameraUnavailable); return }
         epochCoordinator.reset(reason: reason)
         resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: reason, state: epochCoordinator.state))
         policy.reset()
-        session.run(ARWorldTrackingConfiguration(), options: options)
+        driver.run(resetTracking: options.contains(.resetTracking))
     }
     public func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
         switch camera.trackingState {
@@ -102,8 +124,8 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
         let tracking: TrackingQuality = policy.snapshot.quality == .normal ? .normal : policy.snapshot.quality
         poseBuffer.append(PoseSample(timestamp: frame.timestamp, transform: values, tracking: tracking))
     }
-    public func sessionWasInterrupted(_ session: ARSession) { policy.interrupted() }
-    public func sessionInterruptionEnded(_ session: ARSession) { reset(reason: .interruption) }
+    public func sessionWasInterrupted(_ session: ARSession) { policy.interrupted(); reset(reason: .interruption, options: []) }
+    public func sessionInterruptionEnded(_ session: ARSession) { driver.run(resetTracking: false); policy.reset() }
     public func session(_ session: ARSession, didFailWithError error: Error) { epochCoordinator.failed(); resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: .runtimeError, state: epochCoordinator.state)) }
 }
 
