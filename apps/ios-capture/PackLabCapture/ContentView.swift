@@ -33,6 +33,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var m04QualityRuntime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
     private var m04QualityLogStore: QualityCandidateLogStore?
     private var m04CoverageModel = OrbitCoverageModel()
+    private var m04AcceptedDuplicateEvidence: [DuplicateEvidence] = []
     private var cameraControlBridge: CameraControlRuntimeBridge?
     #if canImport(AVFoundation)
     let cameraRecoveryOwner = CameraRecoveryOwner()
@@ -128,6 +129,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04Coverage = m04CoverageModel.snapshot()
         m04CoverageTarget = m04Coverage.missingSectors.first
         m04CoverageActive = true
+        m04AcceptedDuplicateEvidence = []
         m04Evaluation = nil
     }
 
@@ -136,6 +138,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let observation = m04CoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding)
         m04Coverage = m04CoverageModel.snapshot()
         m04CoverageTarget = m04Coverage.missingSectors.first
+        m04AcceptedDuplicateEvidence.append(DuplicateEvidence(captureID: record.captureID, poseBinding: record.poseBinding))
         return observation
     }
 
@@ -143,7 +146,9 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard let evaluation = m04Evaluation else { return nil }
         let target = m04CoverageTarget
         let overlapAllowed = target.map { !m04Coverage.capturedSectors.contains($0) } ?? false
-        return AutoCaptureInput(monotonicTimestamp: monotonicTimestamp, poseEligible: tracking.poseEvidenceEligible, targetSector: target, quality: evaluation.quality, overlapAllowed: overlapAllowed, admission: admission)
+        let candidateEvidence = DuplicateEvidence(captureID: evaluation.input.captureID, poseBinding: evaluation.input.pose)
+        let duplicateDecision = NearDuplicateDetector.evaluate(candidate: candidateEvidence, accepted: m04AcceptedDuplicateEvidence, configuration: m04Coverage.configuration)
+        return AutoCaptureInput(monotonicTimestamp: monotonicTimestamp, poseEligible: tracking.poseEvidenceEligible, targetSector: target, quality: evaluation.quality, overlapAllowed: overlapAllowed, duplicateDecision: duplicateDecision, admission: admission)
     }
 
     @discardableResult

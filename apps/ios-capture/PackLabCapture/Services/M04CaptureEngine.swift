@@ -689,8 +689,9 @@ public struct AutoCaptureInput: Sendable, Equatable {
     public let targetSector: CoverageSector?
     public let quality: QualityDecision
     public let overlapAllowed: Bool
+    public let duplicateDecision: DuplicateDecision?
     public let admission: CaptureAdmissionController
-    public init(monotonicTimestamp: TimeInterval, poseEligible: Bool, targetSector: CoverageSector?, quality: QualityDecision, overlapAllowed: Bool, admission: CaptureAdmissionController) { self.monotonicTimestamp = monotonicTimestamp; self.poseEligible = poseEligible; self.targetSector = targetSector; self.quality = quality; self.overlapAllowed = overlapAllowed; self.admission = admission }
+    public init(monotonicTimestamp: TimeInterval, poseEligible: Bool, targetSector: CoverageSector?, quality: QualityDecision, overlapAllowed: Bool, duplicateDecision: DuplicateDecision? = nil, admission: CaptureAdmissionController) { self.monotonicTimestamp = monotonicTimestamp; self.poseEligible = poseEligible; self.targetSector = targetSector; self.quality = quality; self.overlapAllowed = overlapAllowed; self.duplicateDecision = duplicateDecision; self.admission = admission }
 }
 
 public struct AutoCaptureDecision: Sendable, Equatable {
@@ -712,6 +713,7 @@ public struct AutoCaptureController: Sendable, Equatable {
         if input.targetSector == nil { reasons.append("coverage_target_missing") }
         if !input.quality.isAcceptable { reasons.append(contentsOf: input.quality.reasons) }
         if !input.overlapAllowed { reasons.append("overlap_not_allowed") }
+        if input.duplicateDecision?.isDuplicate == true { reasons.append(input.duplicateDecision?.reasonCode ?? "near_duplicate_candidate") }
         if !input.admission.allowsCapture { reasons.append(input.admission.rejectReason() ?? "capture_admission_blocked") }
         return AutoCaptureDecision(allowed: reasons.isEmpty, reasons: reasons)
     }
@@ -747,8 +749,10 @@ public struct DuplicatePolicy: Codable, Sendable, Equatable {
 public struct DuplicateEvidence: Sendable, Equatable {
     public let captureID: String
     public let pose: PoseSample?
+    public let poseBinding: PoseCaptureBinding?
     public let visualSignature: [UInt8]?
-    public init(captureID: String, pose: PoseSample?, visualSignature: [UInt8]? = nil) { self.captureID = captureID; self.pose = pose; self.visualSignature = visualSignature }
+    public init(captureID: String, pose: PoseSample?, visualSignature: [UInt8]? = nil) { self.captureID = captureID; self.pose = pose; self.poseBinding = nil; self.visualSignature = visualSignature }
+    public init(captureID: String, poseBinding: PoseCaptureBinding?, visualSignature: [UInt8]? = nil) { self.captureID = captureID; self.pose = nil; self.poseBinding = poseBinding; self.visualSignature = visualSignature }
 }
 
 public struct DuplicateDecision: Sendable, Equatable {
@@ -760,11 +764,11 @@ public struct DuplicateDecision: Sendable, Equatable {
 
 public enum NearDuplicateDetector {
     public static func evaluate(candidate: DuplicateEvidence, accepted: [DuplicateEvidence], configuration: OrbitCoverageConfiguration = OrbitCoverageConfiguration(), policy: DuplicatePolicy = .provisional) -> DuplicateDecision {
-        guard let pose = candidate.pose, pose.tracking == .normal, pose.hasValidTransform else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
+        guard let pose = pose(for: candidate), pose.tracking == .normal, pose.hasValidTransform else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
         guard let candidatePosition = position(pose) else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
         let candidateObservation = CoveragePoseMapper.map(captureID: candidate.captureID, pose: pose, configuration: configuration)
         for previous in accepted {
-            guard let previousPose = previous.pose, previousPose.tracking == .normal, let previousPosition = position(previousPose) else { continue }
+            guard let previousPose = pose(for: previous), previousPose.tracking == .normal, let previousPosition = position(previousPose) else { continue }
             let previousObservation = CoveragePoseMapper.map(captureID: previous.captureID, pose: previousPose, configuration: configuration)
             let distance = sqrt(zip(candidatePosition, previousPosition).reduce(0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) })
             let elevationDelta = abs((candidateObservation.elevationDegrees ?? 0) - (previousObservation.elevationDegrees ?? 0))
@@ -776,6 +780,13 @@ public enum NearDuplicateDetector {
         return DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate")
     }
 
+    private static func pose(for evidence: DuplicateEvidence) -> PoseSample? {
+        if let binding = evidence.poseBinding {
+            guard binding.captureID == evidence.captureID, binding.aligned.status == "available" else { return nil }
+            return binding.aligned.sample
+        }
+        return evidence.pose
+    }
     private static func position(_ pose: PoseSample) -> [Double]? { guard pose.transform.count == 16 else { return nil }; return [pose.transform[3], pose.transform[7], pose.transform[11]] }
     private static func signaturesMatch(_ lhs: [UInt8]?, _ rhs: [UInt8]?, maximumDistance: Int) -> Bool { guard let lhs, let rhs, lhs.count == rhs.count else { return false }; return zip(lhs, rhs).reduce(0) { $0 + ($1.0 == $1.1 ? 0 : 1) } <= maximumDistance }
 }

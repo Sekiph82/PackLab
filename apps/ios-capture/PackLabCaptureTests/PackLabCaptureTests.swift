@@ -1757,6 +1757,26 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "stale", pose: stale), accepted: [accepted]).reasonCode, "duplicate_pose_unavailable")
     }
 
+    func testPL0105AcceptedPoseBindingDuplicateDecisionFeedsAutoGate() {
+        let base = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
+        let binding = acceptedPoseBinding(captureID: "accepted", pose: base)
+        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: acceptedPoseBinding(captureID: "candidate", pose: base), visualSignature: [1, 2, 3]), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding, visualSignature: [1, 2, 3])])
+        XCTAssertTrue(duplicate.isDuplicate)
+        XCTAssertEqual(duplicate.reasonCode, "near_duplicate_candidate")
+        let stale = PoseCaptureBinding(captureID: "candidate", captureTimestamp: 1, aligned: AlignedPose(sample: nil, delta: 1, status: "stale"))
+        let useful = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: stale), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding)])
+        XCTAssertFalse(useful.isDuplicate)
+        XCTAssertEqual(useful.reasonCode, "duplicate_pose_unavailable")
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
+        let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
+        let clip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let frame = FramingMetric(availability: .available, objectFraction: 0.3, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let quality = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: frame, background: background))
+        let input = AutoCaptureInput(monotonicTimestamp: 1, poseEligible: true, targetSector: CoverageSector(ringID: "middle", azimuthIndex: 0), quality: quality, overlapAllowed: true, duplicateDecision: duplicate, admission: CaptureAdmissionController())
+        XCTAssertTrue(AutoCaptureController().evaluate(input).reasons.contains("near_duplicate_candidate"))
+    }
+
     func testPL0106StandardBottleCompletionRequiresEveryConfiguredRing() {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "lower", minimumElevation: -30, maximumElevation: -5), CoverageRingDefinition(id: "middle", minimumElevation: -5, maximumElevation: 5), CoverageRingDefinition(id: "upper", minimumElevation: 5, maximumElevation: 30)])
         let policy = StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 1), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 1), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 1)])
