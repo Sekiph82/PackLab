@@ -210,6 +210,7 @@ public struct ClippingThresholds: Codable, Sendable, Equatable {
         self.rejectFraction = min(1, max(self.warningFraction, rejectFraction))
     }
     public static let highlightProvisional = ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.01, warningFraction: 0.05, rejectFraction: 0.20)
+    public static let shadowProvisional = ClippingThresholds(luminanceCutoff: 0.05, toleratedFraction: 0.01, warningFraction: 0.08, rejectFraction: 0.25)
 }
 
 public struct ClippingMetric: Codable, Sendable, Equatable {
@@ -234,6 +235,10 @@ public struct ClippingMetric: Codable, Sendable, Equatable {
 public enum LuminanceClippingAnalyzer {
     public static func highlight(_ frame: QualityImageFrame, thresholds: ClippingThresholds = .highlightProvisional) -> ClippingMetric {
         analyze(frame, thresholds: thresholds, predicate: { $0 >= thresholds.luminanceCutoff }, reasonPrefix: "highlight")
+    }
+
+    public static func shadow(_ frame: QualityImageFrame, thresholds: ClippingThresholds = .shadowProvisional) -> ClippingMetric {
+        analyze(frame, thresholds: thresholds, predicate: { $0 <= thresholds.luminanceCutoff }, reasonPrefix: "shadow")
     }
 
     private static func analyze(_ frame: QualityImageFrame, thresholds: ClippingThresholds, predicate: (Double) -> Bool, reasonPrefix: String) -> ClippingMetric {

@@ -1384,6 +1384,16 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(LuminanceClippingAnalyzer.highlight(QualityImageFrame(width: 10, height: 1, luminance: atReject, objectMask: [Bool](repeating: true, count: 10)), thresholds: thresholds).band, .reject)
     }
 
+    func testPL0097ShadowClippingUsesObjectRegionAndExplainsMissingMask() {
+        let objectMask = [Bool](repeating: true, count: 20) + [Bool](repeating: false, count: 80)
+        let pixels = [Double](repeating: 0.01, count: 20) + [Double](repeating: 0.5, count: 80)
+        let objectMetric = LuminanceClippingAnalyzer.shadow(QualityImageFrame(width: 10, height: 10, luminance: pixels, objectMask: objectMask))
+        XCTAssertEqual(objectMetric.band, .reject)
+        XCTAssertEqual(objectMetric.objectClippedFraction, 1.0)
+        let noMask = LuminanceClippingAnalyzer.shadow(QualityImageFrame(width: 10, height: 10, luminance: pixels))
+        XCTAssertTrue(noMask.reasons.contains("shadow_object_region_unavailable"))
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
