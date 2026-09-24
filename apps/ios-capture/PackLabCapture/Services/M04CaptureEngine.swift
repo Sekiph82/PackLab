@@ -1074,7 +1074,8 @@ public struct ScanPreflightInput: Sendable, Equatable {
     public let calibration: CalibrationAvailability
     public let preparationAcknowledged: Bool
     public let environmentGuidanceAcknowledged: Bool
-    public init(preset: PackagingPreset, admission: CaptureAdmissionController = CaptureAdmissionController(), cameraReady: Bool, sessionReady: Bool, storageAvailable: Bool, calibration: CalibrationAvailability, preparationAcknowledged: Bool, environmentGuidanceAcknowledged: Bool) { self.preset = preset; self.admission = admission; self.cameraReady = cameraReady; self.sessionReady = sessionReady; self.storageAvailable = storageAvailable; self.calibration = calibration; self.preparationAcknowledged = preparationAcknowledged; self.environmentGuidanceAcknowledged = environmentGuidanceAcknowledged }
+    public let transparentTreatment: TransparentTreatmentMode
+    public init(preset: PackagingPreset, admission: CaptureAdmissionController = CaptureAdmissionController(), cameraReady: Bool, sessionReady: Bool, storageAvailable: Bool, calibration: CalibrationAvailability, preparationAcknowledged: Bool, environmentGuidanceAcknowledged: Bool, transparentTreatment: TransparentTreatmentMode = .none) { self.preset = preset; self.admission = admission; self.cameraReady = cameraReady; self.sessionReady = sessionReady; self.storageAvailable = storageAvailable; self.calibration = calibration; self.preparationAcknowledged = preparationAcknowledged; self.environmentGuidanceAcknowledged = environmentGuidanceAcknowledged; self.transparentTreatment = transparentTreatment }
 }
 
 public struct ScanPreflightResult: Codable, Sendable, Equatable {
@@ -1096,6 +1097,7 @@ public enum ScanSuitabilityPreflight {
         if !input.storageAvailable { issues.append(PreflightIssue(code: "storage_unavailable", severity: .blocker, message: "Storage admission is unavailable.")) }
         if input.calibration != .ownerVerified { issues.append(PreflightIssue(code: "calibration_owner_required", severity: .warning, message: "Owner-verified physical calibration is unavailable; thresholds remain provisional.")) }
         if input.preset.requiresPreparationAcknowledgement && !input.preparationAcknowledged { issues.append(PreflightIssue(code: "preparation_acknowledgement_required", severity: .blocker, message: "Required preparation guidance has not been acknowledged.")) }
+        if input.preset.id == .transparent && input.transparentTreatment == .none { issues.append(PreflightIssue(code: "transparent_treatment_required", severity: .blocker, message: "Select and perform a transparent-packaging preparation treatment, or do not start.")) }
         if !input.environmentGuidanceAcknowledged { issues.append(PreflightIssue(code: "environment_guidance_required", severity: .blocker, message: "Minimum lighting/background guidance has not been acknowledged.")) }
         else { issues.append(PreflightIssue(code: "environment_guidance_acknowledged", severity: .information, message: "Minimum lighting/background guidance is acknowledged.")) }
         if input.preset.id == .transparent { issues.append(PreflightIssue(code: "transparent_reconstruction_unproven", severity: .warning, message: "Transparent reconstruction reliability is not established.")) }
@@ -1135,7 +1137,7 @@ public struct TransparentPreparationEvaluation: Codable, Sendable, Equatable {
     public let treatment: TransparentTreatmentMode
     public let suitability: String
     public init(acknowledged: Bool, treatment: TransparentTreatmentMode) { self.warningCodes = ["transparent_reconstruction_unproven", "transparent_preparation_required"]; self.acknowledgementRequired = true; self.acknowledged = acknowledged; self.treatment = treatment; self.suitability = "warning_only_not_physically_verified" }
-    public var mayStart: Bool { acknowledged }
+    public var mayStart: Bool { acknowledged && treatment != .none }
 }
 
 public enum AsymmetricCoverageRegion: String, Codable, Sendable, Equatable, CaseIterable { case front, back, left, right, handle, shoulder }

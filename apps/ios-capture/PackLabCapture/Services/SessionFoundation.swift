@@ -11,20 +11,21 @@ public struct NewScanDraft: Codable, Sendable, Equatable {
     public let createdAt: Date
     public let presetID: PackagingPresetID?
     public let preflight: ScanPreflightResult?
-    public init(sessionID: String = UUID().uuidString, packageName: String, packageType: PackageType, captureMode: CaptureModeID, notes: String = "", createdAt: Date = Date(), presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil) { self.sessionID = sessionID; self.packageName = packageName; self.packageType = packageType; self.captureMode = captureMode; self.notes = notes; self.createdAt = createdAt; self.presetID = presetID; self.preflight = preflight }
+    public let treatmentMode: TransparentTreatmentMode?
+    public init(sessionID: String = UUID().uuidString, packageName: String, packageType: PackageType, captureMode: CaptureModeID, notes: String = "", createdAt: Date = Date(), presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil) { self.sessionID = sessionID; self.packageName = packageName; self.packageType = packageType; self.captureMode = captureMode; self.notes = notes; self.createdAt = createdAt; self.presetID = presetID; self.preflight = preflight; self.treatmentMode = treatmentMode }
 }
 
 public enum NewScanDraftError: Error, Sendable, Equatable { case emptyName, nameTooLong, notesTooLong }
 public enum NewScanDraftValidator {
     public static let maximumNameLength = 120
     public static let maximumNotesLength = 500
-    public static func make(name: String, type: PackageType, mode: CaptureModeID, notes: String = "", now: Date = Date(), sessionID: String = UUID().uuidString, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil) throws -> NewScanDraft {
+    public static func make(name: String, type: PackageType, mode: CaptureModeID, notes: String = "", now: Date = Date(), sessionID: String = UUID().uuidString, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil) throws -> NewScanDraft {
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedName.isEmpty else { throw NewScanDraftError.emptyName }
         guard normalizedName.count <= maximumNameLength else { throw NewScanDraftError.nameTooLong }
         guard normalizedNotes.count <= maximumNotesLength else { throw NewScanDraftError.notesTooLong }
-        return NewScanDraft(sessionID: sessionID, packageName: normalizedName, packageType: type, captureMode: mode, notes: normalizedNotes, createdAt: now, presetID: presetID, preflight: preflight)
+        return NewScanDraft(sessionID: sessionID, packageName: normalizedName, packageType: type, captureMode: mode, notes: normalizedNotes, createdAt: now, presetID: presetID, preflight: preflight, treatmentMode: treatmentMode)
     }
 }
 
@@ -32,8 +33,8 @@ public struct NewScanWorkflowModel: Sendable, Equatable {
     public enum State: Sendable, Equatable { case editing, validationFailed(String), started(NewScanDraft), cancelled }
     public private(set) var state: State = .editing
     public init() {}
-    public mutating func start(name: String, type: PackageType, mode: CaptureModeID, notes: String = "", now: Date = Date(), sessionID: String = UUID().uuidString, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil) -> NewScanDraft? {
-        do { let draft = try NewScanDraftValidator.make(name: name, type: type, mode: mode, notes: notes, now: now, sessionID: sessionID, presetID: presetID, preflight: preflight); state = .started(draft); return draft }
+    public mutating func start(name: String, type: PackageType, mode: CaptureModeID, notes: String = "", now: Date = Date(), sessionID: String = UUID().uuidString, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil) -> NewScanDraft? {
+        do { let draft = try NewScanDraftValidator.make(name: name, type: type, mode: mode, notes: notes, now: now, sessionID: sessionID, presetID: presetID, preflight: preflight, treatmentMode: treatmentMode); state = .started(draft); return draft }
         catch let error as NewScanDraftError { state = .validationFailed(String(describing: error)); return nil }
         catch { state = .validationFailed("invalid") ; return nil }
     }
@@ -575,8 +576,8 @@ public actor SafeSessionDeleter {
 
 public enum NewScanActionCoordinator {
     @discardableResult
-    public static func start(workflow: inout NewScanWorkflowModel, name: String, type: PackageType, mode: CaptureModeID, notes: String, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, onStart: (NewScanDraft) -> Void) -> Bool {
-        guard let draft = workflow.start(name: name, type: type, mode: mode, notes: notes, presetID: presetID, preflight: preflight) else { return false }
+    public static func start(workflow: inout NewScanWorkflowModel, name: String, type: PackageType, mode: CaptureModeID, notes: String, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil, onStart: (NewScanDraft) -> Void) -> Bool {
+        guard let draft = workflow.start(name: name, type: type, mode: mode, notes: notes, presetID: presetID, preflight: preflight, treatmentMode: treatmentMode) else { return false }
         onStart(draft)
         return true
     }
@@ -596,6 +597,7 @@ public struct NewScanWizard: View {
     @State private var notes = ""
     @State private var presetID: PackagingPresetID = .matteHDPE
     @State private var guidanceAcknowledged = false
+    @State private var transparentTreatment: TransparentTreatmentMode = .none
     @State private var validationMessage: String?
     @State private var workflow = NewScanWorkflowModel()
     public let admission: CaptureAdmissionController
@@ -607,6 +609,10 @@ public struct NewScanWizard: View {
             Picker("Package type", selection: $packageType) { ForEach(PackageType.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
             Picker("Capture mode", selection: $mode) { ForEach(CaptureModeID.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
             Picker("Packaging preset", selection: $presetID) { ForEach(PackagingPresetID.allCases, id: \.self) { Text(PackagingPresetCatalog.preset(for: $0).displayName).tag($0) } }
+            if presetID == .transparent {
+                Picker("Transparent preparation treatment", selection: $transparentTreatment) { ForEach(TransparentTreatmentMode.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                Text("Treatment is operator-selected and not physical verification. None cannot be represented as treated.").font(.caption).foregroundStyle(.orange)
+            }
             Toggle("Lighting and preparation guidance understood", isOn: $guidanceAcknowledged)
             TextField("Notes (optional)", text: $notes, axis: .vertical)
             if let validationMessage { Text(validationMessage).foregroundStyle(.red).accessibilityAddTraits(.isStaticText) }
@@ -615,12 +621,17 @@ public struct NewScanWizard: View {
                 Spacer()
                 Button("Start") {
                     let preset = PackagingPresetCatalog.preset(for: presetID)
-                    let preflight = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, admission: admission, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: guidanceAcknowledged, environmentGuidanceAcknowledged: guidanceAcknowledged))
+                    let selectedTreatment = presetID == .transparent ? transparentTreatment : nil
+                    if presetID == .transparent && !TransparentPreparationEvaluation(acknowledged: guidanceAcknowledged, treatment: transparentTreatment).mayStart {
+                        validationMessage = "Transparent preparation acknowledgement and a non-none treatment are required."
+                        return
+                    }
+                    let preflight = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, admission: admission, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: guidanceAcknowledged, environmentGuidanceAcknowledged: guidanceAcknowledged, transparentTreatment: transparentTreatment))
                     guard preflight.canStart else {
                         validationMessage = preflight.issues.filter { $0.severity == .blocker }.map(\.message).joined(separator: " ")
                         return
                     }
-                    if NewScanActionCoordinator.start(workflow: &workflow, name: name, type: packageType, mode: mode, notes: notes, presetID: presetID, preflight: preflight, onStart: onStart) { dismiss() }
+                    if NewScanActionCoordinator.start(workflow: &workflow, name: name, type: packageType, mode: mode, notes: notes, presetID: presetID, preflight: preflight, treatmentMode: selectedTreatment, onStart: onStart) { dismiss() }
                     else if case .validationFailed(let message) = workflow.state { validationMessage = "Cannot start scan: \(message)" }
                 }
             }

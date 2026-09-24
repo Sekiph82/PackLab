@@ -2085,6 +2085,25 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(M04ScanContext(preset: preset, preparationAcknowledged: true, treatmentMode: TransparentTreatmentMode.temporaryMatte.rawValue).treatmentMode, "temporaryMatte")
     }
 
+    func testPL0113TransparentTreatmentOptionsAreExplicitAndNoneIsNotTreated() async throws {
+        for treatment in TransparentTreatmentMode.allCases {
+            let evaluation = TransparentPreparationEvaluation(acknowledged: true, treatment: treatment)
+            XCTAssertEqual(evaluation.mayStart, treatment != .none)
+        }
+        let preset = PackagingPresetCatalog.preset(for: .transparent)
+        let blocked = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: true, environmentGuidanceAcknowledged: true, transparentTreatment: .none))
+        XCTAssertFalse(blocked.canStart)
+        XCTAssertTrue(blocked.issues.contains { $0.code == "transparent_treatment_required" && $0.severity == .blocker })
+        let selected = try NewScanDraftValidator.make(name: "Transparent", type: .bottle, mode: .guidedOrbit, sessionID: "transparent", presetID: .transparent, preflight: ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: preset, cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerRequired, preparationAcknowledged: true, environmentGuidanceAcknowledged: true, transparentTreatment: .temporaryMatte)), treatmentMode: .temporaryMatte)
+        let roundTrip = try JSONDecoder().decode(NewScanDraft.self, from: JSONEncoder().encode(selected))
+        XCTAssertEqual(roundTrip.treatmentMode, .temporaryMatte)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "transparent")
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset, preparationAcknowledged: true, treatmentMode: selected.treatmentMode?.rawValue, preflight: selected.preflight))
+        let loaded = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertEqual(loaded.treatmentMode, "temporaryMatte")
+    }
+
     func testPL0114AsymmetricCoverageRequiresHandleAndAllMajorRegions() {
         let policy = AsymmetricCoveragePolicy()
         let incomplete = AsymmetricCoverageEvaluation(observedRegions: [.front: 4, .back: 4, .left: 2, .right: 2], policy: policy)
