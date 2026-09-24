@@ -824,6 +824,42 @@ public struct CompletionDiagnostics: Codable, Sendable, Equatable {
     }
 }
 
+public struct ManualCaptureInput: Sendable, Equatable {
+    public let automaticDecision: AutoCaptureDecision
+    public let quality: QualityDecision
+    public let admission: CaptureAdmissionController
+    public let cameraReady: Bool
+    public let sessionReady: Bool
+    public let sourceIntegrityReady: Bool
+    public let metadataReady: Bool
+    public let poseEvidenceReady: Bool
+    public init(automaticDecision: AutoCaptureDecision, quality: QualityDecision, admission: CaptureAdmissionController, cameraReady: Bool, sessionReady: Bool, sourceIntegrityReady: Bool, metadataReady: Bool, poseEvidenceReady: Bool) { self.automaticDecision = automaticDecision; self.quality = quality; self.admission = admission; self.cameraReady = cameraReady; self.sessionReady = sessionReady; self.sourceIntegrityReady = sourceIntegrityReady; self.metadataReady = metadataReady; self.poseEvidenceReady = poseEvidenceReady }
+}
+
+public struct ManualCaptureDecision: Sendable, Equatable {
+    public let allowed: Bool
+    public let warnings: [String]
+    public let blockingReasons: [String]
+    public init(allowed: Bool, warnings: [String], blockingReasons: [String]) { self.allowed = allowed; self.warnings = warnings; self.blockingReasons = blockingReasons }
+}
+
+public enum ManualCaptureCoordinator {
+    public static func evaluate(_ input: ManualCaptureInput) -> ManualCaptureDecision {
+        var blocks: [String] = []
+        if !input.admission.allowsCapture { blocks.append("health_hard_stop") }
+        if !input.cameraReady { blocks.append("camera_not_ready") }
+        if !input.sessionReady { blocks.append("session_not_ready") }
+        if !input.sourceIntegrityReady { blocks.append("source_integrity_unavailable") }
+        if !input.metadataReady { blocks.append("metadata_unavailable") }
+        if !input.poseEvidenceReady { blocks.append("pose_evidence_unavailable") }
+        var warnings = input.quality.warnings + input.quality.reasons
+        if !input.automaticDecision.allowed { warnings.append(contentsOf: input.automaticDecision.reasons) }
+        warnings.append("manual_capture_override")
+        var seen = Set<String>(); warnings = warnings.filter { seen.insert($0).inserted }
+        return ManualCaptureDecision(allowed: blocks.isEmpty, warnings: warnings, blockingReasons: blocks)
+    }
+}
+
 #if canImport(SwiftUI)
 public struct CoverageGridView: View {
     public let model: CoverageViewModel

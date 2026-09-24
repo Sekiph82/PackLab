@@ -1559,6 +1559,23 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertLessThan(diagnostics.score, 1)
     }
 
+    func testPL0110ManualCaptureAllowsQualityWarningButNeverSafetyOrEvidenceBypass() {
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.001, sampleCount: 10, band: .reject, reasonCode: "sharpness_reject")
+        let motion = MotionBlurAssessment(risk: .warning, availability: .available, rotationRateMagnitude: 0.5, reasons: ["image_blur_with_motion"])
+        let clip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let frame = FramingMetric(availability: .available, objectFraction: 0.3, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let quality = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: frame, background: background))
+        let admission = CaptureAdmissionController()
+        let automatic = AutoCaptureDecision(allowed: false, reasons: ["auto_capture_quality_reject"])
+        let input = ManualCaptureInput(automaticDecision: automatic, quality: quality, admission: admission, cameraReady: true, sessionReady: true, sourceIntegrityReady: true, metadataReady: true, poseEvidenceReady: true)
+        let allowed = ManualCaptureCoordinator.evaluate(input)
+        XCTAssertTrue(allowed.allowed)
+        XCTAssertTrue(allowed.warnings.contains("manual_capture_override"))
+        XCTAssertFalse(ManualCaptureCoordinator.evaluate(ManualCaptureInput(automaticDecision: automatic, quality: quality, admission: admission, cameraReady: false, sessionReady: true, sourceIntegrityReady: true, metadataReady: true, poseEvidenceReady: true)).allowed)
+        XCTAssertTrue(ManualCaptureCoordinator.evaluate(ManualCaptureInput(automaticDecision: automatic, quality: quality, admission: admission, cameraReady: true, sessionReady: true, sourceIntegrityReady: true, metadataReady: true, poseEvidenceReady: false)).blockingReasons.contains("pose_evidence_unavailable"))
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
