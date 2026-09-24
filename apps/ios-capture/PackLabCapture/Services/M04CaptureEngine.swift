@@ -780,6 +780,28 @@ public struct DetailPassEvaluation: Codable, Sendable, Equatable {
     }
 }
 
+public struct BasePassAvailability: Codable, Sendable, Equatable {
+    public let physicallyFeasible: Bool
+    public let reasonCode: String
+    public init(physicallyFeasible: Bool, reasonCode: String) { self.physicallyFeasible = physicallyFeasible; self.reasonCode = reasonCode }
+}
+
+public struct BasePassEvaluation: Codable, Sendable, Equatable {
+    public let metadata: CapturePassMetadata
+    public let status: String
+    public let capturedSectorCount: Int
+    public let guidance: [String]
+    public init(snapshot: OrbitCoverageSnapshot, availability: BasePassAvailability, minimumSectorCount: Int = 2) {
+        let count = snapshot.capturedSectors.filter { $0.ringID == CapturePassID.base.rawValue }.count
+        capturedSectorCount = count
+        if !availability.physicallyFeasible { status = "unavailable"; guidance = [availability.reasonCode] }
+        else if count >= minimumSectorCount { status = "complete"; guidance = [] }
+        else { status = "incomplete"; guidance = ["Capture more base sectors without unsafe handling"] }
+        metadata = CapturePassMetadata(passID: .base, required: availability.physicallyFeasible, evidenceStatus: status)
+    }
+    public var isComplete: Bool { status == "complete" }
+}
+
 #if canImport(SwiftUI)
 public struct CoverageGridView: View {
     public let model: CoverageViewModel

@@ -1538,6 +1538,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(unavailable.metadata.evidenceStatus, "pose_evidence_unavailable")
     }
 
+    func testPL0108BasePassSeparatesFeasibleIncompleteAndUnavailableStates() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "base", minimumElevation: -60, maximumElevation: -35)])
+        var model = OrbitCoverageModel(configuration: configuration)
+        _ = model.observe(captureID: "base-1", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: -1, z: -1).values, tracking: .normal))
+        let incomplete = BasePassEvaluation(snapshot: model.snapshot(), availability: BasePassAvailability(physicallyFeasible: true, reasonCode: "operator_confirmed_feasible"), minimumSectorCount: 2)
+        XCTAssertEqual(incomplete.status, "incomplete")
+        let unavailable = BasePassEvaluation(snapshot: model.snapshot(), availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "object_cannot_be_safely_tilted"))
+        XCTAssertEqual(unavailable.status, "unavailable")
+        XCTAssertFalse(unavailable.isComplete)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
