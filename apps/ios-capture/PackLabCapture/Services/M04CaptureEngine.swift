@@ -99,7 +99,7 @@ public enum SharpnessAnalyzer {
         let mean = responses.reduce(0, +) / Double(responses.count)
         let variance = responses.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(responses.count)
         let band: SharpnessBand = variance >= thresholds.acceptMinimum ? .accept : (variance >= thresholds.warnMinimum ? .warn : .reject)
-        return SharpnessMetric(availability: .available, normalizedLaplacianVariance: variance, sampleCount: responses.count, band: band, reasonCode: "sharpness_(band.rawValue)")
+        return SharpnessMetric(availability: .available, normalizedLaplacianVariance: variance, sampleCount: responses.count, band: band, reasonCode: "sharpness_\(band.rawValue)")
     }
 
     private static func normalizedGrid(_ frame: QualityImageFrame, side: Int) -> [Double] {
@@ -183,7 +183,7 @@ public enum MotionBlurAnalyzer {
             return MotionBlurAssessment(risk: imageBlurred ? .warning : .unavailable, availability: .unavailable, rotationRateMagnitude: nil, reasons: imageBlurred ? ["image_blur_motion_unavailable"] : ["motion_unavailable"])
         }
         guard motion.status == "available", let sample = motion.sample, sample.isValid else {
-            return MotionBlurAssessment(risk: imageBlurred ? .warning : .unavailable, availability: motion.status == "stale" ? .stale : .unavailable, rotationRateMagnitude: nil, reasons: imageBlurred ? ["image_blur_motion_stale"] : ["motion_(motion.status)"])
+            return MotionBlurAssessment(risk: imageBlurred ? .warning : .unavailable, availability: motion.status == "stale" ? .stale : .unavailable, rotationRateMagnitude: nil, reasons: imageBlurred ? ["image_blur_motion_stale"] : ["motion_\(motion.status)"])
         }
         let magnitude = sqrt(sample.rotationRate.reduce(0) { $0 + $1 * $1 })
         if imageBlurred && magnitude >= thresholds.highRotationRate {
@@ -435,6 +435,47 @@ public enum QualityDecisionEngine {
         let uniqueHard = unique(hard)
         let uniqueWarnings = unique(warnings)
         return QualityDecision(decision: uniqueHard.isEmpty ? .accept : .reject, reasons: uniqueHard, warnings: uniqueWarnings, metrics: metrics)
+    }
+}
+
+/// The single production-used quality seam. Camera/preview adapters provide a
+/// normalized candidate frame and the already-owned M03 motion binding; every
+/// M04 metric is evaluated from the selected versioned preset here.
+public struct M04CandidateFrameInput: Sendable, Equatable {
+    public let sessionID: String
+    public let captureID: String
+    public let sequence: Int
+    public let monotonicTimestamp: TimeInterval
+    public let frame: QualityImageFrame
+    public let motion: MotionCaptureBinding?
+    public let pose: PoseCaptureBinding?
+    public init(sessionID: String, captureID: String = UUID().uuidString, sequence: Int, monotonicTimestamp: TimeInterval, frame: QualityImageFrame, motion: MotionCaptureBinding? = nil, pose: PoseCaptureBinding? = nil) {
+        self.sessionID = sessionID; self.captureID = captureID; self.sequence = sequence; self.monotonicTimestamp = monotonicTimestamp; self.frame = frame; self.motion = motion; self.pose = pose
+    }
+}
+
+public struct M04CandidateQualityEvaluation: Sendable, Equatable {
+    public let input: M04CandidateFrameInput
+    public let quality: QualityDecision
+    public init(input: M04CandidateFrameInput, quality: QualityDecision) { self.input = input; self.quality = quality }
+}
+
+public struct M04CandidateQualityRuntime: Sendable, Equatable {
+    public let preset: PackagingPreset
+    public let decisionPolicy: QualityDecisionPolicy
+    public init(preset: PackagingPreset, decisionPolicy: QualityDecisionPolicy = .provisional) { self.preset = preset; self.decisionPolicy = decisionPolicy }
+    public func evaluate(_ input: M04CandidateFrameInput) -> M04CandidateQualityEvaluation {
+        let quality = evaluateQuality(frame: input.frame, motion: input.motion)
+        return M04CandidateQualityEvaluation(input: input, quality: quality)
+    }
+    public func evaluateQuality(frame: QualityImageFrame, motion: MotionCaptureBinding?) -> QualityDecision {
+        let sharpness = SharpnessAnalyzer.analyze(frame, thresholds: preset.quality.sharpness)
+        let motionBlur = MotionBlurAnalyzer.analyze(sharpness: sharpness, motion: motion)
+        let highlight = LuminanceClippingAnalyzer.highlight(frame, thresholds: preset.quality.highlight)
+        let shadow = LuminanceClippingAnalyzer.shadow(frame, thresholds: preset.quality.shadow)
+        let framing = FramingAnalyzer.analyze(frame, thresholds: preset.quality.framing)
+        let background = BackgroundComplexityAnalyzer.analyze(frame, thresholds: preset.quality.background)
+        return QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharpness, motionBlur: motionBlur, highlightClipping: highlight, shadowClipping: shadow, framing: framing, background: background), policy: decisionPolicy)
     }
 }
 

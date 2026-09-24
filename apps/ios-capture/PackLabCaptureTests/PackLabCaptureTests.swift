@@ -1356,6 +1356,16 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(SharpnessThresholds(acceptMinimum: 0.01, warnMinimum: 0.2).warnMinimum, 0.01)
     }
 
+    func testPL0094CandidateRuntimeUsesSelectedPresetAndPropagatesAllQualityMetrics() {
+        let frame = QualityImageFrame(width: 8, height: 8, luminance: (0..<64).map { (($0 / 8 + $0 % 8) % 2 == 0) ? 0.2 : 0.8 }, objectMask: (0..<64).map { index in let x = index % 8; let y = index / 8; return (2...5).contains(x) && (2...5).contains(y) })
+        let input = M04CandidateFrameInput(sessionID: "session", captureID: "candidate", sequence: 3, monotonicTimestamp: 10, frame: frame)
+        let evaluation = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.glossyPET).evaluate(input)
+        XCTAssertEqual(evaluation.input.captureID, "candidate")
+        XCTAssertEqual(evaluation.quality.metrics.highlightClipping, LuminanceClippingAnalyzer.highlight(frame, thresholds: PackagingPresetCatalog.glossyPET.quality.highlight))
+        XCTAssertNotEqual(evaluation.quality.metrics.sharpness.reasonCode, "sharpness_(band.rawValue)")
+        XCTAssertTrue(["sharpness_accept", "sharpness_warn", "sharpness_reject"].contains(evaluation.quality.metrics.sharpness.reasonCode))
+    }
+
     func testPL0095MotionBlurUsesMonotonicBindingAndExplainsUnavailableMotion() {
         let blurred = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.001, sampleCount: 10, band: .reject, reasonCode: "sharpness_reject")
         let lowMotion = MotionCaptureBinding(captureID: "c1", captureTimestamp: 10, sample: MotionSampleRecord(monotonicTimestamp: 10, attitude: [0, 0, 0, 1], rotationRate: [0.1, 0, 0]), delta: 0, status: "available")
