@@ -1513,6 +1513,18 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "stale", pose: stale), accepted: [accepted]).reasonCode, "duplicate_pose_unavailable")
     }
 
+    func testPL0106StandardBottleCompletionRequiresEveryConfiguredRing() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "lower", minimumElevation: -30, maximumElevation: -5), CoverageRingDefinition(id: "middle", minimumElevation: -5, maximumElevation: 5), CoverageRingDefinition(id: "upper", minimumElevation: 5, maximumElevation: 30)])
+        let policy = StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 1), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 1), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 1)])
+        var model = OrbitCoverageModel(configuration: configuration)
+        _ = model.observe(captureID: "lower", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: -0.2, z: -1).values, tracking: .normal))
+        _ = model.observe(captureID: "middle", pose: PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
+        XCTAssertFalse(RingCoverageEvaluation(snapshot: model.snapshot(), policy: policy).isComplete)
+        XCTAssertEqual(RingCoverageEvaluation(snapshot: model.snapshot(), policy: policy).missingRingIDs, ["upper"])
+        _ = model.observe(captureID: "upper", pose: PoseSample(timestamp: 3, transform: CoordinateTransform.translation(x: 0, y: 0.2, z: -1).values, tracking: .normal))
+        XCTAssertTrue(RingCoverageEvaluation(snapshot: model.snapshot(), policy: policy).isComplete)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.

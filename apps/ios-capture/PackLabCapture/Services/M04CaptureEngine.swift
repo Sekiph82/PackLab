@@ -710,6 +710,44 @@ public enum NearDuplicateDetector {
     private static func signaturesMatch(_ lhs: [UInt8]?, _ rhs: [UInt8]?, maximumDistance: Int) -> Bool { guard let lhs, let rhs, lhs.count == rhs.count else { return false }; return zip(lhs, rhs).reduce(0) { $0 + ($1.0 == $1.1 ? 0 : 1) } <= maximumDistance }
 }
 
+public struct RingCoverageRequirement: Codable, Sendable, Equatable, Identifiable {
+    public let ringID: String
+    public let minimumSectorCount: Int
+    public let required: Bool
+    public init(ringID: String, minimumSectorCount: Int, required: Bool = true) { self.ringID = ringID; self.minimumSectorCount = max(0, minimumSectorCount); self.required = required }
+    public var id: String { ringID }
+}
+
+public struct StandardBottleCoveragePolicy: Codable, Sendable, Equatable {
+    public let requirements: [RingCoverageRequirement]
+    public init(requirements: [RingCoverageRequirement] = [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 4), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 4), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 4)]) { self.requirements = requirements }
+    public static let standard = StandardBottleCoveragePolicy()
+}
+
+public struct RingCoverageStatus: Codable, Sendable, Equatable, Identifiable {
+    public let ringID: String
+    public let capturedSectorCount: Int
+    public let minimumSectorCount: Int
+    public let missing: Bool
+    public var id: String { ringID }
+}
+
+public struct RingCoverageEvaluation: Codable, Sendable, Equatable {
+    public let statuses: [RingCoverageStatus]
+    public let missingRingIDs: [String]
+    public let isComplete: Bool
+    public let guidance: [String]
+    public init(snapshot: OrbitCoverageSnapshot, policy: StandardBottleCoveragePolicy = .standard) {
+        statuses = policy.requirements.map { requirement in
+            let count = snapshot.capturedSectors.filter { $0.ringID == requirement.ringID }.count
+            return RingCoverageStatus(ringID: requirement.ringID, capturedSectorCount: count, minimumSectorCount: requirement.minimumSectorCount, missing: requirement.required && count < requirement.minimumSectorCount)
+        }
+        missingRingIDs = statuses.filter(\.missing).map(\.ringID)
+        isComplete = missingRingIDs.isEmpty
+        guidance = missingRingIDs.map { "Capture more \($0) ring sectors" }
+    }
+}
+
 #if canImport(SwiftUI)
 public struct CoverageGridView: View {
     public let model: CoverageViewModel
