@@ -4,14 +4,14 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M03
-- Current Sprint: M03-BATCH-006 — Final camera-control evidence closure
-- Current Task: M03-BATCH-006 — Remediate PL-0073, PL-0074 and PL-0075
+- Current Milestone: M04
+- Current Sprint: M04-BATCH-001 — Guided Capture & Quality Intelligence
+- Current Task: M04-BATCH-001 — Execute PL-0094 through PL-0118
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CODEX_PROMPT_V05.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V05.md. Preserve the 22 accepted M03 children, remediate only PL-0073, PL-0074 and PL-0075 using their frozen V06 work orders, publish distinct implementation/log commits, then publish MASTER_REMEDIATION_CODEX_LOG_V05.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M04, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0094 through PL-0118 in frozen order using each child prompt/criteria, preserve the accepted M03 architecture, publish one implementation boundary and one child log per task, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M05, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V04.md — CHANGES_REQUIRED (22/25 M03 children accepted; PL-0073, PL-0074 and PL-0075 remain open)
-- Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner explicitly authorized M03 execution/remediation without closing PL-0068 on 2026-09-23.
+- Latest M03 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V05.md — AUDITED_PASS (25/25 M03 children accepted)
+- Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
 
@@ -40,7 +40,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 | M00 | Governance & Architecture | Reproducible rules, repo contract, AI workflow | [x] |
 | M01 | Monorepo & Development Foundations | iOS + Windows project skeletons, local tooling | [x] |
 | M02 | PackScan Data Contract & Calibration | Versioned .packscan format and real-world scale contract | [ ] |
-| M03 | iOS Capture Foundation | SwiftUI/NextLevel/ARKit app runs on iPhone 16 | [ ] |
+| M03 | iOS Capture Foundation | SwiftUI/NextLevel/ARKit app runs on iPhone 16 | [x] |
 | M04 | Guided Capture & Quality Intelligence | Reliable, guided, high-resolution packaging capture | [ ] |
 | M05 | Transfer & Ingest | .packscan moves safely from iPhone to Windows | [ ] |
 | M06 | PackLab Studio Foundation | PySide6 desktop shell and project lifecycle | [ ] |
@@ -169,9 +169,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0070** Enumerate iPhone 16 rear-camera devices and select the intended main lens deterministically.
 - [x] **PL-0071** Implement high-resolution still-photo capture for reconstruction source images.
 - [x] **PL-0072** Preserve original capture metadata without destructive resizing or social-media style processing.
-- [ ] **PL-0073** Implement focus control with guided autofocus followed by optional focus lock.
-- [ ] **PL-0074** Implement exposure metering and optional exposure lock for consistent image sets.
-- [ ] **PL-0075** Implement white-balance stabilization/lock for texture consistency.
+- [x] **PL-0073** Implement focus control with guided autofocus followed by optional focus lock.
+- [x] **PL-0074** Implement exposure metering and optional exposure lock for consistent image sets.
+- [x] **PL-0075** Implement white-balance stabilization/lock for texture consistency.
 - [x] **PL-0076** Capture and persist camera metadata for every accepted still.
 - [x] **PL-0077** Add camera-error recovery for interruption, permission denial and session restart.
 - [x] **PL-0078** Add thermal/storage/battery warnings before and during long captures.
