@@ -1561,6 +1561,32 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(rejected.reasons, ["framing_too_small"])
     }
 
+    func testPL0100UnavailableClippingPolicyTableAndRuntimePrecedence() {
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
+        let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
+        let unavailableHighlight = ClippingMetric(availability: .unavailable, clippedFraction: nil, objectClippedFraction: nil, clippedPixelCount: 0, analyzedPixelCount: 0, band: .unavailable, reasons: ["highlight_clipping_unavailable"])
+        let unavailableShadow = ClippingMetric(availability: .unavailable, clippedFraction: nil, objectClippedFraction: nil, clippedPixelCount: 0, analyzedPixelCount: 0, band: .unavailable, reasons: ["shadow_clipping_unavailable"])
+        let frame = FramingMetric(availability: .available, objectFraction: 0.3, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let metrics = CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: unavailableHighlight, shadowClipping: unavailableShadow, framing: frame, background: background)
+        let cases: [(QualityDecisionPolicy, CandidateQualityDecision, [String], [String])] = [
+            (.provisional, .accept, [], ["highlight_clipping_unavailable", "shadow_clipping_unavailable"]),
+            (QualityDecisionPolicy(rejectUnavailableClipping: true), .reject, ["highlight_clipping_unavailable", "shadow_clipping_unavailable"], [])
+        ]
+        for (policy, expectedDecision, expectedReasons, expectedWarnings) in cases {
+            let decision = QualityDecisionEngine.evaluate(metrics, policy: policy)
+            XCTAssertEqual(decision.decision, expectedDecision)
+            XCTAssertEqual(decision.reasons, expectedReasons)
+            XCTAssertEqual(decision.warnings, expectedWarnings)
+        }
+        let defaultRuntime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
+        let strictRuntime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE, decisionPolicy: QualityDecisionPolicy(rejectUnavailableClipping: true))
+        let defaultQuality = defaultRuntime.evaluateQuality(frame: .unavailable, motion: nil)
+        let strictQuality = strictRuntime.evaluateQuality(frame: .unavailable, motion: nil)
+        XCTAssertTrue(defaultQuality.warnings.contains("highlight_clipping_unavailable"))
+        XCTAssertTrue(strictQuality.reasons.contains("highlight_clipping_unavailable"))
+    }
+
     func testPL0101QualityCandidateLogIsBoundedOrderedAndSanitized() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

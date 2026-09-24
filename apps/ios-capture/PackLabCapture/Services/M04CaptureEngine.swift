@@ -437,9 +437,15 @@ public enum QualityDecisionEngine {
         if metrics.motionBlur.risk == .highRisk { hard.append(contentsOf: metrics.motionBlur.reasons) }
         else if metrics.motionBlur.risk == .warning || metrics.motionBlur.risk == .unavailable { warnings.append(contentsOf: metrics.motionBlur.reasons) }
         if metrics.highlightClipping.band == .reject { hard.append(contentsOf: metrics.highlightClipping.reasons.filter { $0.hasSuffix("_reject") }) }
-        else if metrics.highlightClipping.band == .warn || (metrics.highlightClipping.band == .unavailable && !policy.rejectUnavailableClipping) { warnings.append(contentsOf: metrics.highlightClipping.reasons) }
+        else if metrics.highlightClipping.band == .unavailable {
+            if policy.rejectUnavailableClipping { hard.append(contentsOf: metrics.highlightClipping.reasons) } else { warnings.append(contentsOf: metrics.highlightClipping.reasons) }
+        }
+        else if metrics.highlightClipping.band == .warn { warnings.append(contentsOf: metrics.highlightClipping.reasons) }
         if metrics.shadowClipping.band == .reject { hard.append(contentsOf: metrics.shadowClipping.reasons.filter { $0.hasSuffix("_reject") }) }
-        else if metrics.shadowClipping.band == .warn || (metrics.shadowClipping.band == .unavailable && !policy.rejectUnavailableClipping) { warnings.append(contentsOf: metrics.shadowClipping.reasons) }
+        else if metrics.shadowClipping.band == .unavailable {
+            if policy.rejectUnavailableClipping { hard.append(contentsOf: metrics.shadowClipping.reasons) } else { warnings.append(contentsOf: metrics.shadowClipping.reasons) }
+        }
+        else if metrics.shadowClipping.band == .warn { warnings.append(contentsOf: metrics.shadowClipping.reasons) }
         if metrics.framing.band == .tooSmall || metrics.framing.band == .cropped || (metrics.framing.band == .unavailable && policy.rejectUnavailableFraming) { hard.append(contentsOf: metrics.framing.reasons) }
         if metrics.background.band == .warning || metrics.background.band == .unavailable { warnings.append(contentsOf: metrics.background.reasons) }
         func unique(_ values: [String]) -> [String] { var seen = Set<String>(); return values.filter { seen.insert($0).inserted } }
