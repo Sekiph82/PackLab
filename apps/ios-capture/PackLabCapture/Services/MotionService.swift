@@ -25,6 +25,7 @@ public protocol MotionService: Sendable {
     func stop() async
     func latestSample() async -> MotionSample?
     func latestRecord() async -> MotionSampleRecord?
+    func records() async -> [MotionSampleRecord]
     func state() async -> MotionServiceState
 }
 
@@ -37,6 +38,13 @@ public extension MotionService {
 
 public extension MotionService {
     func latestRecord() async -> MotionSampleRecord? { nil }
+    func records() async -> [MotionSampleRecord] {
+        guard let record = await latestRecord() else { return [] }
+        return [record]
+    }
+    func bindCandidateMotion(captureID: String, timestamp: TimeInterval, tolerance: TimeInterval = 0.1) async -> MotionCaptureBinding {
+        MotionCaptureBinder.bind(captureID: captureID, timestamp: timestamp, records: await records(), tolerance: tolerance)
+    }
 }
 
 /// Foundation-only seam for a future Core Motion adapter.

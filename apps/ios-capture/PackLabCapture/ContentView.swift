@@ -126,6 +126,14 @@ final class CaptureRuntimeViewModel: ObservableObject {
         return evaluation
     }
 
+    /// Production candidate entry point. Motion is bound in the existing
+    /// MotionService timestamp domain before the shared quality runtime runs.
+    @discardableResult
+    func analyzeM04Candidate(sessionID: String, captureID: String, sequence: Int, monotonicTimestamp: TimeInterval, frame: QualityImageFrame, pose: PoseCaptureBinding? = nil) async -> M04CandidateQualityEvaluation {
+        let motionBinding = await motionService.bindCandidateMotion(captureID: captureID, timestamp: monotonicTimestamp)
+        return analyzeM04Candidate(M04CandidateFrameInput(sessionID: sessionID, captureID: captureID, sequence: sequence, monotonicTimestamp: monotonicTimestamp, frame: frame, motion: motionBinding, pose: pose))
+    }
+
     /// Installs the same health-gated backend used by the production camera
     /// composition. Tests inject a deterministic StillPhotoBackend; the UI
     /// and physical request therefore share one admission boundary.
@@ -244,6 +252,15 @@ struct ContentView: View {
                             .padding(8).background(.black.opacity(0.72), in: Capsule()).foregroundStyle(.white).padding(.top)
                     }
                     Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
+                    if let evaluation = runtime.m04Evaluation {
+                        let motion = evaluation.quality.metrics.motionBlur
+                        VStack(spacing: 2) {
+                            Text("Quality: \(evaluation.quality.decision.rawValue) · Motion: \(motion.risk.rawValue)")
+                            if !motion.reasons.isEmpty { Text(motion.reasons.joined(separator: ", ")) }
+                        }
+                        .font(.caption2.monospaced()).foregroundStyle(.white)
+                        .padding(6).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
+                    }
                     Spacer()
                     if runtime.tracking.poseEvidenceEligible == false {
                         Text(runtime.tracking.message).font(.caption)

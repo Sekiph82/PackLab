@@ -1377,6 +1377,28 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(MotionBlurAnalyzer.analyze(sharpness: SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept"), motion: stale).availability, .stale)
     }
 
+    func testPL0095CandidateRuntimePublishesAlignedMotionWarningsAndHighRisk() {
+        let sharpFrame = QualityImageFrame(width: 64, height: 64, luminance: (0..<64).flatMap { y in (0..<64).map { x in ((x + y) % 2 == 0) ? 1.0 : 0.0 } }, objectMask: (0..<64).flatMap { y in (0..<64).map { x in (16..<48).contains(x) && (16..<48).contains(y) } })
+        let blurredFrame = QualityImageFrame(width: 8, height: 8, luminance: [Double](repeating: 0.5, count: 64))
+        let sharpRuntime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
+        let missing = sharpRuntime.evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "missing", sequence: 0, monotonicTimestamp: 10, frame: sharpFrame))
+        XCTAssertEqual(missing.quality.decision, .accept)
+        XCTAssertEqual(missing.quality.metrics.motionBlur.risk, .unavailable)
+        XCTAssertTrue(missing.quality.warnings.contains("motion_unavailable"))
+
+        let low = MotionCaptureBinding(captureID: "low", captureTimestamp: 10, sample: MotionSampleRecord(monotonicTimestamp: 10, attitude: [0, 0, 0, 1], rotationRate: [0.35, 0, 0]), delta: 0, status: "available")
+        let high = MotionCaptureBinding(captureID: "high", captureTimestamp: 10, sample: MotionSampleRecord(monotonicTimestamp: 10, attitude: [0, 0, 0, 1], rotationRate: [1.2, 0, 0]), delta: 0, status: "available")
+        let stale = MotionCaptureBinding(captureID: "stale", captureTimestamp: 10, sample: nil, delta: 1, status: "stale")
+        let lowResult = sharpRuntime.evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "low", sequence: 1, monotonicTimestamp: 10, frame: blurredFrame, motion: low))
+        let highResult = sharpRuntime.evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "high", sequence: 2, monotonicTimestamp: 10, frame: blurredFrame, motion: high))
+        let staleResult = sharpRuntime.evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "stale", sequence: 3, monotonicTimestamp: 10, frame: sharpFrame, motion: stale))
+        XCTAssertEqual(lowResult.quality.metrics.motionBlur.reasons, ["image_blur_low_motion"])
+        XCTAssertEqual(highResult.quality.metrics.motionBlur.risk, .highRisk)
+        XCTAssertEqual(highResult.quality.decision, .reject)
+        XCTAssertTrue(staleResult.quality.warnings.contains("image_blur_motion_stale") == false)
+        XCTAssertTrue(staleResult.quality.warnings.contains("motion_stale"))
+    }
+
     func testPL0096HighlightClippingToleratesLocalizedSpecularPixelsAndRejectsBroadClipping() {
         let localized = [Double](repeating: 0.5, count: 99) + [1.0]
         let localizedMetric = LuminanceClippingAnalyzer.highlight(QualityImageFrame(width: 10, height: 10, luminance: localized, objectMask: [Bool](repeating: true, count: 100)))
