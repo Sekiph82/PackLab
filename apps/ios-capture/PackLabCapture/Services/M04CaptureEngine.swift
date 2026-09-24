@@ -613,6 +613,59 @@ public struct CoverageViewModel: Sendable, Equatable {
     }
 }
 
+public struct AutoCaptureInput: Sendable, Equatable {
+    public let monotonicTimestamp: TimeInterval
+    public let poseEligible: Bool
+    public let targetSector: CoverageSector?
+    public let quality: QualityDecision
+    public let overlapAllowed: Bool
+    public let admission: CaptureAdmissionController
+    public init(monotonicTimestamp: TimeInterval, poseEligible: Bool, targetSector: CoverageSector?, quality: QualityDecision, overlapAllowed: Bool, admission: CaptureAdmissionController) { self.monotonicTimestamp = monotonicTimestamp; self.poseEligible = poseEligible; self.targetSector = targetSector; self.quality = quality; self.overlapAllowed = overlapAllowed; self.admission = admission }
+}
+
+public struct AutoCaptureDecision: Sendable, Equatable {
+    public let allowed: Bool
+    public let reasons: [String]
+    public init(allowed: Bool, reasons: [String]) { self.allowed = allowed; self.reasons = reasons }
+}
+
+public struct AutoCaptureController: Sendable, Equatable {
+    public let cooldownSeconds: TimeInterval
+    public private(set) var inFlight = false
+    public private(set) var cooldownUntil: TimeInterval?
+    public init(cooldownSeconds: TimeInterval = 0.75) { self.cooldownSeconds = max(0, cooldownSeconds) }
+    public func evaluate(_ input: AutoCaptureInput) -> AutoCaptureDecision {
+        var reasons: [String] = []
+        if inFlight { reasons.append("auto_capture_in_flight") }
+        if let cooldownUntil, input.monotonicTimestamp < cooldownUntil { reasons.append("auto_capture_cooldown") }
+        if !input.poseEligible { reasons.append("pose_ineligible") }
+        if input.targetSector == nil { reasons.append("coverage_target_missing") }
+        if !input.quality.isAcceptable { reasons.append(contentsOf: input.quality.reasons) }
+        if !input.overlapAllowed { reasons.append("overlap_not_allowed") }
+        if !input.admission.allowsCapture { reasons.append(input.admission.rejectReason() ?? "capture_admission_blocked") }
+        return AutoCaptureDecision(allowed: reasons.isEmpty, reasons: reasons)
+    }
+    public mutating func begin(_ input: AutoCaptureInput) -> AutoCaptureDecision { let decision = evaluate(input); if decision.allowed { inFlight = true }; return decision }
+    public mutating func complete(success: Bool, monotonicTimestamp: TimeInterval) { inFlight = false; if success { cooldownUntil = monotonicTimestamp + cooldownSeconds } }
+    public mutating func resetAfterRejectedCandidate() { inFlight = false }
+}
+
+/// Production adapter for the existing health-gated still-capture owner.
+public actor GuidedAutoCaptureService {
+    private let stillCapture: AdmissionControlledStillCaptureService
+    private var controller: AutoCaptureController
+    public init(stillCapture: AdmissionControlledStillCaptureService, cooldownSeconds: TimeInterval = 0.75) { self.stillCapture = stillCapture; self.controller = AutoCaptureController(cooldownSeconds: cooldownSeconds) }
+    public func request(captureID: String, input: AutoCaptureInput) async -> (decision: AutoCaptureDecision, result: StillCaptureResult?) {
+        let decision = controller.begin(input)
+        guard decision.allowed else { return (decision, nil) }
+        let result = await stillCapture.capture(captureID: captureID)
+        if case .accepted(let still) = result { controller.complete(success: true, monotonicTimestamp: still.monotonicTimestamp ?? input.monotonicTimestamp) }
+        else { controller.resetAfterRejectedCandidate() }
+        return (decision, result)
+    }
+    public func resetForManualCapture() { controller.resetAfterRejectedCandidate() }
+}
+
 #if canImport(SwiftUI)
 public struct CoverageGridView: View {
     public let model: CoverageViewModel

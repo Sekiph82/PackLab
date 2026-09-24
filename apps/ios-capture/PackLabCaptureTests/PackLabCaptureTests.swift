@@ -1483,6 +1483,25 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(CoverageViewModel(snapshot: complete.snapshot()).statusText, "Coverage complete")
     }
 
+    func testPL0104AutoCaptureRequiresAllGatesAndRearmsAfterCooldown() {
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
+        let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
+        let clip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let frame = FramingMetric(availability: .available, objectFraction: 0.3, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let quality = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: frame, background: background))
+        let admission = CaptureAdmissionController()
+        let target = CoverageSector(ringID: "middle", azimuthIndex: 0)
+        let input = AutoCaptureInput(monotonicTimestamp: 10, poseEligible: true, targetSector: target, quality: quality, overlapAllowed: true, admission: admission)
+        var controller = AutoCaptureController(cooldownSeconds: 1)
+        XCTAssertTrue(controller.begin(input).allowed)
+        XCTAssertFalse(controller.begin(input).allowed)
+        controller.complete(success: true, monotonicTimestamp: 10)
+        XCTAssertFalse(controller.evaluate(input).allowed)
+        XCTAssertTrue(controller.evaluate(AutoCaptureInput(monotonicTimestamp: 11.1, poseEligible: true, targetSector: target, quality: quality, overlapAllowed: true, admission: admission)).allowed)
+        XCTAssertTrue(controller.evaluate(AutoCaptureInput(monotonicTimestamp: 11.1, poseEligible: false, targetSector: target, quality: quality, overlapAllowed: true, admission: admission)).reasons.contains("pose_ineligible"))
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
