@@ -900,6 +900,23 @@ public struct BasePassEvaluation: Codable, Sendable, Equatable {
     public var isComplete: Bool { status == "complete" }
 }
 
+public struct BasePassAcceptanceDecision: Sendable, Equatable {
+    public let allowed: Bool
+    public let reasons: [String]
+    public let evaluation: BasePassEvaluation
+    public init(snapshot: OrbitCoverageSnapshot, availability: BasePassAvailability, quality: QualityDecision, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?) {
+        var reasons: [String] = []
+        if !availability.physicallyFeasible { reasons.append(availability.reasonCode) }
+        guard let poseBinding, poseBinding.aligned.status == "available", poseBinding.aligned.sample != nil else { reasons.append("pose_evidence_unavailable") }
+        if !quality.isAcceptable { reasons.append(contentsOf: quality.reasons) }
+        if duplicateDecision == nil { reasons.append("duplicate_evidence_unavailable") }
+        else if duplicateDecision?.isDuplicate == true { reasons.append(duplicateDecision?.reasonCode ?? "near_duplicate_candidate") }
+        self.allowed = reasons.isEmpty
+        self.reasons = reasons
+        self.evaluation = BasePassEvaluation(snapshot: snapshot, availability: availability)
+    }
+}
+
 public enum CompletionEvidenceStatus: String, Codable, Sendable, Equatable { case complete, incomplete, unavailable }
 
 public struct CompletionDiagnostics: Codable, Sendable, Equatable {
@@ -1054,7 +1071,8 @@ public struct M04ScanContext: Codable, Sendable, Equatable {
     public let preparationAcknowledged: Bool
     public let treatmentMode: String?
     public let preflight: ScanPreflightResult?
-    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight }
+    public let basePass: BasePassEvaluation?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass }
 }
 
 public extension SessionStorageLayout {

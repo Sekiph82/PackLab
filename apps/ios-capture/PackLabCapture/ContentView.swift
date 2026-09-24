@@ -24,6 +24,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var m04CoverageActive = false
     @Published private(set) var m04RingCoverage = RingCoverageEvaluation(snapshot: OrbitCoverageModel().snapshot())
     @Published private(set) var m04DetailGuidance: [String] = []
+    @Published private(set) var m04BasePass = BasePassEvaluation(snapshot: OrbitCoverageModel().snapshot(), availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "base_pass_unavailable"))
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
@@ -38,6 +39,9 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var m04RingPolicy = StandardBottleCoveragePolicy.standard
     private var m04DetailPolicies: [CapturePassID: DetailPassPolicy] = [:]
     private var m04DetailCoverageModels: [CapturePassID: OrbitCoverageModel] = [:]
+    private var m04BaseCoverageModel = OrbitCoverageModel(configuration: OrbitCoverageConfiguration(rings: [CoverageRingDefinition(id: "base", minimumElevation: -90, maximumElevation: 90)]))
+    private var m04BaseAvailability = BasePassAvailability(physicallyFeasible: false, reasonCode: "base_pass_unavailable")
+    private var m04SessionLayout: SessionStorageLayout?
     private var m04AcceptedDuplicateEvidence: [DuplicateEvidence] = []
     private var cameraControlBridge: CameraControlRuntimeBridge?
     #if canImport(AVFoundation)
@@ -130,6 +134,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     func configureM04QualityRuntime(preset: PackagingPreset, layout: SessionStorageLayout? = nil) {
         m04QualityRuntime = M04CandidateQualityRuntime(preset: preset)
         m04QualityLogStore = layout.map { QualityCandidateLogStore(layout: $0) }
+        m04SessionLayout = layout
         m04CoverageModel = OrbitCoverageModel(configuration: preset.coverage.orbit)
         m04Coverage = m04CoverageModel.snapshot()
         m04CoverageTarget = m04Coverage.missingSectors.first
@@ -140,6 +145,9 @@ final class CaptureRuntimeViewModel: ObservableObject {
             (passID, OrbitCoverageModel(configuration: OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: passID.rawValue, minimumElevation: passID == .closure ? 10 : 15, maximumElevation: passID == .shoulder ? 60 : 45)])))
         })
         m04DetailGuidance = m04DetailPolicies.values.map { "Capture missing \($0.passID.rawValue) detail sectors" }
+        m04BaseCoverageModel = OrbitCoverageModel(configuration: OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: "base", minimumElevation: -90, maximumElevation: 90)]))
+        m04BaseAvailability = BasePassAvailability(physicallyFeasible: false, reasonCode: "base_pass_unavailable")
+        m04BasePass = BasePassEvaluation(snapshot: m04BaseCoverageModel.snapshot(), availability: m04BaseAvailability)
         m04CoverageActive = true
         m04AcceptedDuplicateEvidence = []
         m04Evaluation = nil
@@ -160,7 +168,27 @@ final class CaptureRuntimeViewModel: ObservableObject {
                 m04DetailGuidance = m04DetailGuidance.filter { !$0.contains("\(passID.rawValue) detail") } + evaluation.missingGuidance
             }
         }
+        if record.passMetadata?.passID == .base {
+            _ = m04BaseCoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding)
+            m04BasePass = BasePassEvaluation(snapshot: m04BaseCoverageModel.snapshot(), availability: m04BaseAvailability)
+            Task { await persistBasePassContext() }
+        }
         return observation
+    }
+
+    func setBasePassAvailability(_ availability: BasePassAvailability) {
+        m04BaseAvailability = availability
+        m04BasePass = BasePassEvaluation(snapshot: m04BaseCoverageModel.snapshot(), availability: availability)
+        Task { await persistBasePassContext() }
+    }
+
+    func restoreBasePass(_ evaluation: BasePassEvaluation) {
+        m04BasePass = evaluation
+        m04BaseAvailability = BasePassAvailability(physicallyFeasible: evaluation.status != "unavailable", reasonCode: evaluation.guidance.first ?? "operator_confirmed_feasible")
+    }
+
+    func evaluateBasePass(quality: QualityDecision, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?) -> BasePassAcceptanceDecision {
+        BasePassAcceptanceDecision(snapshot: m04BaseCoverageModel.snapshot(), availability: m04BaseAvailability, quality: quality, poseBinding: poseBinding, duplicateDecision: duplicateDecision)
     }
 
     func evaluateDetailPass(passID: CapturePassID, quality: QualityDecision, framing: FramingMetric, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?) -> DetailPassAcceptanceDecision {
@@ -235,6 +263,25 @@ final class CaptureRuntimeViewModel: ObservableObject {
         try await store.storeAcceptedCapture(still: still, record: detailRecord, metadata: detailMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
         recordAcceptedCaptureCoverage(detailRecord)
         return (decision, still)
+    }
+
+    func captureAndPersistBasePass(captureID: String = UUID().uuidString, quality: QualityDecision, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) async throws -> (decision: BasePassAcceptanceDecision, still: AcceptedStill?) {
+        let decision = evaluateBasePass(quality: quality, poseBinding: poseBinding, duplicateDecision: duplicateDecision)
+        guard decision.allowed else { return (decision, nil) }
+        guard let service = captureAdmissionService else { throw CameraServiceError.failed("capture_backend_unavailable") }
+        let result = await service.capture(captureID: captureID)
+        guard case .accepted(let still) = result else { return (decision, nil) }
+        let baseRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: CapturePassMetadata(passID: .base, required: false, evidenceStatus: decision.evaluation.status))
+        let baseMetadata = (try? JSONEncoder().encode(baseRecord)) ?? metadata
+        try await store.storeAcceptedCapture(still: still, record: baseRecord, metadata: baseMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
+        recordAcceptedCaptureCoverage(baseRecord)
+        return (decision, still)
+    }
+
+    private func persistBasePassContext() async {
+        guard let layout = m04SessionLayout, let existing = try? await M04SessionContextStore(layout: layout).load() else { return }
+        let context = M04ScanContext(preset: existing.preset, preparationAcknowledged: existing.preparationAcknowledged, treatmentMode: existing.treatmentMode, preflight: existing.preflight, basePass: m04BasePass)
+        try? await M04SessionContextStore(layout: layout).persist(context)
     }
 
     #if canImport(AVFoundation) && canImport(NextLevel)
@@ -378,6 +425,8 @@ struct ContentView: View {
                             }
                             ForEach(runtime.m04RingCoverage.guidance, id: \.self) { Text($0) }
                             ForEach(runtime.m04DetailGuidance, id: \.self) { Text($0) }
+                            Text("Base: \(runtime.m04BasePass.status)")
+                            ForEach(runtime.m04BasePass.guidance, id: \.self) { Text($0) }
                         }
                         .font(.caption2.monospaced()).foregroundStyle(.white)
                         .padding(.horizontal, 12)
@@ -408,11 +457,11 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) { Button(showPoseDebug ? "Hide Debug" : "Show Debug") { showPoseDebug.toggle() } }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission) { draft in
-                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, preflight: draft.preflight); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
+                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, preflight: draft.preflight, basePass: runtime.m04BasePass); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
                 showNewScan = false
             } } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
-                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
+                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { if let context = try? await M04SessionContextStore(layout: layout).load(), let basePass = context.basePass { runtime.restoreBasePass(basePass) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
                 Task { let plan = SessionDeletionPlan(root: ContentView.sessionRoot, candidate: candidate); _ = try? await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true) }

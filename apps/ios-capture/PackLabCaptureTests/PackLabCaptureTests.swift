@@ -1857,6 +1857,48 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(persisted.passMetadata?.evidenceStatus, "accepted")
     }
 
+    @MainActor
+    func testPL0108BasePassHonorsSafetyStateAndPersistsAcceptedStatus() async throws {
+        struct Backend: StillPhotoBackend, Sendable {
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([4, 5, 6]), CaptureDimensions(width: 2, height: 1)) }
+        }
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "base", minimumElevation: -90, maximumElevation: 90)])
+        var model = OrbitCoverageModel(configuration: configuration)
+        let first = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
+        let second = PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: -1, y: 0, z: 0).values, tracking: .normal)
+        _ = model.observe(captureID: "one", poseBinding: acceptedPoseBinding(captureID: "one", pose: first))
+        _ = model.observe(captureID: "two", poseBinding: acceptedPoseBinding(captureID: "two", pose: second))
+        let quality = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept"), motionBlur: MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: []), highlightClipping: ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: []), shadowClipping: ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: []), framing: FramingMetric(availability: .available, objectFraction: 0.3, bounds: nil, margins: [:], band: .acceptable, reasons: []), background: BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])))
+        let useful = DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate")
+        let complete = BasePassEvaluation(snapshot: model.snapshot(), availability: BasePassAvailability(physicallyFeasible: true, reasonCode: "operator_confirmed_feasible"))
+        XCTAssertEqual(complete.status, "complete")
+        let incomplete = BasePassEvaluation(snapshot: OrbitCoverageModel(configuration: configuration).snapshot(), availability: BasePassAvailability(physicallyFeasible: true, reasonCode: "operator_confirmed_feasible"))
+        XCTAssertEqual(incomplete.status, "incomplete")
+        let unavailable = BasePassAcceptanceDecision(snapshot: model.snapshot(), availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "object_cannot_be_safely_tilted"), quality: quality, poseBinding: acceptedPoseBinding(captureID: "base", pose: first), duplicateDecision: useful)
+        XCTAssertFalse(unavailable.allowed)
+        XCTAssertTrue(unavailable.reasons.contains("object_cannot_be_safely_tilted"))
+        let rejectedPose = BasePassAcceptanceDecision(snapshot: model.snapshot(), availability: BasePassAvailability(physicallyFeasible: true, reasonCode: "operator_confirmed_feasible"), quality: quality, poseBinding: nil, duplicateDecision: useful)
+        XCTAssertTrue(rejectedPose.reasons.contains("pose_evidence_unavailable"))
+
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        let preset = PackagingPreset(id: .matteHDPE, version: "test", displayName: "Test", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "base")
+        let store = ScanSessionStore(layout: layout); try await store.create(NewScanDraft(sessionID: "base", packageName: "Bottle", packageType: .bottle, captureMode: .guided)); try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset))
+        vm.configureM04QualityRuntime(preset: preset, layout: layout); vm.setBasePassAvailability(BasePassAvailability(physicallyFeasible: true, reasonCode: "operator_confirmed_feasible")); await vm.bindStillCaptureBackend(Backend())
+        let binding = acceptedPoseBinding(captureID: "base", pose: first)
+        let record = AcceptedCaptureRecord(captureID: "base", sequence: 0, sourceFilename: "base.heic", metadataFilename: "base.json")
+        let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "base", nextSequence: 1, epoch: 0, acceptedIDs: ["base"]))
+        let outcome = try await vm.captureAndPersistBasePass(quality: quality, poseBinding: binding, duplicateDecision: useful, record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
+        XCTAssertNotNil(outcome.still)
+        XCTAssertEqual(vm.m04BasePass.status, "incomplete")
+        let persisted = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("base.json")))
+        XCTAssertEqual(persisted.passMetadata?.passID, .base)
+        await Task.yield()
+        let persistedContext = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertEqual(persistedContext.basePass?.status, "incomplete")
+    }
+
     func testPL0108BasePassSeparatesFeasibleIncompleteAndUnavailableStates() {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "base", minimumElevation: -60, maximumElevation: -35)])
         var model = OrbitCoverageModel(configuration: configuration)
