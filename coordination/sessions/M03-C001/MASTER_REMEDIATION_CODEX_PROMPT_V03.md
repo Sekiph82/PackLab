@@ -33,6 +33,22 @@ Fast-forward only when safe. Never reset/rebase/force-push/destructively clean/s
 
 Never edit root TASKS.md or ChatGPT audit files. Never start M04. Never fabricate PL-0068 physical evidence.
 
+## User-facing link policy
+
+Local filesystem paths are allowed only for Codex's internal work on the checkout.
+
+For every user-facing handoff, status message, final response, or published-log reference:
+
+- Use **full GitHub URLs** for repository files, prompts, criteria, audits, Codex logs, master logs, commits, and other repository artifacts.
+- Never present Windows local paths such as `C:\\Users\\...\`, `C:/Users/...`, PowerShell/local checkout paths, `file://` links, or Markdown links whose target is a local filesystem path.
+- A file may still be created/saved locally before commit, but once it is pushed to `Sekiph82/PackLab`, the link shown to the user must be its canonical GitHub URL.
+- Example required form:
+  `https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M03-C001/MASTER_REMEDIATION_CODEX_LOG_V03.md`
+- For commit references, prefer the full GitHub commit URL when a clickable link is requested.
+- Before final handoff, verify that every repository artifact being linked is remotely visible on `main`.
+- The final handoff must not contain any local-path hyperlink.
+
+
 ## Batch-004 strategy
 
 Batch-003 already added most production structures. This pass must **not** build new parallel helpers. It must close the last gaps by:
