@@ -1412,8 +1412,25 @@ final class PackLabCaptureTests: XCTestCase {
 
     func testPL0096HighlightThresholdBoundaryIsDeterministic() {
         let thresholds = ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.10, warningFraction: 0.20, rejectFraction: 0.30)
+        let zero = LuminanceClippingAnalyzer.highlight(QualityImageFrame(width: 10, height: 1, luminance: [Double](repeating: 0.5, count: 10), objectMask: [Bool](repeating: true, count: 10)), thresholds: thresholds)
+        XCTAssertEqual(zero.band, .pass)
+        XCTAssertTrue(zero.reasons.contains("highlight_clipping_within_tolerance"))
+        let atWarning = [Double](repeating: 1.0, count: 2) + [Double](repeating: 0.5, count: 8)
+        let warning = LuminanceClippingAnalyzer.highlight(QualityImageFrame(width: 10, height: 1, luminance: atWarning, objectMask: [Bool](repeating: true, count: 10)), thresholds: thresholds)
+        XCTAssertEqual(warning.band, .warn)
+        XCTAssertTrue(warning.reasons.contains("highlight_clipping_warn"))
         let atReject = [Double](repeating: 1.0, count: 3) + [Double](repeating: 0.5, count: 7)
         XCTAssertEqual(LuminanceClippingAnalyzer.highlight(QualityImageFrame(width: 10, height: 1, luminance: atReject, objectMask: [Bool](repeating: true, count: 10)), thresholds: thresholds).band, .reject)
+    }
+
+    func testPL0096CandidateRuntimeUsesGlossyPETHighlightPolicyAndRawFraction() {
+        let frame = QualityImageFrame(width: 10, height: 10, luminance: [Double](repeating: 1.0, count: 3) + [Double](repeating: 0.5, count: 97), objectMask: [Bool](repeating: true, count: 100))
+        let glossy = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.glossyPET).evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "glossy", sequence: 1, monotonicTimestamp: 1, frame: frame))
+        let matte = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE).evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "matte", sequence: 1, monotonicTimestamp: 1, frame: frame))
+        XCTAssertEqual(glossy.quality.metrics.highlightClipping.clippedFraction, 0.03)
+        XCTAssertEqual(glossy.quality.metrics.highlightClipping.band, .warn)
+        XCTAssertEqual(matte.quality.metrics.highlightClipping.band, .pass)
+        XCTAssertTrue(glossy.quality.warnings.contains("highlight_clipping_warn"))
     }
 
     func testPL0097ShadowClippingUsesObjectRegionAndExplainsMissingMask() {

@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 #if canImport(AVFoundation) && canImport(NextLevel)
 import AVFoundation
 import NextLevel
@@ -257,6 +258,11 @@ struct ContentView: View {
                         VStack(spacing: 2) {
                             Text("Quality: \(evaluation.quality.decision.rawValue) · Motion: \(motion.risk.rawValue)")
                             if !motion.reasons.isEmpty { Text(motion.reasons.joined(separator: ", ")) }
+                            let highlight = evaluation.quality.metrics.highlightClipping
+                            let shadow = evaluation.quality.metrics.shadowClipping
+                            Text("Highlights: \(clippingFractionText(highlight)) · Shadows: \(clippingFractionText(shadow))")
+                            let clippingReasons = highlight.reasons + shadow.reasons
+                            if !clippingReasons.isEmpty { Text(clippingReasons.joined(separator: ", ")) }
                         }
                         .font(.caption2.monospaced()).foregroundStyle(.white)
                         .padding(6).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
@@ -299,6 +305,11 @@ struct ContentView: View {
             }) } }
             .task { await runtime.start(); let candidates = await SessionDiscoveryService(root: ContentView.sessionRoot).discover(); showResume = !candidates.isEmpty }
         }
+    }
+
+    private func clippingFractionText(_ metric: ClippingMetric) -> String {
+        guard let fraction = metric.objectClippedFraction ?? metric.clippedFraction else { return "unavailable" }
+        return String(format: "%.1f%% (%@)", fraction * 100, metric.band.rawValue)
     }
 
     private static var sessionRoot: URL { FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!.appendingPathComponent("PackLabSessions", isDirectory: true) }

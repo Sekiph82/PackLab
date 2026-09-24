@@ -263,7 +263,15 @@ public enum LuminanceClippingAnalyzer {
         } else {
             reasons.append("\(reasonPrefix)_object_region_unavailable")
         }
-        let band: ClippingBand = selectedFraction >= thresholds.rejectFraction ? .reject : (selectedFraction > thresholds.toleratedFraction ? .warn : .pass)
+        let band: ClippingBand
+        if selectedFraction >= thresholds.rejectFraction {
+            band = .reject
+        } else if selectedFraction >= thresholds.warningFraction {
+            band = .warn
+        } else {
+            band = .pass
+            reasons.append(selectedFraction > thresholds.toleratedFraction ? "\(reasonPrefix)_clipping_within_warning_threshold" : "\(reasonPrefix)_clipping_within_tolerance")
+        }
         reasons.append("\(reasonPrefix)_clipping_\(band.rawValue)")
         return ClippingMetric(availability: .available, clippedFraction: overall, objectClippedFraction: objectFraction, clippedPixelCount: allClipped, analyzedPixelCount: allCount, band: band, reasons: reasons)
     }
