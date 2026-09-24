@@ -321,3 +321,64 @@ public enum FramingAnalyzer {
         return FramingMetric(availability: .available, objectFraction: objectFraction, bounds: bounds, margins: margins, band: band, reasons: reasons)
     }
 }
+
+public enum BackgroundComplexityBand: String, Codable, Sendable, Equatable { case clean, warning, unavailable }
+
+public struct BackgroundComplexityThresholds: Codable, Sendable, Equatable {
+    public let warningScore: Double
+    public init(warningScore: Double = 0.18) { self.warningScore = max(0, min(1, warningScore)) }
+    public static let provisional = BackgroundComplexityThresholds()
+}
+
+public struct BackgroundComplexityMetric: Codable, Sendable, Equatable {
+    public let availability: QualityMetricAvailability
+    public let score: Double?
+    public let luminanceVariance: Double?
+    public let edgeDensity: Double?
+    public let sampledPixelCount: Int
+    public let band: BackgroundComplexityBand
+    public let reasons: [String]
+    public init(availability: QualityMetricAvailability, score: Double?, luminanceVariance: Double?, edgeDensity: Double?, sampledPixelCount: Int, band: BackgroundComplexityBand, reasons: [String]) { self.availability = availability; self.score = score; self.luminanceVariance = luminanceVariance; self.edgeDensity = edgeDensity; self.sampledPixelCount = sampledPixelCount; self.band = band; self.reasons = reasons }
+}
+
+/// Bounded background analysis. The object mask is an input contract, not an
+/// inferred second segmentation pipeline; object pixels are excluded and only
+/// a 32x32 deterministic sample grid is evaluated.
+public enum BackgroundComplexityAnalyzer {
+    public static let maximumSamples = 1024
+    public static func analyze(_ frame: QualityImageFrame, thresholds: BackgroundComplexityThresholds = .provisional) -> BackgroundComplexityMetric {
+        guard frame.isAvailable, let mask = frame.objectMask, mask.count == frame.luminance.count else {
+            return BackgroundComplexityMetric(availability: .unavailable, score: nil, luminanceVariance: nil, edgeDensity: nil, sampledPixelCount: 0, band: .unavailable, reasons: ["background_object_region_unavailable"])
+        }
+        let side = min(32, max(1, min(frame.width, frame.height)))
+        var samples: [(x: Int, y: Int, value: Double)] = []
+        for y in 0..<side {
+            for x in 0..<side {
+                let sourceX = min(frame.width - 1, Int((Double(x) + 0.5) * Double(frame.width) / Double(side)))
+                let sourceY = min(frame.height - 1, Int((Double(y) + 0.5) * Double(frame.height) / Double(side)))
+                let index = sourceY * frame.width + sourceX
+                if !mask[index] { samples.append((x, y, frame.luminance[index])) }
+            }
+        }
+        guard !samples.isEmpty else {
+            return BackgroundComplexityMetric(availability: .unavailable, score: nil, luminanceVariance: nil, edgeDensity: nil, sampledPixelCount: 0, band: .unavailable, reasons: ["background_pixels_unavailable"])
+        }
+        let mean = samples.reduce(0) { $0 + $1.value } / Double(samples.count)
+        let variance = samples.reduce(0) { $0 + ($1.value - mean) * ($1.value - mean) } / Double(samples.count)
+        let sampled = Dictionary(uniqueKeysWithValues: samples.map { ("\($0.x):\($0.y)", $0.value) })
+        var edgeCount = 0
+        var edgePairs = 0
+        for sample in samples {
+            for neighbour in [(sample.x + 1, sample.y), (sample.x, sample.y + 1)] {
+                if let value = sampled["\(neighbour.0):\(neighbour.1)"] {
+                    edgePairs += 1
+                    if abs(sample.value - value) >= 0.12 { edgeCount += 1 }
+                }
+            }
+        }
+        let edgeDensity = edgePairs == 0 ? 0 : Double(edgeCount) / Double(edgePairs)
+        let score = min(1, variance * 4 + edgeDensity)
+        let band: BackgroundComplexityBand = score >= thresholds.warningScore ? .warning : .clean
+        return BackgroundComplexityMetric(availability: .available, score: score, luminanceVariance: variance, edgeDensity: edgeDensity, sampledPixelCount: min(samples.count, maximumSamples), band: band, reasons: ["background_complexity_\(band.rawValue)"])
+    }
+}

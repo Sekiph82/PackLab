@@ -1408,6 +1408,17 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(FramingAnalyzer.analyze(.unavailable).band, .unavailable)
     }
 
+    func testPL0099BackgroundComplexityExcludesObjectAndWarnsOnClutter() {
+        let cleanPixels = [Double](repeating: 0.5, count: 100)
+        let mask = (0..<100).map { index in (3...6).contains(index % 10) && (3...6).contains(index / 10) }
+        XCTAssertEqual(BackgroundComplexityAnalyzer.analyze(QualityImageFrame(width: 10, height: 10, luminance: cleanPixels, objectMask: mask)).band, .clean)
+        let clutter = (0..<100).map { index in mask[index] ? 0.5 : ((index % 2 == 0) ? 0.0 : 1.0) }
+        let clutterMetric = BackgroundComplexityAnalyzer.analyze(QualityImageFrame(width: 10, height: 10, luminance: clutter, objectMask: mask))
+        XCTAssertEqual(clutterMetric.band, .warning)
+        XCTAssertGreaterThan(clutterMetric.edgeDensity ?? 0, 0)
+        XCTAssertEqual(BackgroundComplexityAnalyzer.analyze(QualityImageFrame(width: 10, height: 10, luminance: cleanPixels)).band, .unavailable)
+    }
+
 }
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
