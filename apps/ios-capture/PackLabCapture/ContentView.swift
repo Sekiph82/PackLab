@@ -26,6 +26,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var m04DetailGuidance: [String] = []
     @Published private(set) var m04BasePass = BasePassEvaluation(snapshot: OrbitCoverageModel().snapshot(), availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "base_pass_unavailable"))
     @Published private(set) var m04Completion = CompletionDiagnostics(rings: RingCoverageEvaluation(snapshot: OrbitCoverageModel().snapshot()))
+    @Published private(set) var manualCaptureDecision: ManualCaptureDecision?
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
@@ -257,12 +258,53 @@ final class CaptureRuntimeViewModel: ObservableObject {
         return await service.request(captureID: captureID, input: input)
     }
 
+    func evaluateManualCapture(monotonicTimestamp: TimeInterval, cameraReady: Bool, sessionReady: Bool, sourceIntegrityReady: Bool, metadataReady: Bool, poseEvidenceReady: Bool) -> ManualCaptureDecision {
+        guard let evaluation = m04Evaluation else {
+            let decision = ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: ["metadata_unavailable", "pose_evidence_unavailable"])
+            manualCaptureDecision = decision
+            return decision
+        }
+        let automatic = autoCaptureInput(monotonicTimestamp: monotonicTimestamp).map { AutoCaptureController().evaluate($0) } ?? AutoCaptureDecision(allowed: false, reasons: ["quality_unavailable"])
+        let decision = ManualCaptureCoordinator.evaluate(ManualCaptureInput(automaticDecision: automatic, quality: evaluation.quality, admission: admission, cameraReady: cameraReady, sessionReady: sessionReady, sourceIntegrityReady: sourceIntegrityReady, metadataReady: metadataReady, poseEvidenceReady: poseEvidenceReady))
+        manualCaptureDecision = decision
+        return decision
+    }
+
+    func captureAndPersistManual(captureID: String = UUID().uuidString, monotonicTimestamp: TimeInterval, cameraReady: Bool, sessionReady: Bool, sourceIntegrityReady: Bool, metadataReady: Bool, poseEvidenceReady: Bool, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) async throws -> (decision: ManualCaptureDecision, still: AcceptedStill?) {
+        let decision = evaluateManualCapture(monotonicTimestamp: monotonicTimestamp, cameraReady: cameraReady, sessionReady: sessionReady, sourceIntegrityReady: sourceIntegrityReady, metadataReady: metadataReady, poseEvidenceReady: poseEvidenceReady)
+        let audit = ManualCaptureAudit(decision: decision)
+        if let evaluation = m04Evaluation, let logStore = m04QualityLogStore {
+            try? await logStore.append(QualityCandidateLog(sessionID: evaluation.input.sessionID, captureID: captureID, sequence: record.sequence, monotonicTimestamp: monotonicTimestamp, decision: evaluation.quality, manualAudit: audit))
+        }
+        guard decision.allowed else { return (decision, nil) }
+        guard let service = guidedAutoCaptureService else { throw CameraServiceError.failed("capture_backend_unavailable") }
+        let result = await service.requestManual(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
+        guard case .accepted(let still) = result else { return (decision, nil) }
+        let manualRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: record.poseBinding, motionBinding: record.motionBinding, passMetadata: record.passMetadata, manualAudit: audit)
+        let manualMetadata = (try? JSONEncoder().encode(manualRecord)) ?? metadata
+        try await store.storeAcceptedCapture(still: still, record: manualRecord, metadata: manualMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
+        recordAcceptedCaptureCoverage(manualRecord)
+        return (decision, still)
+    }
+
+    func requestManualCapture(captureID: String = UUID().uuidString, monotonicTimestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) async -> (decision: ManualCaptureDecision, still: AcceptedStill?) {
+        guard let layout = m04SessionLayout, let stateData = try? Data(contentsOf: layout.state), let state = try? JSONDecoder().decode(PersistedSessionState.self, from: stateData), let evaluation = m04Evaluation else {
+            let decision = evaluateManualCapture(monotonicTimestamp: monotonicTimestamp, cameraReady: false, sessionReady: false, sourceIntegrityReady: false, metadataReady: false, poseEvidenceReady: false)
+            return (decision, nil)
+        }
+        let record = AcceptedCaptureRecord(captureID: captureID, sequence: state.nextSequence, sourceFilename: "\(captureID).heic", metadataFilename: "\(captureID).json")
+        let poseReady = evaluation.input.pose?.aligned.status == "available" && evaluation.input.pose?.aligned.sample != nil
+        let cameraReady = captureAdmissionService != nil && cameraRecoveryState != .denied && cameraRecoveryState != .unavailable && cameraRecoveryState != .failed
+        let result = try? await captureAndPersistManual(captureID: captureID, monotonicTimestamp: monotonicTimestamp, cameraReady: cameraReady, sessionReady: state.sessionID == layout.sessionID, sourceIntegrityReady: evaluation.input.frame.isAvailable, metadataReady: true, poseEvidenceReady: poseReady, record: record, metadata: Data(), state: stateData, store: ScanSessionStore(layout: layout), poses: PoseBuffer(), motion: MotionBuffer())
+        return result ?? (manualCaptureDecision ?? ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: ["manual_capture_failed"]), nil)
+    }
+
     func requestAutoCaptureAndPersist(captureID: String = UUID().uuidString, monotonicTimestamp: TimeInterval, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) async throws -> (decision: AutoCaptureDecision, still: AcceptedStill?) {
         let outcome = await requestAutoCapture(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
         guard case .accepted(let still) = outcome.result else { return (outcome.decision, nil) }
         try await store.storeAcceptedCapture(still: still, record: record, metadata: metadata, state: state, poses: poses, motion: motion, bridge: bridge)
         let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
-        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata))
+        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit))
         return (outcome.decision, still)
     }
 
@@ -272,7 +314,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard let service = captureAdmissionService else { throw CameraServiceError.failed("capture_backend_unavailable") }
         let result = await service.capture(captureID: captureID)
         guard case .accepted(let still) = result else { return (decision, nil) }
-        let detailRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: decision.metadata)
+        let detailRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: decision.metadata, manualAudit: record.manualAudit)
         let detailMetadata = (try? JSONEncoder().encode(detailRecord)) ?? metadata
         try await store.storeAcceptedCapture(still: still, record: detailRecord, metadata: detailMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
         recordAcceptedCaptureCoverage(detailRecord)
@@ -285,7 +327,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard let service = captureAdmissionService else { throw CameraServiceError.failed("capture_backend_unavailable") }
         let result = await service.capture(captureID: captureID)
         guard case .accepted(let still) = result else { return (decision, nil) }
-        let baseRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: CapturePassMetadata(passID: .base, required: false, evidenceStatus: decision.evaluation.status))
+        let baseRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: poseBinding ?? record.poseBinding, motionBinding: record.motionBinding, passMetadata: CapturePassMetadata(passID: .base, required: false, evidenceStatus: decision.evaluation.status), manualAudit: record.manualAudit)
         let baseMetadata = (try? JSONEncoder().encode(baseRecord)) ?? metadata
         try await store.storeAcceptedCapture(still: still, record: baseRecord, metadata: baseMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
         recordAcceptedCaptureCoverage(baseRecord)
@@ -327,7 +369,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard case .accepted(let still) = result else { throw CameraServiceError.failed("capture_rejected") }
         try await store.storeAcceptedCapture(still: still, record: record, metadata: metadata, state: state, poses: poses, motion: motion, bridge: bridge)
         let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
-        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata))
+        _ = recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit))
         return still
     }
 
@@ -452,7 +494,16 @@ struct ContentView: View {
                             ForEach(runtime.m04Completion.guidance, id: \.self) { Text($0) }
                         }
                         .font(.caption2.monospaced()).foregroundStyle(.white)
-                        .padding(.horizontal, 12)
+                            .padding(.horizontal, 12)
+                        Button("Manual Capture") {
+                            Task { _ = await runtime.requestManualCapture() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!runtime.admitCapture())
+                        if let manual = runtime.manualCaptureDecision {
+                            ForEach(manual.warnings, id: \.self) { Text("Manual warning: \($0)") }
+                            ForEach(manual.blockingReasons, id: \.self) { Text("Manual blocked: \($0)") }
+                        }
                     }
                     Spacer()
                     if runtime.tracking.poseEvidenceEligible == false {

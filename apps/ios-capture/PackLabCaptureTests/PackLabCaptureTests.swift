@@ -1972,6 +1972,56 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(ManualCaptureCoordinator.evaluate(ManualCaptureInput(automaticDecision: automatic, quality: quality, admission: admission, cameraReady: true, sessionReady: true, sourceIntegrityReady: true, metadataReady: true, poseEvidenceReady: false)).blockingReasons.contains("pose_evidence_unavailable"))
     }
 
+    @MainActor
+    func testPL0110ManualCaptureUsesSharedTransactionPersistsOverrideAndRearmsAutoCooldown() async throws {
+        struct Backend: StillPhotoBackend, Sendable {
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([4, 5, 6]), CaptureDimensions(width: 2, height: 1)) }
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "manual")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "manual", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        let vm = CaptureRuntimeViewModel(trackingService: SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal)]), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
+        await vm.bindStillCaptureBackend(Backend())
+        let frame = QualityImageFrame(width: 10, height: 10, luminance: (0..<100).map { (($0 / 10 + $0 % 10) % 2 == 0) ? 0.2 : 0.8 }, objectMask: (0..<100).map { index in let x = index % 10; let y = index / 10; return (2...7).contains(x) && (2...7).contains(y) })
+        let evaluation = await vm.analyzeM04Candidate(M04CandidateFrameInput(sessionID: "manual", captureID: "candidate", sequence: 0, monotonicTimestamp: 10, frame: frame))
+        XCTAssertEqual(evaluation.quality.decision, .accept)
+        let record = AcceptedCaptureRecord(captureID: "manual-capture", sequence: 0, sourceFilename: "manual-capture.heic", metadataFilename: "manual-capture.json")
+        let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "manual", nextSequence: 1, epoch: 0, acceptedIDs: ["manual-capture"]))
+        let outcome = try await vm.captureAndPersistManual(captureID: "manual-capture", monotonicTimestamp: 10, cameraReady: true, sessionReady: true, sourceIntegrityReady: true, metadataReady: true, poseEvidenceReady: true, record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
+        XCTAssertTrue(outcome.decision.allowed)
+        XCTAssertTrue(outcome.decision.warnings.contains("manual_capture_override"))
+        XCTAssertNotNil(outcome.still)
+        let persisted = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("manual-capture.json")))
+        XCTAssertEqual(persisted.manualAudit?.warnings, outcome.decision.warnings)
+        let logs = try await QualityCandidateLogStore(layout: layout).snapshot()
+        XCTAssertTrue(logs.contains { $0.manualAudit?.warnings.contains("manual_capture_override") == true })
+        let cooldown = await vm.requestAutoCapture(captureID: "auto-after-manual", monotonicTimestamp: 10.1)
+        XCTAssertTrue(cooldown.decision.reasons.contains("auto_capture_cooldown") || cooldown.decision.reasons.contains("pose_ineligible"))
+    }
+
+    @MainActor
+    func testPL0110ManualCaptureRejectedHardBlockIsLoggedWithoutWritingAcceptedRecord() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "manual-block")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "manual-block", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
+        let frame = QualityImageFrame(width: 10, height: 10, luminance: [Double](repeating: 0.5, count: 100), objectMask: (0..<100).map { $0 == 44 })
+        _ = await vm.analyzeM04Candidate(M04CandidateFrameInput(sessionID: "manual-block", captureID: "candidate", sequence: 0, monotonicTimestamp: 10, frame: frame))
+        let record = AcceptedCaptureRecord(captureID: "blocked", sequence: 0, sourceFilename: "blocked.heic", metadataFilename: "blocked.json")
+        let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "manual-block", nextSequence: 1, epoch: 0, acceptedIDs: ["blocked"]))
+        let outcome = try await vm.captureAndPersistManual(captureID: "blocked", monotonicTimestamp: 10, cameraReady: false, sessionReady: true, sourceIntegrityReady: true, metadataReady: true, poseEvidenceReady: true, record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
+        XCTAssertFalse(outcome.decision.allowed)
+        XCTAssertTrue(outcome.decision.blockingReasons.contains("camera_not_ready"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.photoRecords.appendingPathComponent("blocked.json").path))
+        XCTAssertTrue((try await QualityCandidateLogStore(layout: layout).snapshot()).contains { $0.manualAudit?.blockingReasons.contains("camera_not_ready") == true })
+    }
+
     func testPL0111MattePresetIsVersionedConfigDrivenAndPersisted() async throws {
         let preset = PackagingPresetCatalog.preset(for: .matteHDPE)
         XCTAssertEqual(preset.id, .matteHDPE)

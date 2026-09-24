@@ -506,7 +506,8 @@ public struct QualityCandidateLog: Codable, Sendable, Equatable, Identifiable {
     public let reasons: [String]
     public let warnings: [String]
     public let metrics: CandidateQualityMetrics
-    public init(sessionID: String, captureID: String, sequence: Int, monotonicTimestamp: TimeInterval, decision: QualityDecision) {
+    public let manualAudit: ManualCaptureAudit?
+    public init(sessionID: String, captureID: String, sequence: Int, monotonicTimestamp: TimeInterval, decision: QualityDecision, manualAudit: ManualCaptureAudit? = nil) {
         self.sessionID = QualityLogSanitizer.identifier(sessionID)
         self.captureID = QualityLogSanitizer.identifier(captureID)
         self.sequence = max(0, sequence)
@@ -515,6 +516,7 @@ public struct QualityCandidateLog: Codable, Sendable, Equatable, Identifiable {
         self.reasons = Array(decision.reasons.prefix(32)).map(QualityLogSanitizer.reason)
         self.warnings = Array(decision.warnings.prefix(32)).map(QualityLogSanitizer.reason)
         self.metrics = decision.metrics
+        self.manualAudit = manualAudit
         self.id = "\(self.sessionID):\(self.captureID):\(self.sequence)"
     }
 }
@@ -734,6 +736,16 @@ public actor GuidedAutoCaptureService {
         if case .accepted(let still) = result { controller.complete(success: true, monotonicTimestamp: still.monotonicTimestamp ?? input.monotonicTimestamp) }
         else { controller.resetAfterRejectedCandidate() }
         return (decision, result)
+    }
+    public func requestManual(captureID: String, monotonicTimestamp: TimeInterval) async -> StillCaptureResult {
+        controller.resetAfterRejectedCandidate()
+        let result = await stillCapture.capture(captureID: captureID)
+        if case .accepted(let still) = result {
+            controller.complete(success: true, monotonicTimestamp: still.monotonicTimestamp ?? monotonicTimestamp)
+        } else {
+            controller.resetAfterRejectedCandidate()
+        }
+        return result
     }
     public func resetForManualCapture() { controller.resetAfterRejectedCandidate() }
 }
@@ -960,6 +972,13 @@ public struct ManualCaptureDecision: Sendable, Equatable {
     public let warnings: [String]
     public let blockingReasons: [String]
     public init(allowed: Bool, warnings: [String], blockingReasons: [String]) { self.allowed = allowed; self.warnings = warnings; self.blockingReasons = blockingReasons }
+}
+
+public struct ManualCaptureAudit: Codable, Sendable, Equatable {
+    public let allowed: Bool
+    public let warnings: [String]
+    public let blockingReasons: [String]
+    public init(decision: ManualCaptureDecision) { self.allowed = decision.allowed; self.warnings = decision.warnings; self.blockingReasons = decision.blockingReasons }
 }
 
 public enum ManualCaptureCoordinator {
