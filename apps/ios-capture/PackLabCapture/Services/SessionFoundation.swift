@@ -259,6 +259,25 @@ public actor SessionGalleryStore {
         }.sorted { $0.sequence < $1.sequence }
     }
 
+    /// Production export seam: resolve accepted records and immutable source
+    /// bytes from the canonical session before invoking the finalizer.
+    public func finalizeAcceptedSession(manifest: Data, payloads: [String: Data], destination: URL, finalizer: SessionFinalizer = SessionFinalizer()) throws {
+        let records = try load().map { entry -> AcceptedCaptureRecord in
+            let url = layout.photoRecords.appendingPathComponent("\(entry.id).json")
+            guard let data = try? Data(contentsOf: url), let record = try? JSONDecoder().decode(AcceptedCaptureRecord.self, from: data) else { throw SessionStorageError.missingRecord }
+            return record
+        }
+        let immutable = try records.reduce(into: [String: Data]()) { result, record in
+            let source = layout.images.appendingPathComponent(record.sourceFilename)
+            let metadata = layout.photoRecords.appendingPathComponent(record.metadataFilename)
+            guard let sourceBytes = try? Data(contentsOf: source), let metadataBytes = try? Data(contentsOf: metadata) else { throw FinalizationError.invalidMetadataBinding }
+            result[record.sourceFilename] = sourceBytes
+            result[record.metadataFilename] = metadataBytes
+        }
+        let source = try CanonicalFinalizationSource(layout: layout, records: records, immutableSourceBytes: immutable)
+        try finalizer.finalize(source: source, manifest: manifest, payloads: payloads, destination: destination)
+    }
+
     public func delete(id: String, confirmed: Bool) throws {
         guard confirmed else { throw GalleryMutationError.confirmationRequired }
         let entries = try load()
@@ -469,14 +488,18 @@ public struct SessionFinalizer: Sendable {
             let oldRecord = try? Data(contentsOf: finalizationURL)
             var packageCommitted = false
             do {
+                if failureInjector?("finalization.packageWrite") == true { throw FinalizationError.packagingFailed }
                 try PackScanWriter().write(manifestJSON: input.manifest, payloads: input.payloads, to: packageTemp)
                 let record = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: .exported, packagePath: input.destination.path, packageBytes: nil, packageSHA256: nil)
                 if failureInjector?("finalization.record") == true { throw FinalizationError.packagingFailed }
                 try JSONEncoder().encode(record).write(to: recordTemp, options: .atomic)
+                guard !fileManager.fileExists(atPath: input.destination.path) else { throw FinalizationError.packagingFailed }
+                if failureInjector?("finalization.packageMove") == true { throw FinalizationError.packagingFailed }
                 if failureInjector?("finalization.packageCommit") == true { throw FinalizationError.packagingFailed }
                 try fileManager.moveItem(at: packageTemp, to: input.destination)
                 packageCommitted = true
                 let packageData = try Data(contentsOf: input.destination)
+                if failureInjector?("finalization.checksum") == true { throw FinalizationError.checksumFailure }
                 let committedRecord = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: .exported, packagePath: input.destination.path, packageBytes: packageData.count, packageSHA256: SourceIntegrity.digest(packageData))
                 if failureInjector?("finalization.recordCommit") == true { throw FinalizationError.packagingFailed }
                 try JSONEncoder().encode(committedRecord).write(to: recordTemp, options: .atomic)
@@ -495,6 +518,18 @@ public struct SessionFinalizer: Sendable {
     }
 
     private func safePayloadPath(_ path: String) -> Bool { !path.isEmpty && !path.hasPrefix("/") && !path.contains("\\") && !path.contains(":") && !path.split(separator: "/", omittingEmptySubsequences: false).contains { $0.isEmpty || $0 == "." || $0 == ".." } }
+}
+
+/// The only production finalization entry point.  Callers must provide the
+/// accepted records and immutable bytes resolved from the canonical session;
+/// arbitrary payload dictionaries cannot bypass that authority boundary.
+public struct CanonicalSessionFinalizationWorkflow: Sendable {
+    private let finalizer: SessionFinalizer
+    public init(finalizer: SessionFinalizer = SessionFinalizer()) { self.finalizer = finalizer }
+    public func finalize(layout: SessionStorageLayout, records: [AcceptedCaptureRecord], immutableSourceBytes: [String: Data], manifest: Data, payloads: [String: Data], destination: URL) throws {
+        let source = try CanonicalFinalizationSource(layout: layout, records: records, immutableSourceBytes: immutableSourceBytes)
+        try finalizer.finalize(source: source, manifest: manifest, payloads: payloads, destination: destination)
+    }
 }
 
 public struct ScanHistoryEntry: Codable, Sendable, Equatable, Identifiable {

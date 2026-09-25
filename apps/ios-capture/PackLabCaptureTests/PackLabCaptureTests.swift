@@ -97,6 +97,29 @@ private actor CountingStillPhotoBackend: StillPhotoBackend {
     }
 }
 
+private final class TestProductionCameraLifecycle: @unchecked Sendable, ProductionCameraLifecycle {
+    var stopAllowed = true
+    private(set) var stopCount = 0
+    private(set) var restoreCount = 0
+    func stopAndReleaseForPairing() async -> Bool { stopCount += 1; return stopAllowed }
+    func restoreAfterPairing() async { restoreCount += 1 }
+}
+
+private final class FakeProductionTransferClient: @unchecked Sendable, ProductionTransferClient {
+    var calls: [String] = []
+    var lastRequestID: String?
+    var statusValue: TransferStatusMessage
+    let acknowledgementState: String
+    init(status: TransferStatusMessage, acknowledgementState: String = "receiving") { statusValue = status; self.acknowledgementState = acknowledgementState }
+    func transfer(_ request: TransferRequest, progress: @escaping @Sendable (TransferStatusMessage) -> Void) async throws -> TransferCompletionAcknowledgement {
+        calls.append("transfer"); lastRequestID = request.transferID
+        let id = request.transferID ?? ""; let status = TransferStatusMessage(transferID: id, confirmedBytes: statusValue.confirmedBytes, totalBytes: statusValue.totalBytes, state: statusValue.state, packageSHA256: statusValue.packageSHA256, nextOffset: statusValue.nextOffset); progress(status)
+        return TransferCompletionAcknowledgement(transferID: id, packageSHA256: status.packageSHA256, verified: acknowledgementState == "complete", authenticated: acknowledgementState == "complete", state: acknowledgementState)
+    }
+    func cancel(transferID: String) async throws { calls.append("cancel:\(transferID)") }
+    func status(transferID: String) async throws -> TransferStatusMessage { calls.append("status:\(transferID)"); return TransferStatusMessage(transferID: transferID, confirmedBytes: statusValue.confirmedBytes, totalBytes: statusValue.totalBytes, state: statusValue.state, packageSHA256: statusValue.packageSHA256, nextOffset: statusValue.nextOffset) }
+}
+
 final class PackLabCaptureTests: XCTestCase {
     func testPL0121SwiftWireModelsMatchSharedGoldenFields() throws {
         let encoder = JSONEncoder()
@@ -109,6 +132,34 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(try object(TransferCompletionAcknowledgement(transferID: "transfer-1", packageSHA256: digest, verified: true, authenticated: true, state: "complete"))["verified"] as? Bool, true)
         let error = try object(TransferErrorEnvelope(errorCode: "unpaired", error: "authorization is required"))
         XCTAssertEqual(error["error_code"] as? String, "unpaired")
+    }
+
+    func testPL0121SwiftConsumesEveryObjectFromTheBundledGoldenFixture() throws {
+        let url = try XCTUnwrap(Bundle(for: PackLabCaptureTests.self).url(forResource: "transfer-protocol-v1-golden", withExtension: "json"))
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let decoder = JSONDecoder(); let encoder = JSONEncoder()
+        func object<T: Decodable & Encodable>(_ type: T.Type, _ name: String) throws -> [String: Any] {
+            try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(decoder.decode(type, from: try XCTUnwrap(JSONSerialization.data(withJSONObject: fixture[name] as Any))))) as? [String: Any])
+        }
+        XCTAssertEqual(try object(TransferCreateMessage.self, "create") as NSDictionary, fixture["create"] as? NSDictionary)
+        XCTAssertEqual(try object(TransferChunkMessage.self, "chunk") as NSDictionary, fixture["chunk"] as? NSDictionary)
+        XCTAssertEqual(try object(TransferStatusMessage.self, "status") as NSDictionary, fixture["status"] as? NSDictionary)
+        XCTAssertEqual(try object(TransferControlMessage.self, "cancel") as NSDictionary, fixture["cancel"] as? NSDictionary)
+        XCTAssertEqual(try object(TransferControlMessage.self, "resume") as NSDictionary, fixture["resume"] as? NSDictionary)
+        XCTAssertEqual(try object(TransferCompletionAcknowledgement.self, "completion") as NSDictionary, fixture["completion"] as? NSDictionary)
+        XCTAssertEqual(try object(TransferErrorEnvelope.self, "error") as NSDictionary, fixture["error"] as? NSDictionary)
+    }
+
+    func testPL0121SwiftWireDecodingFailsClosedForUnsupportedVersionsAndProtocols() throws {
+        let values: [[String: Any]] = [
+            ["message": "transfer_status", "protocol": "packlab-transfer", "protocol_version": "2", "transfer_id": "t", "confirmed_bytes": 0, "total_bytes": 1, "state": "receiving", "package_sha256": String(repeating: "a", count: 64), "next_offset": 0],
+            ["message": "completion_acknowledgement", "protocol": "other", "protocol_version": "1", "transfer_id": "t", "package_sha256": String(repeating: "a", count: 64), "verified": true, "authenticated": true, "state": "complete"],
+            ["message": "error", "protocol": "packlab-transfer", "protocol_version": "2", "error_code": "bad_request", "error": "invalid"]
+        ]
+        for value in values {
+            let data = try JSONSerialization.data(withJSONObject: value)
+            XCTAssertThrowsError(try JSONDecoder().decode(TransferStatusMessage.self, from: data))
+        }
     }
 
     @MainActor
@@ -186,6 +237,64 @@ final class PackLabCaptureTests: XCTestCase {
         let suite = "PackLabTests-\(UUID().uuidString)"; let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
         let offer = PairingOffer(protocolName: PackLabTransferProtocol.name, protocolVersion: PackLabTransferProtocol.version, receiverInstanceID: "receiver", host: "127.0.0.1", port: 8443, pairingID: "pairing", pairingCode: "ABCD1234", expiresAt: Date().timeIntervalSince1970 + 60, tlsCertificateFingerprint: String(repeating: "a", count: 64))
         let store = ReceiverReconnectIdentityStore(defaults: defaults); try store.save(ReceiverReconnectIdentity(receiverInstanceID: offer.receiverInstanceID, host: offer.host, port: offer.port, tlsCertificateFingerprint: offer.tlsCertificateFingerprint)); XCTAssertEqual(store.load()?.receiverInstanceID, "receiver"); XCTAssertFalse(String(decoding: try XCTUnwrap(defaults.data(forKey: "packlab.receiver.reconnect.identity.v1")), as: UTF8.self).contains("ABCD1234"))
+    }
+
+    @MainActor
+    func testPL0122ManualQRExpiryMalformedWrongReceiverAndCameraHandbackMatrix() async throws {
+        let lifecycle = TestProductionCameraLifecycle()
+        let ownership = PairingCameraOwnership(lifecycle: lifecycle)
+        let suite = "PackLabPairing-\(UUID().uuidString)"; let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let now = Date(timeIntervalSince1970: 1_000)
+        let offer = PairingOffer(protocolName: PackLabTransferProtocol.name, protocolVersion: PackLabTransferProtocol.version, receiverInstanceID: "receiver", host: "127.0.0.1", port: 8443, pairingID: "pairing", pairingCode: "ABCD1234", expiresAt: now.timeIntervalSince1970 + 60, tlsCertificateFingerprint: String(repeating: "a", count: 64))
+        let coordinator = PairingCoordinator(cameraOwnership: ownership, identityStore: ReceiverReconnectIdentityStore(defaults: defaults), now: { now })
+        _ = try coordinator.accept(offer: offer, receiverInstanceID: "receiver", manualCode: "ABCD-1234")
+        XCTAssertEqual(coordinator.restoredIdentity()?.receiverInstanceID, "receiver")
+        XCTAssertThrowsError(try coordinator.accept(offer: offer, receiverInstanceID: "other", manualCode: offer.pairingCode)) { XCTAssertEqual($0 as? PairingProtocolError, .wrongReceiver) }
+        let expired = PairingOffer(protocolName: offer.protocolName, protocolVersion: offer.protocolVersion, receiverInstanceID: offer.receiverInstanceID, host: offer.host, port: offer.port, pairingID: "expired", pairingCode: offer.pairingCode, expiresAt: 999, tlsCertificateFingerprint: offer.tlsCertificateFingerprint)
+        XCTAssertThrowsError(try coordinator.accept(offer: expired, receiverInstanceID: "receiver", manualCode: offer.pairingCode)) { XCTAssertEqual($0 as? PairingProtocolError, .expired) }
+        XCTAssertThrowsError(try PairingOffer(data: Data("not-json".utf8)))
+        lifecycle.stopAllowed = false
+        XCTAssertFalse(await coordinator.beginQRScan())
+        lifecycle.stopAllowed = true
+        XCTAssertTrue(await coordinator.beginQRScan())
+        XCTAssertEqual(await ownership.currentOwner(), .pairingScanner)
+        await coordinator.finishQRScan()
+        XCTAssertEqual(await ownership.currentOwner(), .idle)
+        XCTAssertEqual(lifecycle.stopCount, 2); XCTAssertEqual(lifecycle.restoreCount, 1)
+    }
+
+    @MainActor
+    func testPL0124AndPL0126ProductionClientPersistsSameIDCancelRetryAndRestore() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let package = root.appendingPathComponent("capture.packscan"); try Data(repeating: 7, count: 10).write(to: package)
+        let receiver = ReceiverReconnectIdentity(receiverInstanceID: "receiver", host: "127.0.0.1", port: 8443, tlsCertificateFingerprint: String(repeating: "a", count: 64))
+        let record = SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: package.path, packageBytes: 10)
+        let request = TransferRequest(source: package, receiver: receiver, transferID: nil, finalization: record)
+        let status = TransferStatusMessage(transferID: "transfer-fixed", confirmedBytes: 4, totalBytes: 10, state: "receiving", packageSHA256: SourceIntegrity.digest(Data(repeating: 7, count: 10)), nextOffset: 4)
+        let client = FakeProductionTransferClient(status: status)
+        let suite = "PackLabSender-\(UUID().uuidString)"; let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SenderTransferIdentityStore(defaults: defaults)
+        let vm = TransferViewModel(client: client, store: store)
+        await vm.startNetworkTransfer(request)
+        let saved = try XCTUnwrap(store.load()); XCTAssertEqual(saved.transferID, client.lastRequestID); XCTAssertEqual(vm.state?.phase, .retryableFailure)
+        await vm.cancelNetworkTransfer(); XCTAssertEqual(vm.state?.phase, .cancelled); XCTAssertNotNil(store.load())
+        await vm.retryNetworkTransfer(); XCTAssertEqual(client.lastRequestID, saved.transferID); XCTAssertTrue(client.calls.contains("status:\(saved.transferID)"))
+        let restoredClient = FakeProductionTransferClient(status: status)
+        let restored = TransferViewModel(client: restoredClient, store: store)
+        await restored.restorePersistedTransfer(request)
+        XCTAssertEqual(restoredClient.lastRequestID, saved.transferID)
+        XCTAssertFalse(restoredClient.calls.contains { $0.hasPrefix("transfer:") && !$0.contains(saved.transferID) })
+    }
+
+    @MainActor
+    func testPL0125CompletionRejectsWrongIdentityAndNonTerminalAckWithoutClearingResume() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let package = root.appendingPathComponent("capture.packscan"); try Data([1, 2]).write(to: package)
+        let suite = "PackLabCompletion-\(UUID().uuidString)"; let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let store = SenderTransferIdentityStore(defaults: defaults); try store.save(SenderTransferIdentity(transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2])), receiverInstanceID: "receiver"))
+        let vm = TransferViewModel(store: store); vm.prepare(package: FinalizedPackScanShare(packageURL: package, packageName: package.lastPathComponent, packageBytes: 2)); vm.pair(receiverIdentity: "receiver", transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2]))); vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 2, totalBytes: 2, verified: true, packageSHA256: SourceIntegrity.digest(Data([1, 2])))
+        vm.applyCompletion(TransferCompletionAcknowledgement(transferID: "other", packageSHA256: SourceIntegrity.digest(Data([1, 2])), verified: true, authenticated: true, state: "complete")); XCTAssertEqual(vm.state?.phase, .retryableFailure); XCTAssertNotNil(store.load())
+        vm.applyCompletion(TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2])), verified: true, authenticated: true, state: "receiving")); XCTAssertEqual(vm.state?.phase, .retryableFailure); XCTAssertNotNil(store.load())
     }
     func testPreviewLifecyclePolicyIsIdempotent() {
         var policy = PreviewLifecyclePolicy()
@@ -701,6 +810,48 @@ final class PackLabCaptureTests: XCTestCase {
     func testFinalizationGateRequiresPhotoAndMetadataPayloads() throws {
         let input = FinalizationInput(manifest: Data("{}".utf8), payloads: [:], destination: URL(fileURLWithPath: "/tmp/out.packscan"))
         XCTAssertThrowsError(try SessionFinalizer().validate(input)) { error in XCTAssertEqual(error as? FinalizationError, .invalidManifest) }
+    }
+
+    func testPL0119CanonicalWorkflowRequiresAuthoritativeRecordsAndUsesSourceEntryPoint() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "canonical")
+        try FileManager.default.createDirectory(at: layout.sessionRoot, withIntermediateDirectories: true)
+        let image = Data([1, 2, 3])
+        let metadata = try JSONEncoder().encode(PackScanPhotoMetadataDocument(photos: [PackScanPhotoMetadataWire(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: PackScanOrientation(value: .unknown, source: .unknown), focalLengthMM: PackScanNumericMeasurement(status: .unavailable), exposure: PackScanNumericMeasurement(status: .unavailable), iso: PackScanISOMeasurement(status: .unavailable), whiteBalanceKelvin: PackScanNumericMeasurement(status: .unavailable))]))
+        let record = AcceptedCaptureRecord(captureID: "p", sequence: 0, sourceFilename: "p.heic", metadataFilename: "p.json")
+        let payloads = ["metadata/photos.json": metadata, "images/p.heic": image]
+        let manifest = try JSONSerialization.data(withJSONObject: ["schema_version": "1.0.0", "capture_id": "canonical", "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization], "payloads": [["path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": metadata.count, "sha256": SourceIntegrity.digest(metadata)], ["path": "images/p.heic", "kind": "image", "required": true, "authority": "source", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)]]])
+        let destination = root.appendingPathComponent("canonical.packscan")
+        try CanonicalSessionFinalizationWorkflow().finalize(layout: layout, records: [record], immutableSourceBytes: ["p.heic": image, "p.json": metadata], manifest: manifest, payloads: payloads, destination: destination)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertThrowsError(try CanonicalSessionFinalizationWorkflow().finalize(layout: layout, records: [], immutableSourceBytes: [:], manifest: manifest, payloads: payloads, destination: root.appendingPathComponent("other.packscan"))) { XCTAssertEqual($0 as? FinalizationError, .invalidManifest) }
+        XCTAssertThrowsError(try CanonicalSessionFinalizationWorkflow().finalize(layout: layout, records: [record], immutableSourceBytes: ["p.heic": image], manifest: manifest, payloads: payloads, destination: root.appendingPathComponent("missing-source.packscan"))) { XCTAssertEqual($0 as? FinalizationError, .invalidMetadataBinding) }
+    }
+
+    func testPL0119InjectedFinalizationFailuresLeaveNoPartialArtifactsAndPreservePriorExport() throws {
+        let stages = ["finalization.packageWrite", "finalization.record", "finalization.packageMove", "finalization.packageCommit", "finalization.checksum", "finalization.recordCommit"]
+        for stage in stages {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let layout = SessionStorageLayout(root: root, sessionID: "failure")
+            try FileManager.default.createDirectory(at: layout.sessionRoot, withIntermediateDirectories: true)
+            let image = Data([1, 2, 3]); let metadata = try JSONEncoder().encode(PackScanPhotoMetadataDocument(photos: [PackScanPhotoMetadataWire(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: PackScanOrientation(value: .unknown, source: .unknown), focalLengthMM: PackScanNumericMeasurement(status: .unavailable), exposure: PackScanNumericMeasurement(status: .unavailable), iso: PackScanISOMeasurement(status: .unavailable), whiteBalanceKelvin: PackScanNumericMeasurement(status: .unavailable))]))
+            let record = AcceptedCaptureRecord(captureID: "p", sequence: 0, sourceFilename: "p.heic", metadataFilename: "p.json")
+            let payloads = ["metadata/photos.json": metadata, "images/p.heic": image]
+            let manifest = try JSONSerialization.data(withJSONObject: ["schema_version": "1.0.0", "capture_id": "failure", "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization], "payloads": [["path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": metadata.count, "sha256": SourceIntegrity.digest(metadata)], ["path": "images/p.heic", "kind": "image", "required": true, "authority": "source", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)]]])
+            let destination = root.appendingPathComponent("failure.packscan")
+            XCTAssertThrowsError(try CanonicalSessionFinalizationWorkflow(finalizer: SessionFinalizer(failureInjector: { $0 == stage })).finalize(layout: layout, records: [record], immutableSourceBytes: ["p.heic": image, "p.json": metadata], manifest: manifest, payloads: payloads, destination: destination))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path), stage)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: layout.finalization.path), stage)
+            let partials = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).filter { $0.lastPathComponent.contains(".partial") }
+            XCTAssertTrue(partials.isEmpty, stage)
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "prior"); try FileManager.default.createDirectory(at: layout.sessionRoot, withIntermediateDirectories: true)
+        let destination = root.appendingPathComponent("prior.packscan"); let priorBytes = Data([9, 9, 9]); let prior = SessionFinalizationRecord(sessionID: "prior", state: .exported, packagePath: destination.path, packageBytes: priorBytes.count, packageSHA256: SourceIntegrity.digest(priorBytes)); try priorBytes.write(to: destination); try JSONEncoder().encode(prior).write(to: layout.finalization)
+        XCTAssertThrowsError(try SessionFinalizer(failureInjector: { $0 == "finalization.packageMove" }).finalize(FinalizationInput(manifest: Data("{}".utf8), payloads: [:], destination: destination, sessionRoot: layout.sessionRoot)))
+        XCTAssertEqual(try Data(contentsOf: destination), priorBytes); XCTAssertEqual(try JSONDecoder().decode(SessionFinalizationRecord.self, from: Data(contentsOf: layout.finalization)), prior)
     }
 
     func testFinalizationGateDistinguishesBindingAndChecksumFailures() throws {
