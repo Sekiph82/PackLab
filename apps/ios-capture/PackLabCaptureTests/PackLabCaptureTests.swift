@@ -1706,6 +1706,33 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(vm.m04Coverage.invalidCaptureIDs, [])
     }
 
+    func testPL0102CoverageUsesExactElevationBoundariesAndAdjacentValuesDeterministically() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [
+            CoverageRingDefinition(id: "lower", minimumElevation: -30, maximumElevation: -5),
+            CoverageRingDefinition(id: "middle", minimumElevation: -5, maximumElevation: 5),
+            CoverageRingDefinition(id: "upper", minimumElevation: 5, maximumElevation: 30)
+        ])
+        func binding(_ captureID: String, elevation: Double) -> PoseCaptureBinding? {
+            let radians = elevation * Double.pi / 180
+            let pose = PoseSample(timestamp: Double(captureID.count), transform: CoordinateTransform.translation(x: 0, y: tan(radians), z: -1).values, tracking: .normal)
+            return acceptedPoseBinding(captureID: captureID, pose: pose)
+        }
+        var model = OrbitCoverageModel(configuration: configuration)
+        XCTAssertEqual(model.observe(captureID: "lower-min", poseBinding: binding("lower-min", elevation: -30)).sector?.ringID, "lower")
+        XCTAssertNil(model.observe(captureID: "below-lower-min", poseBinding: binding("below-lower-min", elevation: -30.0001)).sector)
+        XCTAssertEqual(model.observe(captureID: "lower-max", poseBinding: binding("lower-max", elevation: -5)).sector?.ringID, "middle")
+        XCTAssertEqual(model.observe(captureID: "middle-min", poseBinding: binding("middle-min", elevation: -5)).sector?.ringID, "middle")
+        XCTAssertEqual(model.observe(captureID: "middle-max", poseBinding: binding("middle-max", elevation: 5)).sector?.ringID, "upper")
+        XCTAssertEqual(model.observe(captureID: "upper-min", poseBinding: binding("upper-min", elevation: 5)).sector?.ringID, "upper")
+        XCTAssertEqual(model.observe(captureID: "upper-inside", poseBinding: binding("upper-inside", elevation: 5.0001)).sector?.ringID, "upper")
+        XCTAssertNil(model.observe(captureID: "above-upper-max", poseBinding: binding("above-upper-max", elevation: 30)).sector)
+
+        let snapshot = model.snapshot()
+        XCTAssertEqual(snapshot.capturedSectors.map(\.id), ["lower-a0", "middle-a0", "upper-a0"])
+        XCTAssertEqual(snapshot.invalidCaptureIDs, ["below-lower-min", "above-upper-max"])
+        XCTAssertEqual(snapshot.missingSectors.count, 9)
+    }
+
     func testPL0103CoverageViewModelLabelsEmptyPartialCompleteAndUnavailableStates() {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
         let emptyModel = CoverageViewModel(snapshot: OrbitCoverageModel(configuration: configuration).snapshot())
