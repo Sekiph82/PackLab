@@ -90,4 +90,3 @@ class AboutView(QWidget):
         }
         for label, value in values.items():
             layout.addRow(QLabel(label), QLabel(value))
-
