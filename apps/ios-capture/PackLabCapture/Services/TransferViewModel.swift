@@ -112,7 +112,8 @@ public final class TransferViewModel: ObservableObject {
                 Task { @MainActor in self?.applyReceiverStatus(TransferReceiverStatus(transferID: status.transferID, confirmedBytes: status.confirmedBytes, totalBytes: status.totalBytes, verified: status.state == "verified" || status.state == "complete", packageSHA256: status.packageSHA256)) }
             }
             applyCompletion(acknowledgement)
-        } catch is URLSessionTransferError.notVerified { markRetryable("verified_receiver_acknowledgement_required") }
+        } catch URLSessionTransferError.notVerified { markRetryable("verified_receiver_acknowledgement_required") }
+        catch URLSessionTransferError.sourceDigestMismatch { markRetryable("package_digest_mismatch") }
         catch { markFailure(String(describing: error)) }
     }
 
