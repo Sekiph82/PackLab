@@ -5,12 +5,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M04
-- Current Sprint: M04-BATCH-003 — Final boundary/failure remediation
-- Current Task: M04-BATCH-003 — Remediate 9 remaining M04 children
+- Current Sprint: M04-BATCH-004 — Final completion-resume remediation
+- Current Task: M04-BATCH-004 — Remediate PL-0109 only
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V02.md. Remediate exactly PL-0094, PL-0101, PL-0102, PL-0104, PL-0105, PL-0106, PL-0107, PL-0108 and PL-0109 using their frozen V03 work orders. Preserve the 16 accepted M04 children and all accepted M03 behavior, publish distinct implementation/log commits per child, then publish MASTER_REMEDIATION_CODEX_LOG_V02.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M05, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V03.md. Execute exactly PL-0109 using https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/PL-0109_CODEX_PROMPT_V04.md. Preserve all 24 accepted M04 children and accepted M03 behavior, persist/reconstruct authoritative detail-pass resume state, prove recomputation survives an additional accepted capture, publish distinct implementation/log commits, then publish MASTER_REMEDIATION_CODEX_LOG_V03.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M05, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V02.md — CHANGES_REQUIRED (16/25 M04 children accepted; 9 remain open)
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V03.md — CHANGES_REQUIRED (24/25 M04 children accepted; PL-0109 remains open)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -203,24 +203,24 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M04-S01 - Live quality metrics
 
-- [ ] **PL-0094** Implement frame sharpness metric and calibrate thresholds for packaging capture.
+- [x] **PL-0094** Implement frame sharpness metric and calibrate thresholds for packaging capture.
 - [x] **PL-0095** Implement motion-blur warning using frame analysis plus CoreMotion.
 - [x] **PL-0096** Implement exposure/highlight clipping analysis for glossy plastic.
 - [x] **PL-0097** Implement underexposure/shadow clipping analysis.
 - [x] **PL-0098** Implement object-size/framing score so the package fills an appropriate image area.
 - [x] **PL-0099** Implement background-complexity warning for poor photogrammetry setups.
 - [x] **PL-0100** Combine metrics into deterministic per-frame ACCEPT/REJECT decision with explainable reasons.
-- [ ] **PL-0101** Log quality metrics for every candidate/accepted frame for later tuning.
+- [x] **PL-0101** Log quality metrics for every candidate/accepted frame for later tuning.
 
 ## Sprint M04-S02 - Guided orbit capture
 
-- [ ] **PL-0102** Define orbit-coverage model with azimuth/elevation bins around the object.
+- [x] **PL-0102** Define orbit-coverage model with azimuth/elevation bins around the object.
 - [x] **PL-0103** Implement visual coverage globe/rings showing captured and missing sectors.
-- [ ] **PL-0104** Implement automatic still capture when pose, overlap and quality thresholds are satisfied.
-- [ ] **PL-0105** Prevent near-duplicate captures that add storage without useful parallax.
-- [ ] **PL-0106** Require lower, middle and upper capture rings for standard bottle mode.
-- [ ] **PL-0107** Add top/neck detail pass for closures and shoulders.
-- [ ] **PL-0108** Add bottom/base detail pass where physically possible.
+- [x] **PL-0104** Implement automatic still capture when pose, overlap and quality thresholds are satisfied.
+- [x] **PL-0105** Prevent near-duplicate captures that add storage without useful parallax.
+- [x] **PL-0106** Require lower, middle and upper capture rings for standard bottle mode.
+- [x] **PL-0107** Add top/neck detail pass for closures and shoulders.
+- [x] **PL-0108** Add bottom/base detail pass where physically possible.
 - [ ] **PL-0109** Add completion score and explicit missing-area guidance.
 - [x] **PL-0110** Add manual-capture override while retaining quality warnings.
 
