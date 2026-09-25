@@ -4,13 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M04
-- Current Sprint: M04-BATCH-004 — Final completion-resume remediation
-- Current Task: M04-BATCH-004 — Remediate PL-0109 only
+- Current Milestone: M05
+- Current Sprint: M05-BATCH-001 — Transfer & Ingest
+- Current Task: M05-BATCH-001 — Execute PL-0119 through PL-0134
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V03.md. Execute exactly PL-0109 using https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/PL-0109_CODEX_PROMPT_V04.md. Preserve all 24 accepted M04 children and accepted M03 behavior, persist/reconstruct authoritative detail-pass resume state, prove recomputation survives an additional accepted capture, publish distinct implementation/log commits, then publish MASTER_REMEDIATION_CODEX_LOG_V03.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M05, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0119 through PL-0134 in frozen order using each child prompt/criteria. Preserve accepted M03/M04 behavior, keep PL-0068 OWNER_REQUIRED, do not start M06, publish distinct implementation/log commits per child, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V03.md — CHANGES_REQUIRED (24/25 M04 children accepted; PL-0109 remains open)
+- Latest M04 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V04.md — AUDITED_PASS (25/25 M04 children accepted)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -41,7 +41,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 | M01 | Monorepo & Development Foundations | iOS + Windows project skeletons, local tooling | [x] |
 | M02 | PackScan Data Contract & Calibration | Versioned .packscan format and real-world scale contract | [ ] |
 | M03 | iOS Capture Foundation | SwiftUI/NextLevel/ARKit app runs on iPhone 16 | [x] |
-| M04 | Guided Capture & Quality Intelligence | Reliable, guided, high-resolution packaging capture | [ ] |
+| M04 | Guided Capture & Quality Intelligence | Reliable, guided, high-resolution packaging capture | [x] |
 | M05 | Transfer & Ingest | .packscan moves safely from iPhone to Windows | [ ] |
 | M06 | PackLab Studio Foundation | PySide6 desktop shell and project lifecycle | [ ] |
 | M07 | Photogrammetry Reconstruction | COLMAP -> OpenMVS textured scan pipeline | [ ] |
@@ -221,7 +221,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0106** Require lower, middle and upper capture rings for standard bottle mode.
 - [x] **PL-0107** Add top/neck detail pass for closures and shoulders.
 - [x] **PL-0108** Add bottom/base detail pass where physically possible.
-- [ ] **PL-0109** Add completion score and explicit missing-area guidance.
+- [x] **PL-0109** Add completion score and explicit missing-area guidance.
 - [x] **PL-0110** Add manual-capture override while retaining quality warnings.
 
 ## Sprint M04-S03 - Packaging-specific modes
