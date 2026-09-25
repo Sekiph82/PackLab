@@ -11,6 +11,7 @@ from typing import Protocol
 
 from packlab_core.packscan import PackScanError, PackScanReport, extract_packscan, validate_packscan
 
+from .import_report import ImportReportStore, build_import_report
 from .quarantine import QuarantineStore
 from .raw_store import RawEvidenceStore, RawStoreError
 
@@ -49,16 +50,21 @@ class ImportService:
         self.validator = validator
         self.quarantine = quarantine
         self.raw_store: RawEvidenceStore | None = None
+        self.report_store: ImportReportStore | None = None
 
     def with_raw_store(self, raw_store: RawEvidenceStore) -> ImportService:
         self.raw_store = raw_store
+        return self
+
+    def with_report_store(self, report_store: ImportReportStore) -> ImportService:
+        self.report_store = report_store
         return self
 
     @staticmethod
     def normalize_path(value: str | Path) -> Path:
         return Path(os.path.abspath(os.path.normpath(os.fspath(value))))
 
-    def import_path(self, value: str | Path, *, source_channel: str) -> ImportResult:
+    def import_path(self, value: str | Path, *, source_channel: str, transfer_provenance: dict[str, str] | None = None) -> ImportResult:
         source = self.normalize_path(value)
         if source.suffix.lower() != ".packscan":
             return ImportResult(source_channel, "rejected", source.name, error_code="unsupported_extension", error_message="only .packscan files are accepted")
@@ -75,13 +81,18 @@ class ImportService:
             return ImportResult(source_channel, "rejected", source.name, error_code=error.code, error_message=error.code)
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
         capture_id = report.manifest.get("capture_id")
+        raw_location: str | None = None
         if self.raw_store is not None and isinstance(capture_id, str):
             try:
-                self.raw_store.store(source, capture_id=capture_id, source_channel=source_channel)
+                raw_record = self.raw_store.store(source, capture_id=capture_id, source_channel=source_channel)
+                raw_location = f"raw/{raw_record.raw_filename}"
             except OSError:
                 return ImportResult(source_channel, "rejected", source.name, capture_id=capture_id, package_sha256=digest, error_code="raw_store_unavailable", error_message="raw store unavailable")
             except RawStoreError as error:
                 return ImportResult(source_channel, "rejected", source.name, capture_id=capture_id, package_sha256=digest, error_code=str(error), error_message=str(error))
+        if self.report_store is not None and isinstance(capture_id, str):
+            report_path = self.report_store.write(build_import_report(report, package_sha256=digest, source_channel=source_channel, raw_location=raw_location, transfer_provenance=transfer_provenance))
+            return ImportResult(source_channel, "reported", source.name, capture_id=capture_id, package_sha256=digest, error_message=report_path)
         return ImportResult(source_channel, "raw_stored" if self.raw_store is not None else "validated", source.name, capture_id=capture_id if isinstance(capture_id, str) else None, package_sha256=digest)
 
     def validate_then_extract(self, value: str | Path, destination: str | Path, *, source_channel: str) -> tuple[ImportResult, Path | None]:

@@ -20,6 +20,7 @@ from packlab_core.transfer_security import (
     create_server_tls_context,
 )
 
+from .import_report import ImportReportStore
 from .ingest import ImportResult, ImportService
 from .quarantine import QuarantineStore
 from .raw_store import RawEvidenceStore
@@ -42,7 +43,7 @@ class PackLabReceiver:
         self.authenticator = PairingAuthenticator(self.pairings, clock=__import__("time").time)
         self.transfers = ResumableTransferStore(self.root / "transfers")
         self.inbox = self.root / "capture_inbox"
-        self.ingest = ImportService(quarantine=QuarantineStore(self.root / "quarantine")).with_raw_store(RawEvidenceStore(self.root / "raw"))
+        self.ingest = ImportService(quarantine=QuarantineStore(self.root / "quarantine")).with_raw_store(RawEvidenceStore(self.root / "raw")).with_report_store(ImportReportStore(self.root / "reports"))
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
