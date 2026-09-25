@@ -72,10 +72,11 @@ public final class TransferViewModel: ObservableObject {
     private var expectedSHA256: String?
     private var networkClient: (any ProductionTransferClient)?
     private var networkRequest: TransferRequest?
+    private let identityStore: SenderTransferIdentityStore
 
-    public init() {}
+    public init(store: SenderTransferIdentityStore = SenderTransferIdentityStore()) { self.identityStore = store }
 
-    public init(client: any ProductionTransferClient) { self.networkClient = client }
+    public init(client: any ProductionTransferClient, store: SenderTransferIdentityStore = SenderTransferIdentityStore()) { self.networkClient = client; self.identityStore = store }
 
     public func bind(client: any ProductionTransferClient) { networkClient = client }
 
@@ -91,17 +92,28 @@ public final class TransferViewModel: ObservableObject {
     }
 
     public func startNetworkTransfer(_ request: TransferRequest) async {
-        networkRequest = request
         guard let finalization = request.finalization, let share = try? PackScanShareCoordinator().eligiblePackage(at: request.source, finalization: finalization), let client = networkClient else { markFailure("finalized_package_required"); return }
         prepare(package: share)
-        let id = request.transferID ?? UUID().uuidString
-        pair(receiverIdentity: request.receiver.receiverInstanceID, transferID: id, packageSHA256: (try? SourceIntegrity.digest(Data(contentsOf: request.source))) ?? "")
+        guard let packageData = try? Data(contentsOf: request.source) else { markFailure("finalized_package_unavailable"); return }
+        let digest = SourceIntegrity.digest(packageData)
+        if let expected = finalization.packageSHA256, expected != digest { markFailure("finalized_package_digest_mismatch"); return }
+        let saved = identityStore.load()
+        if let saved, request.transferID == nil, (saved.packageSHA256 != digest || saved.receiverInstanceID != request.receiver.receiverInstanceID) {
+            markFailure("sender_identity_conflict"); return
+        }
+        let id = request.transferID ?? (saved?.packageSHA256 == digest && saved?.receiverInstanceID == request.receiver.receiverInstanceID ? saved?.transferID : nil) ?? UUID().uuidString
+        let resolvedRequest = TransferRequest(source: request.source, receiver: request.receiver, pairingOffer: request.pairingOffer, pairingCode: request.pairingCode, transferID: id, finalization: finalization)
+        networkRequest = resolvedRequest
+        transferID = id; expectedSHA256 = digest
+        do { try identityStore.save(SenderTransferIdentity(transferID: id, packageSHA256: digest, receiverInstanceID: request.receiver.receiverInstanceID)) } catch { markFailure("sender_identity_persist_failed"); return }
+        pair(receiverIdentity: request.receiver.receiverInstanceID, transferID: id, packageSHA256: digest)
         do {
-            let acknowledgement = try await client.transfer(TransferRequest(source: request.source, receiver: request.receiver, pairingOffer: request.pairingOffer, pairingCode: request.pairingCode, transferID: id, finalization: finalization)) { [weak self] status in
+            let acknowledgement = try await client.transfer(resolvedRequest) { [weak self] status in
                 Task { @MainActor in self?.applyReceiverStatus(TransferReceiverStatus(transferID: status.transferID, confirmedBytes: status.confirmedBytes, totalBytes: status.totalBytes, verified: status.state == "verified" || status.state == "complete", packageSHA256: status.packageSHA256)) }
             }
             applyCompletion(acknowledgement)
-        } catch { markFailure(String(describing: error)) }
+        } catch is URLSessionTransferError.notVerified { markRetryable("verified_receiver_acknowledgement_required") }
+        catch { markFailure(String(describing: error)) }
     }
 
     public func cancelNetworkTransfer() async {
@@ -111,8 +123,31 @@ public final class TransferViewModel: ObservableObject {
 
     public func retryNetworkTransfer() async {
         guard let id = transferID, let client = networkClient else { return }
-        do { let status = try await client.status(transferID: id); applyReceiverStatus(TransferReceiverStatus(transferID: status.transferID, confirmedBytes: status.confirmedBytes, totalBytes: status.totalBytes, verified: false, packageSHA256: status.packageSHA256)); if let request = networkRequest { await startNetworkTransfer(request) } } catch { markFailure("resume_failed") }
+        do {
+            let status = try await client.status(transferID: id)
+            guard status.transferID == id else { markRetryable("resume_identity_mismatch"); return }
+            applyReceiverStatus(TransferReceiverStatus(transferID: status.transferID, confirmedBytes: status.confirmedBytes, totalBytes: status.totalBytes, verified: false, packageSHA256: status.packageSHA256))
+            if let request = networkRequest {
+                let resumed = TransferRequest(source: request.source, receiver: request.receiver, pairingOffer: request.pairingOffer, pairingCode: request.pairingCode, transferID: id, finalization: request.finalization)
+                await startNetworkTransfer(resumed)
+            }
+        } catch { markFailure("resume_failed") }
     }
+
+    /// Rebuild sender state after an app/runtime restart from the persisted
+    /// identity, then use receiver status as the only progress authority.
+    public func restorePersistedTransfer(_ request: TransferRequest) async {
+        guard let saved = identityStore.load(), saved.receiverInstanceID == request.receiver.receiverInstanceID, let data = try? Data(contentsOf: request.source), SourceIntegrity.digest(data) == saved.packageSHA256, let client = networkClient else { markFailure("sender_identity_conflict"); return }
+        do {
+            let status = try await client.status(transferID: saved.transferID)
+            guard status.transferID == saved.transferID else { markFailure("resume_identity_mismatch"); return }
+            let resumed = TransferRequest(source: request.source, receiver: request.receiver, pairingOffer: request.pairingOffer, pairingCode: request.pairingCode, transferID: saved.transferID, finalization: request.finalization)
+            applyReceiverStatus(TransferReceiverStatus(transferID: status.transferID, confirmedBytes: status.confirmedBytes, totalBytes: status.totalBytes, verified: status.state == "verified" || status.state == "complete", packageSHA256: status.packageSHA256))
+            await startNetworkTransfer(resumed)
+        } catch { markFailure("resume_failed") }
+    }
+
+    public func discardPersistedTransfer() { identityStore.remove() }
 
     /// `confirmedBytes` must come from the receiver's authoritative status.
     public func applyReceiverStatus(_ status: TransferReceiverStatus) {
@@ -122,15 +157,23 @@ public final class TransferViewModel: ObservableObject {
     }
 
     public func applyCompletion(verified: Bool, authenticated: Bool, packageSHA256: String) {
-        guard let current = state, authenticated, verified, packageSHA256 == expectedSHA256, current.confirmedBytes == current.totalBytes else {
-            state = state.map { TransferUIState(packageURL: $0.packageURL, packageName: $0.packageName, totalBytes: $0.totalBytes, confirmedBytes: $0.confirmedBytes, receiverIdentity: $0.receiverIdentity, phase: .retryableFailure, error: "verified_receiver_acknowledgement_required") }
-            return
-        }
-        state = TransferUIState(packageURL: current.packageURL, packageName: current.packageName, totalBytes: current.totalBytes, confirmedBytes: current.totalBytes, receiverIdentity: current.receiverIdentity, phase: .completed)
+        guard let id = transferID else { markRetryable("verified_receiver_acknowledgement_required"); return }
+        applyCompletion(TransferCompletionAcknowledgement(transferID: id, packageSHA256: packageSHA256, verified: verified, authenticated: authenticated, state: "complete"))
     }
 
     public func applyCompletion(_ acknowledgement: TransferCompletionAcknowledgement) {
-        applyCompletion(verified: acknowledgement.verified, authenticated: acknowledgement.authenticated, packageSHA256: acknowledgement.packageSHA256)
+        guard let current = state,
+              acknowledgement.transferID == transferID,
+              acknowledgement.authenticated,
+              acknowledgement.verified,
+              acknowledgement.packageSHA256 == expectedSHA256,
+              acknowledgement.state == "verified" || acknowledgement.state == "complete",
+              current.confirmedBytes == current.totalBytes else {
+            markRetryable("verified_receiver_acknowledgement_required")
+            return
+        }
+        state = TransferUIState(packageURL: current.packageURL, packageName: current.packageName, totalBytes: current.totalBytes, confirmedBytes: current.totalBytes, receiverIdentity: current.receiverIdentity, phase: .completed)
+        identityStore.remove()
     }
 
     public func cancel() {
@@ -144,6 +187,7 @@ public final class TransferViewModel: ObservableObject {
         if let refreshed = self.state { state = TransferUIState(packageURL: refreshed.packageURL, packageName: refreshed.packageName, totalBytes: refreshed.totalBytes, confirmedBytes: refreshed.confirmedBytes, receiverIdentity: refreshed.receiverIdentity, phase: .transferring) }
     }
 
+    private func markRetryable(_ message: String) { if let current = state { state = TransferUIState(packageURL: current.packageURL, packageName: current.packageName, totalBytes: current.totalBytes, confirmedBytes: current.confirmedBytes, receiverIdentity: current.receiverIdentity, phase: .retryableFailure, error: message) } }
     private func markFailure(_ message: String) { if let current = state { state = TransferUIState(packageURL: current.packageURL, packageName: current.packageName, totalBytes: current.totalBytes, confirmedBytes: current.confirmedBytes, receiverIdentity: current.receiverIdentity, phase: .terminalFailure, error: message) } }
 
     public func sourceStillAvailable() -> Bool {
