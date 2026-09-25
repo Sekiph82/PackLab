@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from packlab_core.packscan import PackScanError, PackScanReport, validate_packscan
+from packlab_core.packscan import PackScanError, PackScanReport, extract_packscan, validate_packscan
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +64,18 @@ class ImportService:
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
         capture_id = report.manifest.get("capture_id")
         return ImportResult(source_channel, "validated", source.name, capture_id=capture_id if isinstance(capture_id, str) else None, package_sha256=digest)
+
+    def validate_then_extract(self, value: str | Path, destination: str | Path, *, source_channel: str) -> tuple[ImportResult, Path | None]:
+        """Validate the whole package before exposing any extracted payload."""
+
+        result = self.import_path(value, source_channel=source_channel)
+        if result.state != "validated":
+            return result, None
+        try:
+            extracted = extract_packscan(self.normalize_path(value), destination)
+        except PackScanError as error:
+            return ImportResult(source_channel, "rejected", result.source_name, capture_id=result.capture_id, package_sha256=result.package_sha256, error_code=error.code, error_message=error.code), None
+        return result, extracted
 
 
 class IngestController:
