@@ -11,6 +11,8 @@ from typing import Protocol
 
 from packlab_core.packscan import PackScanError, PackScanReport, extract_packscan, validate_packscan
 
+from .quarantine import QuarantineStore
+
 
 @dataclass(frozen=True, slots=True)
 class ImportResult:
@@ -42,8 +44,9 @@ class ImportService:
     initial boundary deliberately does not expose unvalidated bytes as import.
     """
 
-    def __init__(self, validator=validate_packscan) -> None:
+    def __init__(self, validator=validate_packscan, quarantine: QuarantineStore | None = None) -> None:
         self.validator = validator
+        self.quarantine = quarantine
 
     @staticmethod
     def normalize_path(value: str | Path) -> Path:
@@ -60,6 +63,9 @@ class ImportService:
         try:
             report: PackScanReport = self.validator(source)
         except PackScanError as error:
+            if self.quarantine is not None:
+                self.quarantine.preserve(source, source_channel=source_channel, error_code=error.code, diagnostic=error.code)
+                return ImportResult(source_channel, "quarantined", source.name, error_code=error.code, error_message=error.code)
             return ImportResult(source_channel, "rejected", source.name, error_code=error.code, error_message=error.code)
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
         capture_id = report.manifest.get("capture_id")
