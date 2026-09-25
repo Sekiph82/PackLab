@@ -11,6 +11,7 @@ from .jobs import JobManager
 from .navigation import NavigationController, NavigationPanel, Route, RouteStack
 from .preferences import PreferencesStore, WindowPreferences
 from .project import ProjectManager
+from .recovery import RecoveryManager
 from .shutdown import ShutdownCoordinator
 from .workspace import WorkspaceManager
 
@@ -31,6 +32,7 @@ class StudioMainWindow(QMainWindow):
         self.job_manager = JobManager()
         self.project_manager = ProjectManager(job_manager=self.job_manager)
         self.autosave = AutosaveService(self.project_manager)
+        self.recovery: RecoveryManager | None = None
         self.shutdown = ShutdownCoordinator(self.job_manager)
         self._shutdown_requested = False
         self.navigation_panel = NavigationPanel()
