@@ -42,24 +42,6 @@ class TransferErrorCode(StrEnum):
     INTERNAL_ERROR = "internal_error"
 
 
-@dataclass(frozen=True, slots=True)
-class TransferErrorEnvelope:
-    """Stable error wire response; diagnostics never contain credentials or paths."""
-
-    code: str
-    message: str
-    protocol_version: str = PROTOCOL_VERSION
-
-    def to_dict(self) -> dict[str, object]:
-        return {
-            "message": "error",
-            "protocol": PROTOCOL_NAME,
-            "protocol_version": self.protocol_version,
-            "error_code": self.code,
-            "error": self.message,
-        }
-
-
 def _require_string(value: Any, field: str, *, nonempty: bool = True) -> str:
     if not isinstance(value, str) or (nonempty and not value):
         raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, f"{field} must be a string")
@@ -188,6 +170,8 @@ class TransferControlMessage:
         _require_string(self.transfer_id, "transfer_id")
         if self.action not in {"cancel", "resume"}:
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "unsupported transfer control action")
+        if self.protocol_version != PROTOCOL_VERSION:
+            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -196,6 +180,16 @@ class TransferControlMessage:
             "protocol_version": self.protocol_version,
             "transfer_id": self.transfer_id,
         }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> TransferControlMessage:
+        if value.get("protocol") != PROTOCOL_NAME or value.get("message") not in {"cancel", "resume"}:
+            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a transfer control message")
+        return cls(
+            transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
+            action=_require_string(value.get("message"), "message"),
+            protocol_version=_require_string(value.get("protocol_version"), "protocol_version"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +221,21 @@ class ChunkRange:
             "length": self.length,
             "chunk_sha256": self.chunk_sha256,
         }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> ChunkRange:
+        if value.get("message") != "put_chunk" or value.get("protocol") != PROTOCOL_NAME:
+            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a put_chunk message")
+        if value.get("protocol_version") != PROTOCOL_VERSION:
+            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
+        try:
+            return cls(
+                transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
+                offset=int(value["offset"]), length=int(value["length"]),
+                chunk_sha256=_require_sha256(value.get("chunk_sha256"), "chunk_sha256"),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "put_chunk fields are invalid") from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,4 +270,30 @@ class CompletionAcknowledgement:
             transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
             package_sha256=_require_sha256(value.get("package_sha256"), "package_sha256"),
             verified=value["verified"], authenticated=value["authenticated"], state=_require_string(value.get("state"), "state"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TransferErrorEnvelope:
+    code: str
+    message: str
+    protocol_version: str = PROTOCOL_VERSION
+
+    def __post_init__(self) -> None:
+        _require_string(self.code, "error_code")
+        _require_string(self.message, "error")
+        if self.protocol_version != PROTOCOL_VERSION:
+            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
+
+    def to_dict(self) -> dict[str, object]:
+        return {"message": "error", "protocol": PROTOCOL_NAME, "protocol_version": self.protocol_version, "error_code": self.code, "error": self.message}
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> TransferErrorEnvelope:
+        if value.get("message") != "error" or value.get("protocol") != PROTOCOL_NAME:
+            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not an error envelope")
+        return cls(
+            code=_require_string(value.get("error_code"), "error_code"),
+            message=_require_string(value.get("error"), "error"),
+            protocol_version=_require_string(value.get("protocol_version"), "protocol_version"),
         )

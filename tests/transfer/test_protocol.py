@@ -10,6 +10,7 @@ import pytest
 from packlab_core.transfer_protocol import (
     PROTOCOL_NAME,
     PROTOCOL_VERSION,
+    ChunkRange,
     CompletionAcknowledgement,
     TransferControlMessage,
     TransferCreate,
@@ -75,8 +76,16 @@ def test_shared_golden_contract_covers_status_control_completion_and_error() -> 
     assert create.to_dict() == fixture["create"]
     status = TransferStatus.from_dict(fixture["status"])
     assert status.to_dict() == fixture["status"]
-    assert TransferControlMessage("transfer-1", "cancel").to_dict() == fixture["cancel"]
-    assert TransferControlMessage("transfer-1", "resume").to_dict() == fixture["resume"]
+    assert ChunkRange.from_dict(fixture["chunk"]).to_dict() == fixture["chunk"]
+    assert TransferControlMessage.from_dict(fixture["cancel"]).to_dict() == fixture["cancel"]
+    assert TransferControlMessage.from_dict(fixture["resume"]).to_dict() == fixture["resume"]
     completion = CompletionAcknowledgement.from_dict(fixture["completion"])
     assert completion.to_dict() == fixture["completion"]
-    assert TransferErrorEnvelope("unpaired", "authorization is required").to_dict() == fixture["error"]
+    assert TransferErrorEnvelope.from_dict(fixture["error"]).to_dict() == fixture["error"]
+
+
+def test_control_and_error_versions_fail_closed() -> None:
+    with pytest.raises(TransferProtocolError, match="unsupported_version"):
+        TransferControlMessage.from_dict({"message": "cancel", "protocol": PROTOCOL_NAME, "protocol_version": "2", "transfer_id": "transfer-1"})
+    with pytest.raises(TransferProtocolError, match="unsupported_version"):
+        TransferErrorEnvelope.from_dict({"message": "error", "protocol": PROTOCOL_NAME, "protocol_version": "2", "error_code": "bad_request", "error": "bad"})
