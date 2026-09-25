@@ -182,7 +182,7 @@ public final class TransferViewModel: ObservableObject {
     }
 
     public func retryFromAuthoritativeStatus(_ status: TransferReceiverStatus) {
-        guard let current = state, current.phase == .cancelled || current.phase == .retryableFailure else { return }
+        guard let current = state, current.phase == .cancelled || current.phase == .retryableFailure || current.phase == .terminalFailure else { return }
         applyReceiverStatus(status)
         if let refreshed = self.state { state = TransferUIState(packageURL: refreshed.packageURL, packageName: refreshed.packageName, totalBytes: refreshed.totalBytes, confirmedBytes: refreshed.confirmedBytes, receiverIdentity: refreshed.receiverIdentity, phase: .transferring) }
     }
