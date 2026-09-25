@@ -152,6 +152,15 @@ class ResumableTransferStore:
             self._write_checkpoint(state)
         return state.status()
 
+    def retry_after_verification_failure(self, transfer_id: str) -> TransferStatus:
+        state = self._read(transfer_id)
+        if state.state != "checksum_failed":
+            raise TransferStoreError(TransferErrorCode.BAD_REQUEST, "only a failed verification may be retried")
+        self._part(transfer_id).write_bytes(b"")
+        reset = replace(state, confirmed_bytes=0, state="receiving", verification=None)
+        self._write_checkpoint(reset)
+        return reset.status()
+
     def verify(self, transfer_id: str) -> VerificationResult:
         state = self._read(transfer_id)
         if state.confirmed_bytes != state.total_bytes:

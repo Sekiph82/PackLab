@@ -58,3 +58,19 @@ def test_cancel_resume_and_multi_chunk_completion(tmp_path: Path) -> None:
     result = store.verify("transfer")
     assert result.verified
     assert store.completion_ack("transfer", authenticated=True).verified
+
+
+def test_checksum_failure_retains_evidence_and_supports_explicit_retry(tmp_path: Path) -> None:
+    data = b"abcdefgh"
+    request = _request(data)
+    store = ResumableTransferStore(tmp_path)
+    store.create(request)
+    store.put_chunk("transfer", offset=0, payload=data, chunk_sha256=hashlib.sha256(data).hexdigest())
+    checkpoint = tmp_path / "transfer.json"
+    value = checkpoint.read_text(encoding="utf-8").replace(request.package_sha256, "b" * 64)
+    checkpoint.write_text(value, encoding="utf-8")
+    result = store.verify("transfer")
+    assert not result.verified
+    assert store.status("transfer").state == "checksum_failed"
+    assert (tmp_path / "transfer.part").exists()
+    assert store.retry_after_verification_failure("transfer").next_offset == 0
