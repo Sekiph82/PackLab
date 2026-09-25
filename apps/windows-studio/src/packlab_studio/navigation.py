@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .version import AboutView
+
 
 class Route(StrEnum):
     LIBRARY = "library"
@@ -108,6 +110,8 @@ class RouteStack(QStackedWidget):
             view: QWidget
             if route is Route.CAPTURE_INBOX:
                 view = CaptureInboxView(ingest_controller=ingest_controller, receiver=receiver)
+            elif route is Route.SETTINGS:
+                view = AboutView()
             else:
                 view = QLabel(route.name.replace("_", " ").title())
                 view.setObjectName(f"packlab.view.{route.value}")
