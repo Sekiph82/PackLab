@@ -89,6 +89,14 @@ private func acceptedPoseBinding(captureID: String, pose: PoseSample?) -> PoseCa
     return PoseCaptureBinding(captureID: captureID, captureTimestamp: pose.timestamp, aligned: AlignedPose(sample: status == "available" ? pose : nil, delta: 0, status: status))
 }
 
+private actor CountingStillPhotoBackend: StillPhotoBackend {
+    private(set) var requestCount = 0
+    func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
+        requestCount += 1
+        return (Data([9, 8, 7]), CaptureDimensions(width: 2, height: 1))
+    }
+}
+
 final class PackLabCaptureTests: XCTestCase {
     func testPreviewLifecyclePolicyIsIdempotent() {
         var policy = PreviewLifecyclePolicy()
@@ -1781,6 +1789,68 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(controller.evaluate(input).allowed)
         XCTAssertTrue(controller.evaluate(AutoCaptureInput(monotonicTimestamp: 11.1, poseEligible: true, targetSector: target, quality: quality, overlapAllowed: true, admission: admission)).allowed)
         XCTAssertTrue(controller.evaluate(AutoCaptureInput(monotonicTimestamp: 11.1, poseEligible: false, targetSector: target, quality: quality, overlapAllowed: true, admission: admission)).reasons.contains("pose_ineligible"))
+    }
+
+    func testPL0104ProductionGateMatrixNeverInvokesBackendWhenBlocked() async {
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
+        let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
+        let clip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let frame = FramingMetric(availability: .available, objectFraction: 0.3, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let metrics = CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: frame, background: background)
+        let acceptedQuality = QualityDecisionEngine.evaluate(metrics)
+        let rejectedQuality = QualityDecision(decision: .reject, reasons: ["sharpness_reject"], warnings: [], metrics: metrics)
+        let target = CoverageSector(ringID: "middle", azimuthIndex: 0)
+        let ready = CaptureAdmissionController()
+        let backend = CountingStillPhotoBackend()
+        let gated = AdmissionControlledStillCaptureService(backend: backend)
+        await gated.updateAdmission(ready)
+        let guided = GuidedAutoCaptureService(stillCapture: gated, cooldownSeconds: 0.75)
+        func input(_ timestamp: TimeInterval, poseEligible: Bool, targetSector: CoverageSector?, quality: QualityDecision, overlapAllowed: Bool, admission: CaptureAdmissionController) -> AutoCaptureInput {
+            AutoCaptureInput(monotonicTimestamp: timestamp, poseEligible: poseEligible, targetSector: targetSector, quality: quality, overlapAllowed: overlapAllowed, duplicateDecision: DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate"), admission: admission)
+        }
+
+        let qualityBlocked = await guided.request(captureID: "quality-blocked", input: input(1, poseEligible: true, targetSector: target, quality: rejectedQuality, overlapAllowed: true, admission: ready))
+        XCTAssertFalse(qualityBlocked.decision.allowed)
+        XCTAssertTrue(qualityBlocked.decision.reasons.contains("sharpness_reject"))
+        let targetBlocked = await guided.request(captureID: "target-blocked", input: input(2, poseEligible: true, targetSector: nil, quality: acceptedQuality, overlapAllowed: false, admission: ready))
+        XCTAssertFalse(targetBlocked.decision.allowed)
+        XCTAssertTrue(targetBlocked.decision.reasons.contains("coverage_target_missing"))
+        let poseBlocked = await guided.request(captureID: "pose-blocked", input: input(3, poseEligible: false, targetSector: target, quality: acceptedQuality, overlapAllowed: true, admission: ready))
+        XCTAssertFalse(poseBlocked.decision.allowed)
+        XCTAssertTrue(poseBlocked.decision.reasons.contains("pose_ineligible"))
+        let overlapBlocked = await guided.request(captureID: "overlap-blocked", input: input(4, poseEligible: true, targetSector: target, quality: acceptedQuality, overlapAllowed: false, admission: ready))
+        XCTAssertFalse(overlapBlocked.decision.allowed)
+        XCTAssertTrue(overlapBlocked.decision.reasons.contains("overlap_not_allowed"))
+        var hardStop = CaptureAdmissionController()
+        hardStop.update(.hardStop(HealthDecision(severity: .hardStop, messages: ["test health hard stop"])))
+        let healthBlocked = await guided.request(captureID: "health-blocked", input: input(5, poseEligible: true, targetSector: target, quality: acceptedQuality, overlapAllowed: true, admission: hardStop))
+        XCTAssertFalse(healthBlocked.decision.allowed)
+        XCTAssertTrue(healthBlocked.decision.reasons.contains("test health hard stop"))
+        let blockedCount = await backend.requestCount
+        XCTAssertEqual(blockedCount, 0)
+
+        var controller = AutoCaptureController(cooldownSeconds: 1)
+        let controllerInput = input(10, poseEligible: true, targetSector: target, quality: acceptedQuality, overlapAllowed: true, admission: ready)
+        XCTAssertTrue(controller.begin(controllerInput).allowed)
+        XCTAssertFalse(controller.begin(controllerInput).allowed)
+        controller.complete(success: false, monotonicTimestamp: 10)
+        XCTAssertTrue(controller.evaluate(controllerInput).allowed)
+
+        let accepted = await guided.request(captureID: "accepted", input: input(20, poseEligible: true, targetSector: target, quality: acceptedQuality, overlapAllowed: true, admission: ready))
+        XCTAssertTrue(accepted.decision.allowed)
+        XCTAssertNotNil(accepted.result)
+        let acceptedCount = await backend.requestCount
+        XCTAssertEqual(acceptedCount, 1)
+        let cooldownBlocked = await guided.request(captureID: "cooldown-blocked", input: input(20.74, poseEligible: true, targetSector: target, quality: acceptedQuality, overlapAllowed: true, admission: ready))
+        XCTAssertFalse(cooldownBlocked.decision.allowed)
+        XCTAssertTrue(cooldownBlocked.decision.reasons.contains("auto_capture_cooldown"))
+        let cooldownCount = await backend.requestCount
+        XCTAssertEqual(cooldownCount, 1)
+        let cooldownBoundary = await guided.request(captureID: "cooldown-boundary", input: input(20.75, poseEligible: true, targetSector: target, quality: acceptedQuality, overlapAllowed: true, admission: ready))
+        XCTAssertTrue(cooldownBoundary.decision.allowed)
+        let boundaryCount = await backend.requestCount
+        XCTAssertEqual(boundaryCount, 2)
     }
 
     @MainActor
