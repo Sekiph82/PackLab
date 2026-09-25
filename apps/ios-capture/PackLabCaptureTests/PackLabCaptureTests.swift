@@ -98,6 +98,41 @@ private actor CountingStillPhotoBackend: StillPhotoBackend {
 }
 
 final class PackLabCaptureTests: XCTestCase {
+    @MainActor
+    func testPL0126TransferViewModelUsesConfirmedBytesAndRetainsFinalizedSourceOnCancel() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let package = root.appendingPathComponent("capture.packscan")
+        try Data(repeating: 1, count: 10).write(to: package)
+        let share = FinalizedPackScanShare(packageURL: package, packageName: package.lastPathComponent, packageBytes: 10)
+        let vm = TransferViewModel()
+        vm.prepare(package: share)
+        vm.pair(receiverIdentity: "receiver", transferID: "transfer", packageSHA256: String(repeating: "a", count: 64))
+        vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 4, totalBytes: 10, verified: false, packageSHA256: String(repeating: "a", count: 64)))
+        XCTAssertEqual(vm.state?.confirmedBytes, 4)
+        XCTAssertEqual(vm.state?.percentage, 40)
+        vm.cancel()
+        XCTAssertEqual(vm.state?.phase, .cancelled)
+        XCTAssertTrue(vm.sourceStillAvailable())
+    }
+
+    @MainActor
+    func testPL0126TransferViewModelRequiresVerifiedAuthenticatedMatchingCompletion() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".packscan")
+        try Data([1]).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let digest = String(repeating: "b", count: 64)
+        let vm = TransferViewModel()
+        vm.prepare(package: FinalizedPackScanShare(packageURL: url, packageName: url.lastPathComponent, packageBytes: 1))
+        vm.pair(receiverIdentity: "receiver", transferID: "transfer", packageSHA256: digest)
+        vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 1, totalBytes: 1, verified: true, packageSHA256: digest))
+        vm.applyCompletion(verified: true, authenticated: false, packageSHA256: digest)
+        XCTAssertEqual(vm.state?.phase, .retryableFailure)
+        vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 1, totalBytes: 1, verified: true, packageSHA256: digest))
+        vm.applyCompletion(verified: true, authenticated: true, packageSHA256: digest)
+        XCTAssertEqual(vm.state?.phase, .completed)
+    }
     func testPL0120ShareEligibilityRequiresExportedPackageAndPreservesSource() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
