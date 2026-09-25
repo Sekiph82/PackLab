@@ -40,4 +40,3 @@ def test_secret_raw_and_nonrelative_references_are_rejected(tmp_path) -> None:
         history.append("bad", {"token": "secret"}, project_revision=1, reversible=True)
     with pytest.raises(HistoryError):
         history.append("bad", {}, project_revision=1, references=("raw/source.packscan",), reversible=True)
-
