@@ -51,6 +51,7 @@ public struct SessionStorageLayout: Sendable, Equatable {
     public var images: URL { sessionRoot.appendingPathComponent("images", isDirectory: true) }
     public var previews: URL { sessionRoot.appendingPathComponent("previews", isDirectory: true) }
     public var photoRecords: URL { sessionRoot.appendingPathComponent("records", isDirectory: true) }
+    public var photoMetadata: URL { sessionRoot.appendingPathComponent("metadata", isDirectory: true).appendingPathComponent("photos.json") }
     public var temporary: URL { sessionRoot.appendingPathComponent("tmp", isDirectory: true) }
     public var galleryAudit: URL { sessionRoot.appendingPathComponent("gallery-audit.json") }
     public var finalization: URL { sessionRoot.appendingPathComponent("finalization.json") }
@@ -276,6 +277,52 @@ public actor SessionGalleryStore {
         }
         let source = try CanonicalFinalizationSource(layout: layout, records: records, immutableSourceBytes: immutable)
         try finalizer.finalize(source: source, manifest: manifest, payloads: payloads, destination: destination)
+    }
+
+    /// Builds the package contract only from accepted gallery records, their
+    /// immutable source bytes, and the persisted photo metadata contract.
+    public func finalizeCanonicalAcceptedSession(destination: URL, finalizer: SessionFinalizer = SessionFinalizer()) throws {
+        let records = try canonicalRecords()
+        guard let metadata = try? Data(contentsOf: layout.photoMetadata),
+              let document = try? JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: metadata),
+              !document.photos.isEmpty else { throw FinalizationError.invalidMetadataBinding }
+        var payloads: [String: Data] = ["metadata/photos.json": metadata]
+        var immutable: [String: Data] = [:]
+        for record in records {
+            let sourceURL = layout.images.appendingPathComponent(record.sourceFilename)
+            let recordURL = layout.photoRecords.appendingPathComponent(record.metadataFilename)
+            guard let source = try? Data(contentsOf: sourceURL),
+                  let recordMetadata = try? Data(contentsOf: recordURL),
+                  !source.isEmpty else { throw FinalizationError.invalidMetadataBinding }
+            immutable[record.sourceFilename] = source
+            immutable[record.metadataFilename] = recordMetadata
+            payloads["images/\(record.sourceFilename)"] = source
+            payloads["metadata/accepted-records/\(record.metadataFilename)"] = recordMetadata
+        }
+        let expectedImages = Set(records.map { "images/\($0.sourceFilename)" })
+        guard Set(document.photos.map(\.imagePath)) == expectedImages else { throw FinalizationError.invalidMetadataBinding }
+        let declarations: [[String: Any]] = payloads.keys.sorted().map { path in
+            let bytes = payloads[path] ?? Data()
+            let kind = path == "metadata/photos.json" ? "photo_metadata" : (path.hasPrefix("images/") ? "image" : "accepted_record")
+            return ["path": path, "kind": kind, "required": true, "authority": "source", "size_bytes": bytes.count, "sha256": SourceIntegrity.digest(bytes)]
+        }
+        let manifest = try JSONSerialization.data(withJSONObject: [
+            "schema_version": PackScanWriter.schemaVersion,
+            "capture_id": layout.sessionID,
+            "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization],
+            "payloads": declarations,
+        ])
+        try CanonicalSessionFinalizationWorkflow(finalizer: finalizer).finalize(layout: layout, records: records, immutableSourceBytes: immutable, manifest: manifest, payloads: payloads, destination: destination)
+    }
+
+    private func canonicalRecords() throws -> [AcceptedCaptureRecord] {
+        guard let files = try? fileManager.contentsOfDirectory(at: layout.photoRecords, includingPropertiesForKeys: nil) else { throw SessionStorageError.missingRecord }
+        let records = try files.filter { $0.pathExtension == "json" }.map { file -> AcceptedCaptureRecord in
+            guard let data = try? Data(contentsOf: file), let record = try? JSONDecoder().decode(AcceptedCaptureRecord.self, from: data) else { throw GalleryLoadError.corruptRecord(file.lastPathComponent) }
+            return record
+        }.sorted { $0.sequence < $1.sequence }
+        guard !records.isEmpty else { throw FinalizationError.invalidManifest }
+        return records
     }
 
     public func delete(id: String, confirmed: Bool) throws {
@@ -789,6 +836,7 @@ public struct LocalScanHistoryView: View {
     @State private var entries: [ScanHistoryEntry] = []
     @State private var showShare = false
     @State private var transferSelection: FinalizedTransferSelection?
+    @State private var finalizationMessage: String?
     @StateObject private var shareCoordinator = PackScanSharePresentationCoordinator()
     private let store: LocalScanHistoryStore
     public init(root: URL) { store = LocalScanHistoryStore(root: root) }
@@ -801,11 +849,25 @@ public struct LocalScanHistoryView: View {
                 if entry.exportState == SessionFinalizationState.exported.rawValue {
                     Button("Share") { presentShare(for: entry) }
                     Button("Send to PackLab") { presentTransfer(for: entry) }
+                } else if entry.exportState == SessionFinalizationState.inProgress.rawValue {
+                    Button("Finalize") {
+                        Task {
+                            do {
+                                _ = try await ProductionScanFinalizeAction(root: store.rootURL).finalize(sessionID: entry.id)
+                                entries = await store.load()
+                            } catch { finalizationMessage = "Finalize failed: \(error)" }
+                        }
+                    }
                 }
             }
         }.task { entries = await store.load() }
             .sheet(isPresented: $showShare) { if let share = shareCoordinator.activeShare { PackScanShareSheet(share: share) { completed in shareCoordinator.activityFinished(completed: completed); showShare = false } } }
             .sheet(item: $transferSelection) { selection in NavigationStack { FinalizedTransferWorkflowView(share: selection.share, finalization: selection.finalization) } }
+            .overlay(alignment: .bottom) {
+                if let finalizationMessage {
+                    Text(finalizationMessage).foregroundStyle(.red).padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8)).padding()
+                }
+            }
             .navigationTitle("Scan History")
     }
     private func presentShare(for entry: ScanHistoryEntry) {
@@ -824,6 +886,24 @@ public struct FinalizedTransferSelection: Identifiable {
     public let share: FinalizedPackScanShare
     public let finalization: SessionFinalizationRecord
     public var id: String { share.packageURL.path }
+}
+
+/// Production scan-finalize action used by the history workflow. It returns
+/// the persisted record only after the canonical package is committed.
+public struct ProductionScanFinalizeAction: Sendable {
+    private let root: URL
+    public init(root: URL) { self.root = root }
+    public func finalize(sessionID: String, destination: URL? = nil) async throws -> SessionFinalizationRecord {
+        let layout = SessionStorageLayout(root: root, sessionID: sessionID)
+        let packageURL = destination ?? root.appendingPathComponent("exports", isDirectory: true).appendingPathComponent("\(sessionID).packscan")
+        try await SessionGalleryStore(layout: layout).finalizeCanonicalAcceptedSession(destination: packageURL)
+        guard let data = try? Data(contentsOf: layout.finalization),
+              let record = try? JSONDecoder().decode(SessionFinalizationRecord.self, from: data),
+              record.sessionID == sessionID,
+              record.state == .exported,
+              record.packagePath == packageURL.path else { throw FinalizationError.packagingFailed }
+        return record
+    }
 }
 
 public struct SessionDeletionView: View {
