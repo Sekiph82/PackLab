@@ -7,6 +7,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QSplitter
 
 from .navigation import NavigationController, NavigationPanel, Route, RouteStack
+from .workspace import WorkspaceManager
 
 
 class StudioMainWindow(QMainWindow):
@@ -32,4 +33,5 @@ class StudioMainWindow(QMainWindow):
         splitter.addWidget(self.route_stack)
         splitter.setStretchFactor(1, 1)
         self.setCentralWidget(splitter)
+        self.workspace = WorkspaceManager(self)
         self.navigation_panel.select_route(Route.LIBRARY)
