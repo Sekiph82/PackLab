@@ -212,9 +212,13 @@ final class CaptureRuntimeViewModel: ObservableObject {
         recomputeM04Completion()
     }
 
+    func skipBasePass(reasonCode: String = "operator_skipped") {
+        setBasePassAvailability(BasePassAvailability(physicallyFeasible: false, reasonCode: reasonCode, operatorSkipped: true))
+    }
+
     func restoreBasePass(_ evaluation: BasePassEvaluation) {
         m04BasePass = evaluation
-        m04BaseAvailability = BasePassAvailability(physicallyFeasible: evaluation.status != "unavailable", reasonCode: evaluation.guidance.first ?? "operator_confirmed_feasible")
+        m04BaseAvailability = BasePassAvailability(physicallyFeasible: evaluation.metadata.required, reasonCode: evaluation.guidance.first ?? "operator_confirmed_feasible", operatorSkipped: evaluation.status == "skipped")
         recomputeM04Completion()
     }
 

@@ -904,7 +904,15 @@ public struct DetailPassAcceptanceDecision: Sendable, Equatable {
 public struct BasePassAvailability: Codable, Sendable, Equatable {
     public let physicallyFeasible: Bool
     public let reasonCode: String
-    public init(physicallyFeasible: Bool, reasonCode: String) { self.physicallyFeasible = physicallyFeasible; self.reasonCode = reasonCode }
+    public let operatorSkipped: Bool
+    public init(physicallyFeasible: Bool, reasonCode: String, operatorSkipped: Bool = false) { self.physicallyFeasible = physicallyFeasible; self.reasonCode = reasonCode; self.operatorSkipped = operatorSkipped }
+    private enum CodingKeys: String, CodingKey { case physicallyFeasible, reasonCode, operatorSkipped }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        physicallyFeasible = try container.decode(Bool.self, forKey: .physicallyFeasible)
+        reasonCode = try container.decode(String.self, forKey: .reasonCode)
+        operatorSkipped = try container.decodeIfPresent(Bool.self, forKey: .operatorSkipped) ?? false
+    }
 }
 
 public struct BasePassEvaluation: Codable, Sendable, Equatable {
@@ -915,10 +923,11 @@ public struct BasePassEvaluation: Codable, Sendable, Equatable {
     public init(snapshot: OrbitCoverageSnapshot, availability: BasePassAvailability, minimumSectorCount: Int = 2) {
         let count = snapshot.capturedSectors.filter { $0.ringID == CapturePassID.base.rawValue }.count
         capturedSectorCount = count
-        if !availability.physicallyFeasible { status = "unavailable"; guidance = [availability.reasonCode] }
+        if availability.operatorSkipped { status = "skipped"; guidance = [availability.reasonCode] }
+        else if !availability.physicallyFeasible { status = "unavailable"; guidance = [availability.reasonCode] }
         else if count >= minimumSectorCount { status = "complete"; guidance = [] }
         else { status = "incomplete"; guidance = ["Capture more base sectors without unsafe handling"] }
-        metadata = CapturePassMetadata(passID: .base, required: availability.physicallyFeasible, evidenceStatus: status)
+        metadata = CapturePassMetadata(passID: .base, required: availability.physicallyFeasible && !availability.operatorSkipped, evidenceStatus: status)
     }
     public var isComplete: Bool { status == "complete" }
 }
@@ -929,7 +938,8 @@ public struct BasePassAcceptanceDecision: Sendable, Equatable {
     public let evaluation: BasePassEvaluation
     public init(snapshot: OrbitCoverageSnapshot, availability: BasePassAvailability, quality: QualityDecision, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?) {
         var reasons: [String] = []
-        if !availability.physicallyFeasible { reasons.append(availability.reasonCode) }
+        if availability.operatorSkipped { reasons.append(availability.reasonCode) }
+        else if !availability.physicallyFeasible { reasons.append(availability.reasonCode) }
         guard let poseBinding, poseBinding.aligned.status == "available", poseBinding.aligned.sample != nil else { reasons.append("pose_evidence_unavailable") }
         if !quality.isAcceptable { reasons.append(contentsOf: quality.reasons) }
         if duplicateDecision == nil { reasons.append("duplicate_evidence_unavailable") }
@@ -940,7 +950,7 @@ public struct BasePassAcceptanceDecision: Sendable, Equatable {
     }
 }
 
-public enum CompletionEvidenceStatus: String, Codable, Sendable, Equatable { case complete, incomplete, unavailable }
+public enum CompletionEvidenceStatus: String, Codable, Sendable, Equatable { case complete, incomplete, unavailable, skipped }
 
 public struct M04QualityGuidanceState: Codable, Sendable, Equatable {
     public let presetID: PackagingPresetID
@@ -976,10 +986,19 @@ public struct CompletionDiagnostics: Codable, Sendable, Equatable {
         score = Double(completeRingCount + completeDetails + completeBase + additionalComplete) / Double(denominator)
         mandatoryMissingAreas = rings.missingRingIDs + requiredDetails.filter { !$0.isComplete }.map { $0.metadata.passID.rawValue } + additionalMandatoryMissingAreas
         if requiredBase, base?.isComplete != true { mandatoryMissingAreas.append(CapturePassID.base.rawValue) }
-        optionalUnavailableAreas = base?.status == "unavailable" ? [CapturePassID.base.rawValue] : []
-        guidance = mandatoryMissingAreas.map { "Capture missing \($0) coverage" } + optionalUnavailableAreas.map { "Optional \($0) pass unavailable; completion is not claimed" }
+        optionalUnavailableAreas = (base?.status == "unavailable" || base?.status == "skipped") ? [CapturePassID.base.rawValue] : []
+        let optionalGuidance: [String]
+        if base?.status == "skipped" {
+            optionalGuidance = ["Optional \(CapturePassID.base.rawValue) pass skipped; completion is not claimed"]
+        } else {
+            optionalGuidance = optionalUnavailableAreas.map { "Optional \($0) pass unavailable; completion is not claimed" }
+        }
+        guidance = mandatoryMissingAreas.map { "Capture missing \($0) coverage" } + optionalGuidance
         let hasCompletionEvidence = !rings.statuses.isEmpty || !requiredDetails.isEmpty || base != nil
-        status = mandatoryMissingAreas.isEmpty ? (hasCompletionEvidence ? .complete : .unavailable) : .incomplete
+        if !mandatoryMissingAreas.isEmpty { status = .incomplete }
+        else if base?.status == "skipped" { status = .skipped }
+        else if base?.status == "unavailable" { status = .unavailable }
+        else { status = hasCompletionEvidence ? .complete : .unavailable }
     }
 }
 

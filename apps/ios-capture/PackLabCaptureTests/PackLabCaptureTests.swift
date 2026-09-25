@@ -2156,6 +2156,80 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(unavailable.isComplete)
     }
 
+    func testPL0108BasePassHasDistinctSkippedStateAndCompletionDoesNotClaimIt() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 1, rings: [CoverageRingDefinition(id: "main", minimumElevation: -90, maximumElevation: 90)])
+        let snapshot = OrbitCoverageSnapshot(configuration: configuration, capturedSectors: [CoverageSector(ringID: "main", azimuthIndex: 0)], missingSectors: [], duplicateCaptureIDs: [], invalidCaptureIDs: [], observations: [])
+        let skipped = BasePassEvaluation(snapshot: snapshot, availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "operator_declined_base", operatorSkipped: true))
+        XCTAssertEqual(skipped.status, "skipped")
+        XCTAssertFalse(skipped.metadata.required)
+        XCTAssertEqual(skipped.metadata.evidenceStatus, "skipped")
+        let rings = RingCoverageEvaluation(snapshot: snapshot, policy: StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "main", minimumSectorCount: 1)]))
+        let diagnostics = CompletionDiagnostics(rings: rings, base: skipped)
+        XCTAssertEqual(diagnostics.status, .skipped)
+        XCTAssertEqual(diagnostics.optionalUnavailableAreas, ["base"])
+        XCTAssertTrue(diagnostics.guidance.contains("Optional base pass skipped; completion is not claimed"))
+    }
+
+    @MainActor
+    func testPL0108QualityRejectedBaseCandidateCreatesNoAcceptedEvidence() async throws {
+        struct Backend: StillPhotoBackend, Sendable {
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([2, 3, 4]), CaptureDimensions(width: 2, height: 1)) }
+        }
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 1, rings: [CoverageRingDefinition(id: "base", minimumElevation: -90, maximumElevation: 90)])
+        let preset = PackagingPreset(id: .matteHDPE, version: "base-reject", displayName: "Base Reject", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset)
+        await vm.bindStillCaptureBackend(Backend())
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.001, sampleCount: 10, band: .reject, reasonCode: "sharpness_reject")
+        let motion = MotionBlurAssessment(risk: .warning, availability: .available, rotationRateMagnitude: 0.5, reasons: ["image_blur_with_motion"])
+        let clip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let framing = FramingMetric(availability: .available, objectFraction: 0.3, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let rejected = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: framing, background: background))
+        let pose = acceptedPoseBinding(captureID: "rejected-base", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "rejected-base")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "rejected-base", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        let record = AcceptedCaptureRecord(captureID: "rejected-base", sequence: 0, sourceFilename: "rejected-base.heic", metadataFilename: "rejected-base.json")
+        let state = try Data(contentsOf: layout.state)
+        let outcome = try await vm.captureAndPersistBasePass(quality: rejected, poseBinding: pose, duplicateDecision: DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate"), record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
+        XCTAssertFalse(outcome.decision.allowed)
+        XCTAssertNil(outcome.still)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.photoRecords.appendingPathComponent("rejected-base.json").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("rejected-base.heic").path))
+    }
+
+    @MainActor
+    func testPL0108SkippedBasePassPersistsAndRestoresIntoFreshRuntime() async throws {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 1, rings: [CoverageRingDefinition(id: "main", minimumElevation: -90, maximumElevation: 90)])
+        let policy = StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "main", minimumSectorCount: 1)])
+        let preset = PackagingPreset(id: .matteHDPE, version: "skip-resume", displayName: "Skip Resume", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration, ringRequirements: policy), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "skip-resume")
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset))
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset, layout: layout)
+        let pose = acceptedPoseBinding(captureID: "main", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
+        _ = vm.recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: "main", sequence: 0, sourceFilename: "main.heic", metadataFilename: "main.json", poseBinding: pose))
+        vm.skipBasePass(reasonCode: "operator_declined_base")
+        for _ in 0..<5 { await Task.yield() }
+        let persisted = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertEqual(persisted.basePass?.status, "skipped")
+        XCTAssertEqual(persisted.basePass?.guidance, ["operator_declined_base"])
+        XCTAssertEqual(persisted.completion?.status, .skipped)
+
+        let fresh = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        fresh.configureM04QualityRuntime(preset: preset, layout: layout)
+        if let basePass = persisted.basePass { fresh.restoreBasePass(basePass) }
+        if let completion = persisted.completion { fresh.restoreCompletion(completion) }
+        XCTAssertEqual(fresh.m04BasePass.status, "skipped")
+        XCTAssertEqual(fresh.m04Completion.status, .skipped)
+        XCTAssertTrue(fresh.m04Completion.guidance.contains("Optional base pass skipped; completion is not claimed"))
+    }
+
     func testPL0109CompletionDiagnosticsNeverHidesMandatoryMissingAreas() {
         let ring = RingCoverageEvaluation(snapshot: OrbitCoverageSnapshot(configuration: OrbitCoverageConfiguration(), capturedSectors: [CoverageSector(ringID: "lower", azimuthIndex: 0)], missingSectors: [CoverageSector(ringID: "middle", azimuthIndex: 0)], duplicateCaptureIDs: [], invalidCaptureIDs: [], observations: []), policy: StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 1), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 1)]))
         let base = BasePassEvaluation(snapshot: OrbitCoverageSnapshot(configuration: OrbitCoverageConfiguration(), capturedSectors: [], missingSectors: [], duplicateCaptureIDs: [], invalidCaptureIDs: [], observations: []), availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "base_view_unavailable"))
