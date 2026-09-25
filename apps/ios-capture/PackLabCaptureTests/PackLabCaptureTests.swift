@@ -1648,6 +1648,29 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(reopened.map(\.monotonicTimestamp), [10, 11])
     }
 
+    func testPL0101CorruptQualityLogFailsClosedWithoutMutatingCanonicalSessionFiles() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "corrupt-runtime")
+        let sessionStore = ScanSessionStore(layout: layout)
+        try await sessionStore.create(NewScanDraft(sessionID: "corrupt-runtime", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        let record = AcceptedCaptureRecord(captureID: "accepted", sequence: 0, sourceFilename: "accepted.heic", metadataFilename: "accepted.json")
+        let recordData = try JSONEncoder().encode(record)
+        let stateData = try Data(contentsOf: layout.state)
+        try await sessionStore.storeAcceptedCapture(source: Data([1, 2, 3]), record: record, metadata: recordData, state: stateData)
+        let canonicalPaths = [layout.metadata, layout.state, layout.images.appendingPathComponent("accepted.heic"), layout.photoRecords.appendingPathComponent("accepted.json")]
+        let canonicalBefore = try canonicalPaths.map { try Data(contentsOf: $0) }
+
+        try Data("{malformed quality jsonl".utf8).write(to: layout.qualityLog, options: .atomic)
+        do {
+            _ = try await QualityCandidateLogStore(layout: layout).snapshot()
+            XCTFail("corrupt quality log must fail closed")
+        } catch {
+            XCTAssertEqual(error as? QualityLogStoreError, .corruptLog)
+        }
+        XCTAssertEqual(try canonicalPaths.map { try Data(contentsOf: $0) }, canonicalBefore)
+    }
+
     func testPL0102CoverageMapsWrapAroundAndRejectsUnavailablePose() {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
         var model = OrbitCoverageModel(configuration: configuration)
