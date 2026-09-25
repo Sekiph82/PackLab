@@ -4,13 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M05
-- Current Sprint: M05-BATCH-005 — Final locked-suite validation gate stabilization
-- Current Task: M05-BATCH-005 — Stabilize Windows liveness proof and clear full-suite gate
+- Current Milestone: M06
+- Current Sprint: M06-BATCH-001 — PackLab Studio Foundation
+- Current Task: M06-BATCH-001 — Execute PL-0135 through PL-0157
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve the functionally acceptable final six M05 task implementations (PL-0119, PL-0121, PL-0122, PL-0125, PL-0126, PL-0134), diagnose and deterministically stabilize the unchanged Windows liveness proof that fails only in aggregate, rerun the exact locked suite to zero failures, then publish MASTER_VALIDATION_GATE_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. Do not rewrite M05 product logic unless a real regression is discovered. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M06, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0135 through PL-0157 in frozen order. Preserve accepted M03/M04/M05 behavior, reuse M05 ingest/receiver/raw authority, keep PL-0068 OWNER_REQUIRED, do not start M07, publish distinct implementation/log commits per child, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V03.md — CHANGES_REQUIRED (final six product remediations functionally acceptable; closure blocked only by one aggregate full-suite failure)
+- Latest M05 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CHATGPT_AUDIT_V01.md — AUDITED_PASS (16/16 M05 children accepted; exact locked suite green)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -42,7 +42,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 | M02 | PackScan Data Contract & Calibration | Versioned .packscan format and real-world scale contract | [ ] |
 | M03 | iOS Capture Foundation | SwiftUI/NextLevel/ARKit app runs on iPhone 16 | [x] |
 | M04 | Guided Capture & Quality Intelligence | Reliable, guided, high-resolution packaging capture | [x] |
-| M05 | Transfer & Ingest | .packscan moves safely from iPhone to Windows | [ ] |
+| M05 | Transfer & Ingest | .packscan moves safely from iPhone to Windows | [x] |
 | M06 | PackLab Studio Foundation | PySide6 desktop shell and project lifecycle | [ ] |
 | M07 | Photogrammetry Reconstruction | COLMAP -> OpenMVS textured scan pipeline | [ ] |
 | M08 | Segmentation, Masks & Reconstruction QA | Object-only reconstruction with quality diagnostics | [ ] |
@@ -241,14 +241,14 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M05-S01 - Export from iPhone
 
-- [ ] **PL-0119** Implement .packscan package finalization with checksums and atomic rename.
+- [x] **PL-0119** Implement .packscan package finalization with checksums and atomic rename.
 - [x] **PL-0120** Implement iOS share-sheet export to Files/iCloud/other installed destinations.
-- [ ] **PL-0121** Implement local-network transfer protocol from Capture to PackLab Studio.
-- [ ] **PL-0122** Add QR/pairing-code workflow so the iPhone connects to the correct Windows Studio instance.
+- [x] **PL-0121** Implement local-network transfer protocol from Capture to PackLab Studio.
+- [x] **PL-0122** Add QR/pairing-code workflow so the iPhone connects to the correct Windows Studio instance.
 - [x] **PL-0123** Encrypt/authenticate local transfer sufficiently to prevent accidental cross-device ingestion.
 - [x] **PL-0124** Support resumable transfer for large scan packages.
-- [ ] **PL-0125** Verify checksum after transfer before marking export complete.
-- [ ] **PL-0126** Add transfer progress, cancel and retry UI.
+- [x] **PL-0125** Verify checksum after transfer before marking export complete.
+- [x] **PL-0126** Add transfer progress, cancel and retry UI.
 
 ## Sprint M05-S02 - Windows ingest
 
@@ -259,7 +259,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0131** Create immutable raw-ingest copy so original capture evidence is never silently modified.
 - [x] **PL-0132** Generate import report summarizing images, metadata, calibration and warnings.
 - [x] **PL-0133** Deduplicate imports by capture ID/checksum.
-- [ ] **PL-0134** Add ingest tests for interrupted transfer, corrupt ZIP, missing photo and bad manifest.
+- [x] **PL-0134** Add ingest tests for interrupted transfer, corrupt ZIP, missing photo and bad manifest.
 
 ---
 
