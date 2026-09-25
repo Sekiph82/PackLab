@@ -22,6 +22,9 @@ public struct TransferUIState: Sendable, Equatable {
     public let error: String?
 
     public var percentage: Double { totalBytes == 0 ? 0 : min(100, Double(confirmedBytes) / Double(totalBytes) * 100) }
+    public var progressDescription: String { "\(confirmedBytes) / \(totalBytes) bytes · \(Int(percentage))%" }
+    public var canCancel: Bool { phase != .completed && phase != .cancelled }
+    public var canRetry: Bool { phase == .cancelled || phase == .retryableFailure || phase == .terminalFailure }
 
     public init(packageURL: URL, packageName: String, totalBytes: Int, confirmedBytes: Int = 0, receiverIdentity: String? = nil, phase: TransferUIPhase = .pairingRequired, error: String? = nil) {
         self.packageURL = packageURL
@@ -159,13 +162,13 @@ public struct TransferScreen: View {
             if let state = model.state {
                 Text(state.packageName).font(.headline)
                 if let receiver = state.receiverIdentity { Text("Receiver: \(receiver)").font(.caption) }
-                Text("\(state.confirmedBytes) / \(state.totalBytes) bytes · \(Int(state.percentage))%")
+                Text(state.progressDescription)
                 ProgressView(value: state.percentage, total: 100)
                 Text(state.phase.rawValue).font(.caption.monospaced())
                 if let error = state.error { Text(error).foregroundStyle(.red) }
                 HStack {
-                    Button("Cancel") { Task { await model.cancelNetworkTransfer() } }.disabled(state.phase == .completed || state.phase == .cancelled)
-                    Button("Retry") { Task { await model.retryNetworkTransfer() } }.disabled(state.phase != .cancelled && state.phase != .retryableFailure && state.phase != .terminalFailure)
+                    Button("Cancel") { Task { await model.cancelNetworkTransfer() } }.disabled(!state.canCancel)
+                    Button("Retry") { Task { await model.retryNetworkTransfer() } }.disabled(!state.canRetry)
                 }
             } else { Text("No finalized package selected") }
         }.padding().navigationTitle("Send to PackLab")
