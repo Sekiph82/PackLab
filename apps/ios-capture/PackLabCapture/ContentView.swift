@@ -166,9 +166,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         } else {
             m04DetailPolicies = [.shoulder: DetailPassPolicy(passID: .shoulder, minimumFramingFraction: 0.18), .neck: DetailPassPolicy(passID: .neck, minimumFramingFraction: 0.20), .closure: DetailPassPolicy(passID: .closure, minimumFramingFraction: 0.22)]
         }
-        m04DetailCoverageModels = Dictionary(uniqueKeysWithValues: m04DetailPolicies.keys.map { passID in
-            (passID, OrbitCoverageModel(configuration: OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: passID.rawValue, minimumElevation: passID == .closure ? 10 : 15, maximumElevation: passID == .shoulder ? 60 : 45)])))
-        })
+        m04DetailCoverageModels = Dictionary(uniqueKeysWithValues: m04DetailPolicies.keys.map { passID in (passID, OrbitCoverageModel(configuration: detailCoverageConfiguration(for: passID))) })
         m04DetailGuidance = m04DetailPolicies.values.map { "Capture missing \($0.passID.rawValue) detail sectors" }
         m04BaseCoverageModel = OrbitCoverageModel(configuration: OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: "base", minimumElevation: -90, maximumElevation: 90)]))
         m04BaseAvailability = BasePassAvailability(physicallyFeasible: false, reasonCode: "base_pass_unavailable")
@@ -179,6 +177,97 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04CoverageActive = true
         m04AcceptedDuplicateEvidence = []
         m04Evaluation = nil
+    }
+
+    private func detailCoverageConfiguration(for passID: CapturePassID) -> OrbitCoverageConfiguration {
+        OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: passID.rawValue, minimumElevation: passID == .closure ? 10 : 15, maximumElevation: passID == .shoulder ? 60 : 45)])
+    }
+
+    private func defaultDetailFraming(for policy: DetailPassPolicy) -> FramingMetric {
+        FramingMetric(availability: .available, objectFraction: policy.minimumFramingFraction, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+    }
+
+    private func resetM04DetailPassStateToMissing() {
+        m04DetailCoverageModels = Dictionary(uniqueKeysWithValues: m04DetailPolicies.keys.map { passID in (passID, OrbitCoverageModel(configuration: detailCoverageConfiguration(for: passID))) })
+        m04DetailEvaluations = [:]
+        m04DetailFraming = [:]
+        for policy in m04DetailPolicies.values {
+            let framing = defaultDetailFraming(for: policy)
+            let evaluation = DetailPassEvaluation(snapshot: m04DetailCoverageModels[policy.passID]?.snapshot() ?? OrbitCoverageModel(configuration: detailCoverageConfiguration(for: policy.passID)).snapshot(), framing: framing, policy: policy)
+            m04DetailFraming[policy.passID] = framing
+            m04DetailEvaluations[policy.passID] = evaluation
+        }
+        m04DetailGuidance = m04DetailEvaluations.values.flatMap { $0.missingGuidance }
+    }
+
+    private func makeM04DetailResumeState() -> [M04DetailPassResumeState] {
+        m04DetailPolicies.values.sorted { $0.passID.rawValue < $1.passID.rawValue }.map { policy in
+            let snapshot = m04DetailCoverageModels[policy.passID]?.snapshot() ?? OrbitCoverageModel(configuration: detailCoverageConfiguration(for: policy.passID)).snapshot()
+            let framing = m04DetailFraming[policy.passID] ?? defaultDetailFraming(for: policy)
+            let evaluation = m04DetailEvaluations[policy.passID] ?? DetailPassEvaluation(snapshot: snapshot, framing: framing, policy: policy)
+            return M04DetailPassResumeState(passID: policy.passID, policy: policy, coverage: snapshot, framing: framing, evaluation: evaluation)
+        }
+    }
+
+    private func invalidateM04DetailResumeState() {
+        resetM04DetailPassStateToMissing()
+        m04DetailGuidance.append("Detail-pass resume evidence unavailable")
+        recomputeM04Completion()
+    }
+
+    @discardableResult
+    func restoreM04DetailPassState(_ states: [M04DetailPassResumeState]?) -> Bool {
+        guard let states else {
+            resetM04DetailPassStateToMissing()
+            recomputeM04Completion()
+            return false
+        }
+        let expectedPasses = Set(m04DetailPolicies.keys)
+        guard states.count == expectedPasses.count else {
+            invalidateM04DetailResumeState()
+            return false
+        }
+        var seen = Set<CapturePassID>()
+        var restoredModels: [CapturePassID: OrbitCoverageModel] = [:]
+        var restoredEvaluations: [CapturePassID: DetailPassEvaluation] = [:]
+        var restoredFraming: [CapturePassID: FramingMetric] = [:]
+        for state in states {
+            guard expectedPasses.contains(state.passID), seen.insert(state.passID).inserted,
+                  state.passID == state.policy.passID,
+                  m04DetailPolicies[state.passID] == state.policy,
+                  m04DetailCoverageModels[state.passID]?.configuration == state.coverage.configuration,
+                  OrbitCoverageModel(snapshot: state.coverage).snapshot() == state.coverage,
+                  state.evaluation == DetailPassEvaluation(snapshot: state.coverage, framing: state.framing, policy: state.policy) else {
+                invalidateM04DetailResumeState()
+                return false
+            }
+            restoredModels[state.passID] = OrbitCoverageModel(snapshot: state.coverage)
+            restoredEvaluations[state.passID] = state.evaluation
+            restoredFraming[state.passID] = state.framing
+        }
+        guard seen == expectedPasses else {
+            invalidateM04DetailResumeState()
+            return false
+        }
+        m04DetailCoverageModels = restoredModels
+        m04DetailEvaluations = restoredEvaluations
+        m04DetailFraming = restoredFraming
+        m04DetailGuidance = restoredEvaluations.values.flatMap { $0.missingGuidance }
+        recomputeM04Completion()
+        return true
+    }
+
+    @discardableResult
+    func restoreM04OrbitCoverage(_ snapshot: OrbitCoverageSnapshot?) -> Bool {
+        guard let snapshot,
+              snapshot.configuration == m04CoverageModel.configuration,
+              OrbitCoverageModel(snapshot: snapshot).snapshot() == snapshot else { return false }
+        m04CoverageModel = OrbitCoverageModel(snapshot: snapshot)
+        m04Coverage = snapshot
+        m04CoverageTarget = snapshot.missingSectors.first
+        m04RingCoverage = RingCoverageEvaluation(snapshot: snapshot, policy: m04RingPolicy)
+        recomputeM04Completion()
+        return true
     }
 
     @discardableResult
@@ -420,7 +509,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
 
     private func persistBasePassContext() async {
         guard let layout = m04SessionLayout, let existing = try? await M04SessionContextStore(layout: layout).load() else { return }
-        let context = M04ScanContext(preset: existing.preset, preparationAcknowledged: existing.preparationAcknowledged, treatmentMode: existing.treatmentMode, preflight: existing.preflight, basePass: m04BasePass, completion: m04Completion, qualityGuidance: m04QualityGuidanceState, asymmetricCoverage: m04AsymmetricCoverage, turntableCoverage: m04TurntableCoverage)
+        let context = M04ScanContext(preset: existing.preset, preparationAcknowledged: existing.preparationAcknowledged, treatmentMode: existing.treatmentMode, preflight: existing.preflight, basePass: m04BasePass, completion: m04Completion, qualityGuidance: m04QualityGuidanceState, asymmetricCoverage: m04AsymmetricCoverage, turntableCoverage: m04TurntableCoverage, orbitCoverage: m04Coverage, detailPasses: makeM04DetailResumeState())
         try? await M04SessionContextStore(layout: layout).persist(context)
     }
 
@@ -666,7 +755,7 @@ struct ContentView: View {
                 showNewScan = false
             } } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
-                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; if let completion = context.completion { runtime.restoreCompletion(completion) }; runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
+                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
                 Task { let plan = SessionDeletionPlan(root: ContentView.sessionRoot, candidate: candidate); _ = try? await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true) }

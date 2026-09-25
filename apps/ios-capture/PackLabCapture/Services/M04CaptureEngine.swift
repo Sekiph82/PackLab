@@ -648,6 +648,13 @@ public struct OrbitCoverageModel: Sendable, Equatable {
     private var invalidIDs: [String] = []
     private var recordedObservations: [CoveragePoseObservation] = []
     public init(configuration: OrbitCoverageConfiguration = OrbitCoverageConfiguration()) { self.configuration = configuration }
+    public init(snapshot: OrbitCoverageSnapshot) {
+        self.configuration = snapshot.configuration
+        self.captured = Set(snapshot.capturedSectors)
+        self.duplicateIDs = snapshot.duplicateCaptureIDs
+        self.invalidIDs = snapshot.invalidCaptureIDs
+        self.recordedObservations = snapshot.observations
+    }
     /// Coverage is admitted only from the accepted-capture pose binding. Raw
     /// preview poses cannot create coverage evidence.
     public mutating func observe(captureID: String, poseBinding: PoseCaptureBinding?) -> CoveragePoseObservation {
@@ -1148,6 +1155,17 @@ public enum ScanSuitabilityPreflight {
     }
 }
 
+public struct M04DetailPassResumeState: Codable, Sendable, Equatable {
+    public let passID: CapturePassID
+    public let policy: DetailPassPolicy
+    public let coverage: OrbitCoverageSnapshot
+    public let framing: FramingMetric
+    public let evaluation: DetailPassEvaluation
+    public init(passID: CapturePassID, policy: DetailPassPolicy, coverage: OrbitCoverageSnapshot, framing: FramingMetric, evaluation: DetailPassEvaluation) {
+        self.passID = passID; self.policy = policy; self.coverage = coverage; self.framing = framing; self.evaluation = evaluation
+    }
+}
+
 public struct M04ScanContext: Codable, Sendable, Equatable {
     public let preset: PackagingPreset
     public let preparationAcknowledged: Bool
@@ -1158,7 +1176,9 @@ public struct M04ScanContext: Codable, Sendable, Equatable {
     public let qualityGuidance: M04QualityGuidanceState?
     public let asymmetricCoverage: AsymmetricCoverageEvaluation?
     public let turntableCoverage: TurntableCoverageSnapshot?
-    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil, asymmetricCoverage: AsymmetricCoverageEvaluation? = nil, turntableCoverage: TurntableCoverageSnapshot? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance; self.asymmetricCoverage = asymmetricCoverage; self.turntableCoverage = turntableCoverage }
+    public let orbitCoverage: OrbitCoverageSnapshot?
+    public let detailPasses: [M04DetailPassResumeState]?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil, asymmetricCoverage: AsymmetricCoverageEvaluation? = nil, turntableCoverage: TurntableCoverageSnapshot? = nil, orbitCoverage: OrbitCoverageSnapshot? = nil, detailPasses: [M04DetailPassResumeState]? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance; self.asymmetricCoverage = asymmetricCoverage; self.turntableCoverage = turntableCoverage; self.orbitCoverage = orbitCoverage; self.detailPasses = detailPasses }
 }
 
 public extension SessionStorageLayout {
