@@ -30,4 +30,3 @@ def test_missing_or_tampered_input_is_invalid_and_raw_unchanged(tmp_path) -> Non
     invalid = manager.refresh_integrity()
     assert invalid[0].status is ArtifactStatus.INVALID
     assert source.read_bytes() == b"tampered"
-
