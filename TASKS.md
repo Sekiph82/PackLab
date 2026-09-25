@@ -5,12 +5,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M05
-- Current Sprint: M05-BATCH-003 — Final transfer/integration remediation
-- Current Task: M05-BATCH-003 — Remediate final 9 M05 children
+- Current Sprint: M05-BATCH-004 — Final M05 integration/evidence closure
+- Current Task: M05-BATCH-004 — Remediate final 6 M05 children
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V02.md. Remediate exactly PL-0119, PL-0121–PL-0126, PL-0132 and PL-0134 using their frozen V03 work orders. Preserve accepted PL-0120, PL-0127, PL-0128, PL-0129, PL-0130, PL-0131 and PL-0133 plus all accepted M03/M04 behavior, close same-transfer resume, functional pairing/camera ownership, pinned TLS boundary, Swift completion identity/state, report matrix and executable cross-language integration evidence, publish distinct implementation/log commits per child, then publish MASTER_REMEDIATION_CODEX_LOG_V02.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M06, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V03.md. Remediate exactly PL-0119, PL-0121, PL-0122, PL-0125, PL-0126 and PL-0134 using their frozen V04 work orders. Preserve all 10 accepted M05 children and accepted M03/M04 behavior, close production finalization wiring, Swift decoder matrix, pairing already-idle camera state, production completion/UI failure matrix and persisted-sender executable harness, publish distinct implementation/log commits per child, then publish MASTER_REMEDIATION_CODEX_LOG_V03.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M06, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED (7/16 M05 children accepted; 9 remain open)
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V02.md — CHANGES_REQUIRED (10/16 M05 children accepted; 6 remain open)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -245,8 +245,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0120** Implement iOS share-sheet export to Files/iCloud/other installed destinations.
 - [ ] **PL-0121** Implement local-network transfer protocol from Capture to PackLab Studio.
 - [ ] **PL-0122** Add QR/pairing-code workflow so the iPhone connects to the correct Windows Studio instance.
-- [ ] **PL-0123** Encrypt/authenticate local transfer sufficiently to prevent accidental cross-device ingestion.
-- [ ] **PL-0124** Support resumable transfer for large scan packages.
+- [x] **PL-0123** Encrypt/authenticate local transfer sufficiently to prevent accidental cross-device ingestion.
+- [x] **PL-0124** Support resumable transfer for large scan packages.
 - [ ] **PL-0125** Verify checksum after transfer before marking export complete.
 - [ ] **PL-0126** Add transfer progress, cancel and retry UI.
 
@@ -257,7 +257,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0129** Validate schema version and checksums before extraction.
 - [x] **PL-0130** Quarantine corrupt/unsupported scans instead of partially importing them.
 - [x] **PL-0131** Create immutable raw-ingest copy so original capture evidence is never silently modified.
-- [ ] **PL-0132** Generate import report summarizing images, metadata, calibration and warnings.
+- [x] **PL-0132** Generate import report summarizing images, metadata, calibration and warnings.
 - [x] **PL-0133** Deduplicate imports by capture ID/checksum.
 - [ ] **PL-0134** Add ingest tests for interrupted transfer, corrupt ZIP, missing photo and bad manifest.
 
