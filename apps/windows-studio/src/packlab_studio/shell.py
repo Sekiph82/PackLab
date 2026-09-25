@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QMainWindow, QSplitter
 from .jobs import JobManager
 from .navigation import NavigationController, NavigationPanel, Route, RouteStack
 from .preferences import PreferencesStore, WindowPreferences
+from .shutdown import ShutdownCoordinator
 from .workspace import WorkspaceManager
 
 
@@ -26,6 +27,8 @@ class StudioMainWindow(QMainWindow):
         self.preferences = preferences
         self.navigation = NavigationController()
         self.job_manager = JobManager()
+        self.shutdown = ShutdownCoordinator(self.job_manager)
+        self._shutdown_requested = False
         self.navigation_panel = NavigationPanel()
         self.route_stack = RouteStack(ingest_controller=ingest_controller, receiver=receiver)
         self.navigation_panel.route_requested.connect(self.navigation.navigate)
@@ -59,6 +62,11 @@ class StudioMainWindow(QMainWindow):
         self.navigation_panel.select_route(self.navigation.current_route)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if not self._shutdown_requested and self.job_manager.active_jobs():
+            event.ignore()
+            self._shutdown_requested = True
+            self.shutdown.begin(lambda result: self._finish_shutdown(result))
+            return
         if self.preferences is not None:
             state = self.saveState().toBase64().toStdString()
             self.preferences.save(
@@ -71,3 +79,6 @@ class StudioMainWindow(QMainWindow):
                 )
             )
         super().closeEvent(event)
+
+    def _finish_shutdown(self, _result: object) -> None:
+        self.close()
