@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QMainWindow, QSplitter
 from .jobs import JobManager
 from .navigation import NavigationController, NavigationPanel, Route, RouteStack
 from .preferences import PreferencesStore, WindowPreferences
+from .project import ProjectManager
 from .shutdown import ShutdownCoordinator
 from .workspace import WorkspaceManager
 
@@ -27,6 +28,7 @@ class StudioMainWindow(QMainWindow):
         self.preferences = preferences
         self.navigation = NavigationController()
         self.job_manager = JobManager()
+        self.project_manager = ProjectManager(job_manager=self.job_manager)
         self.shutdown = ShutdownCoordinator(self.job_manager)
         self._shutdown_requested = False
         self.navigation_panel = NavigationPanel()
@@ -41,6 +43,7 @@ class StudioMainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         self.setCentralWidget(splitter)
         self.workspace = WorkspaceManager(self, job_manager=self.job_manager)
+        self.navigation.set_project_context(self.project_manager)
         self._restore_preferences()
 
     def _restore_preferences(self) -> None:
