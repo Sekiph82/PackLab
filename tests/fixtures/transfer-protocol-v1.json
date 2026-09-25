@@ -1,0 +1,12 @@
+{
+  "message": "create_transfer",
+  "package_name": "capture.packscan",
+  "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "capture_id": "capture-001",
+  "protocol": "packlab-transfer",
+  "protocol_version": "1",
+  "receiver_id": "receiver-001",
+  "total_bytes": 4096,
+  "transfer_id": "transfer-001",
+  "transport": "https"
+}
