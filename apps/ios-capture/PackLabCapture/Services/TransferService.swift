@@ -59,7 +59,11 @@ public final class URLSessionTransferClient: NSObject, ProductionTransferClient,
         }
         let response = try await send(path: "/v1/transfers/\(transferID)/complete", method: "POST", body: nil, token: token)
         let acknowledgement = try JSONDecoder().decode(TransferCompletionAcknowledgement.self, from: response)
-        guard acknowledgement.authenticated, acknowledgement.verified, acknowledgement.packageSHA256 == digest else { throw URLSessionTransferError.notVerified }
+        guard acknowledgement.transferID == transferID,
+              acknowledgement.authenticated,
+              acknowledgement.verified,
+              acknowledgement.packageSHA256 == digest,
+              acknowledgement.state == "verified" || acknowledgement.state == "complete" else { throw URLSessionTransferError.notVerified }
         return acknowledgement
     }
     public func cancel(transferID: String) async throws { _ = try await send(path: "/v1/transfers/\(transferID)/cancel", method: "POST", body: nil, token: activeToken) }
