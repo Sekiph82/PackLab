@@ -23,7 +23,7 @@ def certificate_fingerprint(certificate_path: str | Path) -> str:
         der = ssl.PEM_cert_to_DER_cert(path.read_text(encoding="ascii"))
     except (OSError, ValueError) as error:
         raise TransferProtocolError(TransferErrorCode.INTERNAL_ERROR, "TLS certificate is unavailable") from error
-    return hashlib.sha256(bytes.fromhex(der)).hexdigest()
+    return hashlib.sha256(der).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
