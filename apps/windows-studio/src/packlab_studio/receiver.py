@@ -47,6 +47,10 @@ class PackLabReceiver:
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
+    @property
+    def running(self) -> bool:
+        return self._server is not None and self._thread is not None and self._thread.is_alive()
+
     def pairing_offer(self, *, host: str | None = None, ttl_seconds: int = 120) -> PairingOffer:
         if not self._pin:
             raise ReceiverError("TLS identity must be configured before pairing")
@@ -167,6 +171,11 @@ class PackLabReceiver:
             self._thread.join(timeout=2)
         self._server = None
         self._thread = None
+
+    def restart(self) -> None:
+        """Cleanly restart the same TLS receiver over its persisted transfer root."""
+        self.stop()
+        self.start()
 
     def status(self, transfer_id: str, *, token_authenticated: bool = False):
         self._require_direct_auth(token_authenticated)
