@@ -98,6 +98,19 @@ private actor CountingStillPhotoBackend: StillPhotoBackend {
 }
 
 final class PackLabCaptureTests: XCTestCase {
+    func testPL0121SwiftWireModelsMatchSharedGoldenFields() throws {
+        let encoder = JSONEncoder()
+        func object<T: Encodable>(_ value: T) throws -> [String: Any] { try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(value)) as? [String: Any]) }
+        let digest = String(repeating: "a", count: 64)
+        XCTAssertEqual(try object(TransferCreateMessage(receiverID: "receiver-1", transferID: "transfer-1", captureID: "capture-1", packageName: "capture.packscan", totalBytes: 8, packageSHA256: digest))["protocol"] as? String, "packlab-transfer")
+        XCTAssertEqual(try object(TransferStatusMessage(transferID: "transfer-1", confirmedBytes: 8, totalBytes: 8, state: "receiving", packageSHA256: digest, nextOffset: 8))["next_offset"] as? Int, 8)
+        XCTAssertEqual(try object(TransferControlMessage(action: "cancel", transferID: "transfer-1"))["message"] as? String, "cancel")
+        XCTAssertEqual(try object(TransferControlMessage(action: "resume", transferID: "transfer-1"))["message"] as? String, "resume")
+        XCTAssertEqual(try object(TransferCompletionAcknowledgement(transferID: "transfer-1", packageSHA256: digest, verified: true, authenticated: true, state: "complete"))["verified"] as? Bool, true)
+        let error = try object(TransferErrorEnvelope(errorCode: "unpaired", error: "authorization is required"))
+        XCTAssertEqual(error["error_code"] as? String, "unpaired")
+    }
+
     @MainActor
     func testPL0126TransferViewModelUsesConfirmedBytesAndRetainsFinalizedSourceOnCancel() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -157,6 +170,22 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertThrowsError(try PackScanShareCoordinator().eligiblePackage(at: destination, finalization: record)) { error in
             XCTAssertEqual(error as? PackScanShareError, .missingPackage)
         }
+    }
+    @MainActor
+    func testPL0120ProductionSharePresentationStateCoversCancelCompletionFailureAndReplacement() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let package = root.appendingPathComponent("capture.packscan"); try Data([1, 2, 3]).write(to: package)
+        let record = SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: package.path, packageBytes: 3)
+        let coordinator = PackScanSharePresentationCoordinator(); coordinator.prepare(url: package, finalization: record); XCTAssertEqual(coordinator.state, .presenting)
+        coordinator.activityFinished(completed: false); XCTAssertEqual(coordinator.state, .cancelled)
+        coordinator.prepare(url: package, finalization: record); try Data([9]).write(to: package); coordinator.sourceReplacedOrDeleted(); XCTAssertEqual(coordinator.state, .missingPackage)
+        coordinator.presentationFailed(); XCTAssertEqual(coordinator.state, .failed("share_presentation_failed"))
+    }
+    func testPL0122PairingPersistsMinimumIdentityAndRejectsInvalidOffers() throws {
+        let suite = "PackLabTests-\(UUID().uuidString)"; let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let offer = PairingOffer(protocolName: PackLabTransferProtocol.name, protocolVersion: PackLabTransferProtocol.version, receiverInstanceID: "receiver", host: "127.0.0.1", port: 8443, pairingID: "pairing", pairingCode: "ABCD1234", expiresAt: Date().timeIntervalSince1970 + 60, tlsCertificateFingerprint: String(repeating: "a", count: 64))
+        let store = ReceiverReconnectIdentityStore(defaults: defaults); try store.save(ReceiverReconnectIdentity(receiverInstanceID: offer.receiverInstanceID, host: offer.host, port: offer.port, tlsCertificateFingerprint: offer.tlsCertificateFingerprint)); XCTAssertEqual(store.load()?.receiverInstanceID, "receiver"); XCTAssertFalse(String(decoding: try XCTUnwrap(defaults.data(forKey: "packlab.receiver.reconnect.identity.v1")), as: UTF8.self).contains("ABCD1234"))
     }
     func testPreviewLifecyclePolicyIsIdempotent() {
         var policy = PreviewLifecyclePolicy()
