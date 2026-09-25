@@ -35,3 +35,27 @@ def test_import_report_is_portable_ordered_and_redacted(tmp_path: Path, repo_roo
     assert [warning["code"] for warning in report["warnings"]] == ["calibration_owner_required", "optional_mask_missing", "optional_diagnostics_missing", "optional_calibration_missing"]
     assert report["transfer_provenance"] == {"receiver_id": "receiver", "transfer_id": "transfer"}
     assert str(tmp_path) not in json.dumps(report)
+
+
+def test_import_report_manual_and_network_golden_matrix_with_optional_payloads(tmp_path: Path, repo_root: Path) -> None:
+    manifest = json.loads((repo_root / "tests/fixtures/packscan/manifest-derived-present.json").read_text(encoding="utf-8"))
+    manifest["capture_id"] = "golden-report"
+    manifest["calibration_profile_ref"] = "profiles/test"
+    payloads = {"images/0001.jpg": b"IMG", "metadata/photos.json": b"{}", "previews/0001.png": b"P" * 128, "thumbnails/0001.webp": b"T" * 64, "diagnostics/capture.json": b"D" * 96}
+    for item in manifest["payloads"]:
+        data = payloads[item["path"]]
+        item["size_bytes"] = len(data)
+        item["sha256"] = hashlib.sha256(data).hexdigest()
+    package = write_packscan(tmp_path / "golden.packscan", manifest, payloads)
+    reports = tmp_path / "reports"
+    service = ImportService().with_raw_store(RawEvidenceStore(tmp_path / "raw")).with_report_store(ImportReportStore(reports))
+    manual = service.import_path(package, source_channel="drop")
+    network = service.import_path(package, source_channel="network", transfer_provenance={"receiver_id": "receiver", "transfer_id": "transfer", "session_token": "SECRET", "absolute_path": str(tmp_path)})
+    assert manual.state == "reported" and network.state == "reported"
+    report = json.loads((reports / f"{manual.package_sha256}.json").read_text(encoding="utf-8"))
+    assert report["source_channel"] == "network"
+    assert report["calibration_status"] == "available"
+    assert report["optional_payload_counts"] == {"diagnostics": 1, "preview": 1, "thumbnail": 1}
+    assert [warning["code"] for warning in report["warnings"]] == ["optional_mask_missing", "optional_calibration_missing"]
+    assert report["transfer_provenance"] == {"receiver_id": "receiver", "transfer_id": "transfer"}
+    assert "SECRET" not in json.dumps(report) and str(tmp_path) not in json.dumps(report)

@@ -11,6 +11,18 @@ from pathlib import Path
 from packlab_core.packscan import PackScanReport
 
 
+def _safe_transfer_provenance(value: dict[str, str] | None) -> dict[str, str] | None:
+    if value is None:
+        return None
+    allowed = {"receiver_id", "transfer_id"}
+    clean: dict[str, str] = {}
+    for key in sorted(allowed):
+        item = value.get(key)
+        if isinstance(item, str) and item and len(item) <= 128 and "\\" not in item and "/" not in item and "Bearer" not in item:
+            clean[key] = item
+    return clean or None
+
+
 @dataclass(frozen=True, slots=True)
 class ImportReport:
     capture_id: str
@@ -69,7 +81,7 @@ def build_import_report(report: PackScanReport, *, package_sha256: str, source_c
         device_summary={key: str(manifest.get("device", {}).get(key, "")) for key in ("platform", "model", "os_version")},
         calibration_profile_reference=calibration_ref, calibration_status="available" if calibration_ref else "owner_required",
         optional_payload_counts=dict(sorted(optional_counts.items())), warnings=warnings, raw_location=raw_location,
-        transfer_provenance=transfer_provenance,
+        transfer_provenance=_safe_transfer_provenance(transfer_provenance),
     )
 
 
