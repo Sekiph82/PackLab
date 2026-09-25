@@ -188,4 +188,3 @@ class JobPanel(QListWidget):
             item = QListWidgetItem(f"{job.title} [{job.state.value}] {job.progress:.0%}")
             item.setData(0x0100, job.job_id)
             self.addItem(item)
-
