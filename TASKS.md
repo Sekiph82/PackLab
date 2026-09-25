@@ -5,12 +5,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M05
-- Current Sprint: M05-BATCH-001 — Transfer & Ingest
-- Current Task: M05-BATCH-001 — Execute PL-0119 through PL-0134
+- Current Sprint: M05-BATCH-002 — Production transfer/export integration remediation
+- Current Task: M05-BATCH-002 — Remediate 13 remaining M05 children
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0119 through PL-0134 in frozen order using each child prompt/criteria. Preserve accepted M03/M04 behavior, keep PL-0068 OWNER_REQUIRED, do not start M06, publish distinct implementation/log commits per child, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V01.md. Remediate exactly PL-0119–PL-0126, PL-0128, PL-0130, PL-0132, PL-0133 and PL-0134 using their frozen V02 work orders. Preserve accepted PL-0127, PL-0129 and PL-0131 plus all accepted M03/M04 behavior, converge on one production finalized-package Share/TLS transfer/ingest architecture, publish distinct implementation/log commits per child, then publish MASTER_REMEDIATION_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M06, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Latest M04 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M04-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V04.md — AUDITED_PASS (25/25 M04 children accepted)
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED (3/16 M05 children accepted: PL-0127, PL-0129, PL-0131; 13 remain open)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -252,11 +252,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M05-S02 - Windows ingest
 
-- [ ] **PL-0127** Implement drag/drop and file-picker import for .packscan.
+- [x] **PL-0127** Implement drag/drop and file-picker import for .packscan.
 - [ ] **PL-0128** Implement network receiver for paired iPhone transfers.
-- [ ] **PL-0129** Validate schema version and checksums before extraction.
+- [x] **PL-0129** Validate schema version and checksums before extraction.
 - [ ] **PL-0130** Quarantine corrupt/unsupported scans instead of partially importing them.
-- [ ] **PL-0131** Create immutable raw-ingest copy so original capture evidence is never silently modified.
+- [x] **PL-0131** Create immutable raw-ingest copy so original capture evidence is never silently modified.
 - [ ] **PL-0132** Generate import report summarizing images, metadata, calibration and warnings.
 - [ ] **PL-0133** Deduplicate imports by capture ID/checksum.
 - [ ] **PL-0134** Add ingest tests for interrupted transfer, corrupt ZIP, missing photo and bad manifest.
