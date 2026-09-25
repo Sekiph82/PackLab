@@ -8,9 +8,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Current Sprint: M06-BATCH-001 — PackLab Studio Foundation
 - Current Task: M06-BATCH-001 — Execute PL-0135 through PL-0157
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0135 through PL-0157 in frozen order. Preserve accepted M03/M04/M05 behavior, reuse M05 ingest/receiver/raw authority, keep PL-0068 OWNER_REQUIRED, do not start M07, publish distinct implementation/log commits per child, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0135 through PL-0157 in frozen order using each child prompt/criteria. Preserve accepted M03/M04/M05 behavior and M05 ingest/receiver/raw authority, keep PL-0068 OWNER_REQUIRED, do not start M07, publish distinct implementation/log commits per child, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. PL-0151 must select the viewport backend from measured local evidence before PL-0152–PL-0157 use it. User-facing repository links must be full GitHub URLs only.
 - Required Actor: CODEX
-- Latest M05 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CHATGPT_AUDIT_V01.md — AUDITED_PASS (16/16 M05 children accepted; exact locked suite green)
+- Latest M05 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CHATGPT_AUDIT_V01.md — AUDITED_PASS (16/16 M05 children accepted)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
