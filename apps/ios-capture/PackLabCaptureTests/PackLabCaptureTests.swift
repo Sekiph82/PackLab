@@ -2062,6 +2062,48 @@ final class PackLabCaptureTests: XCTestCase {
     }
 
     @MainActor
+    func testPL0107DetailPassFramingMinimumAndPersistenceBoundaries() async throws {
+        struct Backend: StillPhotoBackend, Sendable {
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([6, 5, 4]), CaptureDimensions(width: 2, height: 1)) }
+        }
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
+        let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
+        let clip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let framingAt = FramingMetric(availability: .available, objectFraction: 0.20, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let framingBelow = FramingMetric(availability: .available, objectFraction: 0.1999, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let framingAbove = FramingMetric(availability: .available, objectFraction: 0.2001, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let quality = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: framingAt, background: background))
+        let pose = acceptedPoseBinding(captureID: "boundary-detail", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0.3, z: -1).values, tracking: .normal))
+        let useful = DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate")
+
+        let at = vm.evaluateDetailPass(passID: .neck, quality: quality, framing: framingAt, poseBinding: pose, duplicateDecision: useful)
+        XCTAssertTrue(at.allowed)
+        XCTAssertEqual(at.metadata.evidenceStatus, "accepted")
+        let below = vm.evaluateDetailPass(passID: .neck, quality: quality, framing: framingBelow, poseBinding: pose, duplicateDecision: useful)
+        XCTAssertFalse(below.allowed)
+        XCTAssertEqual(below.metadata.evidenceStatus, "rejected")
+        XCTAssertTrue(vm.m04DetailGuidance.contains("detail_framing_unacceptable"))
+        let above = vm.evaluateDetailPass(passID: .neck, quality: quality, framing: framingAbove, poseBinding: pose, duplicateDecision: useful)
+        XCTAssertTrue(above.allowed)
+
+        await vm.bindStillCaptureBackend(Backend())
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "boundary-detail")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "boundary-detail", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        let record = AcceptedCaptureRecord(captureID: "boundary-detail", sequence: 0, sourceFilename: "boundary-detail.heic", metadataFilename: "boundary-detail.json")
+        let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "boundary-detail", nextSequence: 1, epoch: 0, acceptedIDs: ["boundary-detail"]))
+        let persisted = try await vm.captureAndPersistDetailPass(passID: .neck, quality: quality, framing: framingAt, poseBinding: pose, duplicateDecision: useful, record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
+        XCTAssertNotNil(persisted.still)
+        let persistedRecord = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("boundary-detail.json")))
+        XCTAssertEqual(persistedRecord.passMetadata?.evidenceStatus, "accepted")
+    }
+
+    @MainActor
     func testPL0108BasePassHonorsSafetyStateAndPersistsAcceptedStatus() async throws {
         struct Backend: StillPhotoBackend, Sendable {
             func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([4, 5, 6]), CaptureDimensions(width: 2, height: 1)) }
