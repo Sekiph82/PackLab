@@ -446,13 +446,16 @@ public struct SessionFinalizer: Sendable {
             var packageCommitted = false
             do {
                 try PackScanWriter().write(manifestJSON: input.manifest, payloads: input.payloads, to: packageTemp)
-                let record = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: .exported, packagePath: input.destination.path)
+                let record = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: .exported, packagePath: input.destination.path, packageBytes: nil, packageSHA256: nil)
                 if failureInjector?("finalization.record") == true { throw FinalizationError.packagingFailed }
                 try JSONEncoder().encode(record).write(to: recordTemp, options: .atomic)
                 if failureInjector?("finalization.packageCommit") == true { throw FinalizationError.packagingFailed }
                 try fileManager.moveItem(at: packageTemp, to: input.destination)
                 packageCommitted = true
+                let packageData = try Data(contentsOf: input.destination)
+                let committedRecord = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: .exported, packagePath: input.destination.path, packageBytes: packageData.count, packageSHA256: SourceIntegrity.digest(packageData))
                 if failureInjector?("finalization.recordCommit") == true { throw FinalizationError.packagingFailed }
+                try JSONEncoder().encode(committedRecord).write(to: recordTemp, options: .atomic)
                 if fileManager.fileExists(atPath: finalizationURL.path) { try fileManager.replaceItemAt(finalizationURL, withItemAt: recordTemp, backupItemName: nil, options: .usingNewMetadataOnly) } else { try fileManager.moveItem(at: recordTemp, to: finalizationURL) }
             } catch {
                 try? fileManager.removeItem(at: packageTemp)
@@ -491,7 +494,15 @@ public struct SessionFinalizationRecord: Codable, Sendable, Equatable {
     public let sessionID: String
     public let state: SessionFinalizationState
     public let packagePath: String?
-    public init(sessionID: String, state: SessionFinalizationState, packagePath: String? = nil) { self.sessionID = sessionID; self.state = state; self.packagePath = packagePath }
+    public let packageBytes: Int?
+    public let packageSHA256: String?
+    public init(sessionID: String, state: SessionFinalizationState, packagePath: String? = nil, packageBytes: Int? = nil, packageSHA256: String? = nil) {
+        self.sessionID = sessionID
+        self.state = state
+        self.packagePath = packagePath
+        self.packageBytes = packageBytes
+        self.packageSHA256 = packageSHA256
+    }
 }
 
 public actor LocalScanHistoryStore {
