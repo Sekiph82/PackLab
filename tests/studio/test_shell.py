@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import importlib
+import os
+import subprocess
+import sys
 
-from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
 from packlab_studio.app import APPLICATION_NAME, create_application
@@ -10,9 +11,20 @@ from packlab_studio.shell import StudioMainWindow
 
 
 def test_import_does_not_create_qapplication() -> None:
-    assert QCoreApplication.instance() is None
-    importlib.import_module("packlab_studio.app")
-    assert QCoreApplication.instance() is None
+    environment = os.environ.copy()
+    environment["QT_QPA_PLATFORM"] = "offscreen"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import packlab_studio.app; from PySide6.QtCore import QCoreApplication; assert QCoreApplication.instance() is None",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_shell_constructs_one_window_and_closes(monkeypatch) -> None:
