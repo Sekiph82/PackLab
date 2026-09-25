@@ -91,7 +91,10 @@ class ImportService:
             try:
                 existing = self.index.lookup(capture_id, digest)
             except IngestIdentityConflict as error:
-                return ImportResult(source_channel, "rejected", source.name, capture_id=capture_id, package_sha256=digest, error_code=str(error), error_message=str(error))
+                if self.quarantine is not None:
+                    self.quarantine.preserve(source, source_channel=source_channel, error_code=error.code, diagnostic=error.code)
+                    return ImportResult(source_channel, "quarantined", source.name, capture_id=capture_id, package_sha256=digest, error_code=error.code, error_message=error.code)
+                return ImportResult(source_channel, "rejected", source.name, capture_id=capture_id, package_sha256=digest, error_code=error.code, error_message=error.code)
             if existing is not None:
                 return ImportResult(source_channel, "duplicate", source.name, capture_id=capture_id, package_sha256=digest, error_message=existing.raw_location)
         raw_location: str | None = None
@@ -107,7 +110,10 @@ class ImportService:
             try:
                 self.index.register(IngestIndexRecord(capture_id, digest, raw_location or f"packages/{digest}.packscan"))
             except IngestIdentityConflict as error:
-                return ImportResult(source_channel, "rejected", source.name, capture_id=capture_id, package_sha256=digest, error_code=str(error), error_message=str(error))
+                if self.quarantine is not None:
+                    self.quarantine.preserve(source, source_channel=source_channel, error_code=error.code, diagnostic=error.code)
+                    return ImportResult(source_channel, "quarantined", source.name, capture_id=capture_id, package_sha256=digest, error_code=error.code, error_message=error.code)
+                return ImportResult(source_channel, "rejected", source.name, capture_id=capture_id, package_sha256=digest, error_code=error.code, error_message=error.code)
         if self.report_store is not None and isinstance(capture_id, str):
             report_path = self.report_store.write(build_import_report(report, package_sha256=digest, source_channel=source_channel, raw_location=raw_location, transfer_provenance=transfer_provenance))
             if self.index is not None and isinstance(capture_id, str):
