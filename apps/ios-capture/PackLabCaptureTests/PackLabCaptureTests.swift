@@ -98,6 +98,31 @@ private actor CountingStillPhotoBackend: StillPhotoBackend {
 }
 
 final class PackLabCaptureTests: XCTestCase {
+    func testPL0120ShareEligibilityRequiresExportedPackageAndPreservesSource() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let package = root.appendingPathComponent("capture.packscan")
+        try Data([1, 2, 3]).write(to: package)
+        let record = SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: package.path)
+        let share = try PackScanShareCoordinator().eligiblePackage(at: package, finalization: record)
+        XCTAssertEqual(share.packageName, "capture.packscan")
+        XCTAssertTrue(PackScanShareCoordinator().packageStillAvailable(share))
+        XCTAssertThrowsError(try PackScanShareCoordinator().eligiblePackage(at: package, finalization: SessionFinalizationRecord(sessionID: "capture", state: .inProgress))) { error in
+            XCTAssertEqual(error as? PackScanShareError, .notFinalized)
+        }
+    }
+
+    func testPL0120ShareEligibilityRejectsMissingOrNonPackscanFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let destination = root.appendingPathComponent("capture.txt")
+        let record = SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: destination.path)
+        XCTAssertThrowsError(try PackScanShareCoordinator().eligiblePackage(at: destination, finalization: record)) { error in
+            XCTAssertEqual(error as? PackScanShareError, .missingPackage)
+        }
+    }
     func testPreviewLifecyclePolicyIsIdempotent() {
         var policy = PreviewLifecyclePolicy()
         XCTAssertTrue(policy.startIfNeeded())
