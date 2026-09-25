@@ -28,7 +28,10 @@ public struct PairingOffer: Codable, Sendable, Equatable {
 
 public enum PairingProtocolError: Error, Sendable, Equatable { case malformed, unsupportedVersion, expired, wrongReceiver, wrongPin, replayed }
 
+public enum ProductionCameraLifecycleState: String, Sendable, Equatable { case active, idle }
+
 public protocol ProductionCameraLifecycle: Sendable {
+    func lifecycleState() async -> ProductionCameraLifecycleState
     func stopAndReleaseForPairing() async -> Bool
     func restoreAfterPairing() async
 }
@@ -41,11 +44,21 @@ public final class ProductionCaptureCameraLifecycle: @unchecked Sendable, Produc
     public static let shared = ProductionCaptureCameraLifecycle()
     private var stopHandler: (() -> Bool)?
     private var restoreHandler: (() -> Void)?
+    private var state: ProductionCameraLifecycleState = .idle
     private init() {}
-    public func install(stop: @escaping () -> Bool, restore: @escaping () -> Void) { stopHandler = stop; restoreHandler = restore }
-    public func clear() { stopHandler = nil; restoreHandler = nil }
-    public nonisolated func stopAndReleaseForPairing() async -> Bool { await MainActor.run { stopHandler?() ?? false } }
-    public nonisolated func restoreAfterPairing() async { await MainActor.run { restoreHandler?() } }
+    public func install(stop: @escaping () -> Bool, restore: @escaping () -> Void) { stopHandler = stop; restoreHandler = restore; state = .active }
+    public func clear() { stopHandler = nil; restoreHandler = nil; state = .idle }
+    public nonisolated func lifecycleState() async -> ProductionCameraLifecycleState { await MainActor.run { state } }
+    public nonisolated func stopAndReleaseForPairing() async -> Bool {
+        await MainActor.run {
+            guard state == .active else { return true }
+            guard let stopHandler else { state = .idle; return true }
+            let released = stopHandler()
+            if released { state = .idle }
+            return released
+        }
+    }
+    public nonisolated func restoreAfterPairing() async { await MainActor.run { restoreHandler?(); if restoreHandler != nil { state = .active } } }
 }
 
 public struct PairingCodeEntry: Sendable, Equatable {
@@ -191,11 +204,27 @@ public final class PairingQRScannerController: UIViewController, AVCaptureMetada
 public actor PairingCameraOwnership {
     public enum Owner: Sendable, Equatable { case idle, capture, pairingScanner }
     private var owner: Owner = .idle
+    private var displacedCapture = false
     private let lifecycle: any ProductionCameraLifecycle
     @MainActor public init(lifecycle: any ProductionCameraLifecycle = ProductionCaptureCameraLifecycle.shared) { self.lifecycle = lifecycle }
     public func beginCapture() -> Bool { guard owner == .idle else { return false }; owner = .capture; return true }
     public func endCapture() { if owner == .capture { owner = .idle } }
-    public func beginPairingScan() async -> Bool { guard owner == .idle, await lifecycle.stopAndReleaseForPairing() else { return false }; owner = .pairingScanner; return true }
-    public func endPairingScan() async { if owner == .pairingScanner { owner = .idle; await lifecycle.restoreAfterPairing() } }
+    public func beginPairingScan() async -> Bool {
+        guard owner == .idle else { return false }
+        switch await lifecycle.lifecycleState() {
+        case .idle:
+            displacedCapture = false
+        case .active:
+            guard await lifecycle.stopAndReleaseForPairing() else { return false }
+            displacedCapture = true
+        }
+        owner = .pairingScanner
+        return true
+    }
+    public func endPairingScan() async {
+        guard owner == .pairingScanner else { return }
+        owner = .idle
+        if displacedCapture { displacedCapture = false; await lifecycle.restoreAfterPairing() }
+    }
     public func currentOwner() -> Owner { owner }
 }

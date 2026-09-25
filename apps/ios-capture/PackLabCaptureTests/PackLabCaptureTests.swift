@@ -99,10 +99,12 @@ private actor CountingStillPhotoBackend: StillPhotoBackend {
 
 private final class TestProductionCameraLifecycle: @unchecked Sendable, ProductionCameraLifecycle {
     var stopAllowed = true
+    var state: ProductionCameraLifecycleState = .active
     private(set) var stopCount = 0
     private(set) var restoreCount = 0
-    func stopAndReleaseForPairing() async -> Bool { stopCount += 1; return stopAllowed }
-    func restoreAfterPairing() async { restoreCount += 1 }
+    func lifecycleState() async -> ProductionCameraLifecycleState { state }
+    func stopAndReleaseForPairing() async -> Bool { stopCount += 1; guard stopAllowed else { return false }; state = .idle; return true }
+    func restoreAfterPairing() async { restoreCount += 1; state = .active }
 }
 
 private final class FakeProductionTransferClient: @unchecked Sendable, ProductionTransferClient {
@@ -261,6 +263,9 @@ final class PackLabCaptureTests: XCTestCase {
         let expired = PairingOffer(protocolName: offer.protocolName, protocolVersion: offer.protocolVersion, receiverInstanceID: offer.receiverInstanceID, host: offer.host, port: offer.port, pairingID: "expired", pairingCode: offer.pairingCode, expiresAt: 999, tlsCertificateFingerprint: offer.tlsCertificateFingerprint)
         XCTAssertThrowsError(try coordinator.accept(offer: expired, receiverInstanceID: "receiver", manualCode: offer.pairingCode)) { XCTAssertEqual($0 as? PairingProtocolError, .expired) }
         XCTAssertThrowsError(try PairingOffer(data: Data("not-json".utf8)))
+        var wrongVersion = try XCTUnwrap(JSONSerialization.jsonObject(with: try offer.payloadData()) as? [String: Any]); wrongVersion["protocol_version"] = "2"
+        XCTAssertThrowsError(try PairingOffer(data: JSONSerialization.data(withJSONObject: wrongVersion))) { XCTAssertEqual($0 as? PairingProtocolError, .unsupportedVersion) }
+        XCTAssertTrue(await ownership.beginCapture()); XCTAssertFalse(await coordinator.beginQRScan()); await ownership.endCapture()
         lifecycle.stopAllowed = false
         XCTAssertFalse(await coordinator.beginQRScan())
         lifecycle.stopAllowed = true
@@ -269,6 +274,8 @@ final class PackLabCaptureTests: XCTestCase {
         await coordinator.finishQRScan()
         XCTAssertEqual(await ownership.currentOwner(), .idle)
         XCTAssertEqual(lifecycle.stopCount, 2); XCTAssertEqual(lifecycle.restoreCount, 1)
+        let idleLifecycle = TestProductionCameraLifecycle(); idleLifecycle.state = .idle; let idleOwnership = PairingCameraOwnership(lifecycle: idleLifecycle); let idleCoordinator = PairingCoordinator(cameraOwnership: idleOwnership, identityStore: ReceiverReconnectIdentityStore(defaults: defaults), now: { now })
+        XCTAssertTrue(await idleCoordinator.beginQRScan()); XCTAssertEqual(idleLifecycle.stopCount, 0); await idleCoordinator.finishQRScan(); XCTAssertEqual(idleLifecycle.restoreCount, 0); XCTAssertEqual(await idleOwnership.currentOwner(), .idle)
     }
 
     @MainActor
