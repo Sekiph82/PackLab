@@ -40,7 +40,23 @@ def _corrupt(path: Path, repo_root: Path) -> Path:
 def _missing_photo(path: Path, repo_root: Path) -> Path:
     manifest = json.loads((repo_root / "tests/fixtures/packscan/manifest-valid.json").read_text(encoding="utf-8"))
     manifest["capture_id"] = "missing-photo"
-    return _invalid_zip(path, manifest=json.dumps(manifest).encode())
+    manifest["payloads"][0]["size_bytes"] = 3
+    manifest["payloads"][0]["sha256"] = hashlib.sha256(b"IMG").hexdigest()
+    manifest["payloads"][1]["size_bytes"] = 2
+    manifest["payloads"][1]["sha256"] = hashlib.sha256(b"{}").hexdigest()
+    manifest["payloads"].append({"path": "images/0002.jpg", "kind": "image", "required": True, "authority": "source", "size_bytes": 7, "sha256": hashlib.sha256(b"MISSING").hexdigest(), "media_type": "image/jpeg"})
+    manifest_bytes = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    metadata = b"{}"
+    checksums = {
+        "schema_version": "1.0.0", "algorithm": "sha256", "canonicalization": "sha256_32_bytes_lowercase_hex_64_chars_v1",
+        "entries": {"manifest.json": hashlib.sha256(manifest_bytes).hexdigest(), "metadata/photos.json": hashlib.sha256(metadata).hexdigest(), "images/0001.jpg": hashlib.sha256(b"IMG").hexdigest()},
+    }
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("manifest.json", manifest_bytes)
+        archive.writestr("metadata/photos.json", metadata)
+        archive.writestr("images/0001.jpg", b"IMG")
+        archive.writestr("checksums.json", (json.dumps(checksums, sort_keys=True, separators=(",", ":")) + "\n").encode())
+    return path
 
 
 def _transfer(receiver: PackLabReceiver, package: Path, transfer_id: str, *, capture_id: str = "integration-capture", declared_digest: str | None = None, split: int = 11) -> tuple[object, object]:
@@ -109,3 +125,11 @@ def test_invalid_transfers_are_quarantined_and_never_reach_raw_store(tmp_path: P
     assert ack.verified and result.state == "quarantined"
     assert not list((tmp_path / "raw").glob("*.packscan"))
     assert list((tmp_path / "quarantine" / "packages").glob("*.packscan"))
+
+
+def test_missing_photo_fixture_has_valid_controls_but_only_declared_image_is_absent(tmp_path: Path, repo_root: Path) -> None:
+    package = _missing_photo(tmp_path / "missing-only-image.packscan", repo_root)
+    receiver = PackLabReceiver(tmp_path, receiver_id="receiver", certificate_fingerprint="pin")
+    ack, result = _transfer(receiver, package, "missing-only-image-transfer", capture_id="missing-photo")
+    assert ack.verified and result.state == "quarantined" and result.error_code == "missing_declared_entry"
+    assert not list((tmp_path / "raw").glob("*.packscan"))
