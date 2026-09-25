@@ -1,9 +1,10 @@
-import csv
+import ctypes
 import os
 import subprocess
 import sys
 import threading
 import time
+from ctypes import wintypes
 from pathlib import Path
 
 import pytest
@@ -60,23 +61,30 @@ def _read_pids(marker: Path) -> tuple[int, int]:
 
 def _is_process_alive(pid: int) -> bool:
     if os.name == "nt":
-        try:
-            completed = subprocess.run(
-                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-                capture_output=True,
-                check=False,
-                shell=False,
-                timeout=1.0,
-                text=True,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-        if completed.returncode != 0:
-            return False
-        return any(
-            len(row) >= 2 and row[1] == str(pid)
-            for row in csv.reader(completed.stdout.splitlines())
-        )
+        process_query_limited_information = 0x1000
+        still_active = 259
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        open_process.restype = wintypes.HANDLE
+        get_exit_code = kernel32.GetExitCodeProcess
+        get_exit_code.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        get_exit_code.restype = wintypes.BOOL
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            handle = open_process(process_query_limited_information, False, pid)
+            if handle:
+                exit_code = wintypes.DWORD()
+                queried = bool(get_exit_code(handle, ctypes.byref(exit_code)))
+                close_handle(handle)
+                if queried:
+                    return exit_code.value == still_active
+            time.sleep(0.02)
+        return False
     try:
         os.kill(pid, 0)
     except OSError:
@@ -102,6 +110,7 @@ def test_windows_liveness_query_is_non_destructive():
     finally:
         process.terminate()
         process.wait(timeout=2.0)
+    assert not _is_process_alive(process.pid)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows taskkill result proof")
