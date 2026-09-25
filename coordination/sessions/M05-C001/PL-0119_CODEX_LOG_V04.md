@@ -1,9 +1,9 @@
 # PL-0119 — Codex Implementation Log V04
 
-Task: PL-0119 — Wire canonical finalization into real app export flow  
-Repository: https://github.com/Sekiph82/PackLab  
-Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/PL-0119_CODEX_PROMPT_V04.md  
-Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/PL-0119_CHATGPT_AUDIT_CRITERIA_V04.md  
+Task: PL-0119 — Wire canonical finalization into real app export flow
+Repository: https://github.com/Sekiph82/PackLab
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/PL-0119_CODEX_PROMPT_V04.md
+Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/PL-0119_CHATGPT_AUDIT_CRITERIA_V04.md
 Previous audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/PL-0119_CHATGPT_AUDIT_V03.md
 
 ## Boundary and synchronization
@@ -32,5 +32,5 @@ Previous audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessi
 
 ## Handoff
 
-The source and evidence are ready for independent inspection against the frozen V04 criteria.  
+The source and evidence are ready for independent inspection against the frozen V04 criteria.
 READY_FOR_INDEPENDENT_AUDIT
