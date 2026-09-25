@@ -7,10 +7,16 @@ import secrets
 import string
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
-from .transfer_protocol import PROTOCOL_NAME, PROTOCOL_VERSION, TransferErrorCode, TransferProtocolError, canonical_json
+from .transfer_protocol import (
+    PROTOCOL_NAME,
+    PROTOCOL_VERSION,
+    TransferErrorCode,
+    TransferProtocolError,
+    canonical_json,
+)
 
 _CODE_ALPHABET = string.ascii_uppercase + string.digits
 
@@ -43,7 +49,7 @@ class PairingOffer:
         return canonical_json(self.public_dict()).decode("utf-8").rstrip("\n")
 
     @classmethod
-    def from_qr_payload(cls, payload: str) -> "PairingOffer":
+    def from_qr_payload(cls, payload: str) -> PairingOffer:
         try:
             value = json.loads(payload)
         except json.JSONDecodeError as error:
@@ -77,7 +83,7 @@ class PairedReceiverIdentity:
 class PairingStore:
     """In-memory one-time offer store; only non-secret identity is exportable."""
 
-    def __init__(self, *, clock: callable = time.time) -> None:
+    def __init__(self, *, clock: Callable[[], float] = time.time) -> None:
         self._clock = clock
         self._offers: dict[str, PairingOffer] = {}
         self._used: set[str] = set()

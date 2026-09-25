@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -13,7 +12,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from packlab_core.pairing import PairingOffer, PairingStore
-from packlab_core.transfer_protocol import TransferProtocolError
+from packlab_core.transfer_protocol import TransferErrorEnvelope, TransferProtocolError
 from packlab_core.transfer_security import (
     PairingAuthenticator,
     TLSIdentity,
@@ -83,6 +82,27 @@ class PackLabReceiver:
                     raise TransferProtocolError("unpaired", "authorization is required")
                 receiver.authenticator.require_session(receiver_instance_id=receiver.receiver_id, token=token[7:], certificate_fingerprint_value=receiver._pin or "")
 
+            def _pair(self) -> None:
+                body = self._body()
+                offer_value = body.get("offer", body)
+                if not isinstance(offer_value, dict):
+                    raise TransferProtocolError("bad_request", "pairing offer is required")
+                offer = PairingOffer.from_qr_payload(json.dumps(offer_value, sort_keys=True, separators=(",", ":")))
+                code = body.get("pairing_code")
+                fingerprint = body.get("tls_certificate_fingerprint")
+                if not isinstance(code, str) or not isinstance(fingerprint, str):
+                    raise TransferProtocolError("bad_request", "pairing code and certificate fingerprint are required")
+                credential = receiver.pair(offer, code=code, certificate_fingerprint=fingerprint)
+                self._json(HTTPStatus.OK, {
+                    "message": "pairing_acknowledgement",
+                    "protocol": "packlab-transfer",
+                    "protocol_version": "1",
+                    "receiver_instance_id": credential.receiver_instance_id,
+                    "session_token": credential.token,
+                    "expires_at": credential.expires_at,
+                    "tls_certificate_fingerprint": credential.certificate_fingerprint,
+                })
+
             def _body(self) -> dict[str, object]:
                 length = int(self.headers.get("Content-Length", "0"))
                 value = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -92,25 +112,32 @@ class PackLabReceiver:
 
             def do_POST(self) -> None:
                 try:
-                    self._auth()
-                    if self.path == "/v1/transfers":
-                        self._json(HTTPStatus.CREATED, asdict(receiver.create_transfer(self._body(), token_authenticated=True)))
-                    elif self.path.startswith("/v1/transfers/") and self.path.endswith("/cancel"):
-                        transfer_id = self.path.split("/")[3]
-                        self._json(HTTPStatus.OK, asdict(receiver.cancel(transfer_id, token_authenticated=True)))
-                    elif self.path.startswith("/v1/transfers/") and self.path.endswith("/chunks"):
-                        transfer_id = self.path.split("/")[3]
-                        offset = int(self.headers["X-PackLab-Offset"])
-                        digest = self.headers["X-PackLab-Chunk-SHA256"]
-                        length = int(self.headers.get("Content-Length", "0"))
-                        self._json(HTTPStatus.OK, asdict(receiver.put_chunk(transfer_id, offset=offset, payload=self.rfile.read(length), chunk_sha256=digest, token_authenticated=True)))
-                    elif self.path.startswith("/v1/transfers/") and self.path.endswith("/complete"):
-                        transfer_id = self.path.split("/")[3]
-                        self._json(HTTPStatus.OK, asdict(receiver.complete(transfer_id, token_authenticated=True)[0]))
+                    if self.path == "/v1/pair":
+                        self._pair()
                     else:
-                        self._json(HTTPStatus.NOT_FOUND, {"error_code": "unknown_route"})
+                        self._auth()
+                        if self.path == "/v1/transfers":
+                            self._json(HTTPStatus.CREATED, receiver.create_transfer(self._body(), token_authenticated=True).status().to_dict())
+                        elif self.path.startswith("/v1/transfers/") and self.path.endswith("/resume"):
+                            transfer_id = self.path.split("/")[3]
+                            self._json(HTTPStatus.OK, receiver.resume(transfer_id, token_authenticated=True).to_dict())
+                        elif self.path.startswith("/v1/transfers/") and self.path.endswith("/cancel"):
+                            transfer_id = self.path.split("/")[3]
+                            self._json(HTTPStatus.OK, receiver.cancel(transfer_id, token_authenticated=True).to_dict())
+                        elif self.path.startswith("/v1/transfers/") and self.path.endswith("/chunks"):
+                            transfer_id = self.path.split("/")[3]
+                            offset = int(self.headers["X-PackLab-Offset"])
+                            digest = self.headers["X-PackLab-Chunk-SHA256"]
+                            length = int(self.headers.get("Content-Length", "0"))
+                            self._json(HTTPStatus.OK, receiver.put_chunk(transfer_id, offset=offset, payload=self.rfile.read(length), chunk_sha256=digest, token_authenticated=True).to_dict())
+                        elif self.path.startswith("/v1/transfers/") and self.path.endswith("/complete"):
+                            transfer_id = self.path.split("/")[3]
+                            ack, _ = receiver.complete(transfer_id, token_authenticated=True)
+                            self._json(HTTPStatus.OK, ack.to_dict())
+                        else:
+                            self._json(HTTPStatus.NOT_FOUND, {"error_code": "unknown_route"})
                 except (TransferProtocolError, ReceiverError, ValueError, KeyError) as error:
-                    self._json(HTTPStatus.BAD_REQUEST, {"error_code": getattr(error, "code", "bad_request"), "error": str(error).split(":", 1)[0]})
+                    self._json(HTTPStatus.BAD_REQUEST, TransferErrorEnvelope(getattr(error, "code", "bad_request"), str(error).split(":", 1)[0]).to_dict())
 
             def do_GET(self) -> None:
                 try:
@@ -118,11 +145,11 @@ class PackLabReceiver:
                     parsed = urlparse(self.path)
                     if parsed.path.startswith("/v1/transfers/"):
                         transfer_id = parsed.path.split("/")[3]
-                        self._json(HTTPStatus.OK, asdict(receiver.status(transfer_id, token_authenticated=True)))
+                        self._json(HTTPStatus.OK, receiver.status(transfer_id, token_authenticated=True).to_dict())
                     else:
                         self._json(HTTPStatus.NOT_FOUND, {"error_code": "unknown_route"})
                 except (TransferProtocolError, ReceiverError, ValueError, KeyError) as error:
-                    self._json(HTTPStatus.BAD_REQUEST, {"error_code": getattr(error, "code", "bad_request"), "error": str(error).split(":", 1)[0]})
+                    self._json(HTTPStatus.BAD_REQUEST, TransferErrorEnvelope(getattr(error, "code", "bad_request"), str(error).split(":", 1)[0]).to_dict())
 
         server = ThreadingHTTPServer((self.host, self.port), Handler)
         server.socket = create_server_tls_context(self.tls_identity).wrap_socket(server.socket, server_side=True)
@@ -161,6 +188,10 @@ class PackLabReceiver:
     def cancel(self, transfer_id: str, *, token_authenticated: bool = False):
         self._require_direct_auth(token_authenticated)
         return self.transfers.cancel(transfer_id)
+
+    def resume(self, transfer_id: str, *, token_authenticated: bool = False):
+        self._require_direct_auth(token_authenticated)
+        return self.transfers.resume(transfer_id)
 
     def complete(self, transfer_id: str, *, token_authenticated: bool = False) -> tuple[object, ImportResult | None]:
         self._require_direct_auth(token_authenticated)
