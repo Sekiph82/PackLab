@@ -12,6 +12,7 @@ from typing import Protocol
 from packlab_core.packscan import PackScanError, PackScanReport, extract_packscan, validate_packscan
 
 from .quarantine import QuarantineStore
+from .raw_store import RawEvidenceStore, RawStoreError
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,11 @@ class ImportService:
     def __init__(self, validator=validate_packscan, quarantine: QuarantineStore | None = None) -> None:
         self.validator = validator
         self.quarantine = quarantine
+        self.raw_store: RawEvidenceStore | None = None
+
+    def with_raw_store(self, raw_store: RawEvidenceStore) -> ImportService:
+        self.raw_store = raw_store
+        return self
 
     @staticmethod
     def normalize_path(value: str | Path) -> Path:
@@ -69,7 +75,14 @@ class ImportService:
             return ImportResult(source_channel, "rejected", source.name, error_code=error.code, error_message=error.code)
         digest = hashlib.sha256(source.read_bytes()).hexdigest()
         capture_id = report.manifest.get("capture_id")
-        return ImportResult(source_channel, "validated", source.name, capture_id=capture_id if isinstance(capture_id, str) else None, package_sha256=digest)
+        if self.raw_store is not None and isinstance(capture_id, str):
+            try:
+                self.raw_store.store(source, capture_id=capture_id, source_channel=source_channel)
+            except OSError:
+                return ImportResult(source_channel, "rejected", source.name, capture_id=capture_id, package_sha256=digest, error_code="raw_store_unavailable", error_message="raw store unavailable")
+            except RawStoreError as error:
+                return ImportResult(source_channel, "rejected", source.name, capture_id=capture_id, package_sha256=digest, error_code=str(error), error_message=str(error))
+        return ImportResult(source_channel, "raw_stored" if self.raw_store is not None else "validated", source.name, capture_id=capture_id if isinstance(capture_id, str) else None, package_sha256=digest)
 
     def validate_then_extract(self, value: str | Path, destination: str | Path, *, source_channel: str) -> tuple[ImportResult, Path | None]:
         """Validate the whole package before exposing any extracted payload."""
