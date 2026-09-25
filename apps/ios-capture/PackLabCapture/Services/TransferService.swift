@@ -23,7 +23,7 @@ public protocol ProductionTransferClient: Sendable {
     func status(transferID: String) async throws -> TransferStatusMessage
 }
 
-public enum URLSessionTransferError: Error, Sendable, Equatable { case invalidSource, invalidResponse, server(String), notVerified, cancelled }
+public enum URLSessionTransferError: Error, Sendable, Equatable { case invalidSource, sourceDigestMismatch, invalidResponse, server(String), notVerified, cancelled }
 
 public final class URLSessionTransferClient: NSObject, ProductionTransferClient, @unchecked Sendable {
     private let identity: ReceiverReconnectIdentity
@@ -45,6 +45,7 @@ public final class URLSessionTransferClient: NSObject, ProductionTransferClient,
     public func transfer(_ request: TransferRequest, progress: @escaping @Sendable (TransferStatusMessage) -> Void) async throws -> TransferCompletionAcknowledgement {
         guard let data = try? Data(contentsOf: request.source) else { throw URLSessionTransferError.invalidSource }
         let digest = SourceIntegrity.digest(data)
+        if let declared = request.finalization?.packageSHA256, declared != digest { throw URLSessionTransferError.sourceDigestMismatch }
         let transferID = request.transferID ?? UUID().uuidString
         var token = sessionToken
         if let offer = request.pairingOffer, let code = request.pairingCode { token = try await pair(offer: offer, code: code); activeToken = token }

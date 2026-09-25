@@ -122,6 +122,21 @@ private final class FakeProductionTransferClient: @unchecked Sendable, Productio
     func status(transferID: String) async throws -> TransferStatusMessage { calls.append("status:\(transferID)"); return TransferStatusMessage(transferID: transferID, confirmedBytes: statusValue.confirmedBytes, totalBytes: statusValue.totalBytes, state: statusValue.state, packageSHA256: statusValue.packageSHA256, nextOffset: statusValue.nextOffset) }
 }
 
+private final class StubTransferURLProtocol: URLProtocol {
+    static var handler: ((URLRequest) -> (Int, Data))?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        guard let result = Self.handler?(request), let client else { return }
+        let response = HTTPURLResponse(url: request.url!, statusCode: result.0, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client.urlProtocol(self, didLoad: result.1)
+        client.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+private final class RequestCounter { var value = 0 }
+
 final class PackLabCaptureTests: XCTestCase {
     func testPL0121SwiftWireModelsMatchSharedGoldenFields() throws {
         let encoder = JSONEncoder()
@@ -310,6 +325,35 @@ final class PackLabCaptureTests: XCTestCase {
         let vm = TransferViewModel(store: store); vm.prepare(package: FinalizedPackScanShare(packageURL: package, packageName: package.lastPathComponent, packageBytes: 2)); vm.pair(receiverIdentity: "receiver", transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2]))); vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 2, totalBytes: 2, verified: true, packageSHA256: SourceIntegrity.digest(Data([1, 2])))
         vm.applyCompletion(TransferCompletionAcknowledgement(transferID: "other", packageSHA256: SourceIntegrity.digest(Data([1, 2])), verified: true, authenticated: true, state: "complete")); XCTAssertEqual(vm.state?.phase, .retryableFailure); XCTAssertNotNil(store.load())
         vm.applyCompletion(TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2])), verified: true, authenticated: true, state: "receiving")); XCTAssertEqual(vm.state?.phase, .retryableFailure); XCTAssertNotNil(store.load())
+    }
+
+    func testPL0125URLSessionProductionClientAckAndDeclaredDigestMatrix() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let package = root.appendingPathComponent("capture.packscan"); let bytes = Data([1, 2, 3]); try bytes.write(to: package); let digest = SourceIntegrity.digest(bytes)
+        let receiver = ReceiverReconnectIdentity(receiverInstanceID: "receiver", host: "127.0.0.1", port: 8443, tlsCertificateFingerprint: String(repeating: "a", count: 64)); let finalization = SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: package.path, packageBytes: bytes.count, packageSHA256: digest); let request = TransferRequest(source: package, receiver: receiver, transferID: "transfer", finalization: finalization)
+        let statusData = try JSONEncoder().encode(TransferStatusMessage(transferID: "transfer", confirmedBytes: bytes.count, totalBytes: bytes.count, state: "verified", packageSHA256: digest, nextOffset: bytes.count))
+        func client(for acknowledgement: TransferCompletionAcknowledgement, counter: RequestCounter) -> URLSessionTransferClient {
+            let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [StubTransferURLProtocol.self]; StubTransferURLProtocol.handler = { request in counter.value += 1; if request.url?.path.hasSuffix("/complete") == true { return (200, (try? JSONEncoder().encode(acknowledgement)) ?? Data()) }; return (200, statusData) }
+            return URLSessionTransferClient(identity: receiver, session: URLSession(configuration: configuration))
+        }
+        let good = TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: digest, verified: true, authenticated: true, state: "complete")
+        let successfulCounter = RequestCounter(); let successful = client(for: good, counter: successfulCounter); let actual = try await successful.transfer(request, progress: { _ in }); XCTAssertEqual(actual, good); XCTAssertGreaterThan(successfulCounter.value, 0)
+        let rejected = [
+            TransferCompletionAcknowledgement(transferID: "other", packageSHA256: digest, verified: true, authenticated: true, state: "complete"),
+            TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: String(repeating: "b", count: 64), verified: true, authenticated: true, state: "complete"),
+            TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: digest, verified: true, authenticated: false, state: "complete"),
+            TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: digest, verified: false, authenticated: true, state: "complete"),
+            TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: digest, verified: true, authenticated: true, state: "receiving"),
+        ]
+        for acknowledgement in rejected {
+            let rejectedCounter = RequestCounter(); let rejecting = client(for: acknowledgement, counter: rejectedCounter)
+            do { _ = try await rejecting.transfer(request, progress: { _ in }); XCTFail("invalid acknowledgement must be rejected") } catch { XCTAssertEqual(error as? URLSessionTransferError, .notVerified) }
+            XCTAssertGreaterThan(rejectedCounter.value, 0)
+        }
+        let mismatchCounter = RequestCounter(); let mismatch = client(for: good, counter: mismatchCounter); let wrongDeclaration = TransferRequest(source: package, receiver: receiver, transferID: "transfer", finalization: SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: package.path, packageBytes: bytes.count, packageSHA256: String(repeating: "c", count: 64)))
+        do { _ = try await mismatch.transfer(wrongDeclaration, progress: { _ in }); XCTFail("wrong declared digest must fail before network") } catch { XCTAssertEqual(error as? URLSessionTransferError, .sourceDigestMismatch) }; XCTAssertEqual(mismatchCounter.value, 0)
+
+        let suite = "PackLabPL0125-\(UUID().uuidString)"; let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }; let store = SenderTransferIdentityStore(defaults: defaults); let vm = TransferViewModel(store: store); vm.prepare(package: FinalizedPackScanShare(packageURL: package, packageName: package.lastPathComponent, packageBytes: bytes.count)); vm.pair(receiverIdentity: receiver.receiverInstanceID, transferID: "transfer", packageSHA256: digest); vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: bytes.count, totalBytes: bytes.count, verified: true, packageSHA256: digest)); vm.applyCompletion(rejected[1]); XCTAssertEqual(vm.state?.phase, .retryableFailure); XCTAssertNotNil(store.load()); vm.applyCompletion(good); XCTAssertEqual(vm.state?.phase, .completed); XCTAssertNil(store.load())
     }
     func testPreviewLifecyclePolicyIsIdempotent() {
         var policy = PreviewLifecyclePolicy()
