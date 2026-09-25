@@ -204,6 +204,12 @@ class PackLabReceiver:
 
     def complete(self, transfer_id: str, *, token_authenticated: bool = False) -> tuple[object, ImportResult | None]:
         self._require_direct_auth(token_authenticated)
+        existing = self.transfers.status(transfer_id)
+        if existing.state == "complete":
+            # A verified transfer has already moved its part file and written
+            # its report/index.  Replaying completion is an idempotent ack, not
+            # a second ingest.
+            return self.transfers.completion_ack(transfer_id, authenticated=True), None
         verification = self.transfers.verify(transfer_id)
         if not verification.verified:
             return self.transfers.completion_ack(transfer_id, authenticated=True), None
