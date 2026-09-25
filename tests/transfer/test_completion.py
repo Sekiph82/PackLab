@@ -25,3 +25,13 @@ def test_sender_never_completes_on_wrong_digest_or_unauthenticated_ack() -> None
     assert wrong.phase == "retryable_failure"
     unauthenticated = controller.apply_completion_ack(CompletionAcknowledgement("t", "a" * 64, True, False, "verified"))
     assert unauthenticated.phase == "retryable_failure"
+
+
+def test_sender_requires_matching_transfer_identity_and_verified_state() -> None:
+    digest = hashlib.sha256(b"payload").hexdigest()
+    controller = SenderTransferController(transfer_id="transfer", package_sha256=digest, total_bytes=7)
+    controller.confirmed_status(TransferStatus("transfer", 7, 7, "receiving", digest, 7))
+    wrong_transfer = controller.apply_completion_ack(CompletionAcknowledgement("other", digest, True, True, "verified"))
+    assert wrong_transfer.phase == "retryable_failure"
+    not_verified = controller.apply_completion_ack(CompletionAcknowledgement("transfer", digest, True, True, "receiving"))
+    assert not_verified.phase == "retryable_failure"

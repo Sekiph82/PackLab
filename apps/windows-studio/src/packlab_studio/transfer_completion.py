@@ -49,7 +49,7 @@ class SenderTransferController:
         if acknowledgement.transfer_id != self._state.transfer_id or acknowledgement.package_sha256 != self._state.package_sha256:
             self._state = replace(self._state, phase="retryable_failure", error="acknowledgement_identity_mismatch")
             return self._state
-        if not acknowledgement.authenticated or not acknowledgement.verified:
+        if not acknowledgement.authenticated or not acknowledgement.verified or acknowledgement.state not in {"verified", "complete"}:
             self._state = replace(self._state, phase="retryable_failure", error="receiver_verification_required")
             return self._state
         self._state = replace(self._state, confirmed_bytes=self._state.total_bytes, phase="completed", error=None)
