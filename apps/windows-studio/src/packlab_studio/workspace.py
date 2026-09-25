@@ -72,4 +72,3 @@ class WorkspaceManager:
         self.window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._docks[DockId.PROPERTIES])
         self.window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._docks[DockId.JOBS])
         self.window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._docks[DockId.LOGS])
-
