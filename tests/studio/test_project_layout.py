@@ -33,4 +33,3 @@ def test_corrupt_or_incompatible_marker_is_rejected(tmp_path) -> None:
     layout.marker_path.write_text(json.dumps({"schema_version": "99"}), encoding="utf-8")
     with pytest.raises(ProjectLayoutError):
         ProjectLayout.open(root)
-

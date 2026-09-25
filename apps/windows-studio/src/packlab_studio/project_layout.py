@@ -88,4 +88,3 @@ class ProjectLayout:
             os.replace(temporary_name, target)
         finally:
             Path(temporary_name).unlink(missing_ok=True)
-
