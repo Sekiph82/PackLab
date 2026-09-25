@@ -107,16 +107,20 @@ private final class TestProductionCameraLifecycle: @unchecked Sendable, Producti
     func restoreAfterPairing() async { restoreCount += 1; state = .active }
 }
 
+private enum FakeProductionTransferError: Error, Sendable, Equatable { case networkFailure }
 private final class FakeProductionTransferClient: @unchecked Sendable, ProductionTransferClient {
     var calls: [String] = []
     var lastRequestID: String?
     var statusValue: TransferStatusMessage
-    let acknowledgementState: String
-    init(status: TransferStatusMessage, acknowledgementState: String = "receiving") { statusValue = status; self.acknowledgementState = acknowledgementState }
+    var acknowledgementState: String
+    var acknowledgementPackageSHA256: String?
+    var transferError: FakeProductionTransferError?
+    init(status: TransferStatusMessage, acknowledgementState: String = "receiving", acknowledgementPackageSHA256: String? = nil, transferError: FakeProductionTransferError? = nil) { statusValue = status; self.acknowledgementState = acknowledgementState; self.acknowledgementPackageSHA256 = acknowledgementPackageSHA256; self.transferError = transferError }
     func transfer(_ request: TransferRequest, progress: @escaping @Sendable (TransferStatusMessage) -> Void) async throws -> TransferCompletionAcknowledgement {
         calls.append("transfer"); lastRequestID = request.transferID
+        if let transferError { throw transferError }
         let id = request.transferID ?? ""; let status = TransferStatusMessage(transferID: id, confirmedBytes: statusValue.confirmedBytes, totalBytes: statusValue.totalBytes, state: statusValue.state, packageSHA256: statusValue.packageSHA256, nextOffset: statusValue.nextOffset); progress(status)
-        return TransferCompletionAcknowledgement(transferID: id, packageSHA256: status.packageSHA256, verified: acknowledgementState == "complete", authenticated: acknowledgementState == "complete", state: acknowledgementState)
+        return TransferCompletionAcknowledgement(transferID: id, packageSHA256: acknowledgementPackageSHA256 ?? status.packageSHA256, verified: acknowledgementState == "complete", authenticated: acknowledgementState == "complete", state: acknowledgementState)
     }
     func cancel(transferID: String) async throws { calls.append("cancel:\(transferID)") }
     func status(transferID: String) async throws -> TransferStatusMessage { calls.append("status:\(transferID)"); return TransferStatusMessage(transferID: transferID, confirmedBytes: statusValue.confirmedBytes, totalBytes: statusValue.totalBytes, state: statusValue.state, packageSHA256: statusValue.packageSHA256, nextOffset: statusValue.nextOffset) }
@@ -307,13 +311,25 @@ final class PackLabCaptureTests: XCTestCase {
         let vm = TransferViewModel(client: client, store: store)
         await vm.startNetworkTransfer(request)
         let saved = try XCTUnwrap(store.load()); XCTAssertEqual(saved.transferID, client.lastRequestID); XCTAssertEqual(vm.state?.phase, .retryableFailure)
+        vm.applyReceiverStatus(TransferReceiverStatus(transferID: saved.transferID, confirmedBytes: 2, totalBytes: 10, verified: false, packageSHA256: status.packageSHA256)); XCTAssertEqual(vm.state?.confirmedBytes, 4)
         await vm.cancelNetworkTransfer(); XCTAssertEqual(vm.state?.phase, .cancelled); XCTAssertNotNil(store.load())
         await vm.retryNetworkTransfer(); XCTAssertEqual(client.lastRequestID, saved.transferID); XCTAssertTrue(client.calls.contains("status:\(saved.transferID)"))
         let restoredClient = FakeProductionTransferClient(status: status)
         let restored = TransferViewModel(client: restoredClient, store: store)
         await restored.restorePersistedTransfer(request)
         XCTAssertEqual(restoredClient.lastRequestID, saved.transferID)
+        XCTAssertEqual(restored.state?.receiverIdentity, receiver.receiverInstanceID)
+        XCTAssertEqual(restored.state?.confirmedBytes, status.confirmedBytes)
+        XCTAssertEqual(restored.state?.phase, .retryableFailure)
         XCTAssertFalse(restoredClient.calls.contains { $0.hasPrefix("transfer:") && !$0.contains(saved.transferID) })
+    }
+
+    @MainActor
+    func testPL0126FakeProductionClientCoversChecksumRetryTerminalFailureAndVerifiedClear() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); let package = root.appendingPathComponent("capture.packscan"); let bytes = Data(repeating: 7, count: 4); try bytes.write(to: package); let digest = SourceIntegrity.digest(bytes)
+        let receiver = ReceiverReconnectIdentity(receiverInstanceID: "receiver", host: "127.0.0.1", port: 8443, tlsCertificateFingerprint: String(repeating: "a", count: 64)); let record = SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: package.path, packageBytes: bytes.count, packageSHA256: digest); let request = TransferRequest(source: package, receiver: receiver, finalization: record); let status = TransferStatusMessage(transferID: "transfer", confirmedBytes: bytes.count, totalBytes: bytes.count, state: "verified", packageSHA256: digest, nextOffset: bytes.count)
+        let retrySuite = "PackLabPL0126Retry-\(UUID().uuidString)"; let retryDefaults = try XCTUnwrap(UserDefaults(suiteName: retrySuite)); defer { retryDefaults.removePersistentDomain(forName: retrySuite) }; let retryStore = SenderTransferIdentityStore(defaults: retryDefaults); let retryClient = FakeProductionTransferClient(status: status, acknowledgementState: "complete", acknowledgementPackageSHA256: String(repeating: "b", count: 64)); let retryVM = TransferViewModel(client: retryClient, store: retryStore); await retryVM.startNetworkTransfer(request); XCTAssertEqual(retryVM.state?.phase, .retryableFailure); XCTAssertNotNil(retryStore.load()); retryClient.acknowledgementPackageSHA256 = digest; await retryVM.retryNetworkTransfer(); XCTAssertEqual(retryVM.state?.phase, .completed); XCTAssertNil(retryStore.load())
+        let terminalSuite = "PackLabPL0126Terminal-\(UUID().uuidString)"; let terminalDefaults = try XCTUnwrap(UserDefaults(suiteName: terminalSuite)); defer { terminalDefaults.removePersistentDomain(forName: terminalSuite) }; let terminalStore = SenderTransferIdentityStore(defaults: terminalDefaults); let terminalClient = FakeProductionTransferClient(status: status, transferError: .networkFailure); let terminalVM = TransferViewModel(client: terminalClient, store: terminalStore); await terminalVM.startNetworkTransfer(request); XCTAssertEqual(terminalVM.state?.phase, .terminalFailure); XCTAssertNotNil(terminalStore.load())
     }
 
     @MainActor

@@ -137,7 +137,13 @@ public final class TransferViewModel: ObservableObject {
     /// Rebuild sender state after an app/runtime restart from the persisted
     /// identity, then use receiver status as the only progress authority.
     public func restorePersistedTransfer(_ request: TransferRequest) async {
-        guard let saved = identityStore.load(), saved.receiverInstanceID == request.receiver.receiverInstanceID, let data = try? Data(contentsOf: request.source), SourceIntegrity.digest(data) == saved.packageSHA256, let client = networkClient else { markFailure("sender_identity_conflict"); return }
+        guard let saved = identityStore.load(), saved.receiverInstanceID == request.receiver.receiverInstanceID, let data = try? Data(contentsOf: request.source), SourceIntegrity.digest(data) == saved.packageSHA256, let finalization = request.finalization, let share = try? PackScanShareCoordinator().eligiblePackage(at: request.source, finalization: finalization), let client = networkClient else { markFailure("sender_identity_conflict"); return }
+        finalizedSource = share.packageURL
+        transferID = saved.transferID
+        expectedSHA256 = saved.packageSHA256
+        networkRequest = TransferRequest(source: request.source, receiver: request.receiver, pairingOffer: request.pairingOffer, pairingCode: request.pairingCode, transferID: saved.transferID, finalization: finalization)
+        prepare(package: share)
+        pair(receiverIdentity: request.receiver.receiverInstanceID, transferID: saved.transferID, packageSHA256: saved.packageSHA256)
         do {
             let status = try await client.status(transferID: saved.transferID)
             guard status.transferID == saved.transferID else { markFailure("resume_identity_mismatch"); return }
