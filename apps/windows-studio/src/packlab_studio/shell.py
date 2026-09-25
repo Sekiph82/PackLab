@@ -6,6 +6,7 @@ from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import QMainWindow, QSplitter
 
+from .jobs import JobManager
 from .navigation import NavigationController, NavigationPanel, Route, RouteStack
 from .preferences import PreferencesStore, WindowPreferences
 from .workspace import WorkspaceManager
@@ -24,6 +25,7 @@ class StudioMainWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.preferences = preferences
         self.navigation = NavigationController()
+        self.job_manager = JobManager()
         self.navigation_panel = NavigationPanel()
         self.route_stack = RouteStack(ingest_controller=ingest_controller, receiver=receiver)
         self.navigation_panel.route_requested.connect(self.navigation.navigate)
@@ -35,7 +37,7 @@ class StudioMainWindow(QMainWindow):
         splitter.addWidget(self.route_stack)
         splitter.setStretchFactor(1, 1)
         self.setCentralWidget(splitter)
-        self.workspace = WorkspaceManager(self)
+        self.workspace = WorkspaceManager(self, job_manager=self.job_manager)
         self._restore_preferences()
 
     def _restore_preferences(self) -> None:

@@ -7,6 +7,8 @@ from enum import StrEnum
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDockWidget, QLabel, QMainWindow
 
+from .jobs import JobManager, JobPanel
+
 
 class DockId(StrEnum):
     SCENE = "packlab.dock.scene"
@@ -26,8 +28,9 @@ class WorkspaceName(StrEnum):
 class WorkspaceManager:
     """Owns dock instances and their stable saveState/restoreState identity."""
 
-    def __init__(self, window: QMainWindow) -> None:
+    def __init__(self, window: QMainWindow, *, job_manager: JobManager | None = None) -> None:
         self.window = window
+        self.job_manager = job_manager
         self._docks: dict[DockId, QDockWidget] = {}
         self._create_docks()
         self.reset_to_default(WorkspaceName.LIBRARY)
@@ -51,7 +54,7 @@ class WorkspaceManager:
                 | Qt.DockWidgetArea.RightDockWidgetArea
                 | Qt.DockWidgetArea.BottomDockWidgetArea
             )
-            dock.setWidget(QLabel(title))
+            dock.setWidget(JobPanel(self.job_manager) if dock_id is DockId.JOBS and self.job_manager is not None else QLabel(title))
             self.window.addDockWidget(area, dock)
             self._docks[dock_id] = dock
 
