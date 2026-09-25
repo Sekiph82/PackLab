@@ -7,7 +7,9 @@ name = "packlab"
 version = "0.1.0"
 description = "PackLab packaging digital-twin foundation"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "PySide6>=6.8,<7",
+]
 
 [dependency-groups]
 dev = [
