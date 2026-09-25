@@ -28,4 +28,3 @@ def test_missing_sources_and_explicit_destination_are_safe(tmp_path) -> None:
     bundle = service.create_bundle(destination, logs="", build_info=None)
     assert bundle.path == destination
     assert json.loads(destination.read_text(encoding="utf-8"))["structured_errors"] == []
-
