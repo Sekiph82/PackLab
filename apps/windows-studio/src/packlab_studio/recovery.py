@@ -129,4 +129,3 @@ class RecoveryManager:
             os.replace(temporary_name, self.marker)
         finally:
             Path(temporary_name).unlink(missing_ok=True)
-
