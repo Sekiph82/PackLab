@@ -1,0 +1,47 @@
+{
+  "create": {
+    "capture_id": "capture-1",
+    "message": "create_transfer",
+    "package_name": "capture.packscan",
+    "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "protocol": "packlab-transfer",
+    "protocol_version": "1",
+    "receiver_id": "receiver-1",
+    "total_bytes": 8,
+    "transfer_id": "transfer-1",
+    "transport": "https"
+  },
+  "chunk": {
+    "chunk_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "length": 8,
+    "message": "put_chunk",
+    "offset": 0,
+    "protocol": "packlab-transfer",
+    "protocol_version": "1",
+    "transfer_id": "transfer-1"
+  },
+  "status": {
+    "confirmed_bytes": 8,
+    "message": "transfer_status",
+    "next_offset": 8,
+    "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "protocol": "packlab-transfer",
+    "protocol_version": "1",
+    "state": "receiving",
+    "total_bytes": 8,
+    "transfer_id": "transfer-1"
+  },
+  "cancel": {"message": "cancel", "protocol": "packlab-transfer", "protocol_version": "1", "transfer_id": "transfer-1"},
+  "resume": {"message": "resume", "protocol": "packlab-transfer", "protocol_version": "1", "transfer_id": "transfer-1"},
+  "completion": {
+    "authenticated": true,
+    "message": "completion_acknowledgement",
+    "package_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "protocol": "packlab-transfer",
+    "protocol_version": "1",
+    "state": "complete",
+    "transfer_id": "transfer-1",
+    "verified": true
+  },
+  "error": {"error": "authorization is required", "error_code": "unpaired", "message": "error", "protocol": "packlab-transfer", "protocol_version": "1"}
+}
