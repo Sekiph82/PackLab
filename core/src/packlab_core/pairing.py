@@ -106,7 +106,7 @@ class PairingStore:
             raise TransferProtocolError(TransferErrorCode.REPLAYED_PAIRING, "pairing offer was already used")
         if self._clock() >= current.expires_at:
             raise TransferProtocolError(TransferErrorCode.EXPIRED_PAIRING, "pairing offer has expired")
-        if receiver_instance_id != current.receiver_instance_id:
+        if receiver_instance_id != current.receiver_instance_id or offer.receiver_instance_id != current.receiver_instance_id:
             raise TransferProtocolError(TransferErrorCode.WRONG_RECEIVER, "receiver identity does not match offer")
         if pairing_code.replace("-", "").upper() != current.pairing_code:
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing code is invalid")

@@ -28,6 +28,26 @@ public struct PairingOffer: Codable, Sendable, Equatable {
 
 public enum PairingProtocolError: Error, Sendable, Equatable { case malformed, unsupportedVersion, expired, wrongReceiver, wrongPin, replayed }
 
+public protocol ProductionCameraLifecycle: Sendable {
+    func stopAndReleaseForPairing() async -> Bool
+    func restoreAfterPairing() async
+}
+
+/// MainActor-owned bridge to the real capture session.  QR ownership is not
+/// granted until the production camera has actually stopped and released its
+/// AVCapture/NextLevel session.
+@MainActor
+public final class ProductionCaptureCameraLifecycle: @unchecked Sendable, ProductionCameraLifecycle {
+    public static let shared = ProductionCaptureCameraLifecycle()
+    private var stopHandler: (() -> Bool)?
+    private var restoreHandler: (() -> Void)?
+    private init() {}
+    public func install(stop: @escaping () -> Bool, restore: @escaping () -> Void) { stopHandler = stop; restoreHandler = restore }
+    public func clear() { stopHandler = nil; restoreHandler = nil }
+    public nonisolated func stopAndReleaseForPairing() async -> Bool { await MainActor.run { stopHandler?() ?? false } }
+    public nonisolated func restoreAfterPairing() async { await MainActor.run { restoreHandler?() } }
+}
+
 public struct PairingCodeEntry: Sendable, Equatable {
     public let receiverInstanceID: String
     public let pairingCode: String
@@ -65,7 +85,7 @@ public final class PairingCoordinator: ObservableObject {
     private let identityStore: ReceiverReconnectIdentityStore
     private let now: @Sendable () -> Date
     public private(set) var pairedOffer: PairingOffer?
-    public init(cameraOwnership: PairingCameraOwnership = PairingCameraOwnership(), identityStore: ReceiverReconnectIdentityStore = ReceiverReconnectIdentityStore(), now: @escaping @Sendable () -> Date = Date.init) { self.cameraOwnership = cameraOwnership; self.identityStore = identityStore; self.now = now }
+    public init(cameraOwnership: PairingCameraOwnership = PairingCameraOwnership(lifecycle: ProductionCaptureCameraLifecycle.shared), identityStore: ReceiverReconnectIdentityStore = ReceiverReconnectIdentityStore(), now: @escaping @Sendable () -> Date = Date.init) { self.cameraOwnership = cameraOwnership; self.identityStore = identityStore; self.now = now }
     public func beginManualEntry() { state = .awaitingCode }
     public func beginQRScan() async -> Bool { let acquired = await cameraOwnership.beginPairingScan(); if acquired { state = .scanning }; return acquired }
     public func finishQRScan() async { await cameraOwnership.endPairingScan(); if case .scanning = state { state = .idle } }
@@ -80,6 +100,10 @@ public final class PairingCoordinator: ObservableObject {
         let offer = try PairingOffer(data: data)
         return try accept(offer: offer, receiverInstanceID: receiverInstanceID, manualCode: offer.pairingCode)
     }
+    public func acceptManual(host: String, port: Int, receiverInstanceID: String, pairingID: String, fingerprint: String, code: String, expiresAt: Date) throws -> ReceiverReconnectIdentity {
+        let offer = PairingOffer(protocolName: PackLabTransferProtocol.name, protocolVersion: PackLabTransferProtocol.version, receiverInstanceID: receiverInstanceID, host: host.trimmingCharacters(in: .whitespacesAndNewlines), port: port, pairingID: pairingID.trimmingCharacters(in: .whitespacesAndNewlines), pairingCode: code, expiresAt: expiresAt.timeIntervalSince1970, tlsCertificateFingerprint: fingerprint.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        return try accept(offer: offer, receiverInstanceID: receiverInstanceID, manualCode: code)
+    }
     public func restoredIdentity() -> ReceiverReconnectIdentity? { identityStore.load() }
     public func fail(_ message: String) { state = .failed(message) }
 }
@@ -89,19 +113,33 @@ import SwiftUI
 public struct PairingView: View {
     @StateObject private var coordinator: PairingCoordinator
     @State private var code = ""
+    @State private var host = ""
+    @State private var port = "8443"
+    @State private var receiverID = ""
+    @State private var pairingID = ""
+    @State private var fingerprint = ""
+    @State private var expiresAt = Date().addingTimeInterval(120)
     @State private var showScanner = false
     public let offer: PairingOffer?
     public init(offer: PairingOffer? = nil, coordinator: PairingCoordinator = PairingCoordinator()) { self.offer = offer; _coordinator = StateObject(wrappedValue: coordinator) }
     public var body: some View {
         Form {
             Section("Pair PackLab receiver") {
+                TextField("Receiver host", text: $host).textInputAutocapitalization(.never)
+                TextField("Receiver port", text: $port).keyboardType(.numberPad)
+                TextField("Receiver instance ID", text: $receiverID).textInputAutocapitalization(.never)
+                TextField("Pairing ID", text: $pairingID).textInputAutocapitalization(.never)
+                TextField("TLS fingerprint", text: $fingerprint).textInputAutocapitalization(.never)
                 TextField("Pairing code", text: $code).textInputAutocapitalization(.characters)
                 Button("Pair manually") {
-                    guard let offer else { return }
-                    do { _ = try coordinator.accept(offer: offer, receiverInstanceID: offer.receiverInstanceID, manualCode: code) }
-                    catch { coordinator.fail("Pairing failed") }
+                    do {
+                        if let offer { _ = try coordinator.accept(offer: offer, receiverInstanceID: offer.receiverInstanceID, manualCode: code) }
+                        else { _ = try coordinator.acceptManual(host: host, port: Int(port) ?? 0, receiverInstanceID: receiverID, pairingID: pairingID, fingerprint: fingerprint, code: code, expiresAt: expiresAt) }
+                    } catch { coordinator.fail("Pairing failed") }
                 }
-                Button("Scan QR offer") { showScanner = true; Task { _ = await coordinator.beginQRScan() } }
+                Button("Scan QR offer") {
+                    Task { if await coordinator.beginQRScan() { showScanner = true } else { coordinator.fail("Production camera is still in use") } }
+                }
                 if case .paired(let identity) = coordinator.state { Text("Paired with \(identity.receiverInstanceID)") }
                 if case .failed(let message) = coordinator.state { Text(message).foregroundStyle(.red) }
             }
@@ -153,10 +191,11 @@ public final class PairingQRScannerController: UIViewController, AVCaptureMetada
 public actor PairingCameraOwnership {
     public enum Owner: Sendable, Equatable { case idle, capture, pairingScanner }
     private var owner: Owner = .idle
-    public init() {}
+    private let lifecycle: any ProductionCameraLifecycle
+    @MainActor public init(lifecycle: any ProductionCameraLifecycle = ProductionCaptureCameraLifecycle.shared) { self.lifecycle = lifecycle }
     public func beginCapture() -> Bool { guard owner == .idle else { return false }; owner = .capture; return true }
     public func endCapture() { if owner == .capture { owner = .idle } }
-    public func beginPairingScan() -> Bool { guard owner == .idle else { return false }; owner = .pairingScanner; return true }
-    public func endPairingScan() { if owner == .pairingScanner { owner = .idle } }
+    public func beginPairingScan() async -> Bool { guard owner == .idle, await lifecycle.stopAndReleaseForPairing() else { return false }; owner = .pairingScanner; return true }
+    public func endPairingScan() async { if owner == .pairingScanner { owner = .idle; await lifecycle.restoreAfterPairing() } }
     public func currentOwner() -> Owner { owner }
 }

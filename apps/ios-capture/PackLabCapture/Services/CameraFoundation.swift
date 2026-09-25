@@ -1426,6 +1426,14 @@ public final class NextLevelPreviewViewController: UIViewController {
 
     public override func viewDidLoad() {
         super.viewDidLoad()
+        ProductionCaptureCameraLifecycle.shared.install(stop: { [weak self] in
+            guard let self else { return false }
+            self.nextLevel.stop()
+            self.recoveryOwner.handle(.stopped)
+            return true
+        }, restore: { [weak self] in
+            self?.startAuthorizedPreview()
+        })
         view.backgroundColor = .black
         statusLabel.textColor = .white
         statusLabel.textAlignment = .center
@@ -1484,6 +1492,7 @@ public final class NextLevelPreviewViewController: UIViewController {
         bridge.disappear()
         recoveryOwner.handle(.stopped)
         recoveryOwner.unregister()
+        ProductionCaptureCameraLifecycle.shared.clear()
     }
 
     deinit {
