@@ -150,16 +150,24 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(try object(TransferErrorEnvelope.self, "error") as NSDictionary, fixture["error"] as? NSDictionary)
     }
 
-    func testPL0121SwiftWireDecodingFailsClosedForUnsupportedVersionsAndProtocols() throws {
-        let values: [[String: Any]] = [
-            ["message": "transfer_status", "protocol": "packlab-transfer", "protocol_version": "2", "transfer_id": "t", "confirmed_bytes": 0, "total_bytes": 1, "state": "receiving", "package_sha256": String(repeating: "a", count: 64), "next_offset": 0],
-            ["message": "completion_acknowledgement", "protocol": "other", "protocol_version": "1", "transfer_id": "t", "package_sha256": String(repeating: "a", count: 64), "verified": true, "authenticated": true, "state": "complete"],
-            ["message": "error", "protocol": "packlab-transfer", "protocol_version": "2", "error_code": "bad_request", "error": "invalid"]
-        ]
-        for value in values {
+    func testPL0121SwiftWireDecodingFailsClosedWithTheCorrectProductionType() throws {
+        func assertError<T: Decodable>(_ type: T.Type, value: [String: Any], expected: TransferWireError) throws {
             let data = try JSONSerialization.data(withJSONObject: value)
-            XCTAssertThrowsError(try JSONDecoder().decode(TransferStatusMessage.self, from: data))
+            XCTAssertThrowsError(try JSONDecoder().decode(type, from: data)) { error in XCTAssertEqual(error as? TransferWireError, expected) }
         }
+        let digest = String(repeating: "a", count: 64)
+        let status: [String: Any] = ["message": "transfer_status", "protocol": "packlab-transfer", "protocol_version": "1", "transfer_id": "t", "confirmed_bytes": 0, "total_bytes": 1, "state": "receiving", "package_sha256": digest, "next_offset": 0]
+        let control: [String: Any] = ["message": "cancel", "protocol": "packlab-transfer", "protocol_version": "1", "transfer_id": "t"]
+        let completion: [String: Any] = ["message": "completion_acknowledgement", "protocol": "packlab-transfer", "protocol_version": "1", "transfer_id": "t", "package_sha256": digest, "verified": true, "authenticated": true, "state": "complete"]
+        let envelope: [String: Any] = ["message": "error", "protocol": "packlab-transfer", "protocol_version": "1", "error_code": "bad_request", "error": "invalid"]
+        var unsupportedStatus = status; unsupportedStatus["protocol_version"] = "2"; try assertError(TransferStatusMessage.self, value: unsupportedStatus, expected: .unsupportedVersion)
+        var wrongStatus = status; wrongStatus["protocol"] = "other"; try assertError(TransferStatusMessage.self, value: wrongStatus, expected: .malformed)
+        var unsupportedControl = control; unsupportedControl["protocol_version"] = "2"; try assertError(TransferControlMessage.self, value: unsupportedControl, expected: .unsupportedVersion)
+        var wrongControl = control; wrongControl["protocol"] = "other"; try assertError(TransferControlMessage.self, value: wrongControl, expected: .malformed)
+        var unsupportedCompletion = completion; unsupportedCompletion["protocol_version"] = "2"; try assertError(TransferCompletionAcknowledgement.self, value: unsupportedCompletion, expected: .unsupportedVersion)
+        var wrongCompletion = completion; wrongCompletion["protocol"] = "other"; try assertError(TransferCompletionAcknowledgement.self, value: wrongCompletion, expected: .malformed)
+        var unsupportedEnvelope = envelope; unsupportedEnvelope["protocol_version"] = "2"; try assertError(TransferErrorEnvelope.self, value: unsupportedEnvelope, expected: .unsupportedVersion)
+        var wrongEnvelope = envelope; wrongEnvelope["protocol"] = "other"; try assertError(TransferErrorEnvelope.self, value: wrongEnvelope, expected: .malformed)
     }
 
     @MainActor
