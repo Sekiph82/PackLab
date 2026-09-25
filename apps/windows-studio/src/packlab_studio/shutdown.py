@@ -82,4 +82,3 @@ class ShutdownCoordinator(QObject):
         self.finished.emit(result)
         if callback:
             callback(result)
-
