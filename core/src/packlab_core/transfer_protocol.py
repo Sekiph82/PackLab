@@ -42,6 +42,24 @@ class TransferErrorCode(StrEnum):
     INTERNAL_ERROR = "internal_error"
 
 
+@dataclass(frozen=True, slots=True)
+class TransferErrorEnvelope:
+    """Stable error wire response; diagnostics never contain credentials or paths."""
+
+    code: str
+    message: str
+    protocol_version: str = PROTOCOL_VERSION
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "message": "error",
+            "protocol": PROTOCOL_NAME,
+            "protocol_version": self.protocol_version,
+            "error_code": self.code,
+            "error": self.message,
+        }
+
+
 def _require_string(value: Any, field: str, *, nonempty: bool = True) -> str:
     if not isinstance(value, str) or (nonempty and not value):
         raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, f"{field} must be a string")
@@ -98,7 +116,7 @@ class TransferCreate:
         }
 
     @classmethod
-    def from_dict(cls, value: dict[str, object]) -> "TransferCreate":
+    def from_dict(cls, value: dict[str, object]) -> TransferCreate:
         if value.get("message") != "create_transfer" or value.get("protocol") != PROTOCOL_NAME:
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a create_transfer message")
         try:
@@ -139,6 +157,44 @@ class TransferStatus:
             "state": self.state,
             "package_sha256": self.package_sha256,
             "next_offset": self.next_offset,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> TransferStatus:
+        if value.get("message") != "transfer_status" or value.get("protocol") != PROTOCOL_NAME:
+            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a transfer_status message")
+        if value.get("protocol_version") != PROTOCOL_VERSION:
+            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
+        try:
+            return cls(
+                transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
+                confirmed_bytes=int(value["confirmed_bytes"]),
+                total_bytes=int(value["total_bytes"]),
+                state=_require_string(value.get("state"), "state"),
+                package_sha256=_require_sha256(value.get("package_sha256"), "package_sha256"),
+                next_offset=int(value["next_offset"]),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "transfer_status fields are invalid") from error
+
+
+@dataclass(frozen=True, slots=True)
+class TransferControlMessage:
+    transfer_id: str
+    action: str
+    protocol_version: str = PROTOCOL_VERSION
+
+    def __post_init__(self) -> None:
+        _require_string(self.transfer_id, "transfer_id")
+        if self.action not in {"cancel", "resume"}:
+            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "unsupported transfer control action")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "message": self.action,
+            "protocol": PROTOCOL_NAME,
+            "protocol_version": self.protocol_version,
+            "transfer_id": self.transfer_id,
         }
 
 
@@ -192,3 +248,17 @@ class CompletionAcknowledgement:
             "authenticated": self.authenticated,
             "state": self.state,
         }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, object]) -> CompletionAcknowledgement:
+        if value.get("message") != "completion_acknowledgement" or value.get("protocol") != PROTOCOL_NAME:
+            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a completion acknowledgement")
+        if value.get("protocol_version") != PROTOCOL_VERSION:
+            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
+        if not isinstance(value.get("verified"), bool) or not isinstance(value.get("authenticated"), bool):
+            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "completion acknowledgement flags are invalid")
+        return cls(
+            transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
+            package_sha256=_require_sha256(value.get("package_sha256"), "package_sha256"),
+            verified=value["verified"], authenticated=value["authenticated"], state=_require_string(value.get("state"), "state"),
+        )
