@@ -2275,6 +2275,53 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(optionalDiagnostics.optionalUnavailableAreas.contains("base"))
     }
 
+    @MainActor
+    func testPL0109MixedRequiredDetailPassesAndFreshRuntimeRestoreAreDeterministic() async throws {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 1, rings: [CoverageRingDefinition(id: "main", minimumElevation: -90, maximumElevation: 90)])
+        let policy = StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "main", minimumSectorCount: 1)])
+        let preset = PackagingPreset(id: .matteHDPE, version: "mixed-resume", displayName: "Mixed Resume", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration, ringRequirements: policy), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "mixed-resume")
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset))
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset, layout: layout)
+        let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
+        let motion = MotionBlurAssessment(risk: .none, availability: .available, rotationRateMagnitude: 0, reasons: [])
+        let clip = ClippingMetric(availability: .available, clippedFraction: 0, objectClippedFraction: 0, clippedPixelCount: 0, analyzedPixelCount: 10, band: .pass, reasons: [])
+        let framing = FramingMetric(availability: .available, objectFraction: 0.2, bounds: nil, margins: [:], band: .acceptable, reasons: [])
+        let background = BackgroundComplexityMetric(availability: .available, score: 0, luminanceVariance: 0, edgeDensity: 0, sampledPixelCount: 10, band: .clean, reasons: [])
+        let quality = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: framing, background: background))
+        let useful = DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate")
+        _ = vm.evaluateDetailPass(passID: .shoulder, quality: quality, framing: framing, poseBinding: nil, duplicateDecision: useful)
+        _ = vm.evaluateDetailPass(passID: .closure, quality: quality, framing: framing, poseBinding: nil, duplicateDecision: useful)
+        func record(_ captureID: String, azimuth: Double) -> AcceptedCaptureRecord {
+            let radians = azimuth * Double.pi / 180
+            let pose = PoseSample(timestamp: Double(captureID.count), transform: CoordinateTransform.translation(x: sin(radians), y: tan(20 * Double.pi / 180), z: -cos(radians)).values, tracking: .normal)
+            return AcceptedCaptureRecord(captureID: captureID, sequence: captureID.count, sourceFilename: "\(captureID).heic", metadataFilename: "\(captureID).json", poseBinding: acceptedPoseBinding(captureID: captureID, pose: pose), passMetadata: CapturePassMetadata(passID: .neck, required: true, evidenceStatus: "accepted"))
+        }
+        _ = vm.recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: "main", sequence: 0, sourceFilename: "main.heic", metadataFilename: "main.json", poseBinding: acceptedPoseBinding(captureID: "main", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))))
+        _ = vm.recordAcceptedCaptureCoverage(record("neck-one", azimuth: 0))
+        _ = vm.recordAcceptedCaptureCoverage(record("neck-two", azimuth: 90))
+        XCTAssertTrue(vm.m04Completion.mandatoryMissingAreas.contains("shoulder"))
+        XCTAssertTrue(vm.m04Completion.mandatoryMissingAreas.contains("closure"))
+        XCTAssertFalse(vm.m04Completion.mandatoryMissingAreas.contains("neck"))
+        XCTAssertEqual(vm.m04Completion.score, 0.5, accuracy: 0.000001)
+
+        for _ in 0..<8 { await Task.yield() }
+        let persisted = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertEqual(persisted.completion, vm.m04Completion)
+        XCTAssertEqual(Set(persisted.completion?.mandatoryMissingAreas ?? []), Set(["shoulder", "closure"]))
+
+        let fresh = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        fresh.configureM04QualityRuntime(preset: preset, layout: layout)
+        if let basePass = persisted.basePass { fresh.restoreBasePass(basePass) }
+        if let completion = persisted.completion { fresh.restoreCompletion(completion) }
+        XCTAssertEqual(fresh.m04Completion, persisted.completion)
+        XCTAssertEqual(Set(fresh.m04Completion.mandatoryMissingAreas), Set(["shoulder", "closure"]))
+        XCTAssertEqual(fresh.m04Completion.score, 0.5, accuracy: 0.000001)
+    }
+
     func testPL0110ManualCaptureAllowsQualityWarningButNeverSafetyOrEvidenceBypass() {
         let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.001, sampleCount: 10, band: .reject, reasonCode: "sharpness_reject")
         let motion = MotionBlurAssessment(risk: .warning, availability: .available, rotationRateMagnitude: 0.5, reasons: ["image_blur_with_motion"])
