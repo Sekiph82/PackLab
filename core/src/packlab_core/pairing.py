@@ -63,7 +63,7 @@ class PairingOffer:
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing identity is incomplete")
         if not isinstance(value.get("port"), int) or not 1 <= value["port"] <= 65535:
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing port is invalid")
-        if not isinstance(value.get("expires_at"), (int, float)):
+        if not isinstance(value.get("expires_at"), int | float):
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing expiry is invalid")
         return cls(
             receiver_instance_id=value["receiver_instance_id"], host=value["host"], port=value["port"],
