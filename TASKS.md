@@ -5,12 +5,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M05
-- Current Sprint: M05-BATCH-004 — Final M05 integration/evidence closure
-- Current Task: M05-BATCH-004 — Remediate final 6 M05 children
+- Current Sprint: M05-BATCH-005 — Final locked-suite validation gate stabilization
+- Current Task: M05-BATCH-005 — Stabilize Windows liveness proof and clear full-suite gate
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V03.md. Remediate exactly PL-0119, PL-0121, PL-0122, PL-0125, PL-0126 and PL-0134 using their frozen V04 work orders. Preserve all 10 accepted M05 children and accepted M03/M04 behavior, close production finalization wiring, Swift decoder matrix, pairing already-idle camera state, production completion/UI failure matrix and persisted-sender executable harness, publish distinct implementation/log commits per child, then publish MASTER_REMEDIATION_CODEX_LOG_V03.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M06, and do not fabricate or close PL-0068.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve the functionally acceptable final six M05 task implementations (PL-0119, PL-0121, PL-0122, PL-0125, PL-0126, PL-0134), diagnose and deterministically stabilize the unchanged Windows liveness proof that fails only in aggregate, rerun the exact locked suite to zero failures, then publish MASTER_VALIDATION_GATE_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. Do not rewrite M05 product logic unless a real regression is discovered. User-facing repository links must be full GitHub URLs only. Do not edit TASKS.md, do not start M06, and do not fabricate or close PL-0068.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V02.md — CHANGES_REQUIRED (10/16 M05 children accepted; 6 remain open)
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V03.md — CHANGES_REQUIRED (final six product remediations functionally acceptable; closure blocked only by one aggregate full-suite failure)
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
