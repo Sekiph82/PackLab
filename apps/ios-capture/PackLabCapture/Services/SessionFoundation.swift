@@ -413,9 +413,33 @@ public actor ActiveScanSessionRegistry {
 
 public enum FinalizationError: Error, Sendable, Equatable { case missingPhoto, invalidMetadataBinding, checksumFailure, invalidManifest, packagingFailed }
 public struct FinalizationInput: Sendable { public let manifest: Data; public let payloads: [String: Data]; public let destination: URL; public let sessionRoot: URL?; public init(manifest: Data, payloads: [String: Data], destination: URL, sessionRoot: URL? = nil) { self.manifest = manifest; self.payloads = payloads; self.destination = destination; self.sessionRoot = sessionRoot } }
+
+/// Production finalization source: accepted records and immutable bytes are
+/// resolved from the canonical session layout before the package is built.
+public struct CanonicalFinalizationSource: Sendable {
+    public let sessionRoot: URL
+    public let records: [AcceptedCaptureRecord]
+    public let immutableSourceBytes: [String: Data]
+    public init(layout: SessionStorageLayout, records: [AcceptedCaptureRecord], immutableSourceBytes: [String: Data]) throws {
+        guard !records.isEmpty else { throw FinalizationError.invalidManifest }
+        guard records.allSatisfy({ immutableSourceBytes[$0.sourceFilename] != nil && immutableSourceBytes[$0.metadataFilename] != nil }) else { throw FinalizationError.invalidMetadataBinding }
+        self.sessionRoot = layout.sessionRoot; self.records = records.sorted { $0.sequence < $1.sequence }; self.immutableSourceBytes = immutableSourceBytes
+    }
+    public func input(manifest: Data, payloads: [String: Data], destination: URL) throws -> FinalizationInput {
+        guard !records.isEmpty else { throw FinalizationError.invalidManifest }
+        guard records.allSatisfy { record in
+            guard let source = immutableSourceBytes[record.sourceFilename], let metadata = immutableSourceBytes[record.metadataFilename] else { return false }
+            return payloads.values.contains(source) && payloads.values.contains(metadata)
+        } else { throw FinalizationError.invalidMetadataBinding }
+        return FinalizationInput(manifest: manifest, payloads: payloads, destination: destination, sessionRoot: sessionRoot)
+    }
+}
 public struct SessionFinalizer: Sendable {
     private let failureInjector: (@Sendable (String) -> Bool)?
     public init(failureInjector: (@Sendable (String) -> Bool)? = nil) { self.failureInjector = failureInjector }
+    public func finalize(source: CanonicalFinalizationSource, manifest: Data, payloads: [String: Data], destination: URL) throws {
+        try finalize(source.input(manifest: manifest, payloads: payloads, destination: destination))
+    }
     public func validate(_ input: FinalizationInput) throws {
         guard let object = try? JSONSerialization.jsonObject(with: input.manifest) as? [String: Any], object["schema_version"] as? String == PackScanWriter.schemaVersion, let captureID = object["capture_id"] as? String, !captureID.isEmpty, let declared = object["payloads"] as? [[String: Any]], declared.count >= 2, let checksums = object["checksums"] as? [String: Any], checksums["algorithm"] as? String == "sha256", checksums["canonicalization"] as? String == PackScanWriter.checksumCanonicalization else { throw FinalizationError.invalidManifest }
         let paths = declared.compactMap { $0["path"] as? String }
@@ -509,6 +533,7 @@ public actor LocalScanHistoryStore {
     private let root: URL
     private let fileManager: FileManager
     public init(root: URL, fileManager: FileManager = .default) { self.root = root; self.fileManager = fileManager }
+    public nonisolated var rootURL: URL { root }
     public func load() -> [ScanHistoryEntry] {
         guard let directories = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
         let index = ScanHistoryIndex()
@@ -727,6 +752,9 @@ public struct SessionResumeView: View {
 
 public struct LocalScanHistoryView: View {
     @State private var entries: [ScanHistoryEntry] = []
+    @State private var showShare = false
+    @State private var transferSelection: FinalizedTransferSelection?
+    @StateObject private var shareCoordinator = PackScanSharePresentationCoordinator()
     private let store: LocalScanHistoryStore
     public init(root: URL) { store = LocalScanHistoryStore(root: root) }
     public var body: some View {
@@ -735,9 +763,32 @@ public struct LocalScanHistoryView: View {
                 if let path = entry.previewPath, let image = UIImage(contentsOfFile: path) { Image(uiImage: image).resizable().scaledToFit().frame(width: 64, height: 64) }
                 else { Image(systemName: "exclamationmark.triangle").frame(width: 64, height: 64) }
                 VStack(alignment: .leading) { Text(entry.packageName); Text(entry.exportState).font(.caption); if let reason = entry.degradedReason { Text(reason).foregroundStyle(.orange).font(.caption2) } }
+                if entry.exportState == SessionFinalizationState.exported.rawValue {
+                    Button("Share") { presentShare(for: entry) }
+                    Button("Send to PackLab") { presentTransfer(for: entry) }
+                }
             }
-        }.task { entries = await store.load() }.navigationTitle("Scan History")
+        }.task { entries = await store.load() }
+            .sheet(isPresented: $showShare) { if let share = shareCoordinator.activeShare { PackScanShareSheet(share: share) { completed in shareCoordinator.activityFinished(completed: completed); showShare = false } } }
+            .sheet(item: $transferSelection) { selection in NavigationStack { FinalizedTransferWorkflowView(share: selection.share, finalization: selection.finalization) } }
+            .navigationTitle("Scan History")
     }
+    private func presentShare(for entry: ScanHistoryEntry) {
+        let layout = SessionStorageLayout(root: store.rootURL, sessionID: entry.id)
+        guard let data = try? Data(contentsOf: layout.finalization), let finalization = try? JSONDecoder().decode(SessionFinalizationRecord.self, from: data), let path = finalization.packagePath else { return }
+        shareCoordinator.prepare(url: URL(fileURLWithPath: path), finalization: finalization); showShare = true
+    }
+    private func presentTransfer(for entry: ScanHistoryEntry) {
+        let layout = SessionStorageLayout(root: store.rootURL, sessionID: entry.id)
+        guard let data = try? Data(contentsOf: layout.finalization), let finalization = try? JSONDecoder().decode(SessionFinalizationRecord.self, from: data), let path = finalization.packagePath, let share = try? PackScanShareCoordinator().eligiblePackage(at: URL(fileURLWithPath: path), finalization: finalization) else { return }
+        transferSelection = FinalizedTransferSelection(share: share, finalization: finalization)
+    }
+}
+
+public struct FinalizedTransferSelection: Identifiable {
+    public let share: FinalizedPackScanShare
+    public let finalization: SessionFinalizationRecord
+    public var id: String { share.packageURL.path }
 }
 
 public struct SessionDeletionView: View {
