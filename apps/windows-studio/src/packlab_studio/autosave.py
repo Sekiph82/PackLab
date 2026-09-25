@@ -77,4 +77,3 @@ class AutosaveService(QObject):
         self.status_changed.emit(status.value)
         if error:
             self.error_changed.emit(error[:256])
-
