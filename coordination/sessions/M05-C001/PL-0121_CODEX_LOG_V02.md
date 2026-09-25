@@ -10,6 +10,7 @@ Previous audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessi
 
 - Starting commit: `56127a5c755297d77bcdde5229434f893fdf0a8b`.
 - Implementation commit: `7d1779a1f0e5c0c5ba78dd25464d0489fa491672`.
+- Supplemental implementation commit: `e7606f650f61077db1df5f6305a21c606b8eb506` (Python wire models were published as a separately verified corrective commit before master handoff).
 - Files changed: Swift `TransferProtocol.swift`, Python `transfer_protocol.py` (completed in the same remediation source set), shared `transfer-protocol-v1-golden.json`, Python contract tests and Swift model tests.
 - Added matching status/query, cancel/resume control, completion acknowledgement and stable error-envelope models, HTTPS/version validation, and explicit authoritative next-offset/idempotency fields.
 - Python and Swift tests consume matching golden field names for create, chunk, status, cancel, resume, completion and error responses; future version/insecure transport rejection remains fail-closed.
