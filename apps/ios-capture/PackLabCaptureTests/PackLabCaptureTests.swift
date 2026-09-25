@@ -1967,6 +1967,47 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(vm.m04RingCoverage.isComplete)
     }
 
+    @MainActor
+    func testPL0106RingAndSectorBoundariesAreDeterministicInLiveGuidance() {
+        let configuration = OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [
+            CoverageRingDefinition(id: "lower", minimumElevation: -30, maximumElevation: -5),
+            CoverageRingDefinition(id: "middle", minimumElevation: -5, maximumElevation: 5),
+            CoverageRingDefinition(id: "upper", minimumElevation: 5, maximumElevation: 30)
+        ])
+        let policy = StandardBottleCoveragePolicy(requirements: [
+            RingCoverageRequirement(ringID: "lower", minimumSectorCount: 1),
+            RingCoverageRequirement(ringID: "middle", minimumSectorCount: 1),
+            RingCoverageRequirement(ringID: "upper", minimumSectorCount: 1)
+        ])
+        func binding(_ captureID: String, elevation: Double, azimuth: Double = 0) -> PoseCaptureBinding? {
+            let elevationRadians = elevation * Double.pi / 180
+            let azimuthRadians = azimuth * Double.pi / 180
+            let pose = PoseSample(timestamp: Double(captureID.count), transform: CoordinateTransform.translation(x: sin(azimuthRadians), y: tan(elevationRadians), z: -cos(azimuthRadians)).values, tracking: .normal)
+            return acceptedPoseBinding(captureID: captureID, pose: pose)
+        }
+        var model = OrbitCoverageModel(configuration: configuration)
+        XCTAssertEqual(model.observe(captureID: "lower", poseBinding: binding("lower", elevation: -30)).sector, CoverageSector(ringID: "lower", azimuthIndex: 0))
+        XCTAssertEqual(model.observe(captureID: "middle", poseBinding: binding("middle", elevation: -5)).sector, CoverageSector(ringID: "middle", azimuthIndex: 0))
+        XCTAssertEqual(model.observe(captureID: "upper", poseBinding: binding("upper", elevation: 5)).sector, CoverageSector(ringID: "upper", azimuthIndex: 0))
+        XCTAssertNil(model.observe(captureID: "outside", poseBinding: binding("outside", elevation: 30)).sector)
+        XCTAssertEqual(model.observe(captureID: "azimuth-before", poseBinding: binding("azimuth-before", elevation: 0, azimuth: 89.999)).sector?.azimuthIndex, 0)
+        XCTAssertEqual(model.observe(captureID: "azimuth-at", poseBinding: binding("azimuth-at", elevation: 0, azimuth: 90)).sector?.azimuthIndex, 1)
+        XCTAssertEqual(model.observe(captureID: "azimuth-next", poseBinding: binding("azimuth-next", elevation: 0, azimuth: 180)).sector?.azimuthIndex, 2)
+        XCTAssertEqual(model.observe(captureID: "azimuth-last", poseBinding: binding("azimuth-last", elevation: 0, azimuth: 359.999)).sector?.azimuthIndex, 3)
+
+        let preset = PackagingPreset(id: .matteHDPE, version: "boundary-test", displayName: "Boundary Test", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration, ringRequirements: policy), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        vm.configureM04QualityRuntime(preset: preset)
+        XCTAssertEqual(vm.m04RingCoverage.missingRingIDs, ["lower", "middle", "upper"])
+        _ = vm.recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: "live-lower", sequence: 0, sourceFilename: "l.heic", metadataFilename: "l.json", poseBinding: binding("live-lower", elevation: -30)))
+        XCTAssertEqual(vm.m04RingCoverage.missingRingIDs, ["middle", "upper"])
+        _ = vm.recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: "live-middle", sequence: 1, sourceFilename: "m.heic", metadataFilename: "m.json", poseBinding: binding("live-middle", elevation: -5)))
+        XCTAssertEqual(vm.m04RingCoverage.missingRingIDs, ["upper"])
+        _ = vm.recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: "live-upper", sequence: 2, sourceFilename: "u.heic", metadataFilename: "u.json", poseBinding: binding("live-upper", elevation: 5)))
+        XCTAssertTrue(vm.m04RingCoverage.isComplete)
+        XCTAssertTrue(vm.m04RingCoverage.guidance.isEmpty)
+    }
+
     func testPL0107DetailPassRequiresCoverageQualityAndExplicitMetadata() {
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "neck", minimumElevation: 15, maximumElevation: 45)])
         let policy = DetailPassPolicy(passID: .neck, minimumFramingFraction: 0.2, minimumSectorCount: 1)
