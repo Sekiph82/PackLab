@@ -24,6 +24,10 @@ class ProjectBusyError(ProjectError):
     pass
 
 
+class RevisionConflict(ProjectError):
+    pass
+
+
 def _now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -121,6 +125,31 @@ class ProjectManager:
         self.layout = None
         self.metadata = None
 
+    def commit_edit(self, state: dict[str, object], *, expected_revision: int | None = None) -> ProjectMetadata:
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        disk_metadata = self._read_metadata(self.layout)
+        if disk_metadata.project_id != self.metadata.project_id or disk_metadata.revision != self.metadata.revision:
+            raise RevisionConflict("project metadata changed on disk")
+        if expected_revision is not None and expected_revision != self.metadata.revision:
+            raise RevisionConflict("editable state revision is stale")
+        next_metadata = ProjectMetadata(
+            self.metadata.project_id,
+            self.metadata.name,
+            self.metadata.created_at,
+            _now(),
+            self.metadata.schema_version,
+            self.metadata.revision + 1,
+        )
+        self._atomic_json(self.layout.path("working", "state.json"), state)
+        self._write_metadata(self.layout, next_metadata)
+        self.metadata = next_metadata
+        return next_metadata
+
+    @classmethod
+    def _read_metadata(cls, layout: ProjectLayout) -> ProjectMetadata:
+        return ProjectMetadata.from_dict(json.loads(layout.path("working", "project.json").read_text(encoding="utf-8")))
+
     @staticmethod
     def _write_metadata(layout: ProjectLayout, metadata: ProjectMetadata) -> None:
         target = layout.path("working", "project.json")
@@ -128,6 +157,19 @@ class ProjectManager:
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                 json.dump(metadata.to_dict(), handle, sort_keys=True, separators=(",", ":"))
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_name, target)
+        finally:
+            Path(temporary_name).unlink(missing_ok=True)
+
+    @staticmethod
+    def _atomic_json(target: Path, value: object) -> None:
+        fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}-", suffix=".tmp", dir=target.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                json.dump(value, handle, sort_keys=True, separators=(",", ":"))
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
