@@ -98,8 +98,19 @@ public enum SharpnessAnalyzer {
         }
         let mean = responses.reduce(0, +) / Double(responses.count)
         let variance = responses.reduce(0) { $0 + ($1 - mean) * ($1 - mean) } / Double(responses.count)
-        let band: SharpnessBand = variance >= thresholds.acceptMinimum ? .accept : (variance >= thresholds.warnMinimum ? .warn : .reject)
-        return SharpnessMetric(availability: .available, normalizedLaplacianVariance: variance, sampleCount: responses.count, band: band, reasonCode: "sharpness_\(band.rawValue)")
+        return analyze(normalizedLaplacianVariance: variance, sampleCount: responses.count, thresholds: thresholds)
+    }
+
+    /// Classifies a measured metric through the same production threshold
+    /// seam used by frame analysis.  The injectable metric form keeps exact
+    /// threshold behavior testable without pretending that synthetic pixels
+    /// are an owner/device calibration capture.
+    public static func analyze(normalizedLaplacianVariance: Double, sampleCount: Int, thresholds: SharpnessThresholds = .provisional) -> SharpnessMetric {
+        guard normalizedLaplacianVariance.isFinite, sampleCount > 0 else {
+            return SharpnessMetric(availability: .invalid, normalizedLaplacianVariance: nil, sampleCount: max(0, sampleCount), band: .unavailable, reasonCode: "sharpness_metric_invalid")
+        }
+        let band: SharpnessBand = normalizedLaplacianVariance >= thresholds.acceptMinimum ? .accept : (normalizedLaplacianVariance >= thresholds.warnMinimum ? .warn : .reject)
+        return SharpnessMetric(availability: .available, normalizedLaplacianVariance: normalizedLaplacianVariance, sampleCount: sampleCount, band: band, reasonCode: "sharpness_\(band.rawValue)")
     }
 
     private static func normalizedGrid(_ frame: QualityImageFrame, side: Int) -> [Double] {

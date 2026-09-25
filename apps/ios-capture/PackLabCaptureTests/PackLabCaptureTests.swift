@@ -1360,6 +1360,23 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(SharpnessCalibrationHarness.suggestThresholds(from: [SharpnessCalibrationSample(label: .blurred, metric: 0.002), SharpnessCalibrationSample(label: .usable, metric: 0.008), SharpnessCalibrationSample(label: .sharp, metric: 0.02)]).calibrationStatus, "provisional_test_calibrated")
         XCTAssertEqual(thresholds.warnMinimum, 0.006)
         XCTAssertEqual(SharpnessThresholds(acceptMinimum: 0.01, warnMinimum: 0.2).warnMinimum, 0.01)
+
+        XCTAssertEqual(SharpnessAnalyzer.analyze(normalizedLaplacianVariance: thresholds.acceptMinimum, sampleCount: 10, thresholds: thresholds).band, .accept)
+        XCTAssertEqual(SharpnessAnalyzer.analyze(normalizedLaplacianVariance: thresholds.warnMinimum, sampleCount: 10, thresholds: thresholds).band, .warn)
+        XCTAssertEqual(SharpnessAnalyzer.analyze(normalizedLaplacianVariance: thresholds.warnMinimum.nextDown, sampleCount: 10, thresholds: thresholds).band, .reject)
+        XCTAssertEqual(SharpnessAnalyzer.analyze(normalizedLaplacianVariance: thresholds.acceptMinimum.nextDown, sampleCount: 10, thresholds: thresholds).band, .warn)
+    }
+
+    func testPL0094SharpnessFrameFixturesProduceWarnAndRejectBands() {
+        let warnPixels = (0..<48).flatMap { y in
+            (0..<48).map { x in 0.5 + 0.5 * sin(2 * Double.pi * Double(x) / 6.0) }
+        }
+        let warn = SharpnessAnalyzer.analyze(QualityImageFrame(width: 48, height: 48, luminance: warnPixels))
+        let reject = SharpnessAnalyzer.analyze(QualityImageFrame(width: 48, height: 48, luminance: [Double](repeating: 0.5, count: 48 * 48)))
+        XCTAssertEqual(warn.band, .warn)
+        XCTAssertEqual(warn.reasonCode, "sharpness_warn")
+        XCTAssertEqual(reject.band, .reject)
+        XCTAssertEqual(reject.reasonCode, "sharpness_reject")
     }
 
     func testPL0094CandidateRuntimeUsesSelectedPresetAndPropagatesAllQualityMetrics() {
