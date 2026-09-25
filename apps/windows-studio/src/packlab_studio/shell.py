@@ -6,6 +6,7 @@ from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import QMainWindow, QSplitter
 
+from .autosave import AutosaveService
 from .jobs import JobManager
 from .navigation import NavigationController, NavigationPanel, Route, RouteStack
 from .preferences import PreferencesStore, WindowPreferences
@@ -29,6 +30,7 @@ class StudioMainWindow(QMainWindow):
         self.navigation = NavigationController()
         self.job_manager = JobManager()
         self.project_manager = ProjectManager(job_manager=self.job_manager)
+        self.autosave = AutosaveService(self.project_manager)
         self.shutdown = ShutdownCoordinator(self.job_manager)
         self._shutdown_requested = False
         self.navigation_panel = NavigationPanel()
@@ -70,6 +72,7 @@ class StudioMainWindow(QMainWindow):
             self._shutdown_requested = True
             self.shutdown.begin(lambda result: self._finish_shutdown(result))
             return
+        self.autosave.shutdown_flush()
         if self.preferences is not None:
             state = self.saveState().toBase64().toStdString()
             self.preferences.save(
