@@ -1,9 +1,9 @@
 # M05-BATCH-004 — Master Remediation Codex Log V03
 
-Milestone: **M05 — Transfer & Ingest**  
-Repository: https://github.com/Sekiph82/PackLab  
-Canonical tracker: https://github.com/Sekiph82/PackLab/blob/main/TASKS.md  
-Master prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CODEX_PROMPT_V03.md  
+Milestone: **M05 — Transfer & Ingest**
+Repository: https://github.com/Sekiph82/PackLab
+Canonical tracker: https://github.com/Sekiph82/PackLab/blob/main/TASKS.md
+Master prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CODEX_PROMPT_V03.md
 Master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V03.md
 
 ## Authorization and synchronization
