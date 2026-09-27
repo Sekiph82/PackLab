@@ -133,6 +133,16 @@ duplicate candidates, including odd duplicate counts.
 
 **Origin:** `M07-C001 / PL-0167_CHATGPT_AUDIT_V01.md`.
 
+### AL-PL-0012 - Feature-extraction configuration must stay backend-neutral
+
+**Applies to:** M07 feature-extraction configuration and later reconstruction stages.
+
+**Finding:** A named preset can silently become an engine-specific execution path, an untraceable bag of CLI flags, or an unsupported claim of packaging-performance optimization.
+
+**Required behavior:** keep the preset immutable and PackLab-owned; validate bounds and unsupported options; serialize it canonically with a provenance digest; map engine parameters only at the adapter boundary; label the first consumer-packaging preset as an explicit initial configuration rather than physical benchmark evidence; and do not execute or install the external engine in the configuration task.
+
+**Origin:** `M07-C001 / PL-0167_CHATGPT_AUDIT_V02.md` and PL-0168 frontier authorization.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
