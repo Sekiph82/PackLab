@@ -104,6 +104,16 @@ Each reusable finding uses a permanent `AL-PL-xxxx` ID and records:
 
 **Origin:** `M00-C001 / PL-0010_CHATGPT_AUDIT_V01.md`.
 
+### AL-PL-0010 — Publication evidence must respect the final-log boundary
+
+**Applies to:** all Codex logs whose final content is committed and pushed in the same publication commit.
+
+**Finding:** A log cannot truthfully include the SHA or post-push command output of the commit that contains its final content without a follow-up edit commit. Pre-publication `Everything up-to-date` output must not be labeled as publication evidence.
+
+**Required behavior:** Codex logs record actual staged validation and clearly identify the publication boundary; ChatGPT independently verifies the final pushed head, remote equality, and clean status after publication.
+
+**Origin:** `M07-C001-R01 / CHATGPT_AUDIT_V03.md`.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
