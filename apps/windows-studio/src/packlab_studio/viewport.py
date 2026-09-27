@@ -589,6 +589,19 @@ class ViewportService:
         self.scene.set_visible(object_id, visible)
         self.state = self._state(visibility={**self.state.visibility, object_id: visible}, selected_object_id=self.scene.selected_object_id)
 
+    def set_render_mode(self, mode: ViewportRenderMode) -> None:
+        self.state = self._state(render_mode=ViewportRenderMode(mode))
+
+    def normals_status(self, object_id: str) -> str:
+        item = self.scene.get(object_id)
+        if not isinstance(item.geometry, MeshGeometry):
+            return "unavailable"
+        if item.geometry.normals:
+            return "source-provided"
+        if item.geometry.triangles:
+            return "temporary-derived"
+        return "unavailable"
+
     def scene_snapshot(self) -> dict[str, object]:
         """Stable object-tree/inspector seam; widgets do not own scene truth."""
 

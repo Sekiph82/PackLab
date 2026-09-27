@@ -13,6 +13,7 @@ from packlab_studio.viewport import (
     SceneObjectKind,
     ViewportErrorCode,
     ViewportLoadError,
+    ViewportRenderMode,
     ViewportService,
     axis_metadata,
     grid_spec,
@@ -137,3 +138,17 @@ def test_scene_visibility_and_selection_restore_is_deterministic() -> None:
     service.restore_state(state)
     assert service.state.selected_object_id == "cap"
     assert service.scene_snapshot()["selected_object_id"] == "cap"
+
+
+def test_debug_modes_are_state_only_and_missing_normals_are_truthful(tmp_path) -> None:
+    obj = tmp_path / "triangle.obj"
+    obj.write_text("v 0 0 0\nv 10 0 0\nv 0 10 0\nf 1 2 3\n", encoding="utf-8")
+    before = hashlib.sha256(obj.read_bytes()).hexdigest()
+    service = ViewportService()
+    service.load("mesh", SceneObjectKind.SCAN_MESH, obj)
+    assert service.normals_status("mesh") == "temporary-derived"
+    for mode in (ViewportRenderMode.WIREFRAME, ViewportRenderMode.NORMALS, ViewportRenderMode.POINT_CLOUD, ViewportRenderMode.SOLID):
+        service.set_render_mode(mode)
+        assert service.state.render_mode is mode
+        assert not service.render(QSize(240, 180)).isNull()
+    assert hashlib.sha256(obj.read_bytes()).hexdigest() == before
