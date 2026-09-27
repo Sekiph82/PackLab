@@ -63,11 +63,18 @@ class JobManager(QObject):
         self._order: list[str] = []
         self._cancel_hooks: dict[str, Callable[[], bool]] = {}
 
-    def create(self, title: str, job_type: str, *, cancellable: bool = True, job_id: str | None = None) -> JobRecord:
+    def create(
+        self, title: str, job_type: str, *, cancellable: bool = True, job_id: str | None = None
+    ) -> JobRecord:
         identifier = job_id or uuid.uuid4().hex
         if identifier in self._jobs:
             raise ValueError(f"duplicate job id: {identifier}")
-        record = JobRecord(identifier, title[:MAX_MESSAGE_LENGTH], job_type[:MAX_MESSAGE_LENGTH], cancellable=cancellable)
+        record = JobRecord(
+            identifier,
+            title[:MAX_MESSAGE_LENGTH],
+            job_type[:MAX_MESSAGE_LENGTH],
+            cancellable=cancellable,
+        )
         self._jobs[identifier] = record
         self._order.append(identifier)
         self._trim_history()
@@ -82,7 +89,9 @@ class JobManager(QObject):
             raise KeyError(f"unknown job: {job_id}") from error
 
     def jobs(self) -> tuple[JobRecord, ...]:
-        return tuple(self._jobs[identifier] for identifier in self._order if identifier in self._jobs)
+        return tuple(
+            self._jobs[identifier] for identifier in self._order if identifier in self._jobs
+        )
 
     def active_jobs(self) -> tuple[JobRecord, ...]:
         return tuple(job for job in self.jobs() if job.state not in TERMINAL_STATES)
@@ -96,7 +105,9 @@ class JobManager(QObject):
         self._changed(job)
         return job
 
-    def update_progress(self, job_id: str, progress: float, message: str | None = None) -> JobRecord:
+    def update_progress(
+        self, job_id: str, progress: float, message: str | None = None
+    ) -> JobRecord:
         job = self.get(job_id)
         if job.state not in {JobState.RUNNING, JobState.CANCELLING}:
             raise ValueError("progress requires an active job")
@@ -156,6 +167,21 @@ class JobManager(QObject):
                     job.error = str(error)[:MAX_MESSAGE_LENGTH]
                     job.state = JobState.FAILED
                     job.finished_at = _now()
+        self._changed(job)
+        return job
+
+    def finish_cancel(self, job_id: str, error: str | None = None) -> JobRecord:
+        job = self.get(job_id)
+        if job.state in TERMINAL_STATES and error is None:
+            return job
+        if error:
+            job.state = JobState.FAILED
+            job.error = str(error)[:MAX_MESSAGE_LENGTH]
+            job.add_message("subprocess cleanup failed")
+        else:
+            job.state = JobState.CANCELLED
+            job.add_message("cancelled")
+        job.finished_at = _now()
         self._changed(job)
         return job
 

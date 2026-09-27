@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QCloseEvent, QIcon
+from dataclasses import asdict
+from pathlib import Path
+
+from PySide6.QtCore import QByteArray, QStandardPaths, Qt
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QIcon
 from PySide6.QtWidgets import QMainWindow, QSplitter
 
 from .autosave import AutosaveService
+from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .jobs import JobManager
 from .navigation import NavigationController, NavigationPanel, Route, RouteStack
 from .preferences import PreferencesStore, WindowPreferences
 from .project import ProjectManager
 from .recovery import RecoveryManager
 from .shutdown import ShutdownCoordinator
+from .version import current_build_info
 from .workspace import WorkspaceManager
 
 
@@ -21,7 +26,15 @@ class StudioMainWindow(QMainWindow):
 
     WINDOW_OBJECT_NAME = "packlab.studio.main-window"
 
-    def __init__(self, *, ingest_controller: object = None, receiver: object = None, preferences: PreferencesStore | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        ingest_controller: object = None,
+        receiver: object = None,
+        preferences: PreferencesStore | None = None,
+        diagnostics_root: str | Path | None = None,
+        available_work_area: tuple[int, int, int, int] | None = None,
+    ) -> None:
         super().__init__()
         self.setObjectName(self.WINDOW_OBJECT_NAME)
         self.setWindowTitle("PackLab Studio")
@@ -31,15 +44,29 @@ class StudioMainWindow(QMainWindow):
         self.navigation = NavigationController()
         self.job_manager = JobManager()
         self.project_manager = ProjectManager(job_manager=self.job_manager)
+        self.project_manager.add_listener(self._on_project_changed)
         self.autosave = AutosaveService(self.project_manager)
         self.recovery: RecoveryManager | None = None
+        self.recovery_items: tuple[object, ...] = ()
+        default_diagnostics_root = QStandardPaths.writableLocation(
+            QStandardPaths.StandardLocation.AppLocalDataLocation
+        )
+        self.diagnostics = DiagnosticsBundleService(
+            diagnostics_root or Path(default_diagnostics_root or ".") / "diagnostics"
+        )
+        self._diagnostic_errors: list[dict[str, object]] = []
+        self._available_work_area = available_work_area
         self.shutdown = ShutdownCoordinator(self.job_manager)
         self._shutdown_requested = False
         self.navigation_panel = NavigationPanel()
         self.route_stack = RouteStack(ingest_controller=ingest_controller, receiver=receiver)
         self.navigation_panel.route_requested.connect(self.navigation.navigate)
-        self.navigation.route_changed.connect(lambda value: self.route_stack.show_route(Route(value)))
-        self.navigation.route_changed.connect(lambda value: self.navigation_panel.select_route(Route(value)))
+        self.navigation.route_changed.connect(
+            lambda value: self.route_stack.show_route(Route(value))
+        )
+        self.navigation.route_changed.connect(
+            lambda value: self.navigation_panel.select_route(Route(value))
+        )
         splitter = QSplitter(self)
         splitter.setObjectName("packlab.main.splitter")
         splitter.addWidget(self.navigation_panel)
@@ -48,13 +75,14 @@ class StudioMainWindow(QMainWindow):
         self.setCentralWidget(splitter)
         self.workspace = WorkspaceManager(self, job_manager=self.job_manager)
         self.navigation.set_project_context(self.project_manager)
+        self._sync_project_state()
         self._restore_preferences()
 
     def _restore_preferences(self) -> None:
         if self.preferences is None:
             self.navigation_panel.select_route(Route.LIBRARY)
             return
-        saved = self.preferences.load()
+        saved = self.preferences.load(bounds=self._available_work_area or self._current_work_area())
         self.setGeometry(*saved.geometry)
         if saved.maximized:
             self.showMaximized()
@@ -68,6 +96,73 @@ class StudioMainWindow(QMainWindow):
             self.navigation.navigate(Route.LIBRARY)
         self.navigation_panel.select_route(self.navigation.current_route)
 
+    def _current_work_area(self) -> tuple[int, int, int, int] | None:
+        screens = QGuiApplication.screens()
+        if not screens:
+            return None
+        geometries = [screen.availableGeometry() for screen in screens]
+        left = min(rect.left() for rect in geometries)
+        top = min(rect.top() for rect in geometries)
+        right = max(rect.right() for rect in geometries)
+        bottom = max(rect.bottom() for rect in geometries)
+        return left, top, right - left + 1, bottom - top + 1
+
+    def _on_project_changed(self, _metadata: object) -> None:
+        self._sync_project_state()
+
+    def _sync_project_state(self) -> None:
+        available = self.project_manager.current is not None
+        self.recovery = self.project_manager.recovery
+        self.recovery_items = self.project_manager.recovery_items
+        self.navigation_panel.set_project_available(available)
+        self.route_stack.set_project_available(available)
+        self.workspace.set_project_available(available)
+
+    def new_project(self, root: str | Path, name: str):
+        return self.project_manager.new_project(root, name)
+
+    def open_project(self, root: str | Path):
+        return self.project_manager.open_project(root)
+
+    def close_project(self, *, allow_active_jobs: bool = False) -> None:
+        self.project_manager.close(allow_active_jobs=allow_active_jobs)
+
+    def accept_recovery(self, item_id: str):
+        item = self.project_manager.accept_recovery(item_id)
+        self._sync_project_state()
+        return item
+
+    def discard_recovery(self, item_id: str):
+        item = self.project_manager.discard_recovery(item_id)
+        self._sync_project_state()
+        return item
+
+    def create_diagnostic_bundle(
+        self, destination: str | Path | None = None, *, logs: str = ""
+    ) -> DiagnosticBundle:
+        errors = list(self._diagnostic_errors)
+        errors.extend(
+            {"job_id": job.job_id, "error": job.error, "message": job.message}
+            for job in self.job_manager.jobs()
+            if job.error
+        )
+        return self.diagnostics.create_bundle(
+            destination,
+            logs=logs,
+            build_info=asdict(current_build_info()),
+            project_summary=self.project_manager.project_summary(),
+            active_jobs=[
+                {
+                    "job_id": job.job_id,
+                    "state": job.state.value,
+                    "progress": job.progress,
+                    "message": job.message,
+                }
+                for job in self.job_manager.active_jobs()
+            ],
+            structured_errors=errors,
+        )
+
     def closeEvent(self, event: QCloseEvent) -> None:
         if not self._shutdown_requested and self.job_manager.active_jobs():
             event.ignore()
@@ -75,6 +170,7 @@ class StudioMainWindow(QMainWindow):
             self.shutdown.begin(lambda result: self._finish_shutdown(result))
             return
         self.autosave.shutdown_flush()
+        self.project_manager.close()
         if self.preferences is not None:
             state = self.saveState().toBase64().toStdString()
             self.preferences.save(

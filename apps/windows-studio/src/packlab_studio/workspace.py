@@ -54,7 +54,11 @@ class WorkspaceManager:
                 | Qt.DockWidgetArea.RightDockWidgetArea
                 | Qt.DockWidgetArea.BottomDockWidgetArea
             )
-            dock.setWidget(JobPanel(self.job_manager) if dock_id is DockId.JOBS and self.job_manager is not None else QLabel(title))
+            dock.setWidget(
+                JobPanel(self.job_manager)
+                if dock_id is DockId.JOBS and self.job_manager is not None
+                else QLabel(title)
+            )
             self.window.addDockWidget(area, dock)
             self._docks[dock_id] = dock
 
@@ -70,8 +74,16 @@ class WorkspaceManager:
             self._docks[DockId.LOGS].hide()
         self._restore_default_areas()
 
+    def set_project_available(self, available: bool) -> None:
+        for dock_id in (DockId.SCENE, DockId.PROPERTIES):
+            dock = self._docks[dock_id]
+            dock.setEnabled(available)
+            dock.setVisible(available)
+
     def _restore_default_areas(self) -> None:
         self.window.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._docks[DockId.SCENE])
-        self.window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._docks[DockId.PROPERTIES])
+        self.window.addDockWidget(
+            Qt.DockWidgetArea.RightDockWidgetArea, self._docks[DockId.PROPERTIES]
+        )
         self.window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._docks[DockId.JOBS])
         self.window.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self._docks[DockId.LOGS])

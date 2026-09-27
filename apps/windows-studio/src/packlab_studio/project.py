@@ -6,14 +6,18 @@ import json
 import os
 import tempfile
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from .jobs import JobManager
 from .project_layout import ProjectLayout, ProjectLayoutError
+from .recovery import RecoveryItem, RecoveryManager
 
 PROJECT_SCHEMA_VERSION = "1.0"
+AUTHORITY_SCHEMA_VERSION = 1
 
 
 class ProjectError(RuntimeError):
@@ -82,12 +86,24 @@ class ProjectManager:
         self.job_manager = job_manager
         self.layout: ProjectLayout | None = None
         self.metadata: ProjectMetadata | None = None
+        self.recovery: RecoveryManager | None = None
+        self.recovery_items: tuple[RecoveryItem, ...] = ()
+        self._listeners: list[Callable[[ProjectMetadata | None], None]] = []
 
     @property
     def current(self) -> ProjectMetadata | None:
         return self.metadata
 
+    def add_listener(self, listener: Callable[[ProjectMetadata | None], None]) -> None:
+        self._listeners.append(listener)
+
+    def project_summary(self) -> dict[str, Any]:
+        if self.metadata is None:
+            return {"open": False}
+        return {"open": True, **self.metadata.to_dict()}
+
     def new_project(self, root: str | Path, name: str) -> ProjectMetadata:
+        self._ensure_close_allowed()
         target = Path(root)
         if target.exists():
             raise ProjectError("project destination already exists")
@@ -95,41 +111,81 @@ class ProjectManager:
         try:
             layout = ProjectLayout.create(staging)
             now = _now()
-            metadata = ProjectMetadata(str(uuid.uuid4()), name.strip() or "Untitled Project", now, now)
+            metadata = ProjectMetadata(
+                str(uuid.uuid4()), name.strip() or "Untitled Project", now, now
+            )
             self._write_metadata(layout, metadata)
+            self._atomic_json(layout.path("working", "state.json"), {})
+            self._write_authority(layout, metadata, {})
             os.replace(staging, target)
         except (OSError, ProjectLayoutError, ProjectError) as error:
             self._remove_staging(staging)
             raise ProjectError("project creation failed") from error
         if self.metadata is not None:
-            self.close()
+            self.close(allow_active_jobs=True)
         self.layout = ProjectLayout.open(target)
-        self.metadata = ProjectMetadata.from_dict(json.loads((target / "working" / "project.json").read_text(encoding="utf-8")))
+        self.metadata, _ = self._read_authority(self.layout)
+        self.recovery = RecoveryManager(self.layout)
+        self.recovery_items = self.recovery.inspect()
+        self.recovery.mark_start()
+        self._notify()
         return self.metadata
 
     def open_project(self, root: str | Path) -> ProjectMetadata:
         target = Path(root)
         try:
             layout = ProjectLayout.open(target)
-            metadata = ProjectMetadata.from_dict(json.loads((layout.path("working", "project.json")).read_text(encoding="utf-8")))
+            metadata, _ = self._read_authority(layout)
         except (OSError, ValueError, ProjectLayoutError, ProjectError) as error:
             raise ProjectError("project cannot be opened") from error
         self.close()
         self.layout = layout
         self.metadata = metadata
+        self.recovery = RecoveryManager(layout)
+        self.recovery_items = self.recovery.inspect()
+        self.recovery.mark_start()
+        self._notify()
         return metadata
 
     def close(self, *, allow_active_jobs: bool = False) -> None:
-        if self.job_manager is not None and self.job_manager.active_jobs() and not allow_active_jobs:
+        if (
+            self.job_manager is not None
+            and self.job_manager.active_jobs()
+            and not allow_active_jobs
+        ):
             raise ProjectBusyError("active jobs must finish or cancel before project close")
+        if self.recovery is not None:
+            self.recovery.mark_clean_close()
         self.layout = None
         self.metadata = None
+        self.recovery = None
+        self.recovery_items = ()
+        self._notify()
 
-    def commit_edit(self, state: dict[str, object], *, expected_revision: int | None = None) -> ProjectMetadata:
+    def accept_recovery(self, item_id: str) -> RecoveryItem | None:
+        if self.recovery is None:
+            return None
+        item = self.recovery.accept(item_id)
+        self.recovery_items = self.recovery.inspect()
+        return item
+
+    def discard_recovery(self, item_id: str) -> RecoveryItem | None:
+        if self.recovery is None:
+            return None
+        item = self.recovery.discard(item_id)
+        self.recovery_items = self.recovery.inspect()
+        return item
+
+    def commit_edit(
+        self, state: dict[str, object], *, expected_revision: int | None = None
+    ) -> ProjectMetadata:
         if self.layout is None or self.metadata is None:
             raise ProjectError("no project is open")
-        disk_metadata = self._read_metadata(self.layout)
-        if disk_metadata.project_id != self.metadata.project_id or disk_metadata.revision != self.metadata.revision:
+        disk_metadata, _ = self._read_authority(self.layout)
+        if (
+            disk_metadata.project_id != self.metadata.project_id
+            or disk_metadata.revision != self.metadata.revision
+        ):
             raise RevisionConflict("project metadata changed on disk")
         if expected_revision is not None and expected_revision != self.metadata.revision:
             raise RevisionConflict("editable state revision is stale")
@@ -141,14 +197,68 @@ class ProjectManager:
             self.metadata.schema_version,
             self.metadata.revision + 1,
         )
+        self._write_authority(self.layout, next_metadata, state)
+        self._after_authority_publish(next_metadata, state)
         self._atomic_json(self.layout.path("working", "state.json"), state)
         self._write_metadata(self.layout, next_metadata)
         self.metadata = next_metadata
+        self._notify()
         return next_metadata
 
     @classmethod
-    def _read_metadata(cls, layout: ProjectLayout) -> ProjectMetadata:
-        return ProjectMetadata.from_dict(json.loads(layout.path("working", "project.json").read_text(encoding="utf-8")))
+    def _read_authority(cls, layout: ProjectLayout) -> tuple[ProjectMetadata, dict[str, Any]]:
+        authority = layout.path("working", "authority.json")
+        if authority.exists():
+            value = json.loads(authority.read_text(encoding="utf-8"))
+            if (
+                not isinstance(value, dict)
+                or value.get("schema_version") != AUTHORITY_SCHEMA_VERSION
+            ):
+                raise ProjectError("project authority is malformed or unsupported")
+            metadata = ProjectMetadata.from_dict(value.get("metadata"))
+            state = value.get("state")
+            if not isinstance(state, dict):
+                raise ProjectError("project editable state is malformed")
+            mirror_metadata = ProjectMetadata.from_dict(
+                json.loads(layout.path("working", "project.json").read_text(encoding="utf-8"))
+            )
+            if (
+                mirror_metadata.project_id != metadata.project_id
+                or mirror_metadata.name != metadata.name
+                or mirror_metadata.created_at != metadata.created_at
+                or mirror_metadata.schema_version != metadata.schema_version
+            ):
+                raise ProjectError("project metadata identity does not match authority")
+            mirror_state = json.loads(
+                layout.path("working", "state.json").read_text(encoding="utf-8")
+            )
+            if not isinstance(mirror_state, dict):
+                raise ProjectError("project editable state is malformed")
+            if mirror_metadata.revision != metadata.revision or mirror_state != state:
+                cls._atomic_json(layout.path("working", "state.json"), state)
+                cls._write_metadata(layout, metadata)
+            return metadata, state
+        metadata = ProjectMetadata.from_dict(
+            json.loads(layout.path("working", "project.json").read_text(encoding="utf-8"))
+        )
+        state_path = layout.path("working", "state.json")
+        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+        if not isinstance(state, dict):
+            raise ProjectError("project editable state is malformed")
+        return metadata, state
+
+    def _ensure_close_allowed(self) -> None:
+        if self.job_manager is not None and self.job_manager.active_jobs():
+            raise ProjectBusyError("active jobs must finish or cancel before replacing the project")
+
+    def _notify(self) -> None:
+        for listener in tuple(self._listeners):
+            listener(self.metadata)
+
+    def _after_authority_publish(
+        self, _metadata: ProjectMetadata, _state: dict[str, object]
+    ) -> None:
+        """Failure-injection seam; the authority file is already recoverable here."""
 
     @staticmethod
     def _write_metadata(layout: ProjectLayout, metadata: ProjectMetadata) -> None:
@@ -165,8 +275,23 @@ class ProjectManager:
             Path(temporary_name).unlink(missing_ok=True)
 
     @staticmethod
+    def _write_authority(
+        layout: ProjectLayout, metadata: ProjectMetadata, state: dict[str, object]
+    ) -> None:
+        ProjectManager._atomic_json(
+            layout.path("working", "authority.json"),
+            {
+                "schema_version": AUTHORITY_SCHEMA_VERSION,
+                "metadata": metadata.to_dict(),
+                "state": state,
+            },
+        )
+
+    @staticmethod
     def _atomic_json(target: Path, value: object) -> None:
-        fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}-", suffix=".tmp", dir=target.parent)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{target.name}-", suffix=".tmp", dir=target.parent
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                 json.dump(value, handle, sort_keys=True, separators=(",", ":"))

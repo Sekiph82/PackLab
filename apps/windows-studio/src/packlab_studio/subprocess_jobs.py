@@ -12,7 +12,9 @@ from .jobs import JobManager
 
 
 class OwnedSubprocessJob:
-    def __init__(self, manager: JobManager, job_id: str, args: Sequence[str], *, cwd: Path | None = None) -> None:
+    def __init__(
+        self, manager: JobManager, job_id: str, args: Sequence[str], *, cwd: Path | None = None
+    ) -> None:
         self.manager = manager
         self.job_id = job_id
         self.args = tuple(args)
@@ -23,16 +25,18 @@ class OwnedSubprocessJob:
 
     def _cancel(self) -> bool:
         self.cancel_event.set()
-        return True
+        # The runner must report cleanup before the logical job becomes terminal.
+        return False
+
+    @property
+    def cancellation_requested(self) -> bool:
+        return self.cancel_event.is_set()
 
     def run(self) -> ProcessResult:
         self.manager.start(self.job_id)
         self.result = run_process(self.args, cancel_event=self.cancel_event, cwd=self.cwd)
         if self.result.cancelled:
-            if self.result.error:
-                self.manager.fail(self.job_id, self.result.error, message="subprocess cleanup failed")
-            else:
-                self.manager.request_cancel(self.job_id)
+            self.manager.finish_cancel(self.job_id, self.result.error)
         elif self.result.returncode == 0:
             self.manager.succeed(self.job_id)
         else:

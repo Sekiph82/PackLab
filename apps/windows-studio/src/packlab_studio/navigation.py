@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
@@ -90,13 +90,27 @@ class NavigationPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(self.list)
 
+    def set_project_available(self, available: bool) -> None:
+        for index in range(self.list.count()):
+            item = self.list.item(index)
+            route = item.data(Qt.ItemDataRole.UserRole)
+            if route in {Route.CAPTURE_INBOX.value, Route.RECONSTRUCTION.value, Route.EDITOR.value}:
+                flags = item.flags()
+                item.setFlags(
+                    flags | Qt.ItemFlag.ItemIsEnabled
+                    if available
+                    else flags & ~Qt.ItemFlag.ItemIsEnabled
+                )
+
     def select_route(self, route: Route) -> None:
         for index in range(self.list.count()):
             if self.list.item(index).data(0x0100) == route.value:
                 self.list.setCurrentRow(index)
                 return
 
-    def _on_item_changed(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
+    def _on_item_changed(
+        self, current: QListWidgetItem | None, _previous: QListWidgetItem | None
+    ) -> None:
         if current is not None:
             self.route_requested.emit(str(current.data(0x0100)))
 
@@ -120,3 +134,7 @@ class RouteStack(QStackedWidget):
 
     def show_route(self, route: Route) -> None:
         self.setCurrentWidget(self.views[route])
+
+    def set_project_available(self, available: bool) -> None:
+        for route in (Route.CAPTURE_INBOX, Route.RECONSTRUCTION, Route.EDITOR):
+            self.views[route].setEnabled(available)

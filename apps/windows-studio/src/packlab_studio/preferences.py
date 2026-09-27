@@ -30,7 +30,9 @@ class WindowPreferences:
         return value
 
 
-def sanitize_geometry(value: Any, *, bounds: tuple[int, int, int, int] | None = None) -> tuple[int, int, int, int]:
+def sanitize_geometry(
+    value: Any, *, bounds: tuple[int, int, int, int] | None = None
+) -> tuple[int, int, int, int]:
     """Return safe geometry, clamped to the available desktop when supplied."""
 
     if not isinstance(value, (list, tuple)) or len(value) != 4:
@@ -43,6 +45,8 @@ def sanitize_geometry(value: Any, *, bounds: tuple[int, int, int, int] | None = 
     height = max(480, min(height, 10000))
     if bounds is not None:
         bx, by, bw, bh = bounds
+        width = min(width, max(640, bw))
+        height = min(height, max(480, bh))
         x = min(max(x, bx), bx + max(0, bw - 80))
         y = min(max(y, by), by + max(0, bh - 80))
     return x, y, width, height
@@ -52,7 +56,7 @@ class PreferencesStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
 
-    def load(self) -> WindowPreferences:
+    def load(self, *, bounds: tuple[int, int, int, int] | None = None) -> WindowPreferences:
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
         except (FileNotFoundError, OSError, ValueError, TypeError):
@@ -63,10 +67,12 @@ class PreferencesStore:
         if migrated is None:
             return WindowPreferences()
         return WindowPreferences(
-            geometry=sanitize_geometry(migrated.get("geometry")),
+            geometry=sanitize_geometry(migrated.get("geometry"), bounds=bounds),
             maximized=bool(migrated.get("maximized", False)),
             fullscreen=bool(migrated.get("fullscreen", False)),
-            dock_state=str(migrated.get("dock_state", "")) if isinstance(migrated.get("dock_state", ""), str) else "",
+            dock_state=str(migrated.get("dock_state", ""))
+            if isinstance(migrated.get("dock_state", ""), str)
+            else "",
             last_route=str(migrated.get("last_route", "library")),
             theme=str(migrated.get("theme", "system")),
             display_scale=float(migrated.get("display_scale", 1.0)),
@@ -74,7 +80,9 @@ class PreferencesStore:
 
     def save(self, preferences: WindowPreferences) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary_name = tempfile.mkstemp(prefix=f".{self.path.name}-", suffix=".tmp", dir=self.path.parent)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{self.path.name}-", suffix=".tmp", dir=self.path.parent
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                 json.dump(preferences.to_dict(), handle, sort_keys=True, separators=(",", ":"))
