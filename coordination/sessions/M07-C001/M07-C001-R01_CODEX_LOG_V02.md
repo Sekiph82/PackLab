@@ -26,7 +26,7 @@ The V01 independent audit found no remaining product-code defect. V02 does not e
 
 Implementation commit, unchanged: `508e4f2f63aa2e45c62d4e3de33b79297b7ac2b5`
 V01 log-only commit, unchanged: `55a51c13f31512e66c45eaa170ea8e3aa516b340`
-V02 log-only publication commit: recorded below after the log-only commit is created.
+V02 log-only publication commit: `2654870210944bff91dc5deb3662f1231a3e5060`
 
 The V01 independent audit is the evidence for unchanged functional and static behavior. V02 does not claim new functional test results. The V01 audit independently recorded focused tests `10 passed`, locked suite `321 passed, 5 skipped, 1 deselected`, Ruff, targeted mypy, compileall, project lint, and the product/security/scope review.
 
@@ -40,6 +40,6 @@ The V01 independent audit is the evidence for unchanged functional and static be
 
 ## Handoff
 
-Final published head and remote SHA will be verified after the separate V02 log-only commit is pushed.
+Final published head and remote SHA will be verified after this log-only update is pushed.
 
 READY_FOR_INDEPENDENT_AUDIT
