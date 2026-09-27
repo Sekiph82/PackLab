@@ -3,7 +3,7 @@ name: PackLab Studio Preview Windows
 on:
   push:
     branches:
-      - preview/windows-exe
+      - main
     paths:
       - "preview/windows/**"
       - ".github/workflows/packlab-preview-windows.yml"
