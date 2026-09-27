@@ -21,6 +21,7 @@ tests/               unit, contract, integration, regression, and fixture tests
 tools/               developer and CI utilities, diagnostics, and controlled adapters
 docs/
   architecture/      architecture specifications and audited decision records
+  implementation/    task-bound implementation contracts referenced by TASKS.md
 coordination/
   sessions/          immutable, versioned work orders and implementation/audit evidence
 ```
@@ -37,6 +38,7 @@ coordination/
 | `tests/` | Tests organized by unit, contract, integration, regression, and safe fixture use. | Tests may exercise adapters, but domain tests must not become coupled to a particular UI implementation. |
 | `tools/` | Diagnostics, reproducibility helpers, CI utilities, and thin executable-discovery/capability tooling. | Tools support the product and workflow; they do not silently replace the domain or live tracker. |
 | `docs/architecture/` | Repository specifications, architecture decision records, and related architectural evidence. | Documents explain or constrain the system; they do not claim unimplemented tasks are complete. |
+| `docs/implementation/` | Stable task-bound implementation contracts for technically dense tasks that need more detail than a tracker line or session prompt should carry. | A file is binding only when the active `TASKS.md` task or frozen prompt marks it as a Mandatory pre-read. It constrains implementation but does not authorize work or track status. |
 | `coordination/sessions/` | Versioned prompts, criteria, Codex logs, and independent audit artifacts for a task cycle. | Session artifacts are evidence and work orders, not live project state. |
 
 ## Canonical authority and ownership
@@ -82,7 +84,9 @@ External engines are replaceable capabilities, not owners of PackLab project tru
 | Engine | PackLab-owned boundary | Responsibility and non-responsibility |
 | --- | --- | --- |
 | COLMAP | SfM/sparse-reconstruction adapter | Owns camera registration and sparse reconstruction stages. It is not the UI, task tracker, or business-definition source of truth. |
-| OpenMVS | Dense-reconstruction adapter | Owns dense cloud, mesh reconstruction, refinement, and texturing stages in the primary reconstruction chain. It does not define editable CAD semantics. |
+| OpenMVS | Dense-reconstruction adapter | Owns dense cloud, mesh reconstruction, refinement, and texturing stages in the V1 production reconstruction chain. It does not define editable CAD semantics. |
+| Future neural reconstruction | `ReconstructionBackend` adapter only after license/benchmark authorization | May produce normalized reconstruction observations through the same PackLab contract. It cannot redefine units, Scan Master authority, project state, or downstream domain semantics. |
+| Future AI visual-reference generator | `VisualReferenceBackend` | May create clearly generated preview/reference geometry only. It is prohibited from measurement, calibration, or Scan Master authority.
 | Open3D | Point-cloud/mesh analysis adapter | Supports cleanup, registration, normals, components, measurements, decimation, and deviation analysis. Its derived output remains traceable to source evidence. |
 | OpenCascade binding | Engineering CAD/BREP adapter | Builds and validates engineering solids from the editable Design Model and supports STEP/CAD operations. It does not promote a triangle scan to engineering truth. |
 | Blender | UV/material/render adapter | Consumes approved geometry, artwork, and material data for repeatable visual presentation. Render output is never the dimensional or engineering source of truth. |
