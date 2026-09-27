@@ -38,5 +38,20 @@ COLMAP_BASELINE = EngineBaseline(
 )
 
 
+OPENMVS_BASELINE = EngineBaseline(
+    engine_id="openmvs",
+    version="2.4.0",
+    source_url="https://github.com/cdcseacave/openMVS",
+    source_ref="v2.4.0",
+    source_revision="58117204c86bbb11a0b25b26a8987676cf11274d",
+    license_name="GNU AGPL-3.0; HIGH LICENSE ATTENTION; no distribution-clearance conclusion",
+    license_url="https://github.com/cdcseacave/openMVS/blob/v2.4.0/LICENSE",
+    build_source="Official GitHub release with Windows x64 assets or reproducible source build; PackLab does not bundle or auto-download it",
+    integration_mode="external executable discovered by explicit configuration or safe PATH lookup; not bundled by PackLab",
+    binary_sha256=None,
+    host_validation="source identity recorded and parser fixtures tested; no OpenMVS executable installed on the builder host",
+)
+
+
 def baseline_records() -> tuple[EngineBaseline, ...]:
-    return (COLMAP_BASELINE,)
+    return (COLMAP_BASELINE, OPENMVS_BASELINE)
