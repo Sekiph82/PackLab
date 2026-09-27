@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 from PySide6.QtCore import QSize
@@ -19,6 +20,7 @@ from packlab_studio.viewport import (
     grid_spec,
     load_geometry,
 )
+from packlab_studio.viewport_export import ViewportExportError, ViewportPreviewExporter
 
 
 def test_obj_and_point_cloud_loaders_preserve_source_bytes_and_metadata(tmp_path) -> None:
@@ -152,3 +154,43 @@ def test_debug_modes_are_state_only_and_missing_normals_are_truthful(tmp_path) -
         assert service.state.render_mode is mode
         assert not service.render(QSize(240, 180)).isNull()
     assert hashlib.sha256(obj.read_bytes()).hexdigest() == before
+
+
+def test_viewport_preview_export_is_nonempty_atomic_and_redacted(tmp_path) -> None:
+    service = ViewportService()
+    service.add_geometry("scan-mesh", SceneObjectKind.SCAN_MESH, PointCloudGeometry(((0.0, 0.0, 0.0),)))
+    destination = tmp_path / "export" / "preview.png"
+    result = ViewportPreviewExporter().export(
+        service, destination, project_id="project-id", revision=3, project_root=tmp_path / "project", size=QSize(160, 120)
+    )
+    assert result.image_path.stat().st_size > 0
+    metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
+    assert metadata["visible_object_ids"] == ["scan-mesh"]
+    assert metadata["width"] == 160
+    assert metadata["paths_redacted"] is True
+    assert str(tmp_path) not in result.metadata_path.read_text(encoding="utf-8")
+    with pytest.raises(ViewportExportError, match="exists"):
+        ViewportPreviewExporter().export(service, destination, project_id="project-id", revision=3)
+
+
+def test_preview_export_rejects_raw_and_unavailable_backend(tmp_path) -> None:
+    service = ViewportService()
+    service.add_geometry("reference", SceneObjectKind.REFERENCE_GEOMETRY, PointCloudGeometry(((0.0, 0.0, 0.0),)))
+    root = tmp_path / "project"
+    (root / "raw").mkdir(parents=True)
+    with pytest.raises(ViewportExportError, match="raw"):
+        ViewportPreviewExporter().export(service, root / "raw" / "evidence.png", project_root=root)
+
+    class BrokenAdapter:
+        backend_name = "broken"
+        backend_version = "test"
+
+        def render(self, *_args):
+            raise RuntimeError("not available")
+
+        def capabilities(self):
+            return {"headless": False}
+
+    broken = ViewportService(adapter=BrokenAdapter())  # type: ignore[arg-type]
+    with pytest.raises(ViewportExportError, match="unavailable"):
+        ViewportPreviewExporter().export(broken, tmp_path / "broken.png")
