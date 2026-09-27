@@ -8,7 +8,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Current Sprint: M07-C001-R01 — Engine probe remediation
 - Current Task: M07-C001-R01 — Remediate PL-0160 and PL-0161
 - Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CHATGPT_AUDIT_CRITERIA_V02.md. Perform only the bounded R01 evidence-hygiene correction: publish a new trailing-whitespace-free V02 Codex log, preserve implementation commit 508e4f2f63aa2e45c62d4e3de33b79297b7ac2b5 and accepted behavior, and do not start PL-0166 until fresh independent R01 audit passes.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CHATGPT_AUDIT_CRITERIA_V03.md. Perform only the bounded R01 evidence-contract correction: publish one V03 Codex log with actual staged validation and post-push freshness results, preserve implementation commit 508e4f2f63aa2e45c62d4e3de33b79297b7ac2b5 and accepted behavior, and do not start PL-0166 until fresh independent R01 audit passes.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -17,7 +17,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest M06 R02 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; M06 complete.
 - OpenReality Architecture Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0003-object-centric-reconstruction-authority.md — accepted. Master integration architecture: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/OPENREALITY_INTEGRATION_ARCHITECTURE.md.
 - Latest M07 C001 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0158, PL-0159 and PL-0162 through PL-0165; PL-0160 and PL-0161 remain open.
-- Latest M07 C001 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; implementation behavior independently verified, but final V01 handoff `git diff --check` fails on trailing whitespace in the immutable V01 Codex log; V02 evidence-only remediation required.
+- Latest M07 C001 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CHATGPT_AUDIT_V02.md — CHANGES_REQUIRED; V02 diff is clean and product-neutral, but the log omits actual validation/push/freshness results and leaves publication identity incomplete; V03 evidence-contract remediation required.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
