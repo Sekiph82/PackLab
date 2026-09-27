@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M07
 - Current Sprint: M07-C001 — COLMAP SfM input preparation
-- Current Task: M07-C001 — Execute PL-0166 reconstruction-safe photo preprocessing
+- Current Task: M07-C001 — Execute PL-0167 PackScan camera intrinsics and pose-prior consumption
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0166_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0166_CHATGPT_AUDIT_CRITERIA_V01.md. Implement only the revision-scoped, byte-preserving reconstruction working-set seam; preserve full-image evidence and RAW_CAPTURE immutability, and do not start PL-0167 or later tasks.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0167_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0167_CHATGPT_AUDIT_CRITERIA_V01.md. Import and validate PackScan camera intrinsics and capture pose priors against exact working image/revision identities; preserve explicit prior-use and metrology boundaries, and do not start PL-0168 or later tasks.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -18,6 +18,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - OpenReality Architecture Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0003-object-centric-reconstruction-authority.md — accepted. Master integration architecture: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/OPENREALITY_INTEGRATION_ARCHITECTURE.md.
 - Latest M07 C001 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED partial audit; PL-0160 and PL-0161 were subsequently closed by the independent M07-C001-R01 V04 audit.
 - Latest M07 C001 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CHATGPT_AUDIT_V04.md — AUDITED_PASS; PL-0160 and PL-0161 are independently accepted after the V04 evidence-boundary correction.
+- Latest PL-0166 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0166_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the revision-scoped byte-preserving working-set seam is independently accepted.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -321,7 +322,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M07-S02 - COLMAP SfM
 
-- [ ] **PL-0166** Implement photo preprocessing into a reconstruction-safe working set while preserving originals; keep full-image evidence available for camera solving and never overwrite PackScan source images.
+- [x] **PL-0166** Implement photo preprocessing into a reconstruction-safe working set while preserving originals; keep full-image evidence available for camera solving and never overwrite PackScan source images.
 - [ ] **PL-0167** Import/use valid PackScan camera intrinsics and capture pose priors under explicit fixed/initialization/refinement rules; reject inconsistent priors rather than silently treating ARKit/capture metadata as metrology truth.
 - [ ] **PL-0168** Implement feature-extraction configuration optimized first for packaged consumer goods.
 - [ ] **PL-0169** Implement matcher selection for ordered orbit datasets.
