@@ -148,3 +148,30 @@ PackLab Capture -> PackScan -> Source Evidence
 ```
 
 This chain is not a promise that every Digital Twin has every layer. Each transition must preserve ownership, mutability, units, coordinate context, and provenance, and the resulting representation must not be mistaken for another layer merely because it looks similar.
+
+
+## Object-centric reconstruction authority terms
+
+### Reconstruction Observation
+A backend-derived camera/geometry result before package isolation and Scan Master promotion. It may contain scene/background geometry and may still use relative units.
+
+### Object Capture Geometry
+A `generated=false` 3D subset supported by real captured views after versioned segmentation masks are lifted into reconstructed geometry and fused with multiview visibility-aware consensus. It is captured evidence but is not automatically a Scan Master.
+
+### AI Visual Reference
+A `generated=true` 3D asset produced by a generative/completion model such as a future SAM 3D Objects or TRELLIS backend. It may help visualization or recapture planning. It is never measurement, calibration or Scan Master authority.
+
+### Reconstruction Backend
+A PackLab-owned adapter contract that normalizes reconstruction engines into common cameras, geometry, stage results and provenance. COLMAP/OpenMVS is the V1 production lane; later neural engines must enter through the same contract.
+
+### Segmentation Backend
+A replaceable PackLab-owned adapter that turns a source image plus optional prompts into a versioned `MaskArtifact`. Downstream object extraction consumes PackLab mask contracts rather than model-specific APIs.
+
+### Mask-to-3D Lift
+Projection of reconstructed world geometry into solved source cameras, followed by visibility and segmentation-mask tests, to determine which real 3D observations belong to the target package.
+
+### Multiview Support Vote
+The visibility-aware aggregation of mask evidence across multiple cameras. A hidden point is `not observed`, not automatically rejected. The versioned voting profile determines when captured geometry belongs to the package.
+
+### Geometry Authority Class
+A persisted classification describing what an asset is allowed to prove. Current architecture distinguishes at least RAW_CAPTURE, RECONSTRUCTION_OBSERVATION, OBJECT_CAPTURE_GEOMETRY, SCAN_MASTER, AI_VISUAL_REFERENCE and DESIGN_MODEL.
