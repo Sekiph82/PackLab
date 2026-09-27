@@ -114,6 +114,25 @@ Each reusable finding uses a permanent `AL-PL-xxxx` ID and records:
 
 **Origin:** `M07-C001-R01 / CHATGPT_AUDIT_V03.md`.
 
+### AL-PL-0011 - Camera-prior provenance and ambiguity must fail closed
+
+**Applies to:** reconstruction camera-prior ingestion, PackScan metadata
+candidate discovery, and reusable backend input contracts.
+
+**Finding:** A prior model can expose provenance fields as optional while a
+generic assessment boundary accepts an otherwise-valid prior when source
+digest/revision binding is absent. Duplicate metadata handling that toggles a
+candidate out on the second duplicate can also reintroduce one on a third,
+silently selecting an ambiguous payload.
+
+**Required behavior:** require exact source-package, working-set, and image
+identity binding before backend use; track ambiguous candidate keys
+separately so any duplicate count rejects the key and never selects a
+candidate. Add production-boundary tests for missing binding and two-or-more
+duplicate candidates, including odd duplicate counts.
+
+**Origin:** `M07-C001 / PL-0167_CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.

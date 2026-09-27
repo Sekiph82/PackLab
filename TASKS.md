@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M07
 - Current Sprint: M07-C001 — COLMAP SfM input preparation
-- Current Task: M07-C001 — Execute PL-0167 PackScan camera intrinsics and pose-prior consumption
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0167_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0167_CHATGPT_AUDIT_CRITERIA_V01.md. Import and validate PackScan camera intrinsics and capture pose priors against exact working image/revision identities; preserve explicit prior-use and metrology boundaries, and do not start PL-0168 or later tasks.
+- Current Task: M07-C001 — Remediate PL-0167 PackScan camera intrinsics and pose-prior consumption
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0167_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0167_CHATGPT_AUDIT_CRITERIA_V02.md. Require fail-closed source/revision binding at the generic prior-assessment boundary and permanently reject ambiguous duplicate metadata candidates; preserve valid V01 behavior and do not start PL-0168 or later tasks.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -19,6 +19,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest M07 C001 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED partial audit; PL-0160 and PL-0161 were subsequently closed by the independent M07-C001-R01 V04 audit.
 - Latest M07 C001 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CHATGPT_AUDIT_V04.md — AUDITED_PASS; PL-0160 and PL-0161 are independently accepted after the V04 evidence-boundary correction.
 - Latest PL-0166 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0166_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the revision-scoped byte-preserving working-set seam is independently accepted.
+- Latest PL-0167 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0167_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; V01 independently verified the normal importer and validation gates but found missing generic prior binding enforcement and a duplicate-metadata fail-closed gap. V02 remediation is authorized for CODEX.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -323,7 +324,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Sprint M07-S02 - COLMAP SfM
 
 - [x] **PL-0166** Implement photo preprocessing into a reconstruction-safe working set while preserving originals; keep full-image evidence available for camera solving and never overwrite PackScan source images.
-- [ ] **PL-0167** Import/use valid PackScan camera intrinsics and capture pose priors under explicit fixed/initialization/refinement rules; reject inconsistent priors rather than silently treating ARKit/capture metadata as metrology truth.
+- [ ] **PL-0167** Import/use valid PackScan camera intrinsics and capture pose priors under explicit fixed/initialization/refinement rules; reject inconsistent priors rather than silently treating ARKit/capture metadata as metrology truth. **CHANGES_REQUIRED:** V01 found missing generic source/revision binding enforcement and ambiguous duplicate metadata selection; execute the V02 remediation before PL-0168.
 - [ ] **PL-0168** Implement feature-extraction configuration optimized first for packaged consumer goods.
 - [ ] **PL-0169** Implement matcher selection for ordered orbit datasets.
 - [ ] **PL-0170** Implement sparse mapper stage and capture registered-image statistics.
