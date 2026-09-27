@@ -71,6 +71,19 @@ Codex must never create or edit:
 
 ChatGPT creates the audit after inspecting the log and actual GitHub state.
 
+## Mandatory pre-read contracts
+
+Some technically dense tasks in root `TASKS.md` contain a **Mandatory pre-read** link under `docs/implementation/`.
+
+When the authorized task contains such a link:
+
+1. read the linked file in full before material implementation;
+2. treat its architecture, authority, provenance, licensing and test boundaries as part of the frozen scope;
+3. confirm the active prompt/criteria do not contradict it;
+4. stop and report a conflict rather than choosing one silently.
+
+`docs/implementation/` files are not task authorization and not live status. They become binding only through the active TASKS/prompt contract.
+
 ## Synchronization
 
 ### One-time owner-authorized bootstrap
