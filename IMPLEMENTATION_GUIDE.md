@@ -15,8 +15,13 @@ iPhone 16 Standard
   -> PackLab Capture
   -> .packscan
   -> PackLab Studio
-  -> COLMAP
-  -> OpenMVS
+  -> ReconstructionBackend
+       -> COLMAP + OpenMVS (V1 production lane)
+       -> future license-cleared neural backend (experimental)
+  -> SegmentationBackend / versioned masks
+  -> visibility-aware mask-to-3D multiview object extraction
+  -> Object Capture Geometry
+  -> metric scale / alignment
   -> Open3D
   -> Scan Master
   -> Parametric Design Model
@@ -93,8 +98,8 @@ Use fetch + comparison + safe fast-forward. Unexpected tracked local divergence 
 1. **No LiDAR dependency.** iPhone 16 Standard is treated as a non-LiDAR device. Capture is image-based photogrammetry; ARKit/CoreMotion provide supporting pose/motion metadata.
 2. **Immutable capture evidence.** Original photos and imported `.packscan` source are never silently rewritten.
 3. **Scan Mesh != Design Model.** Dense reconstruction is reference geometry, not the final editable CAD truth.
-4. **COLMAP owns SfM.** Camera registration and sparse reconstruction belong to the COLMAP adapter.
-5. **OpenMVS owns the primary dense chain.** Dense cloud, mesh reconstruction, refinement and texturing are separated into observable stages.
+4. **PackLab owns reconstruction semantics.** External reconstruction engines implement the PackLab `ReconstructionBackend`; backend-specific types/commands do not own project truth.
+5. **COLMAP/OpenMVS is the V1 production lane.** COLMAP owns its SfM stages and OpenMVS owns its dense/mesh stages behind the PackLab adapter. Future neural engines remain experimental until license and physical benchmark gates pass.
 6. **Open3D owns geometric analysis/cleanup.** Registration, normals, components, measurements, proxy decimation and deviation analysis remain non-destructive relative to promoted masters.
 7. **OpenCascade owns engineering BREP.** STEP/solid exports come from validated parameter-driven geometry, not from relabeling a triangle mesh.
 8. **Blender owns repeatable visual presentation.** UV/material/render output is visual, never dimensional source of truth.
@@ -102,6 +107,8 @@ Use fetch + comparison + safe fast-forward. Unexpected tracked local divergence 
 10. **External engines use adapters.** Versions, capabilities, paths, command output, cancellation and failures are explicit.
 11. **Public-repository safety.** Secrets, signing material, private Kenya scans and confidential supplier data stay outside Git.
 12. **Deterministic evidence beats opaque scores.** AI can suggest, but core quality gates expose components, thresholds and provenance.
+13. **Captured geometry and generated geometry are different authority classes.** `AI_VISUAL_REFERENCE` may never satisfy measurement, calibration, captured-geometry QA or Scan Master promotion.
+14. **Object extraction is multiview and visibility-aware.** Background may assist camera solving, while versioned masks plus camera geometry determine which real 3D observations belong to the package.
 
 ## 6. Planned application architecture
 
@@ -147,8 +154,8 @@ Responsibilities:
 
 - ingest and immutable raw preservation;
 - calibration/scale;
-- photogrammetry orchestration;
-- masks and reconstruction QA;
+- backend-neutral reconstruction orchestration with COLMAP/OpenMVS as the V1 production lane;
+- versioned segmentation masks, visibility-aware mask-to-3D object extraction and reconstruction QA;
 - Scan Master creation;
 - measurement;
 - parametric fitting/editing;
@@ -162,9 +169,17 @@ Responsibilities:
 
 Cross-platform capture container. It must be versioned, validated, checksummed and explicit about units/coordinate systems/optional metadata.
 
-### Raw reconstruction
+### Reconstruction Observation
 
-COLMAP/OpenMVS/Open3D-derived evidence and intermediates. Never silently treated as engineering CAD.
+Backend-derived cameras/geometry before package isolation. COLMAP/OpenMVS is the V1 source; future neural backends must use the same normalized contract. Reconstruction observations never silently become metric or engineering truth.
+
+### Object Capture Geometry
+
+`generated=false` geometry supported by real captured views after versioned masks are lifted into solved camera geometry and fused across views with visibility-aware consensus. It is the captured input to later M09/M10 authority, not automatically a Scan Master.
+
+### AI Visual Reference
+
+`generated=true` object completion/visualization from a future generative backend. It may help visualization or recapture planning but is ineligible for measurement, calibration and Scan Master promotion.
 
 ### Scan Master
 
@@ -206,7 +221,8 @@ Before Codex edits product files it must:
 3. read `AGENTS.md` and required coordination policy;
 4. read the exact `CODEX_PROMPT_VNN.md`;
 5. read the matching `CHATGPT_AUDIT_CRITERIA_VNN.md`;
-6. read only additional references identified by the prompt.
+6. if the active `TASKS.md` row or prompt contains a **Mandatory pre-read** link, read that `docs/implementation/` file in full before material work;
+7. read only additional references identified by the prompt.
 
 During implementation Codex must:
 
@@ -279,3 +295,16 @@ This guide intentionally does not duplicate 434 live task entries. Detailed exec
 This avoids stale per-task prose becoming a shadow tracker and gives every implementation pass an auditable frozen contract.
 
 Historical versions of the former auto-generated per-task guide remain recoverable in Git history but are superseded by this session-based execution model.
+
+
+## 13. Object-centric reconstruction reference
+
+The accepted architecture derived from the OpenReality review is:
+
+https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/OPENREALITY_INTEGRATION_ARCHITECTURE.md
+
+Decision record:
+
+https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0003-object-centric-reconstruction-authority.md
+
+These documents define captured-vs-generated geometry authority, reconstruction/segmentation backend seams, mask-to-3D multiview extraction, metric-scale ownership and future neural/generative research boundaries.
