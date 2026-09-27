@@ -136,6 +136,19 @@ class ProjectManager:
             revision_id=revision_id,
         )
 
+    def materialize_reconstruction_working_set(self, workspace):
+        """Prepare backend inputs through the project-owned workspace authority."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        from .reconstruction_workspace import ReconstructionWorkspaceManager
+
+        if workspace.project_id != self.metadata.project_id:
+            raise ProjectError("workspace belongs to another project")
+        if workspace.path.parent != self.layout.path("working", "reconstruction"):
+            raise ProjectError("workspace is outside the project reconstruction area")
+        return ReconstructionWorkspaceManager(self.layout).materialize_working_set(workspace)
+
     def new_project(self, root: str | Path, name: str) -> ProjectMetadata:
         self._ensure_close_allowed()
         target = Path(root)
