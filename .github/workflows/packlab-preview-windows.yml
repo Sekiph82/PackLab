@@ -1,0 +1,63 @@
+name: PackLab Studio Preview Windows
+
+on:
+  push:
+    branches:
+      - preview/windows-exe
+    paths:
+      - "preview/windows/**"
+      - ".github/workflows/packlab-preview-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-preview:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "pyinstaller>=6.10,<7"
+
+      - name: Build standalone preview EXE
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name PackLabStudioPreview preview/windows/packlab_preview.py
+          if (!(Test-Path "dist/PackLabStudioPreview.exe")) { throw "Preview EXE was not produced." }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found at $iscc" }
+          & $iscc "preview\windows\installer.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (!(Test-Path "dist-installer/PackLabStudioPreviewSetup.exe")) { throw "Installer EXE was not produced." }
+
+      - name: Upload preview artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PackLabStudioPreview-Windows
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/PackLabStudioPreview.exe
+            dist-installer/PackLabStudioPreviewSetup.exe
