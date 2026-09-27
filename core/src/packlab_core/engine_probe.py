@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from .engine_baseline import COLMAP_BASELINE
+from .engine_baseline import COLMAP_BASELINE, OPENMVS_BASELINE
 
 
 class EngineProbeStatus(StrEnum):
@@ -162,5 +162,19 @@ def probe_colmap(
         executable,
         parse_colmap_version,
         supported_versions=(COLMAP_BASELINE.version,),
+        runner=runner,
+    )
+
+
+def probe_openmvs(
+    executable: str | Path | None,
+    *,
+    runner: VersionRunner = _default_runner,
+) -> EngineProbeResult:
+    return probe_engine(
+        EngineId.OPENMVS,
+        executable,
+        parse_openmvs_version,
+        supported_versions=(OPENMVS_BASELINE.version,),
         runner=runner,
     )

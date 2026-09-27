@@ -6,7 +6,9 @@ from packlab_core.engine_probe import (
     EngineProbeStatus,
     EngineVersion,
     parse_colmap_version,
+    parse_openmvs_version,
     probe_colmap,
+    probe_openmvs,
 )
 
 
@@ -47,3 +49,18 @@ def test_probe_reports_unexecutable_runner_failure_without_writing(tmp_path) -> 
     result = probe_colmap(executable, runner=_runner("", returncode=17))
     assert result.status is EngineProbeStatus.UNEXECUTABLE
     assert executable.read_bytes() == before
+
+
+def test_openmvs_parser_and_probe_use_the_selected_baseline(tmp_path) -> None:
+    assert parse_openmvs_version("OpenMVS x64 v2.4.0") == EngineVersion(2, 4, 0)
+    executable = tmp_path / "DensifyPointCloud.exe"
+    executable.write_bytes(b"fixture")
+    result = probe_openmvs(executable, runner=_runner("OpenMVS x64 v2.4.0"))
+    assert result.status is EngineProbeStatus.VALID
+    assert result.version == EngineVersion(2, 4, 0)
+
+
+def test_openmvs_missing_is_explicit() -> None:
+    result = probe_openmvs(None)
+    assert result.status is EngineProbeStatus.MISSING
+    assert result.detail == "no executable configured"
