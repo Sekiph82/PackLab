@@ -12,6 +12,8 @@ from packlab_studio.viewport import (
     ViewportErrorCode,
     ViewportLoadError,
     ViewportService,
+    axis_metadata,
+    grid_spec,
     load_geometry,
 )
 
@@ -75,3 +77,32 @@ def test_loader_failures_are_structured_and_real_adapter_renders_offscreen(tmp_p
     image = service.render(QSize(320, 240))
     assert image.size() == QSize(320, 240)
     assert not image.isNull()
+
+
+def test_grid_spacing_is_adaptive_visual_mm_metadata_and_axes_are_stable() -> None:
+    near = grid_spec(8.0)
+    far = grid_spec(800.0)
+    assert near.unit == far.unit == "mm"
+    assert near.spacing_mm < far.spacing_mm
+    assert {axis["axis"] for axis in axis_metadata()} == {"X", "Y", "Z"}
+    assert tuple(axis["direction"] for axis in axis_metadata()) == (
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+    )
+
+
+def test_grid_and_scale_visibility_round_trip_through_production_state() -> None:
+    service = ViewportService()
+    service.state = service.state.__class__(
+        camera=service.state.camera,
+        grid_visible=False,
+        axes_visible=False,
+        scale_cues_visible=False,
+    )
+    state = service.state_dict()
+    restored = ViewportService()
+    restored.restore_state(state)
+    assert not restored.state.grid_visible
+    assert not restored.state.axes_visible
+    assert not restored.state.scale_cues_visible

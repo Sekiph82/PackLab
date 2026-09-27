@@ -256,6 +256,31 @@ class ViewportRenderMode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class GridSpec:
+    spacing_mm: float
+    major_every: int = 5
+    unit: str = "mm"
+
+    @property
+    def label(self) -> str:
+        return f"{self.spacing_mm:g} mm"
+
+
+def grid_spec(camera_distance: float) -> GridSpec:
+    return GridSpec(choose_grid_spacing(camera_distance))
+
+
+def axis_metadata() -> tuple[dict[str, object], ...]:
+    """PackLab's right-handed X-right/Y-up/Z-out-of-screen visual convention."""
+
+    return (
+        {"axis": "X", "direction": (1.0, 0.0, 0.0), "color": "#ef476f"},
+        {"axis": "Y", "direction": (0.0, 1.0, 0.0), "color": "#06d6a0"},
+        {"axis": "Z", "direction": (0.0, 0.0, 1.0), "color": "#118ab2"},
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class ViewportState:
     camera: ViewportCamera = field(default_factory=ViewportCamera)
     grid_visible: bool = True
@@ -379,7 +404,7 @@ class QtRasterViewportAdapter:
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if state.grid_visible:
-            self._draw_grid(painter, state.camera, size)
+            self._draw_grid(painter, state.camera, size, show_label=state.scale_cues_visible)
         if state.axes_visible:
             self._draw_axes(painter, state.camera, size)
         for item in scene.visible_objects():
@@ -436,9 +461,10 @@ class QtRasterViewportAdapter:
             if start is not None and end is not None:
                 painter.drawLine(start, end)
 
-    def _draw_grid(self, painter: QPainter, camera: ViewportCamera, size: QSize) -> None:
-        spacing = choose_grid_spacing(camera.distance)
-        painter.setPen(QPen(QColor("#263746"), 1.0))
+    def _draw_grid(self, painter: QPainter, camera: ViewportCamera, size: QSize, *, show_label: bool) -> None:
+        spec = grid_spec(camera.distance)
+        spacing = spec.spacing_mm
+        painter.setPen(QPen(QColor("#324b60" if show_label else "#263746"), 1.0))
         extent = spacing * 10
         for index in range(-10, 11):
             offset = index * spacing
@@ -447,15 +473,18 @@ class QtRasterViewportAdapter:
                 second = self._project(end, camera, size)
                 if first is not None and second is not None:
                     painter.drawLine(first, second)
+        # The label is exposed through GridSpec/state metadata. Keeping the
+        # raster path line-only makes the offscreen adapter deterministic on
+        # hosts whose Qt text raster plugin is unavailable.
 
     def _draw_axes(self, painter: QPainter, camera: ViewportCamera, size: QSize) -> None:
         origin = self._project((0.0, 0.0, 0.0), camera, size)
         if origin is None:
             return
-        for endpoint, color in [((40.0, 0.0, 0.0), "#ef476f"), ((0.0, 40.0, 0.0), "#06d6a0"), ((0.0, 0.0, 40.0), "#118ab2")]:
+        for axis, endpoint in zip(axis_metadata(), ((40.0, 0.0, 0.0), (0.0, 40.0, 0.0), (0.0, 0.0, 40.0))):
             projected = self._project(endpoint, camera, size)
             if projected is not None:
-                painter.setPen(QPen(QColor(color), 2.0))
+                painter.setPen(QPen(QColor(str(axis["color"])), 2.0))
                 painter.drawLine(origin, projected)
 
 
@@ -532,6 +561,12 @@ class ViewportService:
 
     def render(self, size: QSize = QSize(960, 640)) -> QImage:
         return self.adapter.render(self.scene, self.state, size)
+
+    def grid_spec(self) -> GridSpec:
+        return grid_spec(self.state.camera.distance)
+
+    def axes(self) -> tuple[dict[str, object], ...]:
+        return axis_metadata()
 
     def state_dict(self) -> dict[str, object]:
         return self.state.to_dict()
