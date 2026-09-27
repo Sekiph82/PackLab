@@ -5,14 +5,15 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M06
-- Current Sprint: M06-BATCH-002 — PackLab Studio viewport continuation
-- Current Task: M06-BATCH-002 — Execute PL-0150 through PL-0157
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0150 through PL-0157 in order, preserve accepted PL-0135 through PL-0149 and M03–M05, keep PL-0068 OWNER_REQUIRED, do not start M07, and publish https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`.
+- Current Sprint: M06-R02 — M06 final remediation
+- Current Task: M06-R02 — Remediate PL-0150, PL-0151 and PL-0157
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_CRITERIA_V01.md. Remediate only PL-0150, PL-0151 and PL-0157. Preserve accepted PL-0152 through PL-0156 and PL-0135 through PL-0149, keep PL-0068 OWNER_REQUIRED, and do not start M07 until independent R02 audit passes.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CHATGPT_AUDIT_V01.md — AUDITED_PASS (16/16 M05 children accepted)
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
+- Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0152 through PL-0156; PL-0150, PL-0151 and PL-0157 remain open.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -292,11 +293,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Sprint M06-S03 - 3D viewport
 
 - [ ] **PL-0151** Select and document the PySide6-compatible 3D viewport approach after a focused performance spike.
-- [ ] **PL-0152** Implement mesh/point-cloud loading and camera orbit/pan/zoom.
-- [ ] **PL-0153** Implement world grid, axes and millimetre scale cues.
-- [ ] **PL-0154** Implement object selection and visibility toggles for Scan Mesh, Design Model, cap, label and reference geometry.
-- [ ] **PL-0155** Implement wireframe/normals/point-cloud debug modes.
-- [ ] **PL-0156** Implement screenshot/export preview for audit evidence.
+- [x] **PL-0152** Implement mesh/point-cloud loading and camera orbit/pan/zoom.
+- [x] **PL-0153** Implement world grid, axes and millimetre scale cues.
+- [x] **PL-0154** Implement object selection and visibility toggles for Scan Mesh, Design Model, cap, label and reference geometry.
+- [x] **PL-0155** Implement wireframe/normals/point-cloud debug modes.
+- [x] **PL-0156** Implement screenshot/export preview for audit evidence.
 - [ ] **PL-0157** Add large-mesh performance benchmark and viewport LOD strategy.
 
 ---
