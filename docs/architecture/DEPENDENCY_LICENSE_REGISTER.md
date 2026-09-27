@@ -27,6 +27,11 @@ The integration modes describe the intended PackLab boundary, not work completed
 | [Blender](https://www.blender.org/about/license/) | Headless/external UV, material, and visual presentation/render automation; not dimensional truth | External/headless executable and controlled scripts at the Blender render boundary | Planned, not installed or selected at a version | GNU GPL family; Blender’s official guidance describes GPL-version/distribution nuances and separately discusses bundled components | Unpinned; executable and script/add-on scope TBD | **HIGH LICENSE ATTENTION** |
 | [PySide6 / Qt for Python](https://doc.qt.io/qtforpython-6/) | Windows Studio desktop presentation and UI | Python UI library at the presentation boundary; UI does not own PackLab domain truth | Selected for PL-0135; runtime range `>=6.8,<7` and exact resolution in `uv.lock` | LGPLv3/GPLv3 and Qt commercial licensing routes, per [Qt for Python licensing](https://doc.qt.io/qtforpython-6/) and [Qt licensing](https://www.qt.io/development/qt-framework/qt-licensing) | Declared and locked for Python 3.12 | **MEDIUM ATTENTION** |
 
+| [OpenReality](https://github.com/reality-opened/openreality) | Reference architecture for object-centric reconstruction, mask-to-3D lifting, provenance and optional generated-object lanes | **Reference only**; PackLab does not take a runtime dependency by this record | Reviewed at public commit `4d93d5f5b75166a43f0fd64b7d44acc12a56907f`; no package/binary selected | BSD-2-Clause for the OpenReality repository itself; separately fetched models retain their own licenses | Reference commit pinned in `OPENREALITY_INTEGRATION_ARCHITECTURE.md`; no vendor lock-in permitted | **MEDIUM ATTENTION** |
+| [VGGT](https://github.com/facebookresearch/vggt) | Candidate future neural reconstruction backend | Future M19 research only behind PackLab `ReconstructionBackend`; not a V1 dependency | **NOT INSTALLED / NOT SELECTED**. Original `VGGT-1B` checkpoint forbidden for commercial PackLab; `VGGT-1B-Commercial` or successor requires separate acceptance and hash/version pin | Custom VGGT License. Upstream states only the separately released commercial checkpoint permits commercial use; original checkpoint remains non-commercial | Exact checkpoint, license acceptance, restrictions, runtime and redistribution path must be recorded by PL-0436 before any use | **HIGH LICENSE ATTENTION** |
+| [SAM 3D Objects](https://github.com/facebookresearch/sam-3d-objects) | Candidate future AI visual-reference completion | Future `AI_VISUAL_REFERENCE` only; must never become measurement or Scan Master authority | **NOT INSTALLED / NOT SELECTED** | Custom SAM License with trade-control/acceptable-use restrictions | PL-0435 must pin code/checkpoint/license and enforce generated-authority isolation | **HIGH LICENSE / AUTHORITY ATTENTION** |
+| [TRELLIS](https://github.com/microsoft/TRELLIS) | Candidate future image-conditioned 3D visual-reference generation | Future `AI_VISUAL_REFERENCE` only | **NOT INSTALLED / NOT SELECTED** | MIT for TRELLIS models and majority of project code per upstream; some submodules carry separate licenses | PL-0435 must inventory enabled submodules/checkpoints and keep outputs non-authoritative | **MEDIUM ATTENTION** |
+
 ### Focused provenance and compliance notes
 
 #### NextLevel
@@ -72,6 +77,19 @@ Blender’s official license page describes Blender software as GNU GPL, says so
 #### PySide6 / Qt for Python
 
 Official Qt for Python documentation says PySide6 and Shiboken6 are available under LGPLv3/GPLv3 and the Qt commercial license. Qt’s licensing page describes open-source and commercial routes and the obligations associated with choosing between them. PackLab records PySide6 as the Windows Studio presentation layer; it does not own domain truth. Qt modules, plugins, bundled components, and third-party contents can have additional or different licensing constraints. Final packaging must review the actual modules shipped, notices, and applicable LGPL/GPL or commercial-route obligations, including relocation/relinking requirements where applicable. PackLab has not purchased or selected a commercial Qt license, and proprietary distribution is not automatically cleared merely because LGPL is available.
+
+
+#### OpenReality / neural and generated-3D references
+
+OpenReality is an architecture reference, not a blanket license for every model its self-host stack can fetch. PackLab must treat repository code, model code and model checkpoints as separate compliance units.
+
+- Reference architecture: https://github.com/reality-opened/openreality
+- PackLab integration contract: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/OPENREALITY_INTEGRATION_ARCHITECTURE.md
+- Official VGGT commercial-checkpoint distinction: https://github.com/facebookresearch/vggt/blob/main/README.md and https://github.com/facebookresearch/vggt/blob/main/LICENSE.txt
+- SAM 3D Objects license: https://github.com/facebookresearch/sam-3d-objects/blob/main/LICENSE
+- TRELLIS license and submodule caveat: https://github.com/microsoft/TRELLIS/blob/main/README.md and https://github.com/microsoft/TRELLIS/blob/main/LICENSE
+
+No generated-3D model license review can substitute for PackLab's geometry-authority rules. Even a commercially usable model remains `AI_VISUAL_REFERENCE` unless a separate audited architecture explicitly changes that contract.
 
 ## Risk / attention classification
 
