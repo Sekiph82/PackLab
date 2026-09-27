@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M07
-- Current Sprint: M07-C001 — Reconstruction engine foundation and backend contract
-- Current Task: M07-C001 — Execute PL-0158 through PL-0165
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Mandatory pre-read: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/OPENREALITY_INTEGRATION_ARCHITECTURE.md and https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0003-object-centric-reconstruction-authority.md. Execute exactly PL-0158 through PL-0165; do not start PL-0166 until independent batch audit passes.
+- Current Sprint: M07-C001-R01 — Engine probe remediation
+- Current Task: M07-C001-R01 — Remediate PL-0160 and PL-0161
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/M07-C001-R01_CHATGPT_AUDIT_CRITERIA_V01.md. Remediate only PL-0160 and PL-0161. Preserve accepted PL-0158, PL-0159 and PL-0162 through PL-0165. Do not start PL-0166 until independent R01 audit passes.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -16,6 +16,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
 - Latest M06 R02 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; M06 complete.
 - OpenReality Architecture Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0003-object-centric-reconstruction-authority.md — accepted. Master integration architecture: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/OPENREALITY_INTEGRATION_ARCHITECTURE.md.
+- Latest M07 C001 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0158, PL-0159 and PL-0162 through PL-0165; PL-0160 and PL-0161 remain open.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -308,14 +309,14 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M07-S01 - Engine installation and adapters
 
-- [ ] **PL-0158** Define tested COLMAP version, installation source and license record.
-- [ ] **PL-0159** Define tested OpenMVS version, Windows build/binary source and AGPL license record.
+- [x] **PL-0158** Define tested COLMAP version, installation source and license record.
+- [x] **PL-0159** Define tested OpenMVS version, Windows build/binary source and AGPL license record.
 - [ ] **PL-0160** Implement COLMAP capability probe and version parser.
 - [ ] **PL-0161** Implement OpenMVS capability probe and version parser.
-- [ ] **PL-0162** Implement reconstruction-engine discovery/configuration with explicit paths and diagnostics; preserve a backend-neutral capability boundary so future model runtimes cannot leak into Studio/domain code.
-- [ ] **PL-0163** Create the normalized PackLab `ReconstructionBackend` job/output contract independent of specific engine/model syntax; V1 composes COLMAP/OpenMVS while future neural engines remain replaceable. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0163_RECONSTRUCTION_BACKEND_CONTRACT.md
-- [ ] **PL-0164** Implement per-stage stdout/stderr capture and machine-readable stage result records.
-- [ ] **PL-0165** Add reconstruction workspace isolation so retries cannot corrupt the source scan.
+- [x] **PL-0162** Implement reconstruction-engine discovery/configuration with explicit paths and diagnostics; preserve a backend-neutral capability boundary so future model runtimes cannot leak into Studio/domain code.
+- [x] **PL-0163** Create the normalized PackLab `ReconstructionBackend` job/output contract independent of specific engine/model syntax; V1 composes COLMAP/OpenMVS while future neural engines remain replaceable. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0163_RECONSTRUCTION_BACKEND_CONTRACT.md
+- [x] **PL-0164** Implement per-stage stdout/stderr capture and machine-readable stage result records.
+- [x] **PL-0165** Add reconstruction workspace isolation so retries cannot corrupt the source scan.
 
 ## Sprint M07-S02 - COLMAP SfM
 
