@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from packlab_core.reconstruction import ReconstructionStageResult, StageStatus
+from packlab_core.reconstruction import ReconstructionStageResult, RunStatus, StageStatus
 from packlab_core.sparse_export import (
     COLMAP_CAMERA_CONVENTION,
     InvalidSparseExportPayload,
@@ -196,6 +196,29 @@ def test_failed_run_and_unsupported_options_never_export() -> None:
         export_sparse_mapping(_run(), _payload(), SparseExportOptions(include_debug_manifest=False))
     with pytest.raises(UnsupportedSparseExportOption):
         export_sparse_mapping(_run(), _payload(), object())  # type: ignore[arg-type]
+
+
+def test_cancelled_run_and_valid_payload_never_export() -> None:
+    request = _request()
+    cancelled = normalize_sparse_mapping_result(
+        request,
+        ReconstructionStageResult(
+            "sparse-mapping",
+            StageStatus.CANCELLED,
+            None,
+            0.1,
+            cancelled=True,
+        ),
+    )
+
+    assert cancelled.status is RunStatus.CANCELLED
+    assert cancelled.stage_result.status is StageStatus.CANCELLED
+    assert cancelled.stage_result.cancelled is True
+    assert cancelled.stage_result.exit_code is None
+    assert cancelled.statistics is None
+    assert cancelled.sparse_model_asset_id is None
+    with pytest.raises(ValueError, match="successful"):
+        export_sparse_mapping(cancelled, _payload())
 
 
 @pytest.mark.parametrize(
