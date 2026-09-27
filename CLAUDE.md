@@ -38,6 +38,10 @@ Local workspace: `C:\Users\sekip\Desktop\PackLab`.
 
 The owner has authorized one initial GitHub-authoritative alignment. Only the active prompt may invoke that bootstrap exception. After bootstrap, normal synchronization is fetch/compare/fast-forward-only and unexpected divergence must stop the session unless the owner explicitly authorizes replacement.
 
+## Mandatory pre-read task contracts
+
+If the authorized root `TASKS.md` row or active prompt contains a **Mandatory pre-read** URL, read that `docs/implementation/` contract in full before editing. It is a binding technical specification for that task but never a substitute for TASKS authorization or the active prompt/criteria.
+
 ## Supporting documents
 
 - `IMPLEMENTATION_GUIDE.md` contains architecture and implementation guidance; it is not a state tracker.
