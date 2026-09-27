@@ -77,12 +77,15 @@ def run_process(
     on_stderr: LineCallback | None = None,
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
+    max_output_chars: int | None = None,
 ) -> ProcessResult:
     """Run one command with bounded ownership and no shell-string interpretation."""
 
     command = tuple(args)
     if not command or any(not isinstance(item, str) or not item for item in command):
         raise ValueError("args must be a non-empty sequence of non-empty strings")
+    if max_output_chars is not None and max_output_chars < 1:
+        raise ValueError("max_output_chars must be positive")
     if os.name == "nt":
         process = subprocess.Popen(
             list(command),
@@ -110,7 +113,12 @@ def run_process(
 
     def drain(stream, target: list[str], callback: LineCallback | None) -> None:
         for line in iter(stream.readline, ""):
-            target.append(line)
+            if max_output_chars is None:
+                target.append(line)
+            else:
+                retained = sum(len(item) for item in target)
+                if retained < max_output_chars:
+                    target.append(line[: max_output_chars - retained])
             if callback:
                 callback(line.rstrip("\r\n"))
         stream.close()
