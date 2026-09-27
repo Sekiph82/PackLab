@@ -102,6 +102,18 @@ class ProjectManager:
             return {"open": False}
         return {"open": True, **self.metadata.to_dict()}
 
+    def portability_report(self):
+        """Return the read-only M06 portability report for the open project."""
+
+        if self.layout is None:
+            raise ProjectError("no project is open")
+        from .portability import PortabilityReport, scan_project_portability
+
+        report = scan_project_portability(self.layout.root)
+        if not isinstance(report, PortabilityReport):
+            raise ProjectError("portability scanner returned an invalid report")
+        return report
+
     def new_project(self, root: str | Path, name: str) -> ProjectMetadata:
         self._ensure_close_allowed()
         target = Path(root)
