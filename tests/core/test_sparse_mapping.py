@@ -16,7 +16,9 @@ from packlab_core.sparse_mapping import (
     InvalidSparseMappingRequest,
     RegisteredImageStatistics,
     SparseMappingConfig,
+    SparseMappingError,
     SparseMappingRequest,
+    SparseMappingRun,
     SparseMappingSummaryError,
     UnsupportedSparseMappingOption,
     build_colmap_sparse_mapper_command,
@@ -66,21 +68,29 @@ def _summary(**overrides: object) -> dict[str, object]:
     return value
 
 
+def _summary_with_output(**overrides: object) -> dict[str, object]:
+    value = _summary(sparse_model_asset_id="working/reconstruction/sparse")
+    value.update(overrides)
+    return value
+
+
 def _stage(
     status: StageStatus = StageStatus.SUCCEEDED,
     *,
     stdout: str = "",
     exit_code: int | None = 0,
     failure_reason: str | None = None,
+    stage_id: str = "sparse-mapping",
+    cancelled: bool | None = None,
 ) -> ReconstructionStageResult:
     return ReconstructionStageResult(
-        "sparse-mapping",
+        stage_id,
         status,
         exit_code,
         0.01,
         stdout=stdout,
         failure_reason=failure_reason,
-        cancelled=status is StageStatus.CANCELLED,
+        cancelled=status is StageStatus.CANCELLED if cancelled is None else cancelled,
     )
 
 
@@ -175,6 +185,7 @@ def test_command_adapter_rejects_unprobed_or_mismatched_engine() -> None:
         _summary(registration_ratio=float("nan")),
         _summary(total_images=10_000_001, registered_images=10_000_000, unregistered_images=1),
         {"contract": STAGE_SUMMARY_CONTRACT, "total_images": 3, "registered_images": 2},
+        _summary(registration_ratio=10**1000),
     ],
 )
 def test_statistics_reject_malformed_inconsistent_or_overflowed_summaries(
@@ -211,7 +222,7 @@ def test_successful_stage_requires_exact_machine_summary_and_exposes_output() ->
     request = _request(
         ("working/images/001.jpg", "working/images/002.jpg", "working/images/003.jpg")
     )
-    stage = _stage(stdout=STAGE_SUMMARY_PREFIX + json.dumps(_summary()))
+    stage = _stage(stdout=STAGE_SUMMARY_PREFIX + json.dumps(_summary_with_output()))
     result = normalize_sparse_mapping_result(request, stage)
 
     assert result.status is RunStatus.SUCCEEDED
@@ -234,7 +245,7 @@ def test_successful_stage_with_malformed_summary_becomes_failed_without_output()
 def test_successful_stage_statistics_are_bound_to_request_image_count() -> None:
     result = normalize_sparse_mapping_result(
         _request(),
-        _stage(stdout=STAGE_SUMMARY_PREFIX + json.dumps(_summary(total_images=3))),
+        _stage(stdout=STAGE_SUMMARY_PREFIX + json.dumps(_summary_with_output(total_images=3))),
     )
 
     assert result.status is RunStatus.FAILED
@@ -254,12 +265,142 @@ def test_failed_and_cancelled_processes_never_claim_sparse_output() -> None:
     assert cancelled.sparse_model_asset_id is None
 
 
+@pytest.mark.parametrize(
+    "stage",
+    [
+        _stage(stage_id="other", stdout=STAGE_SUMMARY_PREFIX + json.dumps(_summary_with_output())),
+        _stage(
+            stdout=STAGE_SUMMARY_PREFIX + json.dumps(_summary_with_output()),
+            cancelled=True,
+        ),
+        _stage(stdout=STAGE_SUMMARY_PREFIX + json.dumps(_summary_with_output()), exit_code=7),
+        _stage(StageStatus.FAILED, cancelled=True),
+        _stage(StageStatus.CANCELLED, exit_code=None, cancelled=False),
+    ],
+)
+def test_inconsistent_stage_results_fail_closed_without_output(
+    stage: ReconstructionStageResult,
+) -> None:
+    result = normalize_sparse_mapping_result(_request(), stage)
+
+    assert result.status is RunStatus.FAILED
+    assert result.sparse_model_asset_id is None
+    assert result.statistics is None
+    assert result.stage_result.status is StageStatus.FAILED
+    assert result.stage_result.stage_id == "sparse-mapping"
+
+
+@pytest.mark.parametrize(
+    "output_fields",
+    [
+        {},
+        {"sparse_model_asset_id": None},
+        {"sparse_model_asset_id": "working/reconstruction/sparse", "output_asset_id": None},
+        {
+            "sparse_model_asset_id": "working/reconstruction/sparse",
+            "output_asset_id": "working/reconstruction/other",
+        },
+        {"sparse_model_asset_id": "C:/private/sparse"},
+        {"sparse_model_asset_id": "working/reconstruction/../sparse"},
+        {"sparse_model_asset_id": "working/reconstruction/other"},
+    ],
+)
+def test_successful_summary_requires_one_matching_safe_output_identity(
+    output_fields: dict[str, object],
+) -> None:
+    summary = _summary(**output_fields)
+    result = normalize_sparse_mapping_result(
+        _request(),
+        _stage(stdout=STAGE_SUMMARY_PREFIX + json.dumps(summary)),
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert result.sparse_model_asset_id is None
+    assert result.statistics is None
+
+
+def test_equal_output_aliases_are_accepted() -> None:
+    summary = _summary_with_output(output_asset_id="working/reconstruction/sparse")
+    result = normalize_sparse_mapping_result(
+        _request(("working/images/001.jpg", "working/images/002.jpg", "working/images/003.jpg")),
+        _stage(stdout=STAGE_SUMMARY_PREFIX + json.dumps(summary)),
+    )
+
+    assert result.status is RunStatus.SUCCEEDED
+    assert result.sparse_model_asset_id == "working/reconstruction/sparse"
+
+
+def test_sparse_mapping_run_enforces_direct_success_invariants() -> None:
+    request = _request()
+    stage = _stage()
+    statistics = RegisteredImageStatistics(3, 2, 1)
+
+    with pytest.raises(SparseMappingError, match="image count"):
+        SparseMappingRun(
+            request,
+            RunStatus.SUCCEEDED,
+            stage,
+            statistics,
+            "working/reconstruction/sparse",
+        )
+    with pytest.raises(SparseMappingError, match="output identity"):
+        SparseMappingRun(
+            request,
+            RunStatus.SUCCEEDED,
+            stage,
+            RegisteredImageStatistics(2, 1, 1),
+            "working/reconstruction/other",
+        )
+    with pytest.raises(SparseMappingError, match="requires a successful stage"):
+        SparseMappingRun(
+            request,
+            RunStatus.SUCCEEDED,
+            _stage(StageStatus.FAILED, exit_code=7),
+            RegisteredImageStatistics(2, 1, 1),
+            "working/reconstruction/sparse",
+        )
+
+
+def test_sparse_mapping_run_rejects_mismatched_direct_stage_contract() -> None:
+    request = _request()
+    with pytest.raises(SparseMappingError, match="unexpected stage ID"):
+        SparseMappingRun(
+            request,
+            RunStatus.SUCCEEDED,
+            _stage(stage_id="other"),
+            RegisteredImageStatistics(2, 1, 1),
+            "working/reconstruction/sparse",
+        )
+
+
+def test_sparse_mapping_run_rejects_direct_failure_or_cancellation_output() -> None:
+    request = _request()
+    statistics = RegisteredImageStatistics(2, 1, 1)
+
+    with pytest.raises(SparseMappingError, match="cannot expose output"):
+        SparseMappingRun(
+            request,
+            RunStatus.FAILED,
+            _stage(StageStatus.FAILED, exit_code=7),
+            statistics,
+            "working/reconstruction/sparse",
+        )
+    with pytest.raises(SparseMappingError, match="cannot expose output"):
+        SparseMappingRun(
+            request,
+            RunStatus.CANCELLED,
+            _stage(StageStatus.CANCELLED, exit_code=None),
+            statistics,
+            "working/reconstruction/sparse",
+        )
+
+
 def test_execute_uses_injected_runner_through_existing_stage_contract() -> None:
     calls: list[tuple[str, tuple[str, ...]]] = []
 
     def runner(stage_id: str, args: tuple[str, ...], **_: object) -> ReconstructionStageResult:
         calls.append((stage_id, args))
-        return _stage(stdout=STAGE_SUMMARY_PREFIX + json.dumps(_summary()))
+        return _stage(stdout=STAGE_SUMMARY_PREFIX + json.dumps(_summary_with_output()))
 
     result = execute_sparse_mapping(
         _request(("working/images/001.jpg", "working/images/002.jpg", "working/images/003.jpg")),

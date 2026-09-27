@@ -287,7 +287,10 @@ def parse_registered_image_statistics(
         return statistics
     if isinstance(ratio_value, bool) or not isinstance(ratio_value, (int, float)):
         raise SparseMappingSummaryError("registration_ratio must be a finite number")
-    ratio = float(ratio_value)
+    try:
+        ratio = float(ratio_value)
+    except (OverflowError, TypeError, ValueError) as error:
+        raise SparseMappingSummaryError("registration_ratio must be a finite number") from error
     if not math.isfinite(ratio) or not math.isclose(
         ratio, statistics.registration_ratio, rel_tol=0.0, abs_tol=1e-12
     ):
@@ -394,6 +397,15 @@ class SparseMappingRun:
     sparse_model_asset_id: str | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.request, SparseMappingRequest):
+            raise SparseMappingError("sparse mapping run requires a SparseMappingRequest")
+        if not isinstance(self.stage_result, ReconstructionStageResult):
+            raise SparseMappingError("sparse mapping run requires a reconstruction stage result")
+        if not isinstance(self.status, RunStatus):
+            raise SparseMappingError("sparse mapping run has an unknown run status")
+        stage_error = _stage_result_contract_error(self.stage_result)
+        if stage_error is not None:
+            raise SparseMappingError(stage_error)
         if self.status is RunStatus.SUCCEEDED:
             if self.stage_result.status is not StageStatus.SUCCEEDED:
                 raise SparseMappingError("successful sparse mapping requires a successful stage")
@@ -401,9 +413,32 @@ class SparseMappingRun:
                 raise SparseMappingError(
                     "successful sparse mapping requires a valid output contract"
                 )
-            _asset_id(self.sparse_model_asset_id, "sparse_model_asset_id")
-        elif self.statistics is not None or self.sparse_model_asset_id is not None:
-            raise SparseMappingError("failed or cancelled sparse mapping cannot expose output")
+            if not isinstance(self.statistics, RegisteredImageStatistics):
+                raise SparseMappingError("successful sparse mapping requires valid statistics")
+            if self.statistics.total_images != len(self.request.image_asset_ids):
+                raise SparseMappingError(
+                    "successful sparse mapping statistics must match the ordered request image count"
+                )
+            try:
+                output_asset_id = _asset_id(self.sparse_model_asset_id, "sparse_model_asset_id")
+            except SparseMappingError as error:
+                raise SparseMappingError(
+                    "successful sparse mapping has an invalid output identity"
+                ) from error
+            if output_asset_id != self.request.configuration.sparse_output_asset_id:
+                raise SparseMappingError(
+                    "successful sparse mapping output identity does not match request"
+                )
+        elif self.status is RunStatus.FAILED:
+            if self.stage_result.status is not StageStatus.FAILED:
+                raise SparseMappingError("failed sparse mapping requires a failed stage")
+            if self.statistics is not None or self.sparse_model_asset_id is not None:
+                raise SparseMappingError("failed or cancelled sparse mapping cannot expose output")
+        elif self.status is RunStatus.CANCELLED:
+            if self.stage_result.status is not StageStatus.CANCELLED:
+                raise SparseMappingError("cancelled sparse mapping requires a cancelled stage")
+            if self.statistics is not None or self.sparse_model_asset_id is not None:
+                raise SparseMappingError("failed or cancelled sparse mapping cannot expose output")
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -416,12 +451,52 @@ class SparseMappingRun:
         }
 
 
+def _stage_result_contract_error(stage_result: ReconstructionStageResult) -> str | None:
+    if stage_result.stage_id != SPARSE_MAPPING_STAGE_ID:
+        return "sparse mapping stage result has an unexpected stage ID"
+    if stage_result.status is StageStatus.SUCCEEDED:
+        if stage_result.cancelled:
+            return "a successful sparse mapping stage cannot be cancelled"
+        if stage_result.exit_code != 0:
+            return "a successful sparse mapping stage requires exit code zero"
+    elif stage_result.status is StageStatus.FAILED:
+        if stage_result.cancelled:
+            return "a failed sparse mapping stage cannot be marked cancelled"
+    elif stage_result.status is StageStatus.CANCELLED:
+        if not stage_result.cancelled:
+            return "a cancelled sparse mapping stage must be marked cancelled"
+    else:
+        return "unknown reconstruction stage status"
+    return None
+
+
+def _summary_output_asset_id(values: Mapping[str, object]) -> str:
+    present = [key for key in ("sparse_model_asset_id", "output_asset_id") if key in values]
+    if not present:
+        raise SparseMappingSummaryError("stage summary is missing sparse output identity")
+    if any(values[key] is None for key in present):
+        raise SparseMappingSummaryError("stage summary has a null sparse output identity")
+    if len(present) == 2 and values[present[0]] != values[present[1]]:
+        raise SparseMappingSummaryError("stage summary has conflicting sparse output identities")
+    value = values[present[0]]
+    if not isinstance(value, str):
+        raise SparseMappingSummaryError(
+            "sparse output identity must be a repository-relative string"
+        )
+    try:
+        return _asset_id(value, "sparse output identity")
+    except SparseMappingError as error:
+        raise SparseMappingSummaryError(
+            "sparse output identity must be a safe repository-relative asset ID"
+        ) from error
+
+
 def _failed_summary_result(
     result: ReconstructionStageResult,
     reason: str,
 ) -> ReconstructionStageResult:
     return ReconstructionStageResult(
-        stage_id=result.stage_id,
+        stage_id=SPARSE_MAPPING_STAGE_ID,
         status=StageStatus.FAILED,
         exit_code=result.exit_code,
         duration_seconds=result.duration_seconds,
@@ -439,12 +514,16 @@ def normalize_sparse_mapping_result(
 ) -> SparseMappingRun:
     """Map a bounded stage result to PackLab run semantics without guessing."""
 
+    if not isinstance(stage_result, ReconstructionStageResult):
+        raise SparseMappingError("stage runner must return ReconstructionStageResult")
+    stage_error = _stage_result_contract_error(stage_result)
+    if stage_error is not None:
+        failed = _failed_summary_result(stage_result, stage_error)
+        return SparseMappingRun(request, RunStatus.FAILED, failed)
     if stage_result.status is StageStatus.CANCELLED:
         return SparseMappingRun(request, RunStatus.CANCELLED, stage_result)
     if stage_result.status is StageStatus.FAILED:
         return SparseMappingRun(request, RunStatus.FAILED, stage_result)
-    if stage_result.status is not StageStatus.SUCCEEDED:
-        raise SparseMappingError("unknown reconstruction stage status")
     try:
         parsed_summary: Mapping[str, object] | str = (
             _summary_from_stdout(stage_result.stdout) if summary is None else summary
@@ -455,11 +534,8 @@ def normalize_sparse_mapping_result(
                 "stage total_images does not match the ordered request image count"
             )
         values = _summary_mapping(parsed_summary)
-        output_value = values.get("sparse_model_asset_id", values.get("output_asset_id"))
-        if (
-            output_value is not None
-            and output_value != request.configuration.sparse_output_asset_id
-        ):
+        output_value = _summary_output_asset_id(values)
+        if output_value != request.configuration.sparse_output_asset_id:
             raise SparseMappingSummaryError("stage output asset does not match request")
     except SparseMappingError as error:
         failed = _failed_summary_result(
@@ -472,7 +548,7 @@ def normalize_sparse_mapping_result(
         RunStatus.SUCCEEDED,
         stage_result,
         statistics,
-        request.configuration.sparse_output_asset_id,
+        output_value,
     )
 
 
