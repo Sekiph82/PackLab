@@ -6,7 +6,7 @@ import os
 import re
 import shutil
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -60,7 +60,7 @@ class EngineProbeResult:
 
 
 VersionParser = Callable[[str], EngineVersion | None]
-VersionRunner = Callable[[Path], tuple[int, str, str]]
+VersionRunner = Callable[[Path, Sequence[str]], tuple[int, str, str]]
 
 _VERSION = re.compile(r"(?<!\d)(\d+)\.(\d+)\.(\d+)(?!\d)")
 
@@ -90,9 +90,21 @@ def parse_openmvs_version(output: str) -> EngineVersion | None:
     return EngineVersion(*(int(group) for group in match.groups()))
 
 
-def _default_runner(executable: Path) -> tuple[int, str, str]:
+@dataclass(frozen=True, slots=True)
+class EngineProbePolicy:
+    """Engine-specific, non-destructive invocation and exit-code contract."""
+
+    arguments: tuple[str, ...]
+    accepted_exit_codes: frozenset[int]
+
+
+COLMAP_PROBE_POLICY = EngineProbePolicy(("help",), frozenset({0}))
+OPENMVS_PROBE_POLICY = EngineProbePolicy(("-h",), frozenset({1}))
+
+
+def _default_runner(executable: Path, arguments: Sequence[str]) -> tuple[int, str, str]:
     completed = subprocess.run(
-        [str(executable), "--version"],
+        [str(executable), *arguments],
         capture_output=True,
         text=True,
         check=False,
@@ -116,40 +128,88 @@ def probe_engine(
     parser: VersionParser,
     *,
     supported_versions: Sequence[str],
+    policy: EngineProbePolicy,
     runner: VersionRunner = _default_runner,
 ) -> EngineProbeResult:
     """Probe one configured executable without installing, downloading or mutating it."""
 
     name = str(engine_id)
     if executable is None or not str(executable).strip():
-        return EngineProbeResult(name, None, EngineProbeStatus.MISSING, None, "no executable configured")
+        return EngineProbeResult(
+            name, None, EngineProbeStatus.MISSING, None, "no executable configured"
+        )
     configured = True
     path = _resolve_executable(executable)
     if path is None:
         return EngineProbeResult(
-            name, str(executable), EngineProbeStatus.MISSING, None, "configured executable was not found", configured=configured
+            name,
+            str(executable),
+            EngineProbeStatus.MISSING,
+            None,
+            "configured executable was not found",
+            configured=configured,
         )
     if not path.is_file() or (os.name != "nt" and not os.access(path, os.X_OK)):
         return EngineProbeResult(
-            name, str(path), EngineProbeStatus.UNEXECUTABLE, None, "configured path is not executable", configured=configured
+            name,
+            str(path),
+            EngineProbeStatus.UNEXECUTABLE,
+            None,
+            "configured path is not executable",
+            configured=configured,
         )
     try:
-        returncode, stdout, stderr = runner(path)
+        returncode, stdout, stderr = runner(path, policy.arguments)
     except (OSError, subprocess.SubprocessError) as error:
         return EngineProbeResult(
-            name, str(path), EngineProbeStatus.UNEXECUTABLE, None, f"version probe failed: {type(error).__name__}", configured=configured
+            name,
+            str(path),
+            EngineProbeStatus.UNEXECUTABLE,
+            None,
+            f"version probe failed: {type(error).__name__}",
+            configured=configured,
         )
     output = (stdout + "\n" + stderr).strip()[:4096]
-    if returncode != 0:
+    if returncode not in policy.accepted_exit_codes:
         return EngineProbeResult(
-            name, str(path), EngineProbeStatus.UNEXECUTABLE, None, f"version probe exited {returncode}", output, configured
+            name,
+            str(path),
+            EngineProbeStatus.UNEXECUTABLE,
+            None,
+            f"version probe exited {returncode}",
+            output,
+            configured,
         )
     version = parser(output)
     if version is None:
-        return EngineProbeResult(name, str(path), EngineProbeStatus.INVALID, None, "version banner was not parseable", output, configured)
+        return EngineProbeResult(
+            name,
+            str(path),
+            EngineProbeStatus.INVALID,
+            None,
+            "version banner was not parseable",
+            output,
+            configured,
+        )
     if version.text not in set(supported_versions):
-        return EngineProbeResult(name, str(path), EngineProbeStatus.UNSUPPORTED, version, "version is outside the selected baseline", output, configured)
-    return EngineProbeResult(name, str(path), EngineProbeStatus.VALID, version, "version matches the selected baseline", output, configured)
+        return EngineProbeResult(
+            name,
+            str(path),
+            EngineProbeStatus.UNSUPPORTED,
+            version,
+            "version is outside the selected baseline",
+            output,
+            configured,
+        )
+    return EngineProbeResult(
+        name,
+        str(path),
+        EngineProbeStatus.VALID,
+        version,
+        "version matches the selected baseline",
+        output,
+        configured,
+    )
 
 
 def probe_colmap(
@@ -162,6 +222,7 @@ def probe_colmap(
         executable,
         parse_colmap_version,
         supported_versions=(COLMAP_BASELINE.version,),
+        policy=COLMAP_PROBE_POLICY,
         runner=runner,
     )
 
@@ -176,5 +237,53 @@ def probe_openmvs(
         executable,
         parse_openmvs_version,
         supported_versions=(OPENMVS_BASELINE.version,),
+        policy=OPENMVS_PROBE_POLICY,
         runner=runner,
     )
+
+
+OPENMVS_COMPONENTS: tuple[str, ...] = (
+    "InterfaceCOLMAP",
+    "DensifyPointCloud",
+    "ReconstructMesh",
+    "RefineMesh",
+    "TextureMesh",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class OpenMVSComponentSuite:
+    """Capability report for every required OpenMVS 2.4.0 application."""
+
+    components: tuple[EngineProbeResult, ...]
+
+    @property
+    def ready(self) -> bool:
+        return all(result.status is EngineProbeStatus.VALID for result in self.components)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "ready": self.ready,
+            "components": [result.as_dict() for result in self.components],
+        }
+
+
+def probe_openmvs_components(
+    executables: Mapping[str, str | Path | None],
+    *,
+    runner: VersionRunner = _default_runner,
+) -> OpenMVSComponentSuite:
+    """Probe the selected OpenMVS applications without launching reconstruction work."""
+
+    results = tuple(
+        probe_engine(
+            f"{EngineId.OPENMVS}.{component}",
+            executables.get(component),
+            parse_openmvs_version,
+            supported_versions=(OPENMVS_BASELINE.version,),
+            policy=OPENMVS_PROBE_POLICY,
+            runner=runner,
+        )
+        for component in OPENMVS_COMPONENTS
+    )
+    return OpenMVSComponentSuite(results)
