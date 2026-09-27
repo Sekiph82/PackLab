@@ -39,6 +39,19 @@ def _with_manifest(**changes: object) -> SparseExportBundle:
     return SparseExportBundle(artifacts)
 
 
+def _with_artifact_text(name: str, old: str, new: str) -> SparseExportBundle:
+    bundle = _bundle()
+    artifacts = tuple(
+        SparseExportArtifact(
+            artifact.name,
+            artifact.content.replace(old, new, 1) if artifact.name == name else artifact.content,
+        )
+        for artifact in bundle.artifacts
+    )
+    assert old in bundle.content(name)
+    return SparseExportBundle(artifacts)
+
+
 def test_valid_bundle_produces_immutable_deterministic_plan() -> None:
     plan = convert_sparse_export_to_openmvs_scene_plan(_bundle())
 
@@ -140,6 +153,103 @@ def test_artifact_content_counts_and_artifact_set_are_explicitly_validated() -> 
 
     with pytest.raises(ValueError):
         SparseExportBundle(bundle.artifacts + (bundle.artifacts[0],))
+
+
+@pytest.mark.parametrize(
+    ("artifact_name", "old", "new"),
+    [
+        (
+            "cameras.txt",
+            "7 PINHOLE 1920 1080 1000 1001 960 540",
+            "7 NOT_A_CAMERA 1920 1080 1000 1001 960 540",
+        ),
+        (
+            "cameras.txt",
+            "7 PINHOLE 1920 1080 1000 1001 960 540",
+            "7 PINHOLE 1920 1080 1000 1001 960",
+        ),
+        (
+            "cameras.txt",
+            "7 PINHOLE 1920 1080 1000 1001 960 540",
+            "7 PINHOLE 0 1080 1000 1001 960 540",
+        ),
+        (
+            "cameras.txt",
+            "7 PINHOLE 1920 1080 1000 1001 960 540",
+            "7 PINHOLE 1920.0 1080 1000 1001 960 540",
+        ),
+        (
+            "cameras.txt",
+            "7 PINHOLE 1920 1080 1000 1001 960 540",
+            "7 PINHOLE 1920 1080 1000 1001 960 nan",
+        ),
+        (
+            "images.txt",
+            "1 1 0 0 0 0 0 1 7 working/images/001.jpg",
+            "1 0 0 0 0 0 0 1 7 working/images/001.jpg",
+        ),
+        (
+            "images.txt",
+            "2 1 0 0 0 0 0 2 7 working/images/002.jpg",
+            "2 1 0 0 0 0 0 2 7 working/images/001.jpg",
+        ),
+        (
+            "images.txt",
+            "1 1 0 0 0 0 0 1 7 working/images/001.jpg",
+            "1 1 0 0 0 0 0 1 7.0 working/images/001.jpg",
+        ),
+        (
+            "images.txt",
+            "1 1 0 0 0 0 0 1 7 working/images/001.jpg",
+            "1 1 0 0 0 0 0 1 7 working/images/001.jpg extra",
+        ),
+        (
+            "images.txt",
+            "10 15 2",
+            "10 15",
+        ),
+        (
+            "images.txt",
+            "1 1 0 0 0 0 0 1 7 working/images/001.jpg",
+            "1 1 nan 0 0 0 0 1 7 working/images/001.jpg",
+        ),
+        (
+            "points3D.txt",
+            "2 1 2 3 255 1 0 0.25 1 0 2 0",
+            "2 1 2 3 255.5 1 0 0.25 1 0 2 0",
+        ),
+        (
+            "points3D.txt",
+            "2 1 2 3 255 1 0 0.25 1 0 2 0",
+            "2 1 2 3 256 1 0 0.25 1 0 2 0",
+        ),
+        (
+            "points3D.txt",
+            "2 1 2 3 255 1 0 0.25 1 0 2 0",
+            "2 1 2 3 255 1 0 -1 1 0 2 0",
+        ),
+        (
+            "points3D.txt",
+            "2 1 2 3 255 1 0 0.25 1 0 2 0",
+            "2 1 2 3 255 1 0 0.25",
+        ),
+        (
+            "points3D.txt",
+            "2 1 2 3 255 1 0 0.25 1 0 2 0",
+            "2 1 2 3 255 1 0 0.25 1.0 0 2 0",
+        ),
+        (
+            "points3D.txt",
+            "2 1 2 3 255 1 0 0.25 1 0 2 0",
+            "2 nan 2 3 255 1 0 0.25 1 0 2 0",
+        ),
+    ],
+)
+def test_malformed_colmap_records_fail_closed_through_public_boundary(
+    artifact_name: str, old: str, new: str
+) -> None:
+    with pytest.raises(InvalidOpenMVSConversionBundle):
+        convert_sparse_export_to_openmvs_scene_plan(_with_artifact_text(artifact_name, old, new))
 
 
 def test_caller_controlled_openmvs_options_are_rejected_and_plan_has_no_cli_fields() -> None:

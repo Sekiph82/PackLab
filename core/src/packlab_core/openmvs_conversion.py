@@ -18,8 +18,10 @@ from types import MappingProxyType
 from typing import Final, cast
 
 from .sparse_export import (
+    _CAMERA_PARAMETER_COUNTS,
     COLMAP_CAMERA_CONVENTION,
     MAX_EXPORT_RECORDS,
+    MAX_REPROJECTION_ERROR,
     SPARSE_EXPORT_CONTRACT,
     SPARSE_EXPORT_MANIFEST_CONTRACT,
     SparseExportArtifactName,
@@ -191,19 +193,45 @@ def _integer_token(value: str, field_name: str) -> int:
     return parsed
 
 
+def _positive_record_integer(value: str, field_name: str) -> int:
+    parsed = _integer_token(value, field_name)
+    if not 0 < parsed <= MAX_EXPORT_RECORDS:
+        raise InvalidOpenMVSConversionBundle(f"{field_name} must be a bounded positive integer")
+    return parsed
+
+
+def _nonnegative_record_integer(value: str, field_name: str) -> int:
+    parsed = _integer_token(value, field_name)
+    if not 0 <= parsed <= MAX_EXPORT_RECORDS:
+        raise InvalidOpenMVSConversionBundle(f"{field_name} must be a bounded non-negative integer")
+    return parsed
+
+
 def _validate_camera_artifact(content: str) -> tuple[int, set[int]]:
     lines = _data_lines(content, "cameras.txt")
     identifiers: set[int] = set()
     for index, line in enumerate(lines):
         tokens = line.split()
-        if len(tokens) < 5:
+        if len(tokens) < 4:
             raise InvalidOpenMVSConversionBundle("cameras.txt contains a malformed record")
-        camera_id = _integer_token(tokens[0], f"cameras.txt[{index}].camera_id")
+        camera_id = _positive_record_integer(tokens[0], f"cameras.txt[{index}].camera_id")
         if camera_id <= 0 or camera_id in identifiers:
             raise InvalidOpenMVSConversionBundle("cameras.txt contains duplicate or unsafe IDs")
         identifiers.add(camera_id)
-        _portable_text(tokens[1], f"cameras.txt[{index}].model")
-        for token_index, token in enumerate(tokens[2:], start=2):
+        model = tokens[1]
+        parameter_count = _CAMERA_PARAMETER_COUNTS.get(model)
+        if parameter_count is None:
+            raise InvalidOpenMVSConversionBundle(
+                f"cameras.txt[{index}].model is not a supported COLMAP model"
+            )
+        _positive_record_integer(tokens[2], f"cameras.txt[{index}].width")
+        _positive_record_integer(tokens[3], f"cameras.txt[{index}].height")
+        if len(tokens) != 4 + parameter_count:
+            raise InvalidOpenMVSConversionBundle(
+                f"cameras.txt[{index}] has the wrong parameter cardinality"
+            )
+        _portable_text(model, f"cameras.txt[{index}].model")
+        for token_index, token in enumerate(tokens[4:], start=4):
             _finite_float(token, f"cameras.txt[{index}].value[{token_index}]")
     return len(lines), identifiers
 
@@ -217,22 +245,30 @@ def _validate_image_artifact(
     identifiers: set[int] = set()
     camera_ids: set[int] = set()
     observations: set[tuple[int, int, int]] = set()
+    image_names: set[str] = set()
     observation_count = 0
     for index in range(0, len(lines), 2):
         image_tokens = lines[index].split()
-        if len(image_tokens) < 10:
+        if len(image_tokens) != 10:
             raise InvalidOpenMVSConversionBundle("images.txt contains a malformed image record")
-        image_id = _integer_token(image_tokens[0], f"images.txt[{index}].image_id")
+        image_id = _positive_record_integer(image_tokens[0], f"images.txt[{index}].image_id")
         if image_id <= 0 or image_id in identifiers:
             raise InvalidOpenMVSConversionBundle("images.txt contains duplicate or unsafe IDs")
         identifiers.add(image_id)
-        for token_index, token in enumerate(image_tokens[1:9], start=1):
-            _finite_float(token, f"images.txt[{index}].pose[{token_index}]")
-        camera_id = _integer_token(image_tokens[8], f"images.txt[{index}].camera_id")
-        if camera_id <= 0:
-            raise InvalidOpenMVSConversionBundle("images.txt contains an unsafe camera ID")
+        qvec = tuple(
+            _finite_float(token, f"images.txt[{index}].qvec[{token_index}]")
+            for token_index, token in enumerate(image_tokens[1:5])
+        )
+        if sum(value * value for value in qvec) <= 0.0:
+            raise InvalidOpenMVSConversionBundle("images.txt contains a zero quaternion")
+        for token_index, token in enumerate(image_tokens[5:8], start=3):
+            _finite_float(token, f"images.txt[{index}].tvec[{token_index}]")
+        camera_id = _positive_record_integer(image_tokens[8], f"images.txt[{index}].camera_id")
         camera_ids.add(camera_id)
-        _safe_relative_asset_id(image_tokens[9], f"images.txt[{index}].name")
+        image_name = _safe_relative_asset_id(image_tokens[9], f"images.txt[{index}].name")
+        if image_name in image_names:
+            raise InvalidOpenMVSConversionBundle("images.txt contains duplicate image names")
+        image_names.add(image_name)
         point_tokens = lines[index + 1].split()
         if len(point_tokens) % 3:
             raise InvalidOpenMVSConversionBundle("images.txt contains malformed 2D observations")
@@ -242,7 +278,7 @@ def _validate_image_artifact(
             point_id = _integer_token(
                 point_tokens[token_index + 2], "images.txt observation.point3d_id"
             )
-            if point_id < -1:
+            if point_id < -1 or point_id > MAX_EXPORT_RECORDS:
                 raise InvalidOpenMVSConversionBundle("images.txt contains an unsafe point ID")
             if point_id != -1:
                 observations.add((point_id, image_id, observation_index))
@@ -259,21 +295,30 @@ def _validate_points_artifact(
     track_count = 0
     for index, line in enumerate(lines):
         tokens = line.split()
-        if len(tokens) < 8 or len(tokens[8:]) % 2:
+        if len(tokens) < 10 or len(tokens[8:]) % 2:
             raise InvalidOpenMVSConversionBundle("points3D.txt contains a malformed record")
-        point_id = _integer_token(tokens[0], f"points3D.txt[{index}].point3d_id")
+        point_id = _positive_record_integer(tokens[0], f"points3D.txt[{index}].point3d_id")
         if point_id <= 0 or point_id in identifiers:
             raise InvalidOpenMVSConversionBundle("points3D.txt contains duplicate or unsafe IDs")
         identifiers.add(point_id)
-        for token_index, token in enumerate(tokens[1:8], start=1):
-            _finite_float(token, f"points3D.txt[{index}].value[{token_index}]")
+        for token_index, token in enumerate(tokens[1:4], start=1):
+            _finite_float(token, f"points3D.txt[{index}].xyz[{token_index}]")
+        for token_index, token in enumerate(tokens[4:7], start=4):
+            rgb = _integer_token(token, f"points3D.txt[{index}].rgb[{token_index - 4}]")
+            if not 0 <= rgb <= 255:
+                raise InvalidOpenMVSConversionBundle(
+                    f"points3D.txt[{index}].rgb must be an integer from 0 to 255"
+                )
+        error = _finite_float(tokens[7], f"points3D.txt[{index}].error")
+        if not 0.0 <= error <= MAX_REPROJECTION_ERROR:
+            raise InvalidOpenMVSConversionBundle(
+                f"points3D.txt[{index}].error is outside the supported bounds"
+            )
         for token_index in range(8, len(tokens), 2):
-            image_id = _integer_token(tokens[token_index], "points3D.txt track.image_id")
-            point2d_index = _integer_token(
+            image_id = _positive_record_integer(tokens[token_index], "points3D.txt track.image_id")
+            point2d_index = _nonnegative_record_integer(
                 tokens[token_index + 1], "points3D.txt track.point2d_index"
             )
-            if image_id <= 0 or point2d_index < 0:
-                raise InvalidOpenMVSConversionBundle("points3D.txt contains an unsafe track")
             track = (point_id, image_id, point2d_index)
             if track in tracks:
                 raise InvalidOpenMVSConversionBundle("points3D.txt contains duplicate tracks")
