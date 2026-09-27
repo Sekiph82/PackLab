@@ -159,6 +159,24 @@ the public boundary.
 
 **Origin:** `M07-C001 / PL-0168_CHATGPT_AUDIT_V01.md`.
 
+### AL-PL-0014 - Normalized stage results must validate identity and conversion boundaries
+
+**Applies to:** reconstruction-stage adapters, machine-readable summaries, and
+normalized backend result contracts.
+
+**Finding:** A typed stage-result object can still carry contradictory runtime
+flags or the wrong stage identity, and numeric conversion can raise a raw
+language exception before a PackLab-owned fail-closed boundary handles it.
+Optional output aliases can also hide missing or conflicting output identity.
+
+**Required behavior:** validate stage identity and status/cancellation/exit
+consistency before success; translate numeric conversion failures into owned
+diagnostics; require one unambiguous output identity; enforce the same
+invariants in both the normalizer and the public result type; and test malformed
+injected results directly.
+
+**Origin:** `M07-C001 / PL-0170_CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
