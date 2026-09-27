@@ -59,6 +59,44 @@ def test_serialization_and_digest_are_order_independent() -> None:
     assert json.loads(first.serialize())["contract"] == "packlab.feature-extraction.v1"
 
 
+def test_equivalent_threshold_aliases_are_order_independent() -> None:
+    first = FeatureExtractionConfig.from_overrides(
+        {"peak_threshold": 0.006, "contrast_threshold": 0.006}
+    )
+    second = FeatureExtractionConfig.from_overrides(
+        {"contrast_threshold": 0.006, "peak_threshold": 0.006}
+    )
+
+    assert first.contrast_peak_threshold == 0.006
+    assert first.serialize() == second.serialize()
+    assert first.configuration_digest() == second.configuration_digest()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"peak_threshold": 0.006, "contrast_threshold": 0.007},
+        {"contrast_threshold": 0.007, "peak_threshold": 0.006},
+        {"contrast_peak_threshold": 0.006, "peak_threshold": 0.007},
+        {"peak_threshold": 0.007, "contrast_peak_threshold": 0.006},
+    ],
+)
+def test_conflicting_threshold_aliases_fail_closed(overrides: dict[str, object]) -> None:
+    with pytest.raises(FeatureExtractionConfigError, match="conflicting override values"):
+        FeatureExtractionConfig.from_overrides(overrides)
+
+
+def test_equal_canonical_and_alias_thresholds_do_not_mutate_source_or_preset() -> None:
+    source = {"contrast_peak_threshold": 0.006, "contrast_threshold": 0.006}
+    original = dict(source)
+
+    updated = FeatureExtractionConfig.from_overrides(source)
+
+    assert source == original
+    assert updated.contrast_peak_threshold == 0.006
+    assert PACKAGED_CONSUMER_GOODS_PRESET.contrast_peak_threshold == 0.004
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

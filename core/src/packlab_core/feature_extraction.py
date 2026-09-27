@@ -222,6 +222,7 @@ class FeatureExtractionConfig:
         if not isinstance(overrides, Mapping):
             raise FeatureExtractionConfigError("overrides must be a mapping")
         values: dict[str, object] = {}
+        normalized_inputs: dict[str, list[tuple[str, object]]] = {}
         for key, value in overrides.items():
             if not isinstance(key, str):
                 raise FeatureExtractionConfigError("override keys must be strings")
@@ -237,7 +238,15 @@ class FeatureExtractionConfig:
                 "peak_threshold": "contrast_peak_threshold",
                 "contrast_threshold": "contrast_peak_threshold",
             }.get(key, key)
-            values[canonical_key] = value
+            normalized_inputs.setdefault(canonical_key, []).append((key, value))
+        for canonical_key, entries in normalized_inputs.items():
+            _, first_value = entries[0]
+            if any(value != first_value for _, value in entries[1:]):
+                conflicting_keys = ", ".join(key for key, _ in entries)
+                raise FeatureExtractionConfigError(
+                    f"conflicting override values for {canonical_key}: {conflicting_keys}"
+                )
+            values[canonical_key] = first_value
         return replace(self, **cast(dict[str, Any], values))
 
     def to_dict_without_notes(self) -> dict[str, object]:
