@@ -149,6 +149,35 @@ class ProjectManager:
             raise ProjectError("workspace is outside the project reconstruction area")
         return ReconstructionWorkspaceManager(self.layout).materialize_working_set(workspace)
 
+    def import_reconstruction_camera_priors(
+        self,
+        workspace,
+        *,
+        use="initialization-only",
+        per_image_use=None,
+    ):
+        """Consume PackScan camera priors through the project-owned workspace authority."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        from packlab_core.reconstruction import CameraPriorUse
+
+        from .reconstruction_workspace import ReconstructionWorkspaceManager
+
+        if workspace.project_id != self.metadata.project_id:
+            raise ProjectError("workspace belongs to another project")
+        if workspace.path.parent != self.layout.path("working", "reconstruction"):
+            raise ProjectError("workspace is outside the project reconstruction area")
+        try:
+            prior_use = CameraPriorUse(use)
+        except ValueError as error:
+            raise ProjectError("camera prior use mode is invalid") from error
+        return ReconstructionWorkspaceManager(self.layout).import_camera_priors(
+            workspace,
+            use=prior_use,
+            per_image_use=per_image_use,
+        )
+
     def new_project(self, root: str | Path, name: str) -> ProjectMetadata:
         self._ensure_close_allowed()
         target = Path(root)

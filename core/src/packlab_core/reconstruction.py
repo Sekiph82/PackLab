@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import threading
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
+
+PACKSCAN_CAMERA_CONVENTION = (
+    "packscan_right_handed_x_right_y_up_z_out_of_screen_camera_forward_neg_z_v3"
+)
+PACKSCAN_INTRINSICS_CONVENTION = "row_major_3x3_homogeneous"
+PACKSCAN_PIXEL_ORIGIN = "top_left_pixel_center"
+PACKSCAN_POSE_CONVENTION = "camera_to_world_row_major_4x4_column_vectors_v1"
+CAMERA_PRIOR_POLICY_VERSION = "packlab_camera_prior_policy_v1"
 
 
 class ReconstructionBackendId(StrEnum):
@@ -77,6 +86,22 @@ class CameraPrior:
     pose: tuple[float, ...] | None = None
     use: CameraPriorUse = CameraPriorUse.INITIALIZATION_ONLY
     reason: str = ""
+    source_image_asset_id: str | None = None
+    source_digest: str | None = None
+    source_revision: str | None = None
+    source: str | None = None
+    pose_source: str | None = None
+    lens_identity: str | None = None
+    dimensions_unit: str | None = None
+    intrinsics_unit: str | None = None
+    intrinsics_convention: str | None = None
+    pixel_coordinate_origin: str | None = None
+    camera_convention: str | None = None
+    pose_convention: str | None = None
+    pose_unit: str | None = None
+    policy_version: str | None = None
+    distortion_model: str | None = None
+    distortion_coefficients: tuple[float, ...] | None = None
 
     @classmethod
     def missing(cls, image_asset_id: str, reason: str = "camera prior unavailable") -> CameraPrior:
@@ -84,24 +109,80 @@ class CameraPrior:
 
     @property
     def valid(self) -> bool:
-        return (
-            bool(self.image_asset_id)
-            and (self.width is None or self.width > 0)
-            and (self.height is None or self.height > 0)
-            and (self.intrinsics is None or all(value > 0 for value in self.intrinsics))
-            and (self.pose is None or len(self.pose) in {7, 12, 16})
-            and self.use is not CameraPriorUse.REJECTED
-        )
+        try:
+            _relative_asset_id(self.image_asset_id)
+        except ValueError:
+            return False
+        if self.width is not None and self.width <= 0:
+            return False
+        if self.height is not None and self.height <= 0:
+            return False
+        if self.intrinsics is not None:
+            if len(self.intrinsics) != 9 or not all(math.isfinite(value) for value in self.intrinsics):
+                return False
+            if self.intrinsics[0] <= 0 or self.intrinsics[4] <= 0 or self.intrinsics[8] != 1:
+                return False
+        if self.pose is not None:
+            if len(self.pose) not in {7, 12, 16} or not all(math.isfinite(value) for value in self.pose):
+                return False
+            if len(self.pose) == 16 and self.pose[15] != 1:
+                return False
+        if self.source_image_asset_id is not None:
+            try:
+                _relative_asset_id(self.source_image_asset_id)
+            except ValueError:
+                return False
+        if self.source_digest is not None and not re.fullmatch(r"[0-9a-f]{64}", self.source_digest):
+            return False
+        if self.source_revision is not None and not self.source_revision:
+            return False
+        if self.dimensions_unit is not None and self.dimensions_unit != "px":
+            return False
+        if self.intrinsics_unit is not None and self.intrinsics_unit != "px":
+            return False
+        if self.intrinsics_convention is not None and self.intrinsics_convention != PACKSCAN_INTRINSICS_CONVENTION:
+            return False
+        if self.pixel_coordinate_origin is not None and self.pixel_coordinate_origin != PACKSCAN_PIXEL_ORIGIN:
+            return False
+        if self.camera_convention is not None and self.camera_convention != PACKSCAN_CAMERA_CONVENTION:
+            return False
+        if self.pose_convention is not None and self.pose_convention != PACKSCAN_POSE_CONVENTION:
+            return False
+        if self.pose_unit is not None and self.pose_unit != "metres":
+            return False
+        if self.policy_version is not None and self.policy_version != CAMERA_PRIOR_POLICY_VERSION:
+            return False
+        if self.distortion_coefficients is not None and not all(
+            math.isfinite(value) for value in self.distortion_coefficients
+        ):
+            return False
+        return self.use is not CameraPriorUse.REJECTED
 
     def rejected(self, reason: str) -> CameraPrior:
         return CameraPrior(
-            self.image_asset_id,
-            self.width,
-            self.height,
-            self.intrinsics,
-            self.pose,
-            CameraPriorUse.REJECTED,
-            reason,
+            image_asset_id=self.image_asset_id,
+            width=self.width,
+            height=self.height,
+            intrinsics=self.intrinsics,
+            pose=self.pose,
+            use=CameraPriorUse.REJECTED,
+            reason=reason,
+            source_image_asset_id=self.source_image_asset_id,
+            source_digest=self.source_digest,
+            source_revision=self.source_revision,
+            source=self.source,
+            pose_source=self.pose_source,
+            lens_identity=self.lens_identity,
+            dimensions_unit=self.dimensions_unit,
+            intrinsics_unit=self.intrinsics_unit,
+            intrinsics_convention=self.intrinsics_convention,
+            pixel_coordinate_origin=self.pixel_coordinate_origin,
+            camera_convention=self.camera_convention,
+            pose_convention=self.pose_convention,
+            pose_unit=self.pose_unit,
+            policy_version=self.policy_version,
+            distortion_model=self.distortion_model,
+            distortion_coefficients=self.distortion_coefficients,
         )
 
     def as_dict(self) -> dict[str, object]:
@@ -113,6 +194,26 @@ class CameraPrior:
             "pose": None if self.pose is None else list(self.pose),
             "use": self.use.value,
             "reason": self.reason,
+            "source_image_asset_id": self.source_image_asset_id,
+            "source_digest": self.source_digest,
+            "source_revision": self.source_revision,
+            "source": self.source,
+            "pose_source": self.pose_source,
+            "lens_identity": self.lens_identity,
+            "dimensions_unit": self.dimensions_unit,
+            "intrinsics_unit": self.intrinsics_unit,
+            "intrinsics_convention": self.intrinsics_convention,
+            "pixel_coordinate_origin": self.pixel_coordinate_origin,
+            "camera_convention": self.camera_convention,
+            "pose_convention": self.pose_convention,
+            "pose_unit": self.pose_unit,
+            "policy_version": self.policy_version,
+            "distortion_model": self.distortion_model,
+            "distortion_coefficients": (
+                None
+                if self.distortion_coefficients is None
+                else list(self.distortion_coefficients)
+            ),
         }
 
 
@@ -160,11 +261,20 @@ def assess_camera_priors(
     )
     resolved: list[CameraPrior] = []
     warnings: list[str] = []
+    for image in supplied:
+        if image not in inputs.image_asset_ids:
+            warnings.append(f"unexpected camera prior rejected: {image}")
     for image in inputs.image_asset_ids:
         prior = supplied.get(image)
         if prior is None:
             resolved.append(CameraPrior.missing(image))
             warnings.append(f"missing camera prior: {image}")
+        elif prior.source_revision is not None and prior.source_revision != inputs.source_revision:
+            resolved.append(prior.rejected("camera prior working-set revision does not match inputs"))
+            warnings.append(f"camera prior revision mismatch rejected: {image}")
+        elif prior.source_digest is not None and prior.source_digest != inputs.source_digest:
+            resolved.append(prior.rejected("camera prior source digest does not match inputs"))
+            warnings.append(f"camera prior source digest mismatch rejected: {image}")
         elif not prior.valid:
             resolved.append(prior.rejected("camera prior invalid; backend must solve without it"))
             warnings.append(f"invalid camera prior rejected: {image}")
