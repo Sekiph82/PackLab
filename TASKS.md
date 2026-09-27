@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M07
 - Current Sprint: M07-C001 — COLMAP SfM input preparation
-- Current Task: M07-C001 — Build a tunable reconstruction preset system rather than hardcoding CLI flags (PL-0173)
+- Current Task: M07-C001 — Implement COLMAP-to-OpenMVS scene conversion (PL-0174)
 - Current Task Status: READY
-- Next Task/Action: Execute PL-0173 V01 at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0173_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0173_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve PL-0172, do not start PL-0174 or later tasks, and return AWAITING_AUDIT.
+- Next Task/Action: Execute PL-0174 V01 at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0174_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0174_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve PL-0173 as AUDITED_PASS, do not start PL-0175 or later tasks, and return AWAITING_AUDIT.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -25,6 +25,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest PL-0170 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0170_CHATGPT_AUDIT_V02.md — AUDITED_PASS; V02 independently closed the numeric-overflow, stage-result consistency, sparse-output identity, direct-result invariant, and boundary-test findings.
 - Latest PL-0171 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0171_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the deterministic sparse-diagnostic policy, result classifications, threshold boundaries, fail-closed behavior, safe report serialization, and scope were independently accepted.
 - Latest PL-0172 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0172_CHATGPT_AUDIT_V02.md — AUDITED_PASS; V02 closed the missing cancelled-run public-boundary coverage without changing the accepted exporter implementation.
+- Latest PL-0173 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0173_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the immutable backend-neutral reconstruction preset boundary, deterministic provenance, rejection paths, regression suite, and scope were independently accepted.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -335,7 +336,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0170** Implement sparse mapper stage and capture registered-image statistics. **AUDITED_PASS:** V02 independently verified the fail-closed numeric-summary, stage-result, sparse-output identity, direct-result invariant, regression, and publication boundaries.
 - [x] **PL-0171** Detect failed/fragmented sparse models and produce actionable diagnostics. **AUDITED_PASS:** V01 independently accepted the deterministic policy, failed/cancelled/empty/fragmented/complete classifications, inclusive threshold boundaries, fail-closed result checks, safe report serialization, regression evidence, and scope.
 - [x] **PL-0172** Export sparse model/cameras in formats needed by OpenMVS and debugging. **AUDITED_PASS:** V02 closed the missing cancelled-run public-boundary coverage without changing the accepted exporter implementation.
-- [ ] **PL-0173** Build a tunable reconstruction preset system rather than hardcoding CLI flags.
+- [x] **PL-0173** Build a tunable reconstruction preset system rather than hardcoding CLI flags. **AUDITED_PASS:** V01 independently accepted the immutable backend-neutral preset composition, deterministic serialization/digest, fail-closed override and provenance boundaries, regression evidence, and scope.
 
 ## Sprint M07-S03 - OpenMVS dense reconstruction
 
