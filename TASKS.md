@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M07
 - Current Sprint: M07-C001 — COLMAP SfM input preparation
-- Current Task: M07-C001 — Implement matcher selection for ordered orbit datasets (PL-0169)
+- Current Task: M07-C001 — Implement sparse mapper stage and capture registered-image statistics (PL-0170)
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0169_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0169_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve the backend-neutral boundary, select a deterministic ordered-orbit strategy, and do not start PL-0170 or later tasks.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0170_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0170_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve immutable PackScan authority, use the existing bounded stage seam, capture deterministic registered-image statistics, and do not start PL-0171 or later tasks.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -21,6 +21,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest PL-0166 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0166_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the revision-scoped byte-preserving working-set seam is independently accepted.
 - Latest PL-0167 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0167_CHATGPT_AUDIT_V02.md — AUDITED_PASS; V02 closed the generic prior-binding and permanent duplicate-metadata ambiguity findings.
 - Latest PL-0168 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0168_CHATGPT_AUDIT_V02.md — AUDITED_PASS; V02 independently verified deterministic alias normalization, conflict rejection, regression behavior, scope, and publication evidence.
+- Latest PL-0169 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0169_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the ordered guided-orbit matcher-selection boundary, turntable separation, deterministic provenance, regression evidence, and scope were independently accepted.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -327,7 +328,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0166** Implement photo preprocessing into a reconstruction-safe working set while preserving originals; keep full-image evidence available for camera solving and never overwrite PackScan source images.
 - [x] **PL-0167** Import/use valid PackScan camera intrinsics and capture pose priors under explicit fixed/initialization/refinement rules; reject inconsistent priors rather than silently treating ARKit/capture metadata as metrology truth. **AUDITED_PASS:** V02 closed the generic source/revision binding and permanent duplicate-metadata ambiguity findings.
 - [x] **PL-0168** Implement feature-extraction configuration optimized first for packaged consumer goods. **AUDITED_PASS:** V02 closed the order-dependent conflicting threshold-alias normalization finding; equivalent mappings now produce deterministic configuration values and digests, and conflicting aliases fail closed.
-- [ ] **PL-0169** Implement matcher selection for ordered orbit datasets.
+- [x] **PL-0169** Implement matcher selection for ordered orbit datasets. **AUDITED_PASS:** V01 independently accepted the ordered guided-orbit boundary, turntable separation, deterministic provenance, regression evidence, and scope.
 - [ ] **PL-0170** Implement sparse mapper stage and capture registered-image statistics.
 - [ ] **PL-0171** Detect failed/fragmented sparse models and produce actionable diagnostics.
 - [ ] **PL-0172** Export sparse model/cameras in formats needed by OpenMVS and debugging.
