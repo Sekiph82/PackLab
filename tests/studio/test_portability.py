@@ -59,6 +59,54 @@ def test_derived_cache_is_regenerable_and_path_traversal_is_unsafe(tmp_path) -> 
     assert not report.portable
 
 
+def test_real_symlink_escape_is_unsafe_and_owned_symlink_is_portable(tmp_path) -> None:
+    manager, root = _project(tmp_path)
+    outside = tmp_path / "external" / "supplier.obj"
+    outside.parent.mkdir()
+    outside.write_bytes(b"external-source")
+    raw = root / "raw" / "capture.packscan"
+    raw.write_bytes(b"raw-source")
+    owned = root / "working" / "owned.obj"
+    owned.write_bytes(b"owned-project-data")
+    escape_link = root / "working" / "escape.obj"
+    owned_link = root / "working" / "owned-link.obj"
+    try:
+        escape_link.symlink_to(outside)
+        owned_link.symlink_to(owned)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"actual filesystem symlink creation unavailable: {error}")
+    before = (raw.read_bytes(), outside.read_bytes())
+    (root / "working" / "state.json").write_text(
+        json.dumps(
+            {
+                "asset_references": [
+                    {"path": "working/escape.obj", "required": True},
+                    {"path": "working/owned-link.obj", "required": True},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = manager.portability_report()
+    assert report.classifications(PortabilityClassification.UNSAFE_LINK)
+    assert report.classifications(PortabilityClassification.PORTABLE_PROJECT_OWNED)
+    assert str(root) not in json.dumps(report.to_dict())
+    assert (raw.read_bytes(), outside.read_bytes()) == before
+
+
+def test_safe_project_owned_reference_remains_portable(tmp_path) -> None:
+    manager, root = _project(tmp_path)
+    owned = root / "working" / "owned.obj"
+    owned.write_bytes(b"owned-project-data")
+    (root / "working" / "state.json").write_text(
+        json.dumps({"asset_references": [{"path": "working/owned.obj", "required": True}]}),
+        encoding="utf-8",
+    )
+    report = manager.portability_report()
+    assert report.portable
+    assert report.classifications(PortabilityClassification.PORTABLE_PROJECT_OWNED)
+
+
 def test_project_manager_portability_entry_point_requires_open_project(tmp_path) -> None:
     manager = ProjectManager()
     with pytest.raises(ProjectError, match="no project"):

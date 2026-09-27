@@ -1,31 +1,80 @@
 {
   "candidates": [
     {
-      "evidence": [
-        {
-          "count": 1000,
-          "image_bytes": 1228800,
-          "proxy": "QPainter/QImage software raster",
-          "render_seconds": 0.000712
+      "description": "QImage/QPainter immediate software raster",
+      "evidence": {
+        "dependency_footprint": {
+          "additional_packages": 0,
+          "runtime": "existing locked PySide6; no new package"
         },
-        {
-          "count": 10000,
-          "image_bytes": 1228800,
-          "proxy": "QPainter/QImage software raster",
-          "render_seconds": 0.004253
-        },
-        {
-          "count": 50000,
-          "image_bytes": 1228800,
-          "proxy": "QPainter/QImage software raster",
-          "render_seconds": 0.019844
-        }
-      ],
+        "workloads": [
+          {
+            "geometry_setup_seconds": 2e-06,
+            "geometry_type": "point-cloud",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 0.001645,
+            "memory_peak_bytes": 1175564,
+            "primitive_count": 250,
+            "render_seconds": 0.059229,
+            "startup_seconds": 5e-06
+          },
+          {
+            "geometry_setup_seconds": 3e-06,
+            "geometry_type": "point-cloud",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 0.00823,
+            "memory_peak_bytes": 1465990,
+            "primitive_count": 1000,
+            "render_seconds": 0.0025,
+            "startup_seconds": 5e-06
+          },
+          {
+            "geometry_setup_seconds": 2e-06,
+            "geometry_type": "point-cloud",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 0.019942,
+            "memory_peak_bytes": 2041432,
+            "primitive_count": 2500,
+            "render_seconds": 0.005856,
+            "startup_seconds": 5e-06
+          },
+          {
+            "geometry_setup_seconds": 4e-06,
+            "geometry_type": "mesh",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 1e-05,
+            "memory_peak_bytes": 1276201,
+            "primitive_count": 250,
+            "render_seconds": 0.00437,
+            "startup_seconds": 5e-06
+          },
+          {
+            "geometry_setup_seconds": 4e-06,
+            "geometry_type": "mesh",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 9e-06,
+            "memory_peak_bytes": 1519441,
+            "primitive_count": 1000,
+            "render_seconds": 0.013973,
+            "startup_seconds": 5e-06
+          },
+          {
+            "geometry_setup_seconds": 3e-06,
+            "geometry_type": "mesh",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 1.1e-05,
+            "memory_peak_bytes": 2131555,
+            "primitive_count": 2500,
+            "render_seconds": 0.035948,
+            "startup_seconds": 5e-06
+          }
+        ]
+      },
       "future_cad": "backend-independent adapter can coexist with later CAD seam",
       "headless": true,
       "id": "qt-raster-qimage",
       "license": "Qt for Python LGPLv3/GPLv3 or commercial route; existing locked dependency",
-      "mesh_point_cloud": "software projected mesh and point cloud primitives",
+      "mesh_point_cloud": "measured point-cloud and triangle workloads",
       "picking": "PackLab scene-model picking boundary",
       "python_pyside6_compatible": true,
       "selected": true,
@@ -34,32 +83,112 @@
       "wireframe_normals": "PackLab display representation"
     },
     {
-      "evidence": "context probe only; no physical GPU performance claim",
-      "future_cad": "possible but increases native/GPU coupling",
+      "description": "QGraphicsScene/QGraphicsItem software scene raster",
+      "evidence": {
+        "dependency_footprint": {
+          "additional_packages": 0,
+          "runtime": "existing locked PySide6; no new package"
+        },
+        "workloads": [
+          {
+            "geometry_setup_seconds": 0.001669,
+            "geometry_type": "point-cloud",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 7.1e-05,
+            "memory_peak_bytes": 1290658,
+            "primitive_count": 250,
+            "render_seconds": 0.00371,
+            "startup_seconds": 0.000233
+          },
+          {
+            "geometry_setup_seconds": 0.006326,
+            "geometry_type": "point-cloud",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 8.2e-05,
+            "memory_peak_bytes": 1441812,
+            "primitive_count": 1000,
+            "render_seconds": 0.013634,
+            "startup_seconds": 0.000233
+          },
+          {
+            "geometry_setup_seconds": 0.016507,
+            "geometry_type": "point-cloud",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 9.9e-05,
+            "memory_peak_bytes": 1774022,
+            "primitive_count": 2500,
+            "render_seconds": 0.032714,
+            "startup_seconds": 0.000233
+          },
+          {
+            "geometry_setup_seconds": 0.00348,
+            "geometry_type": "mesh",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 6.4e-05,
+            "memory_peak_bytes": 1310088,
+            "primitive_count": 250,
+            "render_seconds": 0.003665,
+            "startup_seconds": 0.000233
+          },
+          {
+            "geometry_setup_seconds": 0.012586,
+            "geometry_type": "mesh",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 7.6e-05,
+            "memory_peak_bytes": 1643274,
+            "primitive_count": 1000,
+            "render_seconds": 0.011443,
+            "startup_seconds": 0.000233
+          },
+          {
+            "geometry_setup_seconds": 0.035254,
+            "geometry_type": "mesh",
+            "image_bytes": 1228800,
+            "interaction_proxy_seconds": 9.9e-05,
+            "memory_peak_bytes": 2435452,
+            "primitive_count": 2500,
+            "render_seconds": 0.030145,
+            "startup_seconds": 0.000233
+          }
+        ]
+      },
+      "future_cad": "backend-independent adapter can coexist with later CAD seam",
+      "headless": true,
+      "id": "qt-graphics-scene",
+      "license": "Qt for Python LGPLv3/GPLv3 or commercial route; existing locked dependency",
+      "mesh_point_cloud": "measured point-cloud and triangle workloads",
+      "picking": "PackLab scene-model picking boundary",
+      "python_pyside6_compatible": true,
+      "selected": false,
+      "version": "6.11.2",
+      "windows_support": true,
+      "wireframe_normals": "PackLab display representation"
+    },
+    {
+      "description": "Qt OpenGL offscreen capability probe",
+      "evidence": "unavailable geometry workload; no fabricated metrics",
       "headless": {
         "available": false,
         "context_created": false,
+        "geometry_workload": "unavailable",
         "limitation": "offscreen context availability is not a physical GPU benchmark",
         "native_gpu_claim": false
       },
       "id": "qt-opengl-offscreen",
       "license": "same existing Qt for Python route; no new dependency selected",
-      "mesh_point_cloud": "native OpenGL primitives when context is available",
-      "picking": "requires additional GPU/render-picking implementation",
       "python_pyside6_compatible": true,
       "selected": false,
       "version": "6.11.2",
-      "windows_support": true,
-      "wireframe_normals": "requires shader/state implementation"
+      "windows_support": true
     }
   ],
   "decision": {
     "limitations": [
-      "QPainter/QImage evidence is a software/offscreen proxy, not a physical GPU benchmark.",
-      "Large-scene performance requires the later display-budget/LOD policy."
+      "Both measured candidates are software/offscreen proxies, not physical GPU benchmarks.",
+      "The OpenGL candidate did not execute geometry on this host and has no fabricated timing or memory metrics."
     ],
     "native_gpu_measured": false,
-    "rationale": "It is deterministic and executable in the repository's offscreen/headless test environment without claiming native GPU performance or adding a dependency.",
+    "rationale": "Both executable software candidates render point and triangle workloads. QImage/QPainter remains selected for deterministic lower-coupling headless evidence; QGraphicsScene is a credible second software path, while OpenGL remains an unavailable capability probe on this host.",
     "selected_backend": "qt-raster-qimage"
   },
   "runtime": {
@@ -68,5 +197,17 @@
     "python": "3.12.10",
     "qt": "6.11.2"
   },
-  "schema_version": "1.0"
+  "schema_version": "2.0",
+  "workload_counts": {
+    "mesh_triangles": [
+      250,
+      1000,
+      2500
+    ],
+    "point_cloud": [
+      250,
+      1000,
+      2500
+    ]
+  }
 }

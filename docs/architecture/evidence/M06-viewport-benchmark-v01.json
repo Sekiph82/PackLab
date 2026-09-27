@@ -1,7 +1,7 @@
 {
   "limitations": [
     "Measurements are local software/offscreen proxies, not physical GPU throughput.",
-    "Synthetic point counts are repository-safe and do not represent a calibrated scan."
+    "Synthetic point and triangle counts are repository-safe and do not represent a calibrated scan."
   ],
   "policy": {
     "decimation": "deterministic-stride",
@@ -10,9 +10,14 @@
   "results": [
     {
       "display_count": 1000,
-      "display_seconds": 1.4e-05,
+      "display_primitive_count": 1000,
+      "display_seconds": 1.5e-05,
+      "geometry_setup_seconds": 2.1e-05,
+      "geometry_type": "point-cloud",
       "image_bytes": 307200,
-      "initialize_seconds": 0.00459,
+      "initialization_seconds": 2.1e-05,
+      "initialize_seconds": 2.1e-05,
+      "interaction_proxy_seconds": 7.4e-05,
       "lod": {
         "budget": 10000,
         "decimation": "none",
@@ -21,15 +26,48 @@
         "source_count": 1000,
         "stride": 1
       },
-      "peak_tracemalloc_bytes": 82584,
-      "render_seconds": 0.019946,
-      "source_count": 1000
+      "memory_peak_bytes": 82164,
+      "peak_tracemalloc_bytes": 82164,
+      "render_seconds": 0.018146,
+      "source_count": 1000,
+      "source_geometry_unchanged": true,
+      "source_primitive_count": 1000
+    },
+    {
+      "display_count": 1000,
+      "display_primitive_count": 1000,
+      "display_seconds": 1.6e-05,
+      "geometry_setup_seconds": 2.2e-05,
+      "geometry_type": "mesh",
+      "image_bytes": 307200,
+      "initialization_seconds": 2.2e-05,
+      "initialize_seconds": 2.2e-05,
+      "interaction_proxy_seconds": 0.000102,
+      "lod": {
+        "budget": 10000,
+        "decimation": "none",
+        "display_count": 1000,
+        "level": "full",
+        "source_count": 1000,
+        "stride": 1
+      },
+      "memory_peak_bytes": 489404,
+      "peak_tracemalloc_bytes": 489404,
+      "render_seconds": 0.067565,
+      "source_count": 1000,
+      "source_geometry_unchanged": true,
+      "source_primitive_count": 1000
     },
     {
       "display_count": 10000,
-      "display_seconds": 1.9e-05,
+      "display_primitive_count": 10000,
+      "display_seconds": 2e-05,
+      "geometry_setup_seconds": 3.3e-05,
+      "geometry_type": "point-cloud",
       "image_bytes": 307200,
-      "initialize_seconds": 0.028454,
+      "initialization_seconds": 3.3e-05,
+      "initialize_seconds": 3.3e-05,
+      "interaction_proxy_seconds": 0.000221,
       "lod": {
         "budget": 10000,
         "decimation": "none",
@@ -38,15 +76,48 @@
         "source_count": 10000,
         "stride": 1
       },
-      "peak_tracemalloc_bytes": 1476992,
-      "render_seconds": 0.16777,
-      "source_count": 10000
+      "memory_peak_bytes": 1788668,
+      "peak_tracemalloc_bytes": 1788668,
+      "render_seconds": 0.471201,
+      "source_count": 10000,
+      "source_geometry_unchanged": true,
+      "source_primitive_count": 10000
     },
     {
       "display_count": 10000,
-      "display_seconds": 0.000124,
+      "display_primitive_count": 10000,
+      "display_seconds": 5.3e-05,
+      "geometry_setup_seconds": 7.9e-05,
+      "geometry_type": "mesh",
       "image_bytes": 307200,
-      "initialize_seconds": 0.136185,
+      "initialization_seconds": 7.9e-05,
+      "initialize_seconds": 7.9e-05,
+      "interaction_proxy_seconds": 0.000227,
+      "lod": {
+        "budget": 10000,
+        "decimation": "none",
+        "display_count": 10000,
+        "level": "full",
+        "source_count": 10000,
+        "stride": 1
+      },
+      "memory_peak_bytes": 6122316,
+      "peak_tracemalloc_bytes": 6122316,
+      "render_seconds": 1.913097,
+      "source_count": 10000,
+      "source_geometry_unchanged": true,
+      "source_primitive_count": 10000
+    },
+    {
+      "display_count": 10000,
+      "display_primitive_count": 10000,
+      "display_seconds": 0.000265,
+      "geometry_setup_seconds": 8.8e-05,
+      "geometry_type": "point-cloud",
+      "image_bytes": 307200,
+      "initialization_seconds": 8.8e-05,
+      "initialize_seconds": 8.8e-05,
+      "interaction_proxy_seconds": 0.000198,
       "lod": {
         "budget": 10000,
         "decimation": "deterministic-stride",
@@ -55,9 +126,37 @@
         "source_count": 50000,
         "stride": 5
       },
-      "peak_tracemalloc_bytes": 8601008,
-      "render_seconds": 0.173036,
-      "source_count": 50000
+      "memory_peak_bytes": 12027348,
+      "peak_tracemalloc_bytes": 12027348,
+      "render_seconds": 0.51682,
+      "source_count": 50000,
+      "source_geometry_unchanged": true,
+      "source_primitive_count": 50000
+    },
+    {
+      "display_count": 10000,
+      "display_primitive_count": 10000,
+      "display_seconds": 0.141633,
+      "geometry_setup_seconds": 7.5e-05,
+      "geometry_type": "mesh",
+      "image_bytes": 307200,
+      "initialization_seconds": 7.5e-05,
+      "initialize_seconds": 7.5e-05,
+      "interaction_proxy_seconds": 0.000296,
+      "lod": {
+        "budget": 10000,
+        "decimation": "deterministic-stride",
+        "display_count": 10000,
+        "level": "budgeted",
+        "source_count": 50000,
+        "stride": 5
+      },
+      "memory_peak_bytes": 34446032,
+      "peak_tracemalloc_bytes": 34446032,
+      "render_seconds": 1.941667,
+      "source_count": 50000,
+      "source_geometry_unchanged": true,
+      "source_primitive_count": 50000
     }
   ],
   "runtime": {
@@ -68,5 +167,17 @@
     "python": "3.12.10",
     "qt": "6.11.2"
   },
-  "schema_version": "1.0"
+  "schema_version": "1.0",
+  "workload_counts": {
+    "mesh_triangles": [
+      1000,
+      10000,
+      50000
+    ],
+    "point_cloud": [
+      1000,
+      10000,
+      50000
+    ]
+  }
 }

@@ -42,5 +42,14 @@ def test_benchmark_result_schema_records_lod_and_truthful_gpu_limit() -> None:
     result = run_benchmark((8, 20))
     assert result["runtime"]["native_gpu_claim"] is False
     assert result["policy"]["display_budget"] == 10_000
-    assert [item["source_count"] for item in result["results"]] == [8, 20]
-    assert all("render_seconds" in item and "lod" in item for item in result["results"])
+    assert {item["geometry_type"] for item in result["results"]} == {"point-cloud", "mesh"}
+    assert [item["source_count"] for item in result["results"] if item["geometry_type"] == "point-cloud"] == [8, 20]
+    assert [item["source_count"] for item in result["results"] if item["geometry_type"] == "mesh"] == [8, 20]
+    assert all(
+        "render_seconds" in item
+        and "interaction_proxy_seconds" in item
+        and "lod" in item
+        and "source_geometry_unchanged" in item
+        and item["source_geometry_unchanged"] is True
+        for item in result["results"]
+    )

@@ -24,10 +24,12 @@ representation.
 QT_QPA_PLATFORM=offscreen uv run --locked python tools/viewport_benchmark.py --output docs/architecture/evidence/M06-viewport-benchmark-v01.json
 ```
 
-The committed evidence uses deterministic synthetic point clouds of 1,000,
-10,000, and 50,000 points with a 10,000-point display budget. It records
-initialization, display-representation, render-proxy, image-size, and
-`tracemalloc` peak observations plus Python/Qt/platform/backend metadata.
+The committed evidence uses deterministic synthetic point clouds and triangle
+meshes of 1,000, 10,000, and 50,000 source primitives with a 10,000-point or
+triangle display budget. Each case records geometry type, source/display
+primitive counts, initialization/setup, display-representation, render and
+interaction proxies, image size, source non-mutation, and `tracemalloc` peak
+observations plus Python/Qt/platform/backend metadata.
 
 The measurements are local software/offscreen proxies. They do not establish
 physical GPU throughput, native-driver performance, or calibrated scan
