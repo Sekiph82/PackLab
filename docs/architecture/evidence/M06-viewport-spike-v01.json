@@ -1,0 +1,72 @@
+{
+  "candidates": [
+    {
+      "evidence": [
+        {
+          "count": 1000,
+          "image_bytes": 1228800,
+          "proxy": "QPainter/QImage software raster",
+          "render_seconds": 0.000712
+        },
+        {
+          "count": 10000,
+          "image_bytes": 1228800,
+          "proxy": "QPainter/QImage software raster",
+          "render_seconds": 0.004253
+        },
+        {
+          "count": 50000,
+          "image_bytes": 1228800,
+          "proxy": "QPainter/QImage software raster",
+          "render_seconds": 0.019844
+        }
+      ],
+      "future_cad": "backend-independent adapter can coexist with later CAD seam",
+      "headless": true,
+      "id": "qt-raster-qimage",
+      "license": "Qt for Python LGPLv3/GPLv3 or commercial route; existing locked dependency",
+      "mesh_point_cloud": "software projected mesh and point cloud primitives",
+      "picking": "PackLab scene-model picking boundary",
+      "python_pyside6_compatible": true,
+      "selected": true,
+      "version": "6.11.2",
+      "windows_support": true,
+      "wireframe_normals": "PackLab display representation"
+    },
+    {
+      "evidence": "context probe only; no physical GPU performance claim",
+      "future_cad": "possible but increases native/GPU coupling",
+      "headless": {
+        "available": false,
+        "context_created": false,
+        "limitation": "offscreen context availability is not a physical GPU benchmark",
+        "native_gpu_claim": false
+      },
+      "id": "qt-opengl-offscreen",
+      "license": "same existing Qt for Python route; no new dependency selected",
+      "mesh_point_cloud": "native OpenGL primitives when context is available",
+      "picking": "requires additional GPU/render-picking implementation",
+      "python_pyside6_compatible": true,
+      "selected": false,
+      "version": "6.11.2",
+      "windows_support": true,
+      "wireframe_normals": "requires shader/state implementation"
+    }
+  ],
+  "decision": {
+    "limitations": [
+      "QPainter/QImage evidence is a software/offscreen proxy, not a physical GPU benchmark.",
+      "Large-scene performance requires the later display-budget/LOD policy."
+    ],
+    "native_gpu_measured": false,
+    "rationale": "It is deterministic and executable in the repository's offscreen/headless test environment without claiming native GPU performance or adding a dependency.",
+    "selected_backend": "qt-raster-qimage"
+  },
+  "runtime": {
+    "headless_platform": "offscreen",
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "qt": "6.11.2"
+  },
+  "schema_version": "1.0"
+}
