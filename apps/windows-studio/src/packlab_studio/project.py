@@ -114,6 +114,28 @@ class ProjectManager:
             raise ProjectError("portability scanner returned an invalid report")
         return report
 
+    def create_reconstruction_workspace(
+        self,
+        source_asset_id: str,
+        source_digest: str,
+        *,
+        revision_id: str | None = None,
+    ):
+        """Create an isolated reconstruction revision through the project authority."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        from .reconstruction_workspace import ReconstructionWorkspaceManager
+
+        manager = ReconstructionWorkspaceManager(self.layout)
+        return manager.create(
+            project_id=self.metadata.project_id,
+            project_revision=self.metadata.revision,
+            source_asset_id=source_asset_id,
+            source_digest=source_digest,
+            revision_id=revision_id,
+        )
+
     def new_project(self, root: str | Path, name: str) -> ProjectMetadata:
         self._ensure_close_allowed()
         target = Path(root)
