@@ -143,6 +143,22 @@ duplicate candidates, including odd duplicate counts.
 
 **Origin:** `M07-C001 / PL-0167_CHATGPT_AUDIT_V02.md` and PL-0168 frontier authorization.
 
+### AL-PL-0013 - Canonical override aliases must not make provenance order-dependent
+
+**Applies to:** M07 feature-extraction configuration and any future normalized
+PackLab configuration boundary.
+
+**Finding:** When multiple public aliases normalize to one canonical field,
+last-write-wins handling can make equal mappings produce different normalized
+values and configuration digests based only on insertion order.
+
+**Required behavior:** normalize aliases before assignment; reject conflicting
+aliases or apply an explicit order-independent rule; test equal mappings in
+opposite insertion orders and conflicting canonical/alias combinations through
+the public boundary.
+
+**Origin:** `M07-C001 / PL-0168_CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
