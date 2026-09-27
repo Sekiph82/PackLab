@@ -1,0 +1,72 @@
+{
+  "limitations": [
+    "Measurements are local software/offscreen proxies, not physical GPU throughput.",
+    "Synthetic point counts are repository-safe and do not represent a calibrated scan."
+  ],
+  "policy": {
+    "decimation": "deterministic-stride",
+    "display_budget": 10000
+  },
+  "results": [
+    {
+      "display_count": 1000,
+      "display_seconds": 1.4e-05,
+      "image_bytes": 307200,
+      "initialize_seconds": 0.00459,
+      "lod": {
+        "budget": 10000,
+        "decimation": "none",
+        "display_count": 1000,
+        "level": "full",
+        "source_count": 1000,
+        "stride": 1
+      },
+      "peak_tracemalloc_bytes": 82584,
+      "render_seconds": 0.019946,
+      "source_count": 1000
+    },
+    {
+      "display_count": 10000,
+      "display_seconds": 1.9e-05,
+      "image_bytes": 307200,
+      "initialize_seconds": 0.028454,
+      "lod": {
+        "budget": 10000,
+        "decimation": "none",
+        "display_count": 10000,
+        "level": "full",
+        "source_count": 10000,
+        "stride": 1
+      },
+      "peak_tracemalloc_bytes": 1476992,
+      "render_seconds": 0.16777,
+      "source_count": 10000
+    },
+    {
+      "display_count": 10000,
+      "display_seconds": 0.000124,
+      "image_bytes": 307200,
+      "initialize_seconds": 0.136185,
+      "lod": {
+        "budget": 10000,
+        "decimation": "deterministic-stride",
+        "display_count": 10000,
+        "level": "budgeted",
+        "source_count": 50000,
+        "stride": 5
+      },
+      "peak_tracemalloc_bytes": 8601008,
+      "render_seconds": 0.173036,
+      "source_count": 50000
+    }
+  ],
+  "runtime": {
+    "backend": "qt-raster-qimage",
+    "headless_platform": "offscreen",
+    "native_gpu_claim": false,
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.10",
+    "qt": "6.11.2"
+  },
+  "schema_version": "1.0"
+}

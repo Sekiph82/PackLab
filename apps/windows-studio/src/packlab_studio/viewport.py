@@ -602,6 +602,21 @@ class ViewportService:
             return "temporary-derived"
         return "unavailable"
 
+    def lod_plan(self, object_id: str, policy=None):
+        from .viewport_lod import LODPolicy, geometry_count
+
+        selected_policy = policy or LODPolicy()
+        return selected_policy.plan(geometry_count(self.scene.get(object_id).geometry))  # type: ignore[arg-type]
+
+    def display_geometry(self, object_id: str, policy=None):
+        from .viewport_lod import LODPolicy, display_geometry
+
+        selected_policy = policy or LODPolicy()
+        item = self.scene.get(object_id)
+        if item.geometry is None:
+            raise ValueError("scene object has no geometry")
+        return display_geometry(item.geometry, selected_policy)
+
     def scene_snapshot(self) -> dict[str, object]:
         """Stable object-tree/inspector seam; widgets do not own scene truth."""
 
