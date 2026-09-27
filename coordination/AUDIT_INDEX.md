@@ -177,6 +177,16 @@ injected results directly.
 
 **Origin:** `M07-C001 / PL-0170_CHATGPT_AUDIT_V01.md`.
 
+### AL-PL-0015 - Conversion seams must validate producer artifact semantics
+
+**Applies to:** sparse-export conversion boundaries and later reconstruction-stage adapters.
+
+**Finding:** An immutable artifact wrapper can validate names and UTF-8 while still carrying malformed producer text. Counts and cross-file IDs alone do not establish valid COLMAP records; unsupported camera models, invalid dimensions, zero poses, duplicate image names, RGB violations, and empty tracks can cross a conversion seam unless the consumer validates the producer contract.
+
+**Required behavior:** validate the actual producer artifact grammar and semantic bounds at the public conversion boundary, add negative tests through that boundary, and do not treat a green aggregate suite as sufficient when malformed artifacts are untested.
+
+**Origin:** `M07-C001 / PL-0174_CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
