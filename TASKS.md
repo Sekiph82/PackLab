@@ -7,8 +7,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Current Milestone: M07
 - Current Sprint: M07-C001 — COLMAP SfM input preparation
 - Current Task: M07-C001 — Export sparse model/cameras in formats needed by OpenMVS and debugging (PL-0172)
-- Current Task Status: READY
-- Next Task/Action: Execute PL-0172 V01 at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0172_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0172_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve the independently accepted PL-0171 diagnostic boundary and do not start PL-0173 or later tasks.
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute the bounded PL-0172 V02 test-only remediation at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0172_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0172_CHATGPT_AUDIT_CRITERIA_V02.md. Add explicit cancelled-run export rejection coverage, preserve the accepted V01 implementation, and do not start PL-0173 or later tasks.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -24,6 +24,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest PL-0169 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0169_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the ordered guided-orbit matcher-selection boundary, turntable separation, deterministic provenance, regression evidence, and scope were independently accepted.
 - Latest PL-0170 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0170_CHATGPT_AUDIT_V02.md — AUDITED_PASS; V02 independently closed the numeric-overflow, stage-result consistency, sparse-output identity, direct-result invariant, and boundary-test findings.
 - Latest PL-0171 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0171_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the deterministic sparse-diagnostic policy, result classifications, threshold boundaries, fail-closed behavior, safe report serialization, and scope were independently accepted.
+- Latest PL-0172 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0172_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; V01 implementation is bounded and validation-green, but the mandatory public-boundary tests lack explicit cancelled-run export coverage. V02 is test/evidence-only.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
