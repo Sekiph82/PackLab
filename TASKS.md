@@ -4,16 +4,18 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M06
-- Current Sprint: M06-R02 — M06 final remediation
-- Current Task: M06-R02 — Remediate PL-0150, PL-0151 and PL-0157
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_CRITERIA_V01.md. Remediate only PL-0150, PL-0151 and PL-0157. Preserve accepted PL-0152 through PL-0156 and PL-0135 through PL-0149, keep PL-0068 OWNER_REQUIRED, and do not start M07 until independent R02 audit passes.
+- Current Milestone: M07
+- Current Sprint: M07-C001 — Reconstruction engine foundation and backend contract
+- Current Task: M07-C001 — Execute PL-0158 through PL-0165
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Mandatory pre-read: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/OPENREALITY_INTEGRATION_ARCHITECTURE.md and https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0003-object-centric-reconstruction-authority.md. Execute exactly PL-0158 through PL-0165; do not start PL-0166 until independent batch audit passes.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CHATGPT_AUDIT_V01.md — AUDITED_PASS (16/16 M05 children accepted)
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
-- Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0152 through PL-0156; PL-0150, PL-0151 and PL-0157 remain open.
+- Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
+- Latest M06 R02 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; M06 complete.
+- OpenReality Architecture Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0003-object-centric-reconstruction-authority.md — accepted. Master integration architecture: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/OPENREALITY_INTEGRATION_ARCHITECTURE.md.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -46,9 +48,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 | M03 | iOS Capture Foundation | SwiftUI/NextLevel/ARKit app runs on iPhone 16 | [x] |
 | M04 | Guided Capture & Quality Intelligence | Reliable, guided, high-resolution packaging capture | [x] |
 | M05 | Transfer & Ingest | .packscan moves safely from iPhone to Windows | [x] |
-| M06 | PackLab Studio Foundation | PySide6 desktop shell and project lifecycle | [ ] |
-| M07 | Photogrammetry Reconstruction | COLMAP -> OpenMVS textured scan pipeline | [ ] |
-| M08 | Segmentation, Masks & Reconstruction QA | Object-only reconstruction with quality diagnostics | [ ] |
+| M06 | PackLab Studio Foundation | PySide6 desktop shell and project lifecycle | [x] |
+| M07 | Reconstruction Backends & Photogrammetry | Backend-neutral reconstruction contract with COLMAP -> OpenMVS as the V1 production lane | [ ] |
+| M08 | Segmentation, Object Extraction & Reconstruction QA | Versioned masks, visibility-aware object-only captured geometry and quality diagnostics | [ ] |
 | M09 | Scale, Calibration & Measurement | Real-size geometry with measurable accuracy | [ ] |
 | M10 | Mesh Processing & Scan Master | Clean, aligned, optimized reference scan assets | [ ] |
 | M11 | Parametric Geometry Engine V1 | Editable bottles, jars, caps and cylindrical packaging | [ ] |
@@ -288,21 +290,21 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0147** Implement non-destructive operation history for user edits.
 - [x] **PL-0148** Implement project recovery after interrupted processing.
 - [x] **PL-0149** Add derived-artifact invalidation when upstream inputs change.
-- [ ] **PL-0150** Add project portability check that identifies missing external assets.
+- [x] **PL-0150** Add project portability check that identifies missing external assets.
 
 ## Sprint M06-S03 - 3D viewport
 
-- [ ] **PL-0151** Select and document the PySide6-compatible 3D viewport approach after a focused performance spike.
+- [x] **PL-0151** Select and document the PySide6-compatible 3D viewport approach after a focused performance spike.
 - [x] **PL-0152** Implement mesh/point-cloud loading and camera orbit/pan/zoom.
 - [x] **PL-0153** Implement world grid, axes and millimetre scale cues.
 - [x] **PL-0154** Implement object selection and visibility toggles for Scan Mesh, Design Model, cap, label and reference geometry.
 - [x] **PL-0155** Implement wireframe/normals/point-cloud debug modes.
 - [x] **PL-0156** Implement screenshot/export preview for audit evidence.
-- [ ] **PL-0157** Add large-mesh performance benchmark and viewport LOD strategy.
+- [x] **PL-0157** Add large-mesh performance benchmark and viewport LOD strategy.
 
 ---
 
-# M07 - Photogrammetry Reconstruction
+# M07 - Reconstruction Backends & Photogrammetry
 
 ## Sprint M07-S01 - Engine installation and adapters
 
@@ -310,15 +312,15 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0159** Define tested OpenMVS version, Windows build/binary source and AGPL license record.
 - [ ] **PL-0160** Implement COLMAP capability probe and version parser.
 - [ ] **PL-0161** Implement OpenMVS capability probe and version parser.
-- [ ] **PL-0162** Implement engine executable discovery/configuration with explicit paths and diagnostics.
-- [ ] **PL-0163** Create normalized reconstruction job model independent of specific engine command syntax.
+- [ ] **PL-0162** Implement reconstruction-engine discovery/configuration with explicit paths and diagnostics; preserve a backend-neutral capability boundary so future model runtimes cannot leak into Studio/domain code.
+- [ ] **PL-0163** Create the normalized PackLab `ReconstructionBackend` job/output contract independent of specific engine/model syntax; V1 composes COLMAP/OpenMVS while future neural engines remain replaceable. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0163_RECONSTRUCTION_BACKEND_CONTRACT.md
 - [ ] **PL-0164** Implement per-stage stdout/stderr capture and machine-readable stage result records.
 - [ ] **PL-0165** Add reconstruction workspace isolation so retries cannot corrupt the source scan.
 
 ## Sprint M07-S02 - COLMAP SfM
 
-- [ ] **PL-0166** Implement photo preprocessing into a COLMAP-safe working set while preserving originals.
-- [ ] **PL-0167** Import/use known camera intrinsics when valid and allow COLMAP refinement under controlled rules.
+- [ ] **PL-0166** Implement photo preprocessing into a reconstruction-safe working set while preserving originals; keep full-image evidence available for camera solving and never overwrite PackScan source images.
+- [ ] **PL-0167** Import/use valid PackScan camera intrinsics and capture pose priors under explicit fixed/initialization/refinement rules; reject inconsistent priors rather than silently treating ARKit/capture metadata as metrology truth.
 - [ ] **PL-0168** Implement feature-extraction configuration optimized first for packaged consumer goods.
 - [ ] **PL-0169** Implement matcher selection for ordered orbit datasets.
 - [ ] **PL-0170** Implement sparse mapper stage and capture registered-image statistics.
@@ -341,17 +343,17 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ---
 
-# M08 - Segmentation, Masks & Reconstruction QA
+# M08 - Segmentation, Object Extraction & Reconstruction QA
 
 ## Sprint M08-S01 - Object segmentation
 
-- [ ] **PL-0184** Define segmentation-backend interface so the model can be replaced without rewriting the pipeline.
+- [ ] **PL-0184** Define PackLab `SegmentationBackend` and versioned `MaskArtifact` contracts so the model can be replaced without rewriting object extraction. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0184_SEGMENTATION_BACKEND_CONTRACT.md
 - [ ] **PL-0185** Benchmark candidate local segmentation model(s) against bottle, jerrycan, cap and transparent/glossy examples.
 - [ ] **PL-0186** Implement selected PyTorch segmentation backend.
 - [ ] **PL-0187** Implement mask post-processing: hole filling, edge cleanup and small-component removal.
 - [ ] **PL-0188** Add manual mask-correction UI for difficult frames.
-- [ ] **PL-0189** Version masks separately from immutable source photos.
-- [ ] **PL-0190** Feed masks into COLMAP/OpenMVS where supported and validate coordinate conventions.
+- [ ] **PL-0189** Version masks separately from immutable source photos and make mask revision changes invalidate downstream object-capture geometry.
+- [ ] **PL-0190** Feed masks into reconstruction stages where supported **and** implement visibility-aware mask-to-3D lifting with multiview consensus to create `OBJECT_CAPTURE_GEOMETRY`; validate camera/image coordinate conventions. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0190_OBJECT_MASK_LIFT_MULTIVIEW_FUSION.md
 - [ ] **PL-0191** Add mask-quality overlays and contact-sheet review.
 
 ## Sprint M08-S02 - Photo/reconstruction QA
@@ -361,10 +363,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0194** Detect inconsistent focal/lens usage and warn before reconstruction.
 - [ ] **PL-0195** Calculate registered-photo ratio after COLMAP.
 - [ ] **PL-0196** Calculate sparse-cloud connectivity/fragmentation indicators.
-- [ ] **PL-0197** Calculate dense-cloud density and surface-coverage indicators.
+- [ ] **PL-0197** Calculate dense/object-cloud density and surface-coverage indicators, including multiview support statistics for `OBJECT_CAPTURE_GEOMETRY`.
 - [ ] **PL-0198** Detect obvious reconstruction artifacts and floating components.
 - [ ] **PL-0199** Produce overall reconstruction confidence with component scores, not a black-box number.
-- [ ] **PL-0200** Gate downstream parametric fitting when scan quality is below minimum acceptance thresholds.
+- [ ] **PL-0200** Gate downstream parametric fitting when captured-geometry quality is below minimum acceptance thresholds; `AI_VISUAL_REFERENCE` can never satisfy this gate.
 - [ ] **PL-0201** Suggest targeted recapture sectors instead of demanding a complete rescan when possible.
 
 ---
@@ -380,7 +382,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0206** Implement automatic upright alignment with manual correction.
 - [ ] **PL-0207** Implement front-direction selection and persist it as project metadata.
 - [ ] **PL-0208** Apply scale/alignment as non-destructive transform before baking a normalized scan.
-- [ ] **PL-0209** Record scale provenance and uncertainty.
+- [ ] **PL-0209** Record scale provenance, uncertainty and explicit RELATIVE/METRIC_UNVERIFIED/METRIC_VERIFIED state. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0209_METRIC_SCALE_PROVENANCE.md
 
 ## Sprint M09-S02 - Measurement tools
 
@@ -417,7 +419,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0230** Implement optional hole filling with non-destructive before/after versions.
 - [ ] **PL-0231** Implement decimation for viewport/proxy meshes while preserving the Scan Master.
 - [ ] **PL-0232** Compute geometric statistics needed by later fitting stages.
-- [ ] **PL-0233** Create Scan Master asset with provenance pointing back to reconstruction settings.
+- [ ] **PL-0233** Create Scan Master asset with captured-evidence-only ancestry and provenance back to PackScan, reconstruction, masks, scale and cleanup settings; generated AI geometry is ineligible. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0233_SCAN_MASTER_AUTHORITY.md
 
 ## Sprint M10-S02 - Scan comparison and revisions
 
@@ -425,7 +427,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0235** Implement distance heatmap between scan and fitted Design Model.
 - [ ] **PL-0236** Implement cross-section comparison overlay.
 - [ ] **PL-0237** Record reconstruction versions and allow switching between them.
-- [ ] **PL-0238** Add Promote to Scan Master action with audit metadata.
+- [ ] **PL-0238** Add Promote to Scan Master action with audit metadata and a hard authority gate rejecting generated/AI-visual-reference assets.
 - [ ] **PL-0239** Prevent downstream Design Model from silently changing when reconstruction is rerun.
 - [ ] **PL-0240** Add Scan Master export as PLY/OBJ/GLB plus original texture assets.
 
@@ -739,6 +741,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0433** Add supplier-comparison report for alternative packages.
 - [ ] **PL-0434** Add automated packaging technical-dossier export after V1 data model is stable.
 
+## Sprint M19-S04 - Experimental reconstruction and AI visual reference
+
+- [ ] **PL-0435** Add an optional AI Visual Reference lane for generated object completion/visualization with hard isolation from measurement and Scan Master authority. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0435_AI_VISUAL_REFERENCE_LANE.md
+- [ ] **PL-0436** Prototype a commercially license-cleared neural reconstruction backend behind the PL-0163 contract; original non-commercial VGGT checkpoints are forbidden for commercial PackLab use. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0436_COMMERCIAL_NEURAL_RECONSTRUCTION_RESEARCH.md
+- [ ] **PL-0437** Run a controlled COLMAP/OpenMVS vs neural-backend benchmark on packaging classes with physical ground truth before any production-default change. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0437_RECONSTRUCTION_BACKEND_BENCHMARK.md
+
 ---
 
 # Execution Rules
@@ -758,3 +766,4 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 13. Owner-authorized milestone batches are permitted only when the Project Status block explicitly names the batch and points to a frozen master prompt/criteria. Each child PL task must retain separate prompt, criteria, implementation/evidence boundary and Codex log.
 14. During an authorized milestone batch Codex may continue sequential child tasks without interim ChatGPT audit only while each child is validation-green and no STOP condition exists. Codex never marks child tasks complete, never edits this tracker, and must stop before the next milestone.
 15. ChatGPT independently audits every batch child and only then writes the milestone audit and updates this tracker to the audited truth.
+16. A task line containing `Mandatory pre-read` creates a binding implementation contract: Codex/Claude must read that linked file in full before material work, and the frozen prompt/audit criteria must preserve its architecture, authority, licensing, provenance and test requirements.
