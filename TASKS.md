@@ -5,12 +5,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M06
-- Current Sprint: M06-BATCH-001 — PackLab Studio Foundation
-- Current Task: M06-BATCH-001 — Execute PL-0135 through PL-0157
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Execute exactly PL-0135 through PL-0157 in frozen order. Preserve accepted M03–M05 behavior and M05 ingest/raw authority, keep PL-0068 OWNER_REQUIRED, do not start M07, publish distinct implementation/log commits per child, then publish MASTER_CODEX_LOG_V01.md ending `AWAITING_MILESTONE_AUDIT`. User-facing repository links must be full GitHub URLs only.
+- Current Sprint: M06-R01 — M06 partial-audit remediation
+- Current Task: M06-R01 — Remediate PL-0138, PL-0140, PL-0141, PL-0144 through PL-0149
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_CRITERIA_V01.md. First reconcile and publish the three pre-existing local-only M06 log commits non-destructively, then remediate the exact findings from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md. Do not start PL-0150 until independent remediation re-audit returns AUDITED_PASS.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M05-C001/MASTER_VALIDATION_GATE_CHATGPT_AUDIT_V01.md — AUDITED_PASS (16/16 M05 children accepted)
+- Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -267,18 +268,18 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M06-S01 - PySide6 shell
 
-- [ ] **PL-0135** Create PackLab Studio PySide6 application shell.
-- [ ] **PL-0136** Implement main navigation: Library, Capture Inbox, Reconstruction, Editor and Settings.
-- [ ] **PL-0137** Create dockable/logical workspace layout suitable for 3D/CAD work.
+- [x] **PL-0135** Create PackLab Studio PySide6 application shell.
+- [x] **PL-0136** Implement main navigation: Library, Capture Inbox, Reconstruction, Editor and Settings.
+- [x] **PL-0137** Create dockable/logical workspace layout suitable for 3D/CAD work.
 - [ ] **PL-0138** Implement persistent window/workspace preferences.
-- [ ] **PL-0139** Add global job/activity panel for long-running reconstruction work.
+- [x] **PL-0139** Add global job/activity panel for long-running reconstruction work.
 - [ ] **PL-0140** Add cancellation and safe shutdown behavior for active subprocesses.
 - [ ] **PL-0141** Add crash report/log bundle creation.
-- [ ] **PL-0142** Add application update/version information screen without requiring an online service.
+- [x] **PL-0142** Add application update/version information screen without requiring an online service.
 
 ## Sprint M06-S02 - Project lifecycle
 
-- [ ] **PL-0143** Define PackLab project directory layout separating raw, working, derived and export data.
+- [x] **PL-0143** Define PackLab project directory layout separating raw, working, derived and export data.
 - [ ] **PL-0144** Implement New/Open/Close project lifecycle.
 - [ ] **PL-0145** Implement project metadata and revision identifiers.
 - [ ] **PL-0146** Implement autosave for editable project state.
