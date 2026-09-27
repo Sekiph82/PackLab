@@ -1,0 +1,21 @@
+# M07 reconstruction engine baseline
+
+This record is implementation evidence, not distribution approval or legal advice.
+
+## PL-0158 — COLMAP
+
+| Field | Selected baseline |
+| --- | --- |
+| Engine | COLMAP |
+| Version | `3.12.6` |
+| Source | https://github.com/colmap/colmap |
+| Release tag | https://github.com/colmap/colmap/tree/3.12.6 |
+| Source revision | `4d5b60e19ad268072adaf1267d21fa38a9a828ca` |
+| Windows source/build route | Official release Windows binaries or reproducible source build through vcpkg; PackLab does not bundle or download it |
+| License evidence | https://colmap.github.io/license.html |
+| License record | New BSD / 3-clause BSD for COLMAP itself; third-party dependencies and resulting binary obligations require separate review |
+| Binary SHA-256 | Not available because no COLMAP executable is installed on the builder host |
+| PackLab integration | External executable discovered through explicit configuration or safe PATH lookup |
+| Validation boundary | Exact source identity is recorded and deterministic parser fixtures validate the expected version string; this is not a claim of native engine execution on this host |
+
+The selected record makes no unsupported redistribution or license-clearance claim. The baseline is a reproducible source/build identity for later owner-controlled installation and packaging review.
