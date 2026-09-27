@@ -8,6 +8,8 @@ from PySide6.QtCore import QSize
 from packlab_studio.viewport import (
     MeshGeometry,
     PointCloudGeometry,
+    SceneObject,
+    SceneObjectId,
     SceneObjectKind,
     ViewportErrorCode,
     ViewportLoadError,
@@ -106,3 +108,32 @@ def test_grid_and_scale_visibility_round_trip_through_production_state() -> None
     assert not restored.state.grid_visible
     assert not restored.state.axes_visible
     assert not restored.state.scale_cues_visible
+
+
+def test_scene_model_has_stable_objects_selection_and_visibility_rules() -> None:
+    service = ViewportService()
+    service.add_geometry(
+        SceneObjectId.SCAN_MESH.value,
+        SceneObjectKind.SCAN_MESH,
+        PointCloudGeometry(((0.0, 0.0, 0.0),)),
+    )
+    with pytest.raises(ValueError, match="duplicate"):
+        service.scene.add(SceneObject(SceneObjectId.SCAN_MESH.value, SceneObjectKind.SCAN_MESH))
+    assert service.select(SceneObjectId.SCAN_MESH.value)
+    service.set_visible(SceneObjectId.SCAN_MESH.value, False)
+    assert service.state.selected_object_id is None
+    assert not service.select("missing")
+    snapshot = service.scene_snapshot()
+    assert snapshot["objects"][0]["object_id"] == SceneObjectId.SCAN_MESH.value
+    assert snapshot["objects"][0]["visible"] is False
+
+
+def test_scene_visibility_and_selection_restore_is_deterministic() -> None:
+    service = ViewportService()
+    service.add_geometry("cap", SceneObjectKind.CAP, PointCloudGeometry(((1.0, 1.0, 1.0),)))
+    service.select("cap")
+    state = service.state_dict()
+    service.clear_selection()
+    service.restore_state(state)
+    assert service.state.selected_object_id == "cap"
+    assert service.scene_snapshot()["selected_object_id"] == "cap"

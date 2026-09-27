@@ -330,6 +330,14 @@ class SceneObjectKind(StrEnum):
     REFERENCE_GEOMETRY = "reference-geometry"
 
 
+class SceneObjectId(StrEnum):
+    SCAN_MESH = "scan-mesh"
+    DESIGN_MODEL = "design-model"
+    CAP = "cap"
+    LABEL = "label"
+    REFERENCE_GEOMETRY = "reference-geometry"
+
+
 @dataclass(frozen=True, slots=True)
 class SceneObject:
     object_id: str
@@ -337,6 +345,15 @@ class SceneObject:
     geometry: Geometry | None = None
     visible: bool = True
     selectable: bool = True
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "object_id": self.object_id,
+            "kind": self.kind.value,
+            "visible": self.visible,
+            "selectable": self.selectable,
+            "has_geometry": self.geometry is not None,
+        }
 
 
 class SceneModel:
@@ -370,6 +387,9 @@ class SceneModel:
         self._selected = object_id
         return True
 
+    def clear_selection(self) -> None:
+        self._selected = None
+
     def set_visible(self, object_id: str, visible: bool) -> None:
         item = self._objects[object_id]
         self._objects[object_id] = SceneObject(item.object_id, item.kind, item.geometry, visible, item.selectable)
@@ -378,6 +398,12 @@ class SceneModel:
 
     def visible_objects(self) -> tuple[SceneObject, ...]:
         return tuple(item for item in self.objects() if item.visible)
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "objects": [item.to_dict() for item in self.objects()],
+            "selected_object_id": self._selected,
+        }
 
     def bounds(self) -> Bounds:
         points = [point for item in self.visible_objects() if item.geometry is not None for point in _geometry_points(item.geometry)]
@@ -555,9 +581,18 @@ class ViewportService:
         self.state = self._state(selected_object_id=self.scene.selected_object_id)
         return selected
 
+    def clear_selection(self) -> None:
+        self.scene.clear_selection()
+        self.state = self._state(selected_object_id=None)
+
     def set_visible(self, object_id: str, visible: bool) -> None:
         self.scene.set_visible(object_id, visible)
         self.state = self._state(visibility={**self.state.visibility, object_id: visible}, selected_object_id=self.scene.selected_object_id)
+
+    def scene_snapshot(self) -> dict[str, object]:
+        """Stable object-tree/inspector seam; widgets do not own scene truth."""
+
+        return self.scene.snapshot()
 
     def render(self, size: QSize = QSize(960, 640)) -> QImage:
         return self.adapter.render(self.scene, self.state, size)
