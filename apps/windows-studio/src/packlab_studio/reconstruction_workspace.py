@@ -624,6 +624,7 @@ class ReconstructionWorkspaceManager:
         image_paths = tuple(photos_by_image)
         photo_ids = tuple(photos_by_id)
         candidates: dict[tuple[str, str], str] = {}
+        ambiguous: set[tuple[str, str]] = set()
         warnings: list[str] = []
         payloads = report.manifest.get("payloads", ())
         if not isinstance(payloads, list):
@@ -642,9 +643,13 @@ class ReconstructionWorkspaceManager:
                 warnings.append(f"camera metadata payload has no unambiguous image binding: {path}")
                 continue
             key = (kind, photo_id)
+            if key in ambiguous:
+                warnings.append(f"duplicate camera metadata payload rejected: {path}")
+                continue
             if key in candidates:
                 warnings.append(f"duplicate camera metadata payload rejected: {path}")
                 candidates.pop(key)
+                ambiguous.add(key)
                 continue
             candidates[key] = path
         return candidates, warnings

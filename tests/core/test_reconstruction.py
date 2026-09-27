@@ -22,6 +22,7 @@ from packlab_core.reconstruction import (
     RunStatus,
     ScaleState,
     StageStatus,
+    assess_camera_priors,
 )
 
 
@@ -103,6 +104,23 @@ def test_invalid_prior_is_rejected_explicitly() -> None:
     assessment = spec.assess_camera_priors()
     assert assessment.priors[0].use is CameraPriorUse.REJECTED
     assert "invalid" in assessment.warnings[0]
+
+
+def test_unbound_prior_is_rejected_at_generic_assessment_boundary() -> None:
+    inputs = _inputs()
+    prior = CameraPrior(
+        inputs.image_asset_ids[0],
+        width=1,
+        height=1,
+        intrinsics=(1.0, 0.0, 0.5, 0.0, 1.0, 0.5, 0.0, 0.0, 1.0),
+    )
+    assert prior.valid
+
+    assessment = assess_camera_priors(inputs, (prior,))
+
+    assert assessment.priors[0].use is CameraPriorUse.REJECTED
+    assert "source binding is incomplete" in assessment.priors[0].reason
+    assert "source binding incomplete" in assessment.warnings[0]
 
 
 def test_cancellation_does_not_change_input_identity() -> None:

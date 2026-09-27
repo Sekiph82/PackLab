@@ -106,6 +106,7 @@ def _package(
     include_intrinsics: bool = True,
     intrinsic_bytes: bytes | None = None,
     pose_bytes: bytes | None = None,
+    extra_intrinsics: tuple[tuple[str, bytes], ...] = (),
 ) -> Path:
     manifest = json.loads(
         (repo_root / "tests" / "fixtures" / "packscan" / "manifest-valid.json").read_text(
@@ -126,6 +127,7 @@ def _package(
         payloads["metadata/intrinsics/photo-0002.json"] = _intrinsics(
             dimensions=dimensions, reference=reference, policy=policy
         )
+        payloads.update(dict(extra_intrinsics))
     if pose_bytes is not None:
         payloads["metadata/poses/photo-0001.json"] = pose_bytes
     manifest["payloads"] = [
@@ -252,6 +254,25 @@ def test_missing_intrinsics_and_changed_working_bytes_fail_closed(tmp_path: Path
     with pytest.raises(ReconstructionWorkspaceError, match="working-set image bytes changed"):
         manager.import_reconstruction_camera_priors(workspace)
     assert manager.layout.path("raw", "capture.packscan").read_bytes() == raw_before
+
+
+def test_three_same_image_intrinsics_payloads_remain_permanently_ambiguous(
+    tmp_path: Path, repo_root: Path
+) -> None:
+    manager, workspace, _working_set, _raw_before = _prepared(
+        tmp_path,
+        repo_root,
+        extra_intrinsics=(
+            ("metadata/intrinsics/photo-0001.intrinsic.json", _intrinsics()),
+            ("metadata/intrinsics/photo-0001.intrinsics.json", _intrinsics()),
+        ),
+    )
+
+    assessment = manager.import_reconstruction_camera_priors(workspace)
+
+    assert assessment.priors[0].use is CameraPriorUse.REJECTED
+    assert "intrinsics are unavailable" in assessment.priors[0].reason
+    assert sum("duplicate camera metadata payload rejected" in warning for warning in assessment.warnings) == 2
 
 
 def test_prior_revision_and_source_digest_binding_rejects_reuse() -> None:

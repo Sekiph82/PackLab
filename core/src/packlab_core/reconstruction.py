@@ -278,6 +278,13 @@ def assess_camera_priors(
         elif not prior.valid:
             resolved.append(prior.rejected("camera prior invalid; backend must solve without it"))
             warnings.append(f"invalid camera prior rejected: {image}")
+        elif (
+            prior.source_image_asset_id is None
+            or prior.source_digest is None
+            or prior.source_revision is None
+        ):
+            resolved.append(prior.rejected("camera prior source binding is incomplete"))
+            warnings.append(f"camera prior source binding incomplete rejected: {image}")
         else:
             resolved.append(prior)
     return CameraPriorAssessment(tuple(resolved), tuple(warnings))
