@@ -203,6 +203,16 @@ boundary alongside valid edge and composite values.
 
 **Origin:** `M07-C001 / PL-0175_CHATGPT_AUDIT_V01.md`.
 
+### AL-PL-0017 - Runtime flags and numeric conversions must fail closed at public stage boundaries
+
+**Applies to:** reconstruction-stage result normalization and semantic numeric configuration adapters.
+
+**Finding:** Dataclass annotations do not enforce runtime types. Truthiness-based branching can let falsey or truthy non-boolean flags claim valid success/cancellation, and accepted integer numerics can raise raw conversion exceptions before a PackLab-owned validation error is returned.
+
+**Required behavior:** validate runtime boolean flags before status normalization and direct-result invariants; translate unrepresentable numeric conversion failures through the owning error boundary; and test huge values plus falsey/truthy malformed flags through public normalization and direct-construction paths.
+
+**Origin:** `M07-C001 / PL-0176_CHATGPT_AUDIT_V02.md`.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
