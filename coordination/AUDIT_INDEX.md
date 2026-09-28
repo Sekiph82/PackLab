@@ -254,6 +254,14 @@ through a PackLab-owned collision error; never silently discard an input.
 
 **Origin:** `M07-C001 / PL-0179_CHATGPT_AUDIT_V01.md`.
 
+### M07-C002 milestone audit - AUDITED_PASS
+
+PL-0181 through PL-0183 were independently accepted. Orchestration keeps stage order, dependencies and output identities explicit; cancellation normalizes process/stage/run/job/workspace state before terminal publication; derived export uses atomic identity publication and rejects unreviewed cross-format conversion.
+
+### M08-C001 package boundary
+
+The complete 18-child package for PL-0184 through PL-0201 preserves immutable RAW_CAPTURE, explicit mask revisions, camera-convention and visibility gates, OBJECT_CAPTURE_GEOMETRY authority, model-license boundaries, and fail-closed QA/parametric gating.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
