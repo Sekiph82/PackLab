@@ -6,11 +6,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M08
 - Current Sprint: M08-C001 — Segmentation, Object Extraction & Reconstruction QA
-- Current Task: M08-C001 — Execute ordered milestone batch PL-0184 through PL-0201
-- Current Task Status: READY
-- Next Task/Action: Execute the complete M08-C001 batch in order from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve M07 as AUDITED_PASS and PL-0068 as OWNER_REQUIRED, stop at any child failure/blocker or unresolved model/license/native gate, do not start M09, and return AWAITING_MILESTONE_AUDIT.
+- Current Task: M08-C001 — Remediation batch PL-0184 V02 then PL-0185 V02
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute the ordered M08-C001 remediation batch from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMEDIATION_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve the original M08 evidence, stop on any remediation failure/blocker, do not start PL-0186+ or M09, and return AWAITING_MILESTONE_AUDIT.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/M07-C002_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0181 through PL-0183 accepted and M07 closed. M08-C001 complete package is published at https://github.com/Sekiph82/PackLab/tree/main/coordination/sessions/M08-C001.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/M08-C001_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; PL-0184 V01 and PL-0185 V01 require bounded digest-integrity remediation. The remediation package is published at https://github.com/Sekiph82/PackLab/tree/main/coordination/sessions/M08-C001.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
