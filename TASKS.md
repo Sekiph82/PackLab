@@ -7,8 +7,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Current Milestone: M07
 - Current Sprint: M07-C001 — COLMAP SfM input preparation
 - Current Task: M07-C001 — Preserve all reconstruction stage outputs and logs for reproducibility (PL-0179)
-- Current Task Status: READY
-- Next Task/Action: Execute PL-0179 V01 at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0179_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0179_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve PL-0178 as AUDITED_PASS and PL-0068 as OWNER_REQUIRED, do not start PL-0180 or later tasks, and return AWAITING_AUDIT.
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute PL-0179 V02 at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0179_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0179_CHATGPT_AUDIT_CRITERIA_V02.md. Correct the V01 Windows collision, duplicate-basename, atomic-publication, and retained-byte-integrity findings; preserve PL-0178 as AUDITED_PASS and PL-0068 as OWNER_REQUIRED, do not start PL-0180 or later tasks, and return AWAITING_AUDIT.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -31,6 +31,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest PL-0176 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0176_CHATGPT_AUDIT_V02.md — AUDITED_PASS; V02 independently closed numeric-overflow error translation and runtime-boolean cancellation validation. PL-0177 V01 is now authorized; PL-0178+ remains unauthorized.
 - Latest PL-0177 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0177_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the OpenMVS mesh-refinement boundary, provenance/authority/scale invariants, pinned command/probe mapping, fail-closed results, regression evidence, and publication scope were independently accepted. PL-0178 V01 is now authorized; PL-0179+ remains unauthorized.
 - Latest PL-0178 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0178_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the OpenMVS texture boundary, pinned command/probe mapping, provenance/authority/scale invariants, fail-closed results, regression evidence, and publication scope were independently accepted. PL-0179 V01 is now authorized; PL-0180+ remains unauthorized.
+- Latest PL-0179 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0179_CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; V01 normal-path retention is published but Windows-equivalent collisions, duplicate sequence basenames, non-atomic final publication, and retained-byte tamper detection require V02 remediation. PL-0179 remains open; PL-0180+ remains unauthorized.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -350,7 +351,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0176** Implement OpenMVS mesh-reconstruction stage. **AUDITED_PASS:** V02 independently closed raw numeric-overflow escape and non-boolean cancellation values not failing closed; the accepted mesh-stage boundary and predecessor contracts remain intact.
 - [x] **PL-0177** Implement OpenMVS mesh-refinement stage. **AUDITED_PASS:** V01 independently accepted the refinement boundary, pinned command/probe mapping, provenance/authority/scale invariants, fail-closed result normalization, regression evidence, and scope.
 - [x] **PL-0178** Implement OpenMVS texture stage. **AUDITED_PASS:** V01 independently accepted the texture boundary, pinned command/probe mapping, provenance/authority/scale invariants, fail-closed result normalization, regression evidence, and publication scope.
-- [ ] **PL-0179** Preserve all stage outputs and logs for reproducibility.
+- [ ] **PL-0179** Preserve all stage outputs and logs for reproducibility. **CHANGES_REQUIRED:** V01 independent audit found Windows-equivalent collision overwrite, duplicate sequence-basename collapse, partial final-directory publication on injected failure, and idempotent acceptance of tampered retained bytes; execute V02.
 - [ ] **PL-0180** Add CPU/GPU-aware presets and memory-safety limits.
 - [ ] **PL-0181** Add one-click Reconstruct Scan orchestration across COLMAP and OpenMVS.
 - [ ] **PL-0182** Add reconstruction cancellation that leaves the project recoverable.

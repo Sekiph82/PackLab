@@ -213,6 +213,47 @@ boundary alongside valid edge and composite values.
 
 **Origin:** `M07-C001 / PL-0176_CHATGPT_AUDIT_V02.md`.
 
+### AL-PL-0018 - Windows retention paths need case-insensitive collision checks
+
+**Applies to:** local Windows evidence retention, artifact stores, and any
+immutable path-addressed publication boundary.
+
+**Finding:** distinct case-sensitive identities can resolve to one Windows
+filesystem path. Manifest entries can then disagree with the bytes actually
+retained if normalized destination collisions are not rejected before writes.
+
+**Required behavior:** normalize source and retained destination collision keys
+with Windows filesystem semantics and fail through a PackLab-owned collision
+error before publication.
+
+**Origin:** `M07-C001 / PL-0179_CHATGPT_AUDIT_V01.md`.
+
+### AL-PL-0019 - Evidence publication must be atomic at the identity boundary
+
+**Applies to:** stage/run evidence, manifests, and other multi-file immutable
+publication units.
+
+**Finding:** moving staged children one at a time into a final directory can
+leave a partial identity after an interruption or injected failure.
+
+**Required behavior:** publish the complete directory atomically, or remove the
+final identity on every publication failure; tests must inject a failure after
+at least one child move and assert no partial final identity remains.
+
+**Origin:** `M07-C001 / PL-0179_CHATGPT_AUDIT_V01.md`.
+
+### AL-PL-0020 - Sequence input conversion must reject duplicate basenames
+
+**Applies to:** APIs that convert explicit path sequences into identity maps.
+
+**Finding:** a dictionary comprehension keyed by basename silently discards an
+earlier explicit path when two inputs share a basename.
+
+**Required behavior:** detect duplicate basenames before conversion and fail
+through a PackLab-owned collision error; never silently discard an input.
+
+**Origin:** `M07-C001 / PL-0179_CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
