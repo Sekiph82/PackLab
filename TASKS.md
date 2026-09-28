@@ -5,10 +5,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Project Status
 
 - Current Milestone: M07
-- Current Sprint: M07-C001 — COLMAP SfM input preparation
-- Current Task: M07-C001 — Add CPU/GPU-aware presets and memory-safety limits (PL-0180)
+- Current Sprint: M07-C002 — OpenMVS dense reconstruction continuation
+- Current Task: M07-C002 — Execute ordered milestone batch PL-0181 through PL-0183
 - Current Task Status: READY
-- Next Task/Action: Execute PL-0180 V01 at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0180_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0180_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve PL-0179 as AUDITED_PASS and PL-0068 as OWNER_REQUIRED, do not start PL-0181 or later tasks, and return AWAITING_AUDIT.
+- Next Task/Action: Execute the complete M07-C002 batch in order from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve PL-0180 as AUDITED_PASS and PL-0068 as OWNER_REQUIRED, stop at any child failure/blocker, do not start M08, and return AWAITING_MILESTONE_AUDIT.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -32,6 +32,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest PL-0177 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0177_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the OpenMVS mesh-refinement boundary, provenance/authority/scale invariants, pinned command/probe mapping, fail-closed results, regression evidence, and publication scope were independently accepted. PL-0178 V01 is now authorized; PL-0179+ remains unauthorized.
 - Latest PL-0178 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0178_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the OpenMVS texture boundary, pinned command/probe mapping, provenance/authority/scale invariants, fail-closed results, regression evidence, and publication scope were independently accepted. PL-0179 V01 is now authorized; PL-0180+ remains unauthorized.
 - Latest PL-0179 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0179_CHATGPT_AUDIT_V03.md — AUDITED_PASS; V03 independently verified atomic stage/run publication, collision preservation, failure-injection cleanup, retained-byte integrity, regression behavior, scope, and publication evidence. PL-0180 V01 is now authorized; PL-0181+ remains unauthorized.
+- Latest PL-0180 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0180_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the immutable backend-neutral CPU/GPU resource-policy boundary, explicit capability selection/fallback, bounded memory/worker limits, deterministic provenance, regression evidence, and publication scope were independently accepted. M07-C002 is now authorized for PL-0181 through PL-0183 in order.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -352,7 +353,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0177** Implement OpenMVS mesh-refinement stage. **AUDITED_PASS:** V01 independently accepted the refinement boundary, pinned command/probe mapping, provenance/authority/scale invariants, fail-closed result normalization, regression evidence, and scope.
 - [x] **PL-0178** Implement OpenMVS texture stage. **AUDITED_PASS:** V01 independently accepted the texture boundary, pinned command/probe mapping, provenance/authority/scale invariants, fail-closed result normalization, regression evidence, and publication scope.
 - [x] **PL-0179** Preserve all stage outputs and logs for reproducibility. **AUDITED_PASS:** V03 independently verified atomic stage/run publication, collision preservation, failure-injection cleanup, retained-byte integrity, regression behavior, scope, and publication evidence.
-- [ ] **PL-0180** Add CPU/GPU-aware presets and memory-safety limits.
+- [x] **PL-0180** Add CPU/GPU-aware presets and memory-safety limits. **AUDITED_PASS:** V01 independently accepted the immutable backend-neutral resource-policy boundary, explicit capability selection/fallback, bounded limits, deterministic provenance, regression evidence, and scope.
 - [ ] **PL-0181** Add one-click Reconstruct Scan orchestration across COLMAP and OpenMVS.
 - [ ] **PL-0182** Add reconstruction cancellation that leaves the project recoverable.
 - [ ] **PL-0183** Convert final textured mesh to PackLab-supported preview/export format without losing the master source.
