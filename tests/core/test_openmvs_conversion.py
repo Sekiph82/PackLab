@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 
 import pytest
 from test_sparse_export import _payload, _run
@@ -171,6 +172,11 @@ def test_artifact_content_counts_and_artifact_set_are_explicitly_validated() -> 
         (
             "cameras.txt",
             "7 PINHOLE 1920 1080 1000 1001 960 540",
+            "7 PINHOLE 1920 1080 0 1001 960 540",
+        ),
+        (
+            "cameras.txt",
+            "7 PINHOLE 1920 1080 1000 1001 960 540",
             "7 PINHOLE 0 1080 1000 1001 960 540",
         ),
         (
@@ -250,6 +256,27 @@ def test_malformed_colmap_records_fail_closed_through_public_boundary(
 ) -> None:
     with pytest.raises(InvalidOpenMVSConversionBundle):
         convert_sparse_export_to_openmvs_scene_plan(_with_artifact_text(artifact_name, old, new))
+
+
+def test_valid_zero_observation_line_is_accepted_through_public_boundary() -> None:
+    from packlab_core.sparse_export import export_sparse_mapping
+
+    payload = _payload()
+    empty_image = replace(payload.images[0], points2d=())
+    point = replace(payload.points3d[0], track=(payload.points3d[0].track[0],))
+    sparse_bundle = export_sparse_mapping(
+        _run(), replace(payload, images=(empty_image, payload.images[1]), points3d=(point,))
+    )
+
+    assert "working/images/002.jpg\n\n" in sparse_bundle.content("images.txt")
+    plan = convert_sparse_export_to_openmvs_scene_plan(sparse_bundle)
+
+    assert plan.record_counts.as_dict() == {
+        "cameras": 1,
+        "images": 2,
+        "points3d": 1,
+        "tracks": 1,
+    }
 
 
 def test_caller_controlled_openmvs_options_are_rejected_and_plan_has_no_cli_fields() -> None:

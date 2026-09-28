@@ -170,7 +170,7 @@ def _required_list(mapping: Mapping[str, object], key: str) -> list[object]:
     return value
 
 
-def _data_lines(content: str, field_name: str) -> list[str]:
+def _data_lines(content: str, field_name: str, *, preserve_blank_lines: bool = False) -> list[str]:
     if not isinstance(content, str) or not content:
         raise InvalidOpenMVSConversionBundle(f"{field_name} must be non-empty UTF-8 text")
     try:
@@ -179,10 +179,21 @@ def _data_lines(content: str, field_name: str) -> list[str]:
         raise InvalidOpenMVSConversionBundle(f"{field_name} must be valid UTF-8") from error
     if re.search(r"[\x00-\x09\x0b-\x0c\x0e-\x1f\x7f]", content):
         raise InvalidOpenMVSConversionBundle(f"{field_name} contains unsafe control characters")
-    lines = [line.strip() for line in content.splitlines() if line.strip()]
-    if not lines or any(line.startswith("#") is False and _CONTROL.search(line) for line in lines):
+    lines: list[str] = []
+    data_started = False
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if line.startswith("#"):
+            continue
+        if not line:
+            if preserve_blank_lines and data_started:
+                lines.append(line)
+            continue
+        data_started = True
+        lines.append(line)
+    if not lines or any(_CONTROL.search(line) for line in lines):
         raise InvalidOpenMVSConversionBundle(f"{field_name} contains unsafe text")
-    return [line for line in lines if not line.startswith("#")]
+    return lines
 
 
 def _integer_token(value: str, field_name: str) -> int:
@@ -231,15 +242,22 @@ def _validate_camera_artifact(content: str) -> tuple[int, set[int]]:
                 f"cameras.txt[{index}] has the wrong parameter cardinality"
             )
         _portable_text(model, f"cameras.txt[{index}].model")
-        for token_index, token in enumerate(tokens[4:], start=4):
+        parameters = tuple(
             _finite_float(token, f"cameras.txt[{index}].value[{token_index}]")
+            for token_index, token in enumerate(tokens[4:], start=4)
+        )
+        focal_count = 2 if model in {"PINHOLE", "OPENCV", "OPENCV_FISHEYE", "FULL_OPENCV"} else 1
+        if any(parameters[param_index] <= 0.0 for param_index in range(focal_count)):
+            raise InvalidOpenMVSConversionBundle(
+                f"cameras.txt[{index}] focal parameters must be positive"
+            )
     return len(lines), identifiers
 
 
 def _validate_image_artifact(
     content: str,
 ) -> tuple[int, int, set[int], set[tuple[int, int, int]]]:
-    lines = _data_lines(content, "images.txt")
+    lines = _data_lines(content, "images.txt", preserve_blank_lines=True)
     if len(lines) % 2:
         raise InvalidOpenMVSConversionBundle("images.txt must contain two lines per image")
     identifiers: set[int] = set()
