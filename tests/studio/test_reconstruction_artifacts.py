@@ -30,8 +30,9 @@ def _fixture(tmp_path: Path, *, status: StageStatus = StageStatus.SUCCEEDED):
         status,
         0 if status is StageStatus.SUCCEEDED else 7,
         1.25,
-        stdout="C:\\private\\capture\\frame.jpg token=SECRET\n" + "x" * 20_000,
-        stderr="password=SECRET2",
+        stdout="C:\\private\\capture\\frame.jpg token=<PACKLAB_TEST_TOKEN_REDACTED>\n"
+        + "x" * 20_000,
+        stderr="password=<PACKLAB_TEST_PASSWORD_REDACTED>",
         cancelled=status is StageStatus.CANCELLED,
         failure_reason=None if status is StageStatus.SUCCEEDED else "stage stopped",
     )
@@ -78,7 +79,7 @@ def test_success_retains_opaque_output_logs_and_manifest(tmp_path: Path) -> None
     assert manifest["provenance"]["stage_digest"] == kwargs["stage_digest"]
     assert manifest["outputs"][0]["sha256"] == _digest("mesh bytes; opaque to retention")
     assert manifest["outputs"][0]["byte_size"] == len(output.read_bytes())
-    assert "SECRET" not in manifest["stdout"]
+    assert "<PACKLAB_TEST_TOKEN_REDACTED>" not in manifest["stdout"]
     assert "private" not in manifest["stdout"].lower()
     assert len(manifest["stdout"]) <= MAX_RETAINED_LOG_CHARS
     assert manifest["outputs"][0]["output_identity"] == kwargs["output_identities"]["mesh"]
