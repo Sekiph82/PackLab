@@ -440,28 +440,34 @@ class ReconstructionEvidenceRetainer:
             return self._resolve_existing(evidence_path, manifest)
 
         staging = Path(tempfile.mkdtemp(prefix=".stage-evidence-", dir=workspace))
-        created_evidence = False
         try:
             for retained, _, data in payloads:
                 _atomic_bytes(staging / retained, data)
             _atomic_bytes(staging / "logs" / "stdout.txt", stdout.encode("utf-8"))
             _atomic_bytes(staging / "logs" / "stderr.txt", stderr.encode("utf-8"))
             _atomic_json(staging / "manifest.json", manifest)
-            try:
-                evidence_path.mkdir(parents=False)
-            except FileExistsError as error:
+            existing = self._casefold_existing_child(
+                evidence_path.parent, evidence_path.name, "stage/run evidence identity"
+            )
+            if existing is not None:
                 raise ReconstructionEvidenceCollisionError(
                     "stage/run evidence identity appeared during retention"
-                ) from error
-            created_evidence = True
-            for child in staging.iterdir():
-                os.replace(child, evidence_path / child.name)
-            staging.rmdir()
-        except Exception:
-            if created_evidence:
-                shutil.rmtree(evidence_path, ignore_errors=True)
-            shutil.rmtree(staging, ignore_errors=True)
-            raise
+                )
+            # The staging directory and final identity are on the same
+            # filesystem. One directory rename publishes the complete
+            # identity, so a failure cannot expose a partial final directory.
+            os.replace(staging, evidence_path)
+        except Exception as publication_error:
+            try:
+                if staging.exists():
+                    shutil.rmtree(staging)
+                if staging.exists():
+                    raise OSError("staging directory remains after publication failure")
+            except OSError as cleanup_error:
+                raise ReconstructionEvidenceRetentionError(
+                    "failed to clear staging after publication failure"
+                ) from cleanup_error
+            raise publication_error
         return RetainedStageEvidence(
             evidence_path / "manifest.json", evidence_path, manifest, idempotent=False
         )

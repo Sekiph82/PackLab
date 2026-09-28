@@ -337,25 +337,22 @@ def test_atomic_failure_leaves_no_partial_evidence(tmp_path: Path, monkeypatch) 
 
 
 @pytest.mark.unit
-def test_mid_publication_failure_removes_final_identity(tmp_path: Path, monkeypatch) -> None:
+def test_atomic_publication_failure_leaves_final_identity_absent(
+    tmp_path: Path, monkeypatch
+) -> None:
     workspace, output, result, kwargs = _fixture(tmp_path)
-    original_replace = artifacts.os.replace
     final_path = workspace / "evidence" / "dense" / "run-001"
-    moved = False
+    original_replace = artifacts.os.replace
 
-    def fail_after_first_final_move(source: str | bytes, target: str | bytes) -> None:
-        nonlocal moved
-        target_path = Path(target)
+    def fail_atomic_publication(source: str | bytes, target: str | bytes) -> None:
+        if Path(target) == final_path:
+            raise OSError("simulated atomic publication failure")
         original_replace(source, target)
-        if target_path.parent == final_path and not moved:
-            moved = True
-            raise OSError("simulated mid-publication failure")
 
-    monkeypatch.setattr(artifacts.os, "replace", fail_after_first_final_move)
-    with pytest.raises(OSError, match="simulated mid-publication"):
+    monkeypatch.setattr(artifacts.os, "replace", fail_atomic_publication)
+    with pytest.raises(OSError, match="simulated atomic publication"):
         _retain(workspace, output, result, kwargs)
 
-    assert moved
     assert not final_path.exists()
     assert not list(workspace.glob(".stage-evidence-*"))
 
