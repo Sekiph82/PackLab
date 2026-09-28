@@ -8,7 +8,7 @@ actor: CODEX
 status: AWAITING_AUDIT
 promptPath: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0175_CODEX_PROMPT_V02.md
 criteriaPath: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0175_CHATGPT_AUDIT_CRITERIA_V02.md
-startingCommit: f9b8562f9ddf705180e2086d53e3f09d677a5b3c
+startingCommit: f9b8562a0b0cb3f00957deb47f140bfcfd8a8f7a
 implementationCommit: 265baeca79ad5262e8c28af2ab4ced500e210fc7
 ---
 
@@ -63,6 +63,16 @@ artifacts were left unchanged.
 - Command: git merge-base --is-ancestor HEAD origin/main; exit 0.
 - Starting commit: f9b8562f9ddf705180e2086d53e3f09d677a5b3c.
 - No fast-forward was needed because local HEAD already equaled origin/main.
+
+## Evidence correction chronology
+
+- After the initial log-only publication, a final range check found that the
+  starting commit full SHA had been transcribed incorrectly even though its
+  short prefix was correct.
+- The starting commit is corrected here to the verified
+  f9b8562a0b0cb3f00957deb47f140bfcfd8a8f7a. This correction changes only the
+  evidence log; no implementation, test, tracker, audit, or accepted artifact
+  was changed.
 
 ## Work performed
 
