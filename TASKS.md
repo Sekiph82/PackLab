@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M07
 - Current Sprint: M07-C001 — COLMAP SfM input preparation
-- Current Task: M07-C001 — Implement COLMAP-to-OpenMVS scene conversion (PL-0174)
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute PL-0174 V03 at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0174_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0174_CHATGPT_AUDIT_CRITERIA_V03.md. Correct the remaining focal-parameter and valid-empty-observation compatibility findings, preserve PL-0173 as AUDITED_PASS, do not start PL-0175 or later tasks, and return AWAITING_AUDIT.
+- Current Task: M07-C001 — Implement OpenMVS dense point-cloud stage (PL-0175)
+- Current Task Status: READY
+- Next Task/Action: Execute PL-0175 V01 at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0175_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0175_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve PL-0174 as AUDITED_PASS, do not start PL-0176 or later tasks, and return AWAITING_AUDIT.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
@@ -26,7 +26,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest PL-0171 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0171_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the deterministic sparse-diagnostic policy, result classifications, threshold boundaries, fail-closed behavior, safe report serialization, and scope were independently accepted.
 - Latest PL-0172 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0172_CHATGPT_AUDIT_V02.md — AUDITED_PASS; V02 closed the missing cancelled-run public-boundary coverage without changing the accepted exporter implementation.
 - Latest PL-0173 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0173_CHATGPT_AUDIT_V01.md — AUDITED_PASS; the immutable backend-neutral reconstruction preset boundary, deterministic provenance, rejection paths, regression suite, and scope were independently accepted.
-- Latest PL-0174 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0174_CHATGPT_AUDIT_V02.md — CHANGES_REQUIRED; V02 accepts non-positive camera focal data and rejects valid zero-observation sparse exports.
+- Latest PL-0174 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C001/PL-0174_CHATGPT_AUDIT_V03.md — AUDITED_PASS; V03 independently closed the model-specific focal-parameter and valid zero-observation compatibility findings.
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
@@ -341,7 +341,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M07-S03 - OpenMVS dense reconstruction
 
-- [ ] **PL-0174** Implement COLMAP-to-OpenMVS scene conversion. **CHANGES_REQUIRED:** V02 audit found non-positive focal acceptance and rejection of valid zero-observation sparse exports; execute the published V03 remediation.
+- [x] **PL-0174** Implement COLMAP-to-OpenMVS scene conversion. **AUDITED_PASS:** V03 independently closed the model-specific focal-parameter and valid zero-observation compatibility findings while preserving the accepted conversion boundary.
 - [ ] **PL-0175** Implement OpenMVS dense point-cloud stage.
 - [ ] **PL-0176** Implement OpenMVS mesh-reconstruction stage.
 - [ ] **PL-0177** Implement OpenMVS mesh-refinement stage.
