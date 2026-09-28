@@ -2,7 +2,7 @@
 
 Task: **Add one-click Reconstruct Scan orchestration across COLMAP and OpenMVS**
 
-Repository: https://github.com/Sekiph82/PackLab  
+Repository: https://github.com/Sekiph82/PackLab
 Cycle: `M07-C002`
 
 Prompt:

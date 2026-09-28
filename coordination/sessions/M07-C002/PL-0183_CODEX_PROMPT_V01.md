@@ -2,7 +2,7 @@
 
 Task: **Convert final textured mesh to a PackLab-supported preview/export format without losing the master source**
 
-Repository: https://github.com/Sekiph82/PackLab  
+Repository: https://github.com/Sekiph82/PackLab
 Cycle: `M07-C002`
 
 Prompt:

@@ -1,7 +1,7 @@
 # M07-C002 - Master ChatGPT Audit Criteria V01
 
-Milestone: **M07 - Reconstruction Backends & Photogrammetry**  
-Scope: **PL-0181 through PL-0183**  
+Milestone: **M07 - Reconstruction Backends & Photogrammetry**
+Scope: **PL-0181 through PL-0183**
 All criteria are mandatory.
 
 1. Root `TASKS.md` explicitly authorizes `M07-C002 / READY / CODEX` for this

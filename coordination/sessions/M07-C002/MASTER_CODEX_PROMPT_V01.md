@@ -1,8 +1,8 @@
 # M07-C002 - Codex Master Work Order V01
 
-Milestone: **M07 - Reconstruction Backends & Photogrammetry**  
-Ordered children: **PL-0181, PL-0182, PL-0183**  
-Repository: https://github.com/Sekiph82/PackLab  
+Milestone: **M07 - Reconstruction Backends & Photogrammetry**
+Ordered children: **PL-0181, PL-0182, PL-0183**
+Repository: https://github.com/Sekiph82/PackLab
 Branch: `main`
 
 Canonical tracker:

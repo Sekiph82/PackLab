@@ -2,7 +2,7 @@
 
 Task: **Add reconstruction cancellation that leaves the project recoverable**
 
-Repository: https://github.com/Sekiph82/PackLab  
+Repository: https://github.com/Sekiph82/PackLab
 Cycle: `M07-C002`
 
 Prompt:
