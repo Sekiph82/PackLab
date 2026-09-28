@@ -57,7 +57,10 @@ def _request(*, output_asset_id: str = "working/masks/rev-1/photo-1.mask") -> Se
 
 
 def _mask(
-    *, model_id: str = "fixture-segmentation", revision: str = "mask-revision-1"
+    *,
+    model_id: str = "fixture-segmentation",
+    revision: str = "mask-revision-1",
+    prompt: PromptEvidence | None = None,
 ) -> MaskArtifact:
     return MaskArtifact(
         "mask-1",
@@ -71,7 +74,7 @@ def _mask(
         3,
         CoordinateTransform(8, 6, 4, 3, 0.5, 0.5),
         _provenance(model_id),
-        _request().prompt,
+        prompt or _request().prompt,
         revision,
         CREATED_AT,
         "post-v1",
@@ -135,6 +138,28 @@ def test_mask_artifact_serialization_preserves_provenance_and_revision_shape() -
     revision = MaskSetRevision("project-1", "mask-set-1", "raw-revision-1", (artifact,), CREATED_AT)
     assert revision.as_dict()["revision_digest"] == revision.revision_digest
     assert revision.as_dict()["masks"][0]["mask_revision"] == "mask-revision-1"
+
+
+def test_prompt_data_is_recursively_immutable_and_digest_safe() -> None:
+    caller_data = {"box": {"x": 1}, "labels": [{"value": "front"}]}
+    prompt = PromptEvidence(PromptKind.BOX, caller_data)
+    artifact = _mask(prompt=prompt)
+    revision = MaskSetRevision("project-1", "mask-set-1", "raw-revision-1", (artifact,), CREATED_AT)
+    before_prompt = prompt.as_dict()
+    before_artifact = artifact.as_dict()
+    before_revision = revision.as_dict()
+
+    caller_data["box"]["x"] = 99
+    caller_data["labels"][0]["value"] = "back"
+    with pytest.raises(TypeError):
+        prompt.data["box"]["x"] = 99  # type: ignore[index]
+    with pytest.raises(TypeError):
+        prompt.data["labels"][0] = {"value": "side"}  # type: ignore[index]
+
+    assert prompt.as_dict() == before_prompt
+    assert artifact.as_dict() == before_artifact
+    assert revision.as_dict() == before_revision
+    assert revision.revision_digest == before_revision["revision_digest"]
 
 
 def test_source_bytes_are_not_touched_by_segmentation(tmp_path: Path) -> None:

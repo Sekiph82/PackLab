@@ -15,6 +15,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 SEGMENTATION_CONTRACT_VERSION = "packlab.segmentation.v1"
@@ -122,6 +123,22 @@ def _json_value(value: object, field_name: str = "value") -> object:
     raise SegmentationContractError(f"{field_name} must contain JSON-compatible values")
 
 
+def _freeze_json(value: object) -> object:
+    if isinstance(value, dict):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_json(item) for item in value]
+    return value
+
+
 def _digest(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -218,10 +235,10 @@ class PromptEvidence:
         normalized = _json_value(self.data, "prompt_data")
         if not isinstance(normalized, dict):
             raise SegmentationContractError("prompt_data must be a mapping")
-        object.__setattr__(self, "data", normalized)
+        object.__setattr__(self, "data", _freeze_json(normalized))
 
     def as_dict(self) -> dict[str, object]:
-        return {"kind": self.kind.value, "data": dict(self.data)}
+        return {"kind": self.kind.value, "data": _thaw_json(self.data)}
 
 
 @dataclass(frozen=True, slots=True)
