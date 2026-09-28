@@ -97,6 +97,17 @@ def _digest(value: object, field_name: str) -> str:
     return value
 
 
+def _reject_casefold_duplicates(values: Sequence[str], field_name: str) -> None:
+    seen: dict[str, str] = {}
+    for value in values:
+        folded = value.casefold()
+        if folded in seen:
+            raise ReconstructionEvidenceCollisionError(
+                f"{field_name} collide under Windows case-insensitive semantics"
+            )
+        seen[folded] = value
+
+
 def _safe_relative(value: str | Path, field_name: str) -> str:
     if isinstance(value, Path):
         if value.is_absolute() or value.drive or value.root:
@@ -255,29 +266,52 @@ def _output_entries(
     ):
         if any(not isinstance(value, (str, Path)) for value in output_paths):
             raise ReconstructionEvidenceError("output paths must be text or Path values")
-        supplied = {Path(value).name: value for value in output_paths}
+        basenames = [Path(value).name for value in output_paths]
+        _reject_casefold_duplicates(basenames, "sequence output basenames")
+        supplied = dict(zip(basenames, output_paths, strict=True))
     else:
         raise ReconstructionEvidenceError("output_paths must be a mapping or sequence")
     if not supplied:
         raise ReconstructionEvidenceError("at least one explicit output path is required")
+    _reject_casefold_duplicates(list(supplied), "output path identities")
+    _reject_casefold_duplicates(list(output_identities), "output identity keys")
     if set(supplied) != set(output_identities):
         raise ReconstructionEvidenceError("output paths and output identities must have equal keys")
 
     entries: list[dict[str, object]] = []
     payloads: list[tuple[str, str, bytes]] = []
     failures: list[str] = []
+    prepared: list[tuple[str, str, str, str, Path]] = []
     seen_sources: set[str] = set()
+    seen_assets: set[str] = set()
+    seen_retained: set[str] = set()
     for key in sorted(supplied):
         identity = _identity(key, "output identity key")
         asset_identity = _safe_relative(output_identities[key], "output identity")
         relative = _safe_relative(supplied[key], f"output path for {key}")
         source = _reject_symlink_components(workspace, relative, f"output path for {key}")
-        source_key = source.as_posix()
+        source_key = relative.casefold()
         if source_key in seen_sources:
             raise ReconstructionEvidenceCollisionError(
-                "two output identities target one source path"
+                "two output identities target one source path under Windows semantics"
             )
         seen_sources.add(source_key)
+        asset_key = asset_identity.casefold()
+        if asset_key in seen_assets:
+            raise ReconstructionEvidenceCollisionError(
+                "two outputs use one output identity under Windows semantics"
+            )
+        seen_assets.add(asset_key)
+        retained = f"outputs/{identity}{Path(relative).suffix}"
+        retained_key = retained.casefold()
+        if retained_key in seen_retained:
+            raise ReconstructionEvidenceCollisionError(
+                "two outputs target one retained path under Windows semantics"
+            )
+        seen_retained.add(retained_key)
+        prepared.append((identity, asset_identity, relative, retained, source))
+
+    for identity, asset_identity, relative, retained, source in prepared:
         try:
             if not source.is_file():
                 raise OSError("output is not a regular file")
@@ -286,7 +320,6 @@ def _output_entries(
             del error
             failures.append(f"{identity}:{relative}:missing_or_unreadable")
             continue
-        retained = f"outputs/{identity}{Path(relative).suffix}"
         entries.append(
             {
                 "identity": identity,
@@ -400,14 +433,14 @@ class ReconstructionEvidenceRetainer:
             "retention_status": "bounded_failure" if retention_failures else "retained",
             "regeneration": {"local_only": True, "source_revision": source_revision},
         }
-        evidence_path = workspace / "evidence" / stage_id / run_id
-        self._ensure_evidence_parent(workspace, evidence_path)
+        evidence_path = self._ensure_evidence_parent(workspace, stage_id, run_id)
         if evidence_path.is_symlink():
             raise ReconstructionEvidenceError("stage/run evidence identity uses a symlink")
         if evidence_path.exists():
             return self._resolve_existing(evidence_path, manifest)
 
         staging = Path(tempfile.mkdtemp(prefix=".stage-evidence-", dir=workspace))
+        created_evidence = False
         try:
             for retained, _, data in payloads:
                 _atomic_bytes(staging / retained, data)
@@ -420,17 +453,20 @@ class ReconstructionEvidenceRetainer:
                 raise ReconstructionEvidenceCollisionError(
                     "stage/run evidence identity appeared during retention"
                 ) from error
+            created_evidence = True
             for child in staging.iterdir():
                 os.replace(child, evidence_path / child.name)
             staging.rmdir()
         except Exception:
+            if created_evidence:
+                shutil.rmtree(evidence_path, ignore_errors=True)
             shutil.rmtree(staging, ignore_errors=True)
             raise
         return RetainedStageEvidence(
             evidence_path / "manifest.json", evidence_path, manifest, idempotent=False
         )
 
-    def _ensure_evidence_parent(self, workspace: Path, evidence_path: Path) -> None:
+    def _ensure_evidence_parent(self, workspace: Path, stage_id: str, run_id: str) -> Path:
         evidence_root = workspace / "evidence"
         if evidence_root.exists() and evidence_root.is_symlink():
             raise ReconstructionEvidenceError("evidence root uses a symlink")
@@ -440,15 +476,47 @@ class ReconstructionEvidenceRetainer:
             evidence_root.mkdir(exist_ok=True)
         except OSError as error:
             raise ReconstructionEvidenceError("evidence root cannot be created") from error
-        stage_path = evidence_path.parent
-        if stage_path.exists() and stage_path.is_symlink():
+
+        stage_path = self._casefold_existing_child(
+            evidence_root, stage_id, "stage evidence identity"
+        )
+        if stage_path is None:
+            stage_path = evidence_root / stage_id
+            try:
+                stage_path.mkdir()
+            except FileExistsError as error:
+                raise ReconstructionEvidenceCollisionError(
+                    "stage evidence identity appeared during retention"
+                ) from error
+            except OSError as error:
+                raise ReconstructionEvidenceError(
+                    "stage evidence directory cannot be created"
+                ) from error
+        if stage_path.is_symlink():
             raise ReconstructionEvidenceError("stage evidence directory uses a symlink")
+        if not stage_path.is_dir():
+            raise ReconstructionEvidenceCollisionError("stage evidence identity is not a directory")
+
+        run_path = self._casefold_existing_child(stage_path, run_id, "stage/run evidence identity")
+        if run_path is None:
+            return stage_path / run_id
+        if run_path.is_symlink():
+            raise ReconstructionEvidenceError("stage/run evidence identity uses a symlink")
+        return run_path
+
+    @staticmethod
+    def _casefold_existing_child(parent: Path, name: str, field_name: str) -> Path | None:
         try:
-            stage_path.mkdir(exist_ok=True)
+            matches = [
+                child for child in parent.iterdir() if child.name.casefold() == name.casefold()
+            ]
         except OSError as error:
-            raise ReconstructionEvidenceError(
-                "stage evidence directory cannot be created"
-            ) from error
+            raise ReconstructionEvidenceError(f"{field_name} cannot be inspected") from error
+        if len(matches) > 1 or (matches and matches[0].name != name):
+            raise ReconstructionEvidenceCollisionError(
+                f"{field_name} collides under Windows case-insensitive semantics"
+            )
+        return matches[0] if matches else None
 
     def _resolve_existing(
         self, evidence_path: Path, expected: Mapping[str, object]
@@ -469,10 +537,75 @@ class ReconstructionEvidenceRetainer:
             isinstance(relative, str) for relative in retained_paths
         ):
             raise ReconstructionEvidenceCollisionError("retained paths metadata is invalid")
-        for relative in retained_paths:
-            path = evidence_path.joinpath(*PurePosixPath(relative).parts)
+        _reject_casefold_duplicates(retained_paths, "retained paths")
+
+        records: dict[str, Mapping[str, object]] = {}
+
+        def add_record(record: object) -> None:
+            if not isinstance(record, Mapping):
+                raise ReconstructionEvidenceCollisionError("retained evidence metadata is invalid")
+            relative = record.get("retained_relative_path")
+            if not isinstance(relative, str):
+                raise ReconstructionEvidenceCollisionError(
+                    "retained evidence path metadata is invalid"
+                )
+            try:
+                normalized = _safe_relative(relative, "retained evidence path")
+            except ReconstructionEvidenceError as error:
+                raise ReconstructionEvidenceCollisionError(
+                    "retained evidence path metadata is unsafe"
+                ) from error
+            if normalized != relative or normalized in records:
+                raise ReconstructionEvidenceCollisionError(
+                    "retained evidence paths are inconsistent"
+                )
+            records[normalized] = record
+
+        logs = expected.get("logs")
+        if not isinstance(logs, Mapping):
+            raise ReconstructionEvidenceCollisionError("retained log metadata is invalid")
+        for record in logs.values():
+            add_record(record)
+        outputs = expected.get("outputs")
+        if not isinstance(outputs, list):
+            raise ReconstructionEvidenceCollisionError("retained output metadata is invalid")
+        for record in outputs:
+            add_record(record)
+        if set(records) != set(retained_paths):
+            raise ReconstructionEvidenceCollisionError("retained evidence paths are inconsistent")
+
+        for relative, record in records.items():
+            try:
+                path = _reject_symlink_components(evidence_path, relative, "retained evidence path")
+            except ReconstructionEvidenceError as error:
+                raise ReconstructionEvidenceCollisionError(
+                    "retained evidence path was altered"
+                ) from error
             if path.is_symlink() or not path.is_file():
                 raise ReconstructionEvidenceCollisionError("retained evidence was altered")
+            byte_size = record.get("byte_size")
+            digest = record.get("sha256")
+            if isinstance(byte_size, bool) or not isinstance(byte_size, int) or byte_size < 0:
+                raise ReconstructionEvidenceCollisionError("retained byte-size metadata is invalid")
+            if not isinstance(digest, str) or _DIGEST.fullmatch(digest) is None:
+                raise ReconstructionEvidenceCollisionError("retained digest metadata is invalid")
+            try:
+                data = path.read_bytes()
+            except OSError as error:
+                raise ReconstructionEvidenceCollisionError(
+                    "retained evidence was altered"
+                ) from error
+            if len(data) != byte_size or _sha256(data) != digest:
+                raise ReconstructionEvidenceCollisionError("retained evidence bytes were altered")
+
+        actual_files: set[str] = set()
+        for path in evidence_path.rglob("*"):
+            if path.is_symlink():
+                raise ReconstructionEvidenceCollisionError("retained evidence uses a symlink")
+            if path.is_file() and path.name != "manifest.json":
+                actual_files.add(path.relative_to(evidence_path).as_posix())
+        if actual_files != set(retained_paths):
+            raise ReconstructionEvidenceCollisionError("retained evidence file set was altered")
         return RetainedStageEvidence(manifest_path, evidence_path, actual, idempotent=True)
 
 
