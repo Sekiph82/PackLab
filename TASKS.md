@@ -4,13 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M07
-- Current Sprint: M07-C002 — OpenMVS dense reconstruction continuation
-- Current Task: M07-C002 — Execute ordered milestone batch PL-0181 through PL-0183
+- Current Milestone: M08
+- Current Sprint: M08-C001 — Segmentation, Object Extraction & Reconstruction QA
+- Current Task: M08-C001 — Execute ordered milestone batch PL-0184 through PL-0201
 - Current Task Status: READY
-- Next Task/Action: Execute the complete M07-C002 batch in order from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve PL-0180 as AUDITED_PASS and PL-0068 as OWNER_REQUIRED, stop at any child failure/blocker, do not start M08, and return AWAITING_MILESTONE_AUDIT.
+- Next Task/Action: Execute the complete M08-C001 batch in order from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Preserve M07 as AUDITED_PASS and PL-0068 as OWNER_REQUIRED, stop at any child failure/blocker or unresolved model/license/native gate, do not start M09, and return AWAITING_MILESTONE_AUDIT.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/M06-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0157 accepted and M06 closed.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/M07-C002_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0181 through PL-0183 accepted and M07 closed. M08-C001 complete package is published at https://github.com/Sekiph82/PackLab/tree/main/coordination/sessions/M08-C001.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -66,7 +66,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 | M04 | Guided Capture & Quality Intelligence | Reliable, guided, high-resolution packaging capture | [x] |
 | M05 | Transfer & Ingest | .packscan moves safely from iPhone to Windows | [x] |
 | M06 | PackLab Studio Foundation | PySide6 desktop shell and project lifecycle | [x] |
-| M07 | Reconstruction Backends & Photogrammetry | Backend-neutral reconstruction contract with COLMAP -> OpenMVS as the V1 production lane | [ ] |
+| M07 | Reconstruction Backends & Photogrammetry | Backend-neutral reconstruction contract with COLMAP -> OpenMVS as the V1 production lane | [x] |
 | M08 | Segmentation, Object Extraction & Reconstruction QA | Versioned masks, visibility-aware object-only captured geometry and quality diagnostics | [ ] |
 | M09 | Scale, Calibration & Measurement | Real-size geometry with measurable accuracy | [ ] |
 | M10 | Mesh Processing & Scan Master | Clean, aligned, optimized reference scan assets | [ ] |
@@ -354,9 +354,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0178** Implement OpenMVS texture stage. **AUDITED_PASS:** V01 independently accepted the texture boundary, pinned command/probe mapping, provenance/authority/scale invariants, fail-closed result normalization, regression evidence, and publication scope.
 - [x] **PL-0179** Preserve all stage outputs and logs for reproducibility. **AUDITED_PASS:** V03 independently verified atomic stage/run publication, collision preservation, failure-injection cleanup, retained-byte integrity, regression behavior, scope, and publication evidence.
 - [x] **PL-0180** Add CPU/GPU-aware presets and memory-safety limits. **AUDITED_PASS:** V01 independently accepted the immutable backend-neutral resource-policy boundary, explicit capability selection/fallback, bounded limits, deterministic provenance, regression evidence, and scope.
-- [ ] **PL-0181** Add one-click Reconstruct Scan orchestration across COLMAP and OpenMVS.
-- [ ] **PL-0182** Add reconstruction cancellation that leaves the project recoverable.
-- [ ] **PL-0183** Convert final textured mesh to PackLab-supported preview/export format without losing the master source.
+- [x] **PL-0181** Add one-click Reconstruct Scan orchestration across COLMAP and OpenMVS. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/PL-0181_CHATGPT_AUDIT_V01.md
+- [x] **PL-0182** Add reconstruction cancellation that leaves the project recoverable. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/PL-0182_CHATGPT_AUDIT_V01.md
+- [x] **PL-0183** Convert final textured mesh to PackLab-supported preview/export format without losing the master source. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/PL-0183_CHATGPT_AUDIT_V01.md
 
 ---
 
