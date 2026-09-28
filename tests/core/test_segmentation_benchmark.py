@@ -8,6 +8,7 @@ from packlab_core.segmentation import MaskRaster
 from packlab_core.segmentation_benchmark import (
     NO_SELECTION_LICENSE_OR_CHECKPOINT_BLOCKER,
     BenchmarkCandidate,
+    BenchmarkCase,
     SegmentationBenchmarkError,
     build_default_report,
     build_synthetic_cases,
@@ -57,6 +58,28 @@ def test_report_is_reproducible_and_explicitly_does_not_select_a_model() -> None
         "transparent",
         "glossy-like",
     }
+
+
+def test_predictions_are_immutable_and_report_digest_safe() -> None:
+    prediction = MaskRaster(2, 2, (True, False, False, False))
+    caller_predictions = {"candidate": prediction}
+    case = BenchmarkCase(
+        "case",
+        "bottle",
+        "synthetic",
+        prediction,
+        caller_predictions,
+    )
+    before_case = case.as_dict()
+    caller_predictions["candidate"] = MaskRaster(2, 2, (False, True, False, False))
+    assert case.as_dict() == before_case
+
+    report = build_default_report()
+    before_report = report.as_dict()
+    with pytest.raises(TypeError):
+        report.cases[0].predictions["packlab-synthetic-oracle-v1"] = MaskRaster(8, 8, (False,) * 64)  # type: ignore[index]
+    assert report.as_dict() == before_report
+    assert report.report_digest == before_report["report_digest"]
 
 
 def test_unavailable_candidate_records_license_checkpoint_and_runtime_failure_modes() -> None:

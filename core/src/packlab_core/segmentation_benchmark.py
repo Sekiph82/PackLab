@@ -11,6 +11,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from .segmentation import MaskRaster
 
@@ -109,7 +110,7 @@ class BenchmarkCase:
                 raise SegmentationBenchmarkError(
                     f"prediction dimensions do not match case {self.case_id}: {candidate_id}"
                 )
-        object.__setattr__(self, "predictions", predictions)
+        object.__setattr__(self, "predictions", MappingProxyType(predictions))
 
     def as_dict(self) -> dict[str, object]:
         return {
