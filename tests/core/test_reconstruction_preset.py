@@ -2,17 +2,28 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 
 import pytest
 
+from packlab_core.capabilities import Capability, CapabilityStatus
 from packlab_core.feature_extraction import FeatureExtractionConfig
 from packlab_core.matching import MatcherSelectionConfig
 from packlab_core.reconstruction import ReconstructionJobSpec
 from packlab_core.reconstruction_preset import (
+    CPU_SAFE_RESOURCE_PRESET,
+    GPU_AWARE_RESOURCE_PRESET,
     PACKAGED_CONSUMER_GOODS_RECONSTRUCTION_PRESET,
     RECONSTRUCTION_PRESET_CONTRACT,
+    GPUUnavailableError,
     ReconstructionPreset,
     ReconstructionPresetError,
+    ResourceBudgetExceededError,
+    ResourceCapabilitySnapshot,
+    ResourceEstimates,
+    ResourceExecutionMode,
+    ResourceLimits,
+    ResourcePlanOutcome,
     UnsupportedReconstructionPresetOption,
 )
 from packlab_core.sparse_mapping import SparseMappingConfig
@@ -31,6 +42,136 @@ def test_packaged_preset_is_explicit_typed_and_disclaims_authority() -> None:
     assert "METRIC_VERIFIED" in text
     assert "filesystem materialization" in text
     assert "CAD authority" in text
+    assert preset.resource_policy.policy_identity == "cpu-safe:1"
+    assert preset.configuration_view()["resource_policy"]["policy_identity"] == "cpu-safe:1"
+
+
+def test_named_resource_presets_are_versioned_and_truthful() -> None:
+    assert CPU_SAFE_RESOURCE_PRESET.execution_mode is ResourceExecutionMode.CPU_ONLY
+    assert GPU_AWARE_RESOURCE_PRESET.execution_mode is ResourceExecutionMode.GPU_PREFERRED
+    assert CPU_SAFE_RESOURCE_PRESET.policy_identity == "cpu-safe:1"
+    assert GPU_AWARE_RESOURCE_PRESET.policy_identity == "gpu-aware:1"
+    for preset in (CPU_SAFE_RESOURCE_PRESET, GPU_AWARE_RESOURCE_PRESET):
+        encoded = json.dumps(preset.to_dict()).lower()
+        assert "not hardware benchmarks" in encoded
+        assert "does not inspect hardware" in encoded
+        assert len(preset.digest) == 64
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"input_bytes": True},
+        {"working_set_bytes": 0},
+        {"retained_output_bytes": 65 * 1024**3},
+        {"parallel_workers": 65},
+        {"input_bytes": 9 * 1024**3, "working_set_bytes": 8 * 1024**3},
+        {"retained_output_bytes": 9 * 1024**3, "working_set_bytes": 8 * 1024**3},
+    ],
+)
+def test_resource_limits_reject_type_overflow_and_inconsistent_values(
+    kwargs: dict[str, object],
+) -> None:
+    with pytest.raises(ReconstructionPresetError):
+        ResourceLimits(**kwargs)  # type: ignore[arg-type]
+
+
+def test_resource_estimates_are_immutable_and_reject_boolean_or_missing_fields() -> None:
+    estimates = ResourceEstimates(1, 2, 1, 1)
+    with pytest.raises((AttributeError, TypeError)):
+        estimates.input_bytes = 2  # type: ignore[misc]
+    with pytest.raises(ReconstructionPresetError):
+        ResourceEstimates(True, 2, 1, 1)  # type: ignore[arg-type]
+    with pytest.raises(ReconstructionPresetError):
+        ResourceEstimates.from_mapping({"input_bytes": 1})
+
+
+def test_capability_snapshot_is_explicit_and_does_not_infer_from_driver_labels() -> None:
+    snapshot = ResourceCapabilitySnapshot(
+        {
+            "nvidia_driver": Capability(
+                "nvidia_driver", CapabilityStatus.AVAILABLE, "550", "driver label", "reported"
+            )
+        }
+    )
+    plan = GPU_AWARE_RESOURCE_PRESET.resolve(snapshot, ResourceEstimates(1, 2, 1, 1))
+
+    assert plan.capability_status is CapabilityStatus.UNKNOWN
+    assert plan.outcome is ResourcePlanOutcome.CPU_FALLBACK
+    assert plan.selected_mode is ResourceExecutionMode.CPU_ONLY
+    assert "explicit CUDA capability" in (plan.fallback_reason or "")
+    assert "capability snapshot has no explicit CUDA record" in plan.capability_provenance
+
+
+def test_direct_cuda_capability_selects_gpu_and_preserves_provenance() -> None:
+    snapshot = ResourceCapabilitySnapshot(
+        {
+            "cuda": Capability(
+                "cuda",
+                CapabilityStatus.AVAILABLE,
+                "12.4",
+                "direct CUDA toolkit probe: nvcc --version",
+                "exit code 0",
+            )
+        }
+    )
+    plan = GPU_AWARE_RESOURCE_PRESET.resolve(
+        ResourceCapabilitySnapshot(snapshot.records),
+        {
+            "input_bytes": 1,
+            "working_set_bytes": 2,
+            "retained_output_bytes": 1,
+            "parallel_workers": 1,
+        },
+    )
+
+    assert plan.outcome is ResourcePlanOutcome.GPU_SELECTED
+    assert plan.selected_mode is ResourceExecutionMode.GPU_PREFERRED
+    assert plan.capability_status is CapabilityStatus.AVAILABLE
+    assert plan.capability_provenance == "direct CUDA toolkit probe: nvcc --version"
+    assert plan.capability_version == "12.4"
+
+
+def test_gpu_required_fails_closed_when_cuda_is_unknown() -> None:
+    required = replace(GPU_AWARE_RESOURCE_PRESET, execution_mode=ResourceExecutionMode.GPU_REQUIRED)
+    with pytest.raises(GPUUnavailableError) as error:
+        required.resolve(ResourceCapabilitySnapshot({}), ResourceEstimates(1, 2, 1, 1))
+    assert error.value.outcome is ResourcePlanOutcome.GPU_UNAVAILABLE
+
+
+def test_over_budget_is_rejected_before_plan_creation() -> None:
+    estimates = ResourceEstimates(17 * 1024**3, 17 * 1024**3, 1, 1)
+    with pytest.raises(ResourceBudgetExceededError) as error:
+        GPU_AWARE_RESOURCE_PRESET.resolve(ResourceCapabilitySnapshot({}), estimates)
+    assert error.value.outcome is ResourcePlanOutcome.OVER_BUDGET
+    assert error.value.resource_name == "input_bytes"
+    assert error.value.limit == GPU_AWARE_RESOURCE_PRESET.limits.input_bytes
+
+
+def test_equivalent_resource_inputs_have_identical_plan_serialization_and_digest() -> None:
+    snapshot = ResourceCapabilitySnapshot(
+        {
+            "cuda": Capability(
+                "cuda", CapabilityStatus.UNKNOWN, None, "test snapshot", "not available"
+            )
+        }
+    )
+    first = GPU_AWARE_RESOURCE_PRESET.resolve(
+        snapshot,
+        {
+            "input_bytes": 1,
+            "working_set_bytes": 2,
+            "retained_output_bytes": 1,
+            "parallel_workers": 1,
+        },
+    )
+    second = GPU_AWARE_RESOURCE_PRESET.resolve(
+        ResourceCapabilitySnapshot(dict(snapshot.records)),
+        ResourceEstimates(1, 2, 1, 1),
+    )
+
+    assert first.serialize() == second.serialize()
+    assert first.digest == second.digest
 
 
 def test_preset_is_immutable_and_overrides_do_not_mutate_parent() -> None:
