@@ -875,6 +875,8 @@ class ReconstructionWorkspaceManager:
         return self._finish(workspace, WorkspaceState.FAILED, reason)
 
     def cancel(self, workspace: ReconstructionWorkspace, reason: str = "cancelled") -> ReconstructionWorkspace:
+        if workspace.state is WorkspaceState.CANCELLED:
+            return workspace
         return self._finish(workspace, WorkspaceState.CANCELLED, reason)
 
     def source_is_intact(self, workspace: ReconstructionWorkspace) -> bool:

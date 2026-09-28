@@ -354,6 +354,12 @@ class CancelToken:
         self._event.set()
 
     @property
+    def event(self) -> threading.Event:
+        """The single owned event passed to cancellable process adapters."""
+
+        return self._event
+
+    @property
     def cancelled(self) -> bool:
         return self._event.is_set()
 

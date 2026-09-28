@@ -319,7 +319,10 @@ class ReconstructionOrchestrator:
                 )
 
             stage_result = execution.stage_result
-            if token.cancelled and stage_result.status is StageStatus.SUCCEEDED:
+            if token.cancelled and stage_result.status in {
+                StageStatus.SUCCEEDED,
+                StageStatus.FAILED,
+            }:
                 stage_result = _terminal_stage(
                     definition.stage_id,
                     StageStatus.CANCELLED,

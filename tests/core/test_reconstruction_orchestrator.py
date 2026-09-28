@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import sys
+import threading
 
 import pytest
 
@@ -23,6 +25,7 @@ from packlab_core.reconstruction_orchestrator import (
     ReconstructionStageDefinition,
     ReconstructionStageExecution,
 )
+from packlab_core.reconstruction_process import run_reconstruction_stage
 
 
 def _request(executors=None) -> ReconstructionOrchestrationRequest:
@@ -160,6 +163,41 @@ def test_cancel_before_start_and_completion_race_are_recoverable() -> None:
     assert raced.status is RunStatus.CANCELLED
     assert raced.output is None
     assert raced.stage_results[-1].cancelled is True
+
+
+def test_cancel_token_stops_owned_process_and_repeated_cancel_is_idempotent() -> None:
+    token = CancelToken()
+    started = threading.Event()
+    holder = {}
+
+    def blocking(context):
+        started.set()
+        stage = run_reconstruction_stage(
+            "feature-extraction",
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cancel_event=context.cancel.event,
+        )
+        holder["stage"] = stage
+        return ReconstructionStageExecution("feature-extraction", stage)
+
+    thread = threading.Thread(
+        target=lambda: holder.setdefault(
+            "result",
+            ReconstructionOrchestrator().run(_request({"feature-extraction": blocking}), token),
+        ),
+        daemon=True,
+    )
+    thread.start()
+    assert started.wait(timeout=2.0)
+    token.cancel()
+    token.cancel()
+    thread.join(timeout=4.0)
+
+    assert not thread.is_alive()
+    result = holder["result"]
+    assert result.status is RunStatus.CANCELLED
+    assert result.output is None
+    assert holder["stage"].status is StageStatus.CANCELLED
 
 
 def test_order_and_dependency_contract_rejects_invalid_plan() -> None:
