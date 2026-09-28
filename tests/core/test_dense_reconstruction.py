@@ -100,6 +100,43 @@ def test_unsafe_or_invalid_configuration_fails_closed(configuration: dict[str, o
         DensePointCloudConfig.from_overrides(configuration)
 
 
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("estimate_colors", -1),
+        ("estimate_colors", 3),
+        ("estimate_normals", -1),
+        ("estimate_normals", 3),
+        ("fusion_filter", -1),
+        ("fusion_filter", 3),
+        ("postprocess_dmaps", -1),
+        ("postprocess_dmaps", 8),
+    ],
+)
+def test_openmvs_semantic_domains_reject_invalid_values(
+    field_name: str, invalid_value: int
+) -> None:
+    with pytest.raises((InvalidDenseReconstructionRequest, UnsupportedDenseReconstructionOption)):
+        DensePointCloudConfig.from_overrides({field_name: invalid_value})
+
+
+@pytest.mark.parametrize(
+    ("field_name", "valid_values"),
+    [
+        ("estimate_colors", (0, 1, 2)),
+        ("estimate_normals", (0, 1, 2)),
+        ("fusion_filter", (0, 1, 2)),
+        ("postprocess_dmaps", (0, 1, 2, 3, 4, 5, 6, 7)),
+    ],
+)
+def test_openmvs_semantic_domains_accept_edges_and_supported_combinations(
+    field_name: str, valid_values: tuple[int, ...]
+) -> None:
+    for valid_value in valid_values:
+        configuration = DensePointCloudConfig.from_overrides({field_name: valid_value})
+        assert getattr(configuration, field_name) == valid_value
+
+
 def test_unknown_and_caller_controlled_options_are_rejected() -> None:
     for overrides in (
         {"--input-file": "private"},

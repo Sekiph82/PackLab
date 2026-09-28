@@ -35,6 +35,8 @@ _HEX_DIGEST = re.compile(r"[0-9a-f]{64}\\Z")
 _CONTROL = re.compile(r"[\\x00-\\x1f\\x7f]")
 _SAFE_REVISION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\\Z")
 _DENSE_PROBE_IDS = frozenset({OPENMVS_ENGINE_ID, "openmvs.DensifyPointCloud"})
+_OPENMVS_TRISTATE_VALUES = frozenset({0, 1, 2})
+_OPENMVS_POSTPROCESS_DMAPS_MASK = 0b111
 
 
 class DenseReconstructionError(ValueError):
@@ -83,6 +85,24 @@ def _integer(value: object, field_name: str, *, minimum: int = 0) -> int:
             f"{field_name} must be an integer greater than or equal to {minimum}"
         )
     return value
+
+
+def _openmvs_tristate(value: object, field_name: str) -> int:
+    parsed = _integer(value, field_name)
+    if parsed not in _OPENMVS_TRISTATE_VALUES:
+        raise UnsupportedDenseReconstructionOption(
+            f"{field_name} must be one of the pinned OpenMVS values 0, 1, or 2"
+        )
+    return parsed
+
+
+def _openmvs_postprocess_dmaps(value: object) -> int:
+    parsed = _integer(value, "postprocess_dmaps")
+    if parsed & ~_OPENMVS_POSTPROCESS_DMAPS_MASK:
+        raise UnsupportedDenseReconstructionOption(
+            "postprocess_dmaps contains unsupported OpenMVS flag bits"
+        )
+    return parsed
 
 
 def _finite_float(value: object, field_name: str, *, minimum: float = 0.0) -> float:
@@ -140,12 +160,12 @@ class DensePointCloudConfig:
             "number_views_fuse",
             "iters",
             "geometric_iters",
-            "estimate_colors",
-            "estimate_normals",
-            "fusion_filter",
-            "postprocess_dmaps",
         ):
             _integer(getattr(self, field_name), field_name)
+        _openmvs_tristate(self.estimate_colors, "estimate_colors")
+        _openmvs_tristate(self.estimate_normals, "estimate_normals")
+        _openmvs_tristate(self.fusion_filter, "fusion_filter")
+        _openmvs_postprocess_dmaps(self.postprocess_dmaps)
         _finite_float(
             self.fusion_depth_diff_threshold,
             "fusion_depth_diff_threshold",
