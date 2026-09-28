@@ -187,6 +187,22 @@ injected results directly.
 
 **Origin:** `M07-C001 / PL-0174_CHATGPT_AUDIT_V01.md`.
 
+### AL-PL-0016 - Engine option domains must fail closed at semantic adapters
+
+**Applies to:** OpenMVS/COLMAP semantic configuration adapters and later
+external-engine command boundaries.
+
+**Finding:** A typed adapter can reject raw option keys yet still accept values
+outside the pinned engine's documented domain, emitting an argv that is not a
+valid PackLab-owned semantic configuration.
+
+**Required behavior:** derive explicit value-domain checks from the pinned
+engine source, reject unsupported enum/range/bitmask values before command
+construction, and test invalid values through the public configuration
+boundary alongside valid edge and composite values.
+
+**Origin:** `M07-C001 / PL-0175_CHATGPT_AUDIT_V01.md`.
+
 ## Audit history pointers
 
 - `M00-C001` — milestone batch V01: PL-0006..PL-0009 and PL-0011..PL-0018 **AUDITED_PASS**; PL-0010 **CHANGES_REQUIRED** because the risk register's Related PL task IDs included multiple semantically unrelated task links. M00 remains open pending PL-0010 remediation and final milestone re-audit.
