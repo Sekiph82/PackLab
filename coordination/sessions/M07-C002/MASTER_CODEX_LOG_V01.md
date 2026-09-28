@@ -19,7 +19,7 @@
 | Child | Implementation/evidence commit | Child log commit | Child log URL | Result/frontier |
 | --- | --- | --- | --- | --- |
 | PL-0181 | `1a19dfc528ed6ce21799a800341236e961de557d` | `<CODEX_FILL_AFTER_CHILD_LOG>` | https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/PL-0181_CODEX_LOG_V01.md | `READY_FOR_INDEPENDENT_AUDIT` |
-| PL-0182 | `<CODEX_FILL>` | `<CODEX_FILL>` | https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/PL-0182_CODEX_LOG_V01.md | `<CODEX_FILL>` |
+| PL-0182 | `c5da811f2965308ac0a58f8696d4cfdb02e1423a` | `<CODEX_FILL_AFTER_CHILD_LOG>` | https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/PL-0182_CODEX_LOG_V01.md | `READY_FOR_INDEPENDENT_AUDIT` |
 | PL-0183 | `<CODEX_FILL>` | `<CODEX_FILL>` | https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M07-C002/PL-0183_CODEX_LOG_V01.md | `<CODEX_FILL>` |
 
 ## Batch validation and limitations
@@ -32,12 +32,19 @@ dependency/lock checks passed. Implementation commit
 The child log records full commands, expected/failure conditions, negative
 coverage, limitations and privacy/scope review. PL-0182 is the next frontier;
 it is authorized only after this child log publication and fresh per-child
-preflight. PL-0183 remains frozen and ordered behind PL-0182.
+preflight. PL-0182 validation: focused cancellation/process/workspace/job suite
+`56 passed, 1 skipped`; exact locked full suite `810 passed, 6 skipped, 1
+deselected, 2 warnings`; targeted Ruff/format/mypy/compileall and protected
+scope checks passed. Implementation commit
+`c5da811f2965308ac0a58f8696d4cfdb02e1423a` is visible on `origin/main`. The
+PL-0182 log records process termination, race/retry/source-preservation
+evidence and limitations. PL-0183 is the next frontier; it is authorized only
+after this child log publication and fresh per-child preflight.
 
 ## Batch state
 
-`BATCH_IN_PROGRESS: PL-0181 complete; next frontier PL-0182`
+`BATCH_IN_PROGRESS: PL-0181 and PL-0182 complete; next frontier PL-0183`
 
 ## Final handoff
 
-`BATCH_PROGRESS_AFTER_PL-0181`
+`BATCH_PROGRESS_AFTER_PL-0182`
