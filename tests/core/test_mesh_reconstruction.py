@@ -87,7 +87,7 @@ def _stage(
     status: StageStatus = StageStatus.SUCCEEDED,
     *,
     exit_code: int | None = 0,
-    cancelled: bool | None = None,
+    cancelled: object | None = None,
     stage_id: str = MESH_RECONSTRUCTION_STAGE_ID,
     stdout: str = "vertices=not-a-contract-and-not-a-count",
     stderr: str = "",
@@ -129,8 +129,11 @@ def test_request_binds_successful_dense_provenance_without_geometry_claims() -> 
         {"mesh_output_asset_id": "private/mesh"},
         {"min_point_distance": -0.01},
         {"min_point_distance": float("nan")},
+        {"min_point_distance": 10**400},
         {"thickness_factor": float("inf")},
+        {"thickness_factor": 10**400},
         {"quality_factor": True},
+        {"quality_factor": 10**400},
         {"integrate_only_roi": 1},
         {"constant_weight": "true"},
         {"free_space_support": 0},
@@ -325,6 +328,53 @@ def test_malformed_stage_results_fail_closed_without_output(
     assert result.mesh_output_asset_id is None
     assert result.stage_result.stage_id == MESH_RECONSTRUCTION_STAGE_ID
     assert result.stage_result.status is StageStatus.FAILED
+
+
+@pytest.mark.parametrize("cancelled", [0, 1, "false", "true"])
+@pytest.mark.parametrize(
+    ("status", "exit_code"),
+    [
+        (StageStatus.SUCCEEDED, 0),
+        (StageStatus.FAILED, 7),
+        (StageStatus.CANCELLED, None),
+    ],
+)
+def test_non_boolean_cancellation_values_fail_closed_on_every_stage_path(
+    status: StageStatus, exit_code: int | None, cancelled: object
+) -> None:
+    result = normalize_mesh_reconstruction_result(
+        _request(), _stage(status, exit_code=exit_code, cancelled=cancelled)
+    )
+
+    assert result.status is RunStatus.FAILED
+    assert result.mesh_output_asset_id is None
+    assert result.stage_result.status is StageStatus.FAILED
+    assert result.stage_result.cancelled is False
+
+
+@pytest.mark.parametrize("cancelled", [0, 1, "false", "true"])
+@pytest.mark.parametrize(
+    ("status", "run_status", "exit_code", "output"),
+    [
+        (StageStatus.SUCCEEDED, RunStatus.SUCCEEDED, 0, DEFAULT_MESH_OUTPUT_ASSET_ID),
+        (StageStatus.FAILED, RunStatus.FAILED, 7, None),
+        (StageStatus.CANCELLED, RunStatus.CANCELLED, None, None),
+    ],
+)
+def test_direct_mesh_run_rejects_non_boolean_cancellation_values(
+    status: StageStatus,
+    run_status: RunStatus,
+    exit_code: int | None,
+    output: str | None,
+    cancelled: object,
+) -> None:
+    with pytest.raises(MeshReconstructionError, match="cancellation flag must be a boolean"):
+        MeshReconstructionRun(
+            _request(),
+            run_status,
+            _stage(status, exit_code=exit_code, cancelled=cancelled),
+            output,
+        )
 
 
 def test_direct_run_rejects_output_on_failure_and_mismatched_output_identity() -> None:

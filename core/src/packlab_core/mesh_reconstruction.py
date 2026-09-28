@@ -80,7 +80,12 @@ def _asset_id(value: object, field_name: str) -> str:
 def _finite_float(value: object, field_name: str, *, minimum: float = 0.0) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise InvalidMeshReconstructionRequest(f"{field_name} must be a finite number")
-    converted = float(value)
+    try:
+        converted = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise InvalidMeshReconstructionRequest(
+            f"{field_name} must be a finite number greater than or equal to {minimum}"
+        ) from exc
     if not math.isfinite(converted) or converted < minimum:
         raise InvalidMeshReconstructionRequest(
             f"{field_name} must be a finite number greater than or equal to {minimum}"
@@ -443,6 +448,8 @@ def _stage_result_contract_error(stage_result: ReconstructionStageResult) -> str
         return "mesh stage result has an unexpected stage ID"
     if not isinstance(stage_result.status, StageStatus):
         return "mesh stage result has an unknown status"
+    if not isinstance(stage_result.cancelled, bool):
+        return "mesh stage result cancellation flag must be a boolean"
     if isinstance(stage_result.exit_code, bool) or not (
         stage_result.exit_code is None or isinstance(stage_result.exit_code, int)
     ):
