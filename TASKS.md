@@ -6,7 +6,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M08
 - Current Sprint: M08-C001 — Segmentation, Object Extraction & Reconstruction QA
-- Current Task: M08-C001 — Remediation batch PL-0184 V02 then PL-0185 V02
+- Current Task: M08-C001 — PL-0186 owner/license/checkpoint/runtime decision
 - Current Task Status: OWNER_REQUIRED
 - Next Task/Action: Owner/governed architecture process must resolve the explicit PL-0186 `NO_SELECTION_LICENSE_OR_CHECKPOINT_BLOCKER` with a reviewed local model, checkpoint, runtime and license decision. ChatGPT must then independently authorize the next ordered M08 child. Do not start PL-0186+ or M09.
 - Required Actor: OWNER
@@ -364,8 +364,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M08-S01 - Object segmentation
 
-- [ ] **PL-0184** Define PackLab `SegmentationBackend` and versioned `MaskArtifact` contracts so the model can be replaced without rewriting object extraction. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0184_SEGMENTATION_BACKEND_CONTRACT.md
-- [ ] **PL-0185** Benchmark candidate local segmentation model(s) against bottle, jerrycan, cap and transparent/glossy examples.
+- [x] **PL-0184** Define PackLab `SegmentationBackend` and versioned `MaskArtifact` contracts so the model can be replaced without rewriting object extraction. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0184_SEGMENTATION_BACKEND_CONTRACT.md **AUDITED_PASS:** V03 independently closed the recursive mutation/digest-integrity finding: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0184_CHATGPT_AUDIT_V03.md
+- [x] **PL-0185** Benchmark candidate local segmentation model(s) against bottle, jerrycan, cap and transparent/glossy examples. **AUDITED_PASS:** V02 independently closed the benchmark prediction/report-digest integrity finding; the production model/license/checkpoint/runtime decision remains the PL-0186 owner gate: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0185_CHATGPT_AUDIT_V02.md
 - [ ] **PL-0186** Implement selected PyTorch segmentation backend.
 - [ ] **PL-0187** Implement mask post-processing: hole filling, edge cleanup and small-component removal.
 - [ ] **PL-0188** Add manual mask-correction UI for difficult frames.
