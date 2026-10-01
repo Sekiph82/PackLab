@@ -164,6 +164,7 @@ class SegmentationCapabilityReport:
     available: bool
     capabilities: tuple[SegmentationCapability, ...] = ()
     limitations: tuple[str, ...] = ()
+    details: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _require_text(self.backend_id, "backend_id")
@@ -171,6 +172,10 @@ class SegmentationCapabilityReport:
             raise SegmentationContractError("available must be a boolean")
         object.__setattr__(self, "capabilities", tuple(self.capabilities))
         object.__setattr__(self, "limitations", tuple(self.limitations))
+        details = _json_value(self.details, "capability_details")
+        if not isinstance(details, dict):
+            raise SegmentationContractError("capability_details must be a mapping")
+        object.__setattr__(self, "details", _freeze_json(details))
         if not self.available and self.capabilities:
             raise SegmentationContractError("unavailable backend cannot advertise capabilities")
 
@@ -180,6 +185,7 @@ class SegmentationCapabilityReport:
             "available": self.available,
             "capabilities": [item.value for item in self.capabilities],
             "limitations": list(self.limitations),
+            "details": _thaw_json(self.details),
         }
 
 
@@ -196,6 +202,7 @@ class SegmentationProvenance:
     runtime_id: str
     runtime_version: str
     license_record: str
+    runtime_details: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for name in (
@@ -211,8 +218,12 @@ class SegmentationProvenance:
             _require_text(getattr(self, name), name)
         if self.checkpoint_sha256 != "not-applicable":
             _require_sha256(self.checkpoint_sha256, "checkpoint_sha256")
+        details = _json_value(self.runtime_details, "runtime_details")
+        if not isinstance(details, dict):
+            raise SegmentationContractError("runtime_details must be a mapping")
+        object.__setattr__(self, "runtime_details", _freeze_json(details))
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, object]:
         return {
             "backend_id": self.backend_id,
             "backend_version": self.backend_version,
@@ -223,6 +234,7 @@ class SegmentationProvenance:
             "runtime_id": self.runtime_id,
             "runtime_version": self.runtime_version,
             "license_record": self.license_record,
+            "runtime_details": _thaw_json(self.runtime_details),
         }
 
 

@@ -61,6 +61,8 @@ Owner decision ADR-0004 selects SAM 2.1 Hiera Base+ for PackLab V1 segmentation 
 
 The production checkpoint may be obtained only from Meta's official public checkpoint source documented in ADR-0004. PL-0186 must compute and persist the local checkpoint SHA-256, exact byte size, runtime/device facts and exact PyTorch/torchvision/SAM 2 artifact versions before independent acceptance. The checkpoint binary must not be committed to Git and the application must not silently auto-download it. CUDA is optional and capability-probed; CPU is a functional fallback without a performance guarantee. Upstream recommends WSL for Windows, so native-Windows versus WSL execution must be treated as a probed runtime fact rather than assumed support.
 
+PL-0186 V02 explicitly acquired the approved public checkpoint on 2026-10-01 for provenance verification: `sam2.1_hiera_base_plus.pt`, 323606802 bytes, SHA-256 `a2345aede8715ab1d5d31b4a509fb160c5a4af1970f199d9054ccfb746c004c5`. The artifact remains outside Git. The PackLab 3.12.10 locked environment did not contain PyTorch, torchvision, or SAM 2, so no native model execution claim is made; the adapter reports this capability truthfully and has no download fallback.
+
 Authoritative project decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md
 
 #### PyTorch
