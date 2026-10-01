@@ -1,6 +1,10 @@
 # PL-0194 Codex Implementation Log V01
 
 Task: **Detect inconsistent focal/lens usage and warn before reconstruction**
+
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0194_CODEX_PROMPT_V01.md
+
+Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0194_CHATGPT_AUDIT_CRITERIA_V01.md
 Required actor: **CODEX**
 
 ## Authorization and synchronization
