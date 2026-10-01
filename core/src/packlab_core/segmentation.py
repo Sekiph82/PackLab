@@ -404,6 +404,7 @@ class MaskArtifact:
     quality_flags: tuple[str, ...] = ()
     raster: MaskRaster | None = None
     authority_class: str = MASK_AUTHORITY_CLASS
+    post_processing_evidence: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.artifact_id, "artifact_id")
@@ -439,11 +440,16 @@ class MaskArtifact:
             self.mask_height,
         ):
             raise InvalidMaskArtifact("raster dimensions do not match the mask artifact")
+        if self.post_processing_evidence is not None:
+            evidence = _json_value(self.post_processing_evidence, "post_processing_evidence")
+            if not isinstance(evidence, dict):
+                raise InvalidMaskArtifact("post_processing_evidence must be a mapping")
+            object.__setattr__(self, "post_processing_evidence", _freeze_json(evidence))
         if self.authority_class != MASK_AUTHORITY_CLASS:
             raise InvalidMaskArtifact("mask artifacts must remain derived mask authority")
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        result: dict[str, object] = {
             "contract": SEGMENTATION_CONTRACT_VERSION,
             "artifact_id": self.artifact_id,
             "authority_class": self.authority_class,
@@ -468,6 +474,9 @@ class MaskArtifact:
             "manual_edit_ancestry": list(self.manual_edit_ancestry),
             "quality_flags": list(self.quality_flags),
         }
+        if self.post_processing_evidence is not None:
+            result["post_processing_evidence"] = _thaw_json(self.post_processing_evidence)
+        return result
 
 
 @dataclass(frozen=True, slots=True)
