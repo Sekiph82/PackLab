@@ -55,4 +55,3 @@ No `TASKS.md`, master log, audit/criteria artifact, owner ADR, accepted child ev
 - PL-0190+ and M09 had not started at this PL-0189 child boundary; after this log is published and remotely verified, continue to PL-0190 under the active master batch.
 
 READY_FOR_INDEPENDENT_AUDIT
-
