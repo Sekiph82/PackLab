@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .mask_correction import MaskCorrectionView
 from .version import AboutView
 
 
@@ -23,6 +24,7 @@ class Route(StrEnum):
     CAPTURE_INBOX = "capture-inbox"
     RECONSTRUCTION = "reconstruction"
     EDITOR = "editor"
+    MASK_CORRECTION = "mask-correction"
     SETTINGS = "settings"
 
 
@@ -124,6 +126,8 @@ class RouteStack(QStackedWidget):
             view: QWidget
             if route is Route.CAPTURE_INBOX:
                 view = CaptureInboxView(ingest_controller=ingest_controller, receiver=receiver)
+            elif route is Route.MASK_CORRECTION:
+                view = MaskCorrectionView()
             elif route is Route.SETTINGS:
                 view = AboutView()
             else:
@@ -136,5 +140,10 @@ class RouteStack(QStackedWidget):
         self.setCurrentWidget(self.views[route])
 
     def set_project_available(self, available: bool) -> None:
-        for route in (Route.CAPTURE_INBOX, Route.RECONSTRUCTION, Route.EDITOR):
+        for route in (
+            Route.CAPTURE_INBOX,
+            Route.RECONSTRUCTION,
+            Route.EDITOR,
+            Route.MASK_CORRECTION,
+        ):
             self.views[route].setEnabled(available)

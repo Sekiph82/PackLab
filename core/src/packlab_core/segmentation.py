@@ -405,6 +405,7 @@ class MaskArtifact:
     raster: MaskRaster | None = None
     authority_class: str = MASK_AUTHORITY_CLASS
     post_processing_evidence: Mapping[str, object] | None = None
+    manual_edit_evidence: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.artifact_id, "artifact_id")
@@ -445,6 +446,11 @@ class MaskArtifact:
             if not isinstance(evidence, dict):
                 raise InvalidMaskArtifact("post_processing_evidence must be a mapping")
             object.__setattr__(self, "post_processing_evidence", _freeze_json(evidence))
+        if self.manual_edit_evidence is not None:
+            evidence = _json_value(self.manual_edit_evidence, "manual_edit_evidence")
+            if not isinstance(evidence, dict):
+                raise InvalidMaskArtifact("manual_edit_evidence must be a mapping")
+            object.__setattr__(self, "manual_edit_evidence", _freeze_json(evidence))
         if self.authority_class != MASK_AUTHORITY_CLASS:
             raise InvalidMaskArtifact("mask artifacts must remain derived mask authority")
 
@@ -476,6 +482,8 @@ class MaskArtifact:
         }
         if self.post_processing_evidence is not None:
             result["post_processing_evidence"] = _thaw_json(self.post_processing_evidence)
+        if self.manual_edit_evidence is not None:
+            result["manual_edit_evidence"] = _thaw_json(self.manual_edit_evidence)
         return result
 
 
