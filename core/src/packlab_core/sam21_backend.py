@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.metadata
 import math
 import platform
+import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -48,6 +50,7 @@ SAM21_CHECKPOINT_URL = (
 )
 SAM21_CHECKPOINT_BYTES = 323_606_802
 SAM21_CHECKPOINT_SHA256 = "a2345aede8715ab1d5d31b4a509fb160c5a4af1970f199d9054ccfb746c004c5"
+SAM21_CONFIG_SHA256 = "37d6c56b07a7f8d08baaa314315c60dc3aabe2edc66cd92bac6d1ed50038e788"
 SAM21_LICENSE_RECORD = "docs/architecture/DEPENDENCY_LICENSE_REGISTER.md#sam-2--sam-21-base"
 
 
@@ -135,15 +138,54 @@ def verify_sam21_checkpoint(
 
 
 @dataclass(frozen=True, slots=True)
+class SAM21RuntimeIdentity:
+    """Expected versus independently observed SAM 2 source identity."""
+
+    observed_available: bool
+    observed_package_version: str
+    observed_source_form: str
+    observed_module_path: str | None
+    observed_source_revision: str | None
+    identity_matches_approved: bool
+    verification_reason: str
+    config_id: str | None
+    config_sha256: str | None
+    config_verified: bool
+    config_path: str | None = None
+
+    def portable_dict(self) -> dict[str, object]:
+        return {
+            "expected_repository": SAM21_UPSTREAM_REPOSITORY,
+            "expected_revision": SAM21_UPSTREAM_REVISION,
+            "observed_available": self.observed_available,
+            "observed_package_version": self.observed_package_version,
+            "observed_source_form": self.observed_source_form,
+            "observed_source_revision": self.observed_source_revision,
+            "identity_matches_approved": self.identity_matches_approved,
+            "verification_reason": self.verification_reason,
+            "config_id": self.config_id,
+            "config_sha256": self.config_sha256,
+            "config_verified": self.config_verified,
+        }
+
+    def diagnostic_dict(self) -> dict[str, object]:
+        return {
+            **self.portable_dict(),
+            "observed_module_path": self.observed_module_path,
+            "config_path": self.config_path,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class SAM21RuntimeReport:
-    """Explicit capability facts returned by a local runtime adapter."""
+    """Explicit local runtime, installed-source and executed-config facts."""
 
     import_available: bool
     executable: bool
     python_version: str
     torch_version: str
     torchvision_version: str
-    sam2_revision: str
+    identity: SAM21RuntimeIdentity
     device: str
     cuda_available: bool
     cuda_version: str
@@ -155,7 +197,7 @@ class SAM21RuntimeReport:
             "python_version": self.python_version,
             "torch_version": self.torch_version,
             "torchvision_version": self.torchvision_version,
-            "sam2_revision": self.sam2_revision,
+            "identity": self.identity.diagnostic_dict(),
             "device": self.device,
             "cuda_available": self.cuda_available,
             "cuda_version": self.cuda_version,
@@ -164,6 +206,161 @@ class SAM21RuntimeReport:
             "executable": self.executable,
             "limitations": list(self.limitations),
         }
+
+
+def _unavailable_identity(reason: str) -> SAM21RuntimeIdentity:
+    return SAM21RuntimeIdentity(
+        observed_available=False,
+        observed_package_version="unavailable",
+        observed_source_form="unavailable",
+        observed_module_path=None,
+        observed_source_revision=None,
+        identity_matches_approved=False,
+        verification_reason=reason,
+        config_id=None,
+        config_sha256=None,
+        config_verified=False,
+    )
+
+
+def observe_sam21_identity(
+    sam2_module: ModuleType,
+    *,
+    command_runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    package_version: str | None = None,
+    expected_config_sha256: str = SAM21_CONFIG_SHA256,
+) -> SAM21RuntimeIdentity:
+    """Verify a clean SAM 2 source checkout and the Hydra config it will resolve."""
+
+    module_file_value = getattr(sam2_module, "__file__", None)
+    if not isinstance(module_file_value, str) or not module_file_value:
+        return SAM21RuntimeIdentity(
+            True,
+            "unknown",
+            "unverifiable",
+            None,
+            None,
+            False,
+            "SAM 2 module has no filesystem source path",
+            None,
+            None,
+            False,
+        )
+    module_file = Path(module_file_value).resolve()
+    try:
+        root_result = command_runner(
+            ["git", "-C", str(module_file.parent), "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        source_root = Path(root_result.stdout.strip()).resolve()
+        revision_result = command_runner(
+            ["git", "-C", str(source_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        observed_revision = revision_result.stdout.strip().lower()
+        remote_result = command_runner(
+            ["git", "-C", str(source_root), "remote", "get-url", "origin"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        remote = remote_result.stdout.strip().lower().removesuffix(".git")
+        clean_result = command_runner(
+            [
+                "git",
+                "-C",
+                str(source_root),
+                "status",
+                "--porcelain",
+                "--untracked-files=all",
+                "--",
+                "sam2",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        package_root = (source_root / "sam2").resolve()
+        if not module_file.is_relative_to(package_root):
+            raise ValueError("imported SAM 2 module is outside the source checkout package")
+        config_path = source_root / "sam2" / SAM21_CONFIG_ID
+        config_sha256 = _file_sha256(config_path) if config_path.is_file() else None
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        return SAM21RuntimeIdentity(
+            True,
+            package_version or _sam2_package_version(),
+            "unverifiable",
+            str(module_file),
+            None,
+            False,
+            f"SAM 2 source checkout could not be verified: {type(error).__name__}",
+            None,
+            None,
+            False,
+        )
+
+    expected_remote_names = {
+        "https://github.com/facebookresearch/sam2",
+        "git@github.com:facebookresearch/sam2",
+        "ssh://git@github.com/facebookresearch/sam2",
+    }
+    repository_matches = remote in expected_remote_names
+    revision_matches = observed_revision == SAM21_UPSTREAM_REVISION
+    clean = not clean_result.stdout.strip()
+    config_matches = config_sha256 == expected_config_sha256
+    matches = repository_matches and revision_matches and clean and config_matches
+    reasons = []
+    if not repository_matches:
+        reasons.append("origin is not the approved facebookresearch/sam2 repository")
+    if not revision_matches:
+        reasons.append("installed SAM 2 Git commit does not match the approved revision")
+    if not clean:
+        reasons.append("SAM 2 source checkout has modified or untracked files")
+    if not config_matches:
+        reasons.append("installed Hydra config is missing or its SHA-256 is not approved")
+    reason = (
+        "verified clean approved SAM 2 source checkout and Hydra config"
+        if matches
+        else "; ".join(reasons)
+    )
+    return SAM21RuntimeIdentity(
+        observed_available=True,
+        observed_package_version=package_version or _sam2_package_version(),
+        observed_source_form="clean-git-source-checkout",
+        observed_module_path=str(module_file),
+        observed_source_revision=observed_revision,
+        identity_matches_approved=matches,
+        verification_reason=reason,
+        config_id=SAM21_CONFIG_ID if config_path.is_file() else None,
+        config_sha256=config_sha256,
+        config_verified=repository_matches and revision_matches and clean and config_matches,
+        config_path=str(config_path) if config_path.is_file() else None,
+    )
+
+
+def _sam2_package_version() -> str:
+    for distribution in ("sam-2", "sam2", "SAM-2"):
+        try:
+            return importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    return "unknown"
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,105 +392,109 @@ ImageProvider = Callable[[SegmentationRequest], object]
 class PyTorchSAM21Runtime:
     """Lazy local PyTorch/SAM 2.1 runtime; imports never trigger network I/O."""
 
-    def __init__(self, checkpoint_path: Path, config_path: Path, *, device: str = "auto") -> None:
+    def __init__(self, checkpoint_path: Path, *, device: str = "auto") -> None:
         self._checkpoint_path = checkpoint_path
-        self._config_path = config_path
         self._device_preference = device
         self._predictor: Any | None = None
         self._torch: ModuleType | None = None
-        self._sam2_revision = SAM21_UPSTREAM_REVISION
 
-    def _modules(self) -> tuple[ModuleType, ModuleType, ModuleType] | None:
+    def _sam2_module(self) -> ModuleType | None:
+        try:
+            return importlib.import_module("sam2")
+        except (ImportError, OSError):
+            return None
+
+    def probe(self) -> SAM21RuntimeReport:
+        sam2 = self._sam2_module()
+        identity = (
+            observe_sam21_identity(sam2)
+            if sam2 is not None
+            else _unavailable_identity("SAM 2 is not importable")
+        )
         try:
             torch = importlib.import_module("torch")
             torchvision = importlib.import_module("torchvision")
-            sam2 = importlib.import_module("sam2")
         except (ImportError, OSError):
-            return None
-        return torch, torchvision, sam2
-
-    def probe(self) -> SAM21RuntimeReport:
-        modules = self._modules()
-        if modules is None:
             return SAM21RuntimeReport(
-                False,
-                False,
-                platform.python_version(),
-                "unavailable",
-                "unavailable",
-                self._sam2_revision,
-                "unavailable",
-                False,
-                "unavailable",
-                _environment_name(),
-                ("PyTorch, torchvision, or SAM 2 is not importable",),
+                import_available=False,
+                executable=False,
+                python_version=platform.python_version(),
+                torch_version=(
+                    "unavailable"
+                    if "torch" not in locals()
+                    else str(getattr(torch, "__version__", "unknown"))
+                ),
+                torchvision_version="unavailable",
+                identity=identity,
+                device="unavailable",
+                cuda_available=False,
+                cuda_version="unavailable",
+                environment=_environment_name(),
+                limitations=("PyTorch or torchvision is not importable",),
             )
-        torch, torchvision, _sam2 = modules
         cuda_available = bool(torch.cuda.is_available())
         device = "cuda" if self._device_preference == "auto" and cuda_available else "cpu"
         if self._device_preference not in {"auto", "cpu", "cuda"}:
             return SAM21RuntimeReport(
-                True,
-                False,
-                platform.python_version(),
-                str(getattr(torch, "__version__", "unknown")),
-                str(getattr(torchvision, "__version__", "unknown")),
-                self._sam2_revision,
-                "invalid",
-                cuda_available,
-                str(getattr(torch.version, "cuda", "unavailable")),
-                _environment_name(),
-                ("device must be auto, cpu, or cuda",),
+                import_available=True,
+                executable=False,
+                python_version=platform.python_version(),
+                torch_version=str(getattr(torch, "__version__", "unknown")),
+                torchvision_version=str(getattr(torchvision, "__version__", "unknown")),
+                identity=identity,
+                device="invalid",
+                cuda_available=cuda_available,
+                cuda_version=str(getattr(torch.version, "cuda", "unavailable")),
+                environment=_environment_name(),
+                limitations=("device must be auto, cpu, or cuda",),
             )
         if self._device_preference == "cuda" and not cuda_available:
             return SAM21RuntimeReport(
-                True,
-                False,
-                platform.python_version(),
-                str(getattr(torch, "__version__", "unknown")),
-                str(getattr(torchvision, "__version__", "unknown")),
-                self._sam2_revision,
-                "cuda",
-                False,
-                str(getattr(torch.version, "cuda", "unavailable")),
-                _environment_name(),
-                ("CUDA was requested but is unavailable",),
+                import_available=True,
+                executable=False,
+                python_version=platform.python_version(),
+                torch_version=str(getattr(torch, "__version__", "unknown")),
+                torchvision_version=str(getattr(torchvision, "__version__", "unknown")),
+                identity=identity,
+                device="cuda",
+                cuda_available=False,
+                cuda_version=str(getattr(torch.version, "cuda", "unavailable")),
+                environment=_environment_name(),
+                limitations=("CUDA was requested but is unavailable",),
             )
         self._torch = torch
+        executable = identity.identity_matches_approved and identity.config_verified
+        limitations = () if executable else (identity.verification_reason,)
         return SAM21RuntimeReport(
-            True,
-            self._config_path.is_file() and self._checkpoint_path.is_file(),
-            platform.python_version(),
-            str(getattr(torch, "__version__", "unknown")),
-            str(getattr(torchvision, "__version__", "unknown")),
-            self._sam2_revision,
-            device,
-            cuda_available,
-            str(getattr(torch.version, "cuda", "unavailable")),
-            _environment_name(),
-            tuple(
-                reason
-                for reason, missing in (
-                    ("SAM config is missing", not self._config_path.is_file()),
-                    ("SAM checkpoint is missing", not self._checkpoint_path.is_file()),
-                )
-                if missing
-            ),
+            import_available=True,
+            executable=executable,
+            python_version=platform.python_version(),
+            torch_version=str(getattr(torch, "__version__", "unknown")),
+            torchvision_version=str(getattr(torchvision, "__version__", "unknown")),
+            identity=identity,
+            device=device,
+            cuda_available=cuda_available,
+            cuda_version=str(getattr(torch.version, "cuda", "unavailable")),
+            environment=_environment_name(),
+            limitations=limitations,
         )
 
     def _ensure_predictor(self) -> Any:
         if self._predictor is not None:
             return self._predictor
-        modules = self._modules()
-        if modules is None:
-            raise SAM21RuntimeError("local PyTorch/SAM 2 runtime is unavailable")
-        torch, _torchvision, _sam2 = modules
+        report = self.probe()
+        if not report.executable or not report.identity.config_verified:
+            raise SAM21RuntimeError("approved SAM 2 source/config identity is unavailable")
+        sam2 = self._sam2_module()
+        if sam2 is None:
+            raise SAM21RuntimeError("local SAM 2 runtime is unavailable")
+        torch = importlib.import_module("torch")
         try:
             build_module = importlib.import_module("sam2.build_sam")
             predictor_module = importlib.import_module("sam2.sam2_image_predictor")
             build_sam2 = getattr(build_module, "build_sam2")
             predictor_type = getattr(predictor_module, "SAM2ImagePredictor")
-            device = self.probe().device
+            device = report.device
             model = build_sam2(SAM21_CONFIG_ID, str(self._checkpoint_path), device=device)
             self._predictor = predictor_type(model)
             self._torch = torch
@@ -346,7 +547,6 @@ class SAM21BasePlusBackend(SegmentationBackend):
     def __init__(
         self,
         checkpoint_path: str | Path,
-        config_path: str | Path,
         *,
         image_provider: ImageProvider,
         runtime: SAM21Runtime | None = None,
@@ -354,9 +554,8 @@ class SAM21BasePlusBackend(SegmentationBackend):
         expected_checkpoint_bytes: int = SAM21_CHECKPOINT_BYTES,
     ) -> None:
         self._checkpoint_path = Path(checkpoint_path)
-        self._config_path = Path(config_path)
         self._image_provider = image_provider
-        self._runtime = runtime or PyTorchSAM21Runtime(self._checkpoint_path, self._config_path)
+        self._runtime = runtime or PyTorchSAM21Runtime(self._checkpoint_path)
         self._expected_checkpoint_sha256 = expected_checkpoint_sha256
         self._expected_checkpoint_bytes = expected_checkpoint_bytes
 
@@ -367,25 +566,22 @@ class SAM21BasePlusBackend(SegmentationBackend):
             expected_bytes=self._expected_checkpoint_bytes,
         )
 
-    def _config_ok(self) -> bool:
-        return self._config_path.name == Path(SAM21_CONFIG_ID).name and self._config_path.is_file()
-
     def _runtime_report(self) -> SAM21RuntimeReport:
         try:
             return self._runtime.probe()
         except Exception as error:  # capability probing must return unavailable, never crash
             return SAM21RuntimeReport(
-                False,
-                False,
-                platform.python_version(),
-                "unavailable",
-                "unavailable",
-                SAM21_UPSTREAM_REVISION,
-                "unavailable",
-                False,
-                "unavailable",
-                _environment_name(),
-                (f"runtime probe failed: {type(error).__name__}",),
+                import_available=False,
+                executable=False,
+                python_version=platform.python_version(),
+                torch_version="unavailable",
+                torchvision_version="unavailable",
+                identity=_unavailable_identity(f"runtime probe failed: {type(error).__name__}"),
+                device="unavailable",
+                cuda_available=False,
+                cuda_version="unavailable",
+                environment=_environment_name(),
+                limitations=(f"runtime probe failed: {type(error).__name__}",),
             )
 
     def provenance(self) -> SegmentationProvenance:
@@ -409,11 +605,13 @@ class SAM21BasePlusBackend(SegmentationBackend):
                 "checkpoint_filename": SAM21_CHECKPOINT_ID,
                 "checkpoint_bytes": checkpoint.byte_size,
                 "checkpoint_verified": checkpoint.verified,
-                "config": SAM21_CONFIG_ID,
+                "sam2_identity": runtime.identity.portable_dict(),
+                "executed_config_id": runtime.identity.config_id,
+                "executed_config_sha256": runtime.identity.config_sha256,
+                "executed_config_verified": runtime.identity.config_verified,
                 "python_version": runtime.python_version,
                 "torch_version": runtime.torch_version,
                 "torchvision_version": runtime.torchvision_version,
-                "sam2_revision": runtime.sam2_revision,
                 "device": runtime.device,
                 "cuda_available": runtime.cuda_available,
                 "cuda_version": runtime.cuda_version,
@@ -424,22 +622,31 @@ class SAM21BasePlusBackend(SegmentationBackend):
     def probe(self) -> SegmentationCapabilityReport:
         checkpoint = self._checkpoint()
         runtime = self._runtime_report()
-        config_ok = self._config_ok()
-        available = checkpoint.verified and config_ok and runtime.executable
+        config_ok = runtime.identity.config_verified
+        available = (
+            checkpoint.verified
+            and runtime.executable
+            and runtime.identity.identity_matches_approved
+            and config_ok
+        )
         limitations = list(runtime.limitations)
         if not checkpoint.verified:
             limitations.append(checkpoint.reason or "checkpoint verification failed")
         if not config_ok:
-            limitations.append("SAM config is missing or has the wrong filename")
+            limitations.append("approved Hydra config is not verified in the approved SAM 2 source")
         details = {
             "backend_configured": True,
             "runtime_import_available": runtime.import_available,
             "runtime_executable": runtime.executable,
             "model_present": checkpoint.verified,
-            "config_present": config_ok,
+            "config_present": runtime.identity.config_id == SAM21_CONFIG_ID,
             "checkpoint_hash_verified": checkpoint.verified,
             "checkpoint": checkpoint.as_dict(),
             "runtime": runtime.as_dict(),
+            "runtime_identity": runtime.identity.diagnostic_dict(),
+            "executed_config_id": runtime.identity.config_id,
+            "executed_config_sha256": runtime.identity.config_sha256,
+            "executed_config_verified": runtime.identity.config_verified,
             "cuda": {"available": runtime.cuda_available, "version": runtime.cuda_version},
             "native_or_wsl": runtime.environment,
             "network_fallback": False,
