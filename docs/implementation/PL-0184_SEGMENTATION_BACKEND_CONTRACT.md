@@ -58,9 +58,16 @@ Segmentation never rewrites source photos. Preprocessed model inputs and masks l
 
 ## Model selection
 
-PL-0185 owns benchmark-based model selection for bottle, jerrycan, cap, transparent and glossy examples.
+PL-0185 owns benchmark evidence for bottle, jerrycan, cap, transparent and glossy examples.
 
-OpenReality's use of SAM-family models is reference evidence only. PL-0184 must not silently select SAM 3 or another model.
+## Selected V1 backend
+
+Owner decision ADR-0004 selects **Meta SAM 2.1 Hiera Base+** for PL-0186 behind this replaceable contract:
+https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md
+
+The selection does not change this contract's model independence. Downstream consumers must continue to depend only on PackLab segmentation and mask artifacts.
+
+OpenReality's use of SAM-family models remains reference evidence only. SAM 3 / SAM 3D Objects are not selected by this contract.
 
 ## Downstream contract
 
