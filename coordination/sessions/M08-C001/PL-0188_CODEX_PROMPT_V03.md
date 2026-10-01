@@ -1,4 +1,4 @@
-# PL-0188 - Codex Work Order V02
+# PL-0188 - Codex Work Order V03
 
 Task: **Add manual mask-correction UI and versioned revision handoff**
 
