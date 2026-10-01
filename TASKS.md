@@ -6,11 +6,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M08
 - Current Sprint: M08-C001 — Segmentation, Object Extraction & Reconstruction QA
-- Current Task: M08-C001 — PL-0186 owner/license/checkpoint/runtime decision
-- Current Task Status: OWNER_REQUIRED
-- Next Task/Action: Owner/governed architecture process must resolve the explicit PL-0186 `NO_SELECTION_LICENSE_OR_CHECKPOINT_BLOCKER` with a reviewed local model, checkpoint, runtime and license decision. ChatGPT must then independently authorize the next ordered M08 child. Do not start PL-0186+ or M09.
-- Required Actor: OWNER
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V01.md — AUDITED_PASS for the PL-0184 V02 then PL-0185 V02 remediation frontier; OWNER_REQUIRED at PL-0186 because no production model/license/checkpoint/runtime decision is reviewed or accepted. Child audits: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0184_CHATGPT_AUDIT_V03.md and https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0185_CHATGPT_AUDIT_V02.md.
+- Current Task: M08-C001 — PL-0186 V02 SAM 2.1 Hiera Base+ backend
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_CRITERIA_V02.md. Mandatory pre-read: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md and https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0184_SEGMENTATION_BACKEND_CONTRACT.md. Do not start PL-0187+ or M09 until PL-0186 independently passes audit.
+- Required Actor: CODEX
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V01.md — AUDITED_PASS for the PL-0184 V02 then PL-0185 V02 remediation frontier. Its prior PL-0186 OWNER_REQUIRED blocker is superseded by the approved owner decision below.
+- Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance. PL-0186 V02 is authorized.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -366,7 +367,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - [x] **PL-0184** Define PackLab `SegmentationBackend` and versioned `MaskArtifact` contracts so the model can be replaced without rewriting object extraction. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0184_SEGMENTATION_BACKEND_CONTRACT.md **AUDITED_PASS:** V03 independently closed the recursive mutation/digest-integrity finding: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0184_CHATGPT_AUDIT_V03.md
 - [x] **PL-0185** Benchmark candidate local segmentation model(s) against bottle, jerrycan, cap and transparent/glossy examples. **AUDITED_PASS:** V02 independently closed the benchmark prediction/report-digest integrity finding; the production model/license/checkpoint/runtime decision remains the PL-0186 owner gate: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0185_CHATGPT_AUDIT_V02.md
-- [ ] **PL-0186** Implement selected PyTorch segmentation backend.
+- [ ] **PL-0186** Implement selected PyTorch segmentation backend. **OWNER DECISION ACCEPTED:** Meta SAM 2.1 Hiera Base+ behind the PackLab `SegmentationBackend`; local PyTorch only; official checkpoint source; no runtime auto-download; checkpoint SHA-256 required. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md **Authorized prompt:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CODEX_PROMPT_V02.md
 - [ ] **PL-0187** Implement mask post-processing: hole filling, edge cleanup and small-component removal.
 - [ ] **PL-0188** Add manual mask-correction UI for difficult frames.
 - [ ] **PL-0189** Version masks separately from immutable source photos and make mask revision changes invalidate downstream object-capture geometry.
