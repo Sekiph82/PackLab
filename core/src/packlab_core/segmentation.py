@@ -508,12 +508,16 @@ class MaskSetRevision:
         if self.parent_revision_id is not None:
             _require_text(self.parent_revision_id, "parent_revision_id")
         object.__setattr__(self, "masks", masks)
+        # Creation timestamps describe publication time; they do not change authority identity.
         expected = _digest(
             {
                 "project_id": self.project_id,
                 "revision_id": self.revision_id,
                 "source_revision": self.source_revision,
-                "masks": [mask.as_dict() for mask in masks],
+                "masks": [
+                    {key: value for key, value in mask.as_dict().items() if key != "created_at"}
+                    for mask in masks
+                ],
                 "parent_revision_id": self.parent_revision_id,
             }
         )
