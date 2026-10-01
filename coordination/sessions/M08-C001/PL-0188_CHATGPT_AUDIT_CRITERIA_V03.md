@@ -1,4 +1,4 @@
-# PL-0188 - ChatGPT Audit Criteria V02
+# PL-0188 - ChatGPT Audit Criteria V03
 
 Task: **Add manual mask-correction UI and versioned revision handoff**
 
