@@ -78,6 +78,11 @@ def post_process_mask(
     raster = parent.raster
     if raster is None:
         raise MaskPostProcessingError("parent mask raster is required for post-processing")
+    # Bind this consumer to the exact in-memory bytes before copying or deriving anything.
+    if raster.digest != parent.mask_digest:
+        raise MaskPostProcessingError(
+            "parent mask raster digest does not match the declared mask_digest"
+        )
     if (raster.width, raster.height) != (parent.mask_width, parent.mask_height):
         raise MaskPostProcessingError("parent raster dimensions do not match mask dimensions")
     pixel_count = raster.width * raster.height

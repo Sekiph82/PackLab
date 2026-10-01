@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+import packlab_core.mask_postprocessing as mask_postprocessing
 from packlab_core.mask_postprocessing import (
     MASK_POSTPROCESSING_PIPELINE_VERSION,
     MaskPostProcessingError,
@@ -65,6 +67,7 @@ def _grid(rows: tuple[str, ...]) -> tuple[bool, ...]:
 
 def test_same_parent_and_parameters_have_stable_identity_and_digest() -> None:
     parent = _parent(_grid((".......", ".#####.", ".#...#.", ".#####.", ".......")), 7, 5)
+    assert parent.raster is not None and parent.raster.digest == parent.mask_digest
     params = MaskPostProcessingParameters(max_hole_area=1)
 
     first = post_process_mask(parent, params).child
@@ -75,6 +78,35 @@ def test_same_parent_and_parameters_have_stable_identity_and_digest() -> None:
     assert first.artifact_id == second.artifact_id
     assert first.mask_asset_id == second.mask_asset_id
     assert first.post_processing_version.endswith(MASK_POSTPROCESSING_PIPELINE_VERSION)
+    assert first.raster is not None and first.raster.digest == first.mask_digest
+    next_revision = post_process_mask(first, params).child
+    assert next_revision.parent_mask_revision == first.mask_revision
+    assert (
+        next_revision.raster is not None
+        and next_revision.raster.digest == next_revision.mask_digest
+    )
+
+
+def test_parent_raster_digest_mismatch_fails_before_processing_or_child_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = _parent(_grid((".....", ".###.", ".###.", ".....")), 5, 4)
+    assert parent.raster is not None
+    mismatched = replace(parent, mask_digest=hashlib.sha256(b"different mask bytes").hexdigest())
+    parent_before = mismatched.as_dict()
+    raster_before = mismatched.raster
+
+    def processing_must_not_start(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("mask processing began before parent digest validation")
+
+    monkeypatch.setattr(mask_postprocessing, "_fill_small_holes", processing_must_not_start)
+    monkeypatch.setattr(mask_postprocessing, "_canonical_digest", processing_must_not_start)
+    with pytest.raises(MaskPostProcessingError, match="raster digest does not match"):
+        post_process_mask(mismatched, MaskPostProcessingParameters(max_hole_area=1))
+
+    assert mismatched.as_dict() == parent_before
+    assert mismatched.raster is raster_before
+    assert "post_processing_evidence" not in mismatched.as_dict()
 
 
 def test_different_parameters_change_revision_even_if_output_is_equal() -> None:
