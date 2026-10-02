@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Sekiph82/PackLab/blob/main/docs/calibration/benchmarks/physical-benchmark-record.schema.json",
+  "title": "PackLab physical accuracy benchmark record v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "protocol_version",
+    "record_version",
+    "record_id",
+    "record_status",
+    "operator_reference",
+    "created_at_utc",
+    "benchmark_categories_required",
+    "environment",
+    "samples",
+    "acceptance_thresholds",
+    "threshold_status",
+    "privacy_boundary",
+    "raw_image_bytes_included",
+    "ambient_identity_included",
+    "synthetic_evidence_is_physical_evidence"
+  ],
+  "properties": {
+    "contract": {"const": "packlab.physical-accuracy-benchmark.v1"},
+    "protocol_version": {"const": "packlab_physical_accuracy_benchmark_v1"},
+    "record_version": {"const": "1.0.0"},
+    "record_id": {"type": "string", "pattern": "^(UNRECORDED-OWNER-ASSIGNED|BENCH-[A-Z0-9_-]{1,64})$"},
+    "record_status": {"enum": ["OWNER_REQUIRED", "READY_FOR_AUDIT"]},
+    "operator_reference": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/safeReference"}]},
+    "created_at_utc": {"oneOf": [{"type": "null"}, {"type": "string", "format": "date-time", "pattern": "Z$"}]},
+    "benchmark_categories_required": {
+      "const": ["matte_bottle", "glossy_bottle", "jerrycan"]
+    },
+    "environment": {"$ref": "#/$defs/environment"},
+    "samples": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/sample"}},
+    "acceptance_thresholds": {"type": "null"},
+    "threshold_status": {"const": "NOT_DEFINED_BY_PROTOCOL"},
+    "privacy_boundary": {"const": "raw_images_and_unnecessary_device_identity_private"},
+    "raw_image_bytes_included": {"const": false},
+    "ambient_identity_included": {"const": false},
+    "synthetic_evidence_is_physical_evidence": {"const": false},
+    "record_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"record_status": {"const": "READY_FOR_AUDIT"}}, "required": ["record_status"]},
+      "then": {
+        "properties": {
+          "samples": {
+            "not": {"contains": {"properties": {"disposition": {"const": "MISSING_MEASUREMENT"}}, "required": ["disposition"]}}
+          }
+        },
+        "allOf": [
+          {"properties": {"samples": {"contains": {"properties": {"category": {"const": "matte_bottle"}}, "required": ["category"]}}}},
+          {"properties": {"samples": {"contains": {"properties": {"category": {"const": "glossy_bottle"}}, "required": ["category"]}}}},
+          {"properties": {"samples": {"contains": {"properties": {"category": {"const": "jerrycan"}}, "required": ["category"]}}}}
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "safeReference": {"type": "string", "pattern": "^(sha256:[0-9a-f]{64}|ref:[A-Za-z0-9_-]{1,64})$"},
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["temperature_c", "relative_humidity_percent", "lighting_description", "background_surface", "camera_to_object_setup", "device_model", "lens_reference"],
+      "properties": {
+        "temperature_c": {"type": ["number", "null"]},
+        "relative_humidity_percent": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "lighting_description": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9 .,;:()_+-]{0,159}$"},
+        "background_surface": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9 .,;:()_+-]{0,159}$"},
+        "camera_to_object_setup": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9 .,;:()_+-]{0,159}$"},
+        "device_model": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9 .,;:()_+-]{0,159}$"},
+        "lens_reference": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9 .,;:()_+-]{0,159}$"}
+      }
+    },
+    "groundTruth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ground_truth_id", "dimension_id", "instrument_type", "value_mm", "repeated_readings_mm", "uncertainty_mm", "caliper_reference", "calibration_record_reference", "owner_reference", "measured_at_utc", "unit"],
+      "properties": {
+        "ground_truth_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "dimension_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "instrument_type": {"const": "caliper"},
+        "value_mm": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "repeated_readings_mm": {"type": "array", "minItems": 1, "items": {"type": "number", "exclusiveMinimum": 0}},
+        "uncertainty_mm": {"type": ["number", "null"], "minimum": 0},
+        "caliper_reference": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/safeReference"}]},
+        "calibration_record_reference": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/safeReference"}]},
+        "owner_reference": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/safeReference"}]},
+        "measured_at_utc": {"type": ["string", "null"], "format": "date-time"},
+        "unit": {"const": "mm"}
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sample_id", "category", "disposition", "scan_id", "scan_revision_id", "measurement_id", "measurement_revision_id", "evidence_reference", "ground_truth", "disposition_reason"],
+      "properties": {
+        "sample_id": {"type": "string", "pattern": "^SAMPLE-[A-Z0-9_-]{1,64}$"},
+        "category": {"enum": ["matte_bottle", "glossy_bottle", "jerrycan"]},
+        "disposition": {"enum": ["ACCEPTED", "REJECTED", "INVALID", "MISSING_MEASUREMENT"]},
+        "scan_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "scan_revision_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "measurement_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "measurement_revision_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+        "evidence_reference": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/safeReference"}]},
+        "ground_truth": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/groundTruth"}]},
+        "disposition_reason": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"disposition": {"const": "ACCEPTED"}}, "required": ["disposition"]},
+          "then": {
+            "required": ["scan_id", "scan_revision_id", "measurement_id", "measurement_revision_id", "evidence_reference", "ground_truth"],
+            "properties": {"ground_truth": {"$ref": "#/$defs/groundTruth"}}
+          }
+        },
+        {
+          "if": {"properties": {"disposition": {"enum": ["REJECTED", "INVALID", "MISSING_MEASUREMENT"]}}, "required": ["disposition"]},
+          "then": {"properties": {"disposition_reason": {"type": "string", "minLength": 1}}}
+        }
+      ]
+    }
+  }
+}

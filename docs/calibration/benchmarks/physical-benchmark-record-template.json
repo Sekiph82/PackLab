@@ -1,0 +1,67 @@
+{
+  "contract": "packlab.physical-accuracy-benchmark.v1",
+  "protocol_version": "packlab_physical_accuracy_benchmark_v1",
+  "record_version": "1.0.0",
+  "record_id": "UNRECORDED-OWNER-ASSIGNED",
+  "record_status": "OWNER_REQUIRED",
+  "operator_reference": null,
+  "created_at_utc": null,
+  "benchmark_categories_required": [
+    "matte_bottle",
+    "glossy_bottle",
+    "jerrycan"
+  ],
+  "environment": {
+    "temperature_c": null,
+    "relative_humidity_percent": null,
+    "lighting_description": null,
+    "background_surface": null,
+    "camera_to_object_setup": null,
+    "device_model": null,
+    "lens_reference": null
+  },
+  "samples": [
+    {
+      "sample_id": "SAMPLE-UNRECORDED-MATTE_BOTTLE-001",
+      "category": "matte_bottle",
+      "disposition": "MISSING_MEASUREMENT",
+      "scan_id": null,
+      "scan_revision_id": null,
+      "measurement_id": null,
+      "measurement_revision_id": null,
+      "evidence_reference": null,
+      "ground_truth": null,
+      "disposition_reason": "Physical sample and measurement not recorded; owner action required."
+    },
+    {
+      "sample_id": "SAMPLE-UNRECORDED-GLOSSY_BOTTLE-001",
+      "category": "glossy_bottle",
+      "disposition": "MISSING_MEASUREMENT",
+      "scan_id": null,
+      "scan_revision_id": null,
+      "measurement_id": null,
+      "measurement_revision_id": null,
+      "evidence_reference": null,
+      "ground_truth": null,
+      "disposition_reason": "Physical sample and measurement not recorded; owner action required."
+    },
+    {
+      "sample_id": "SAMPLE-UNRECORDED-JERRYCAN-001",
+      "category": "jerrycan",
+      "disposition": "MISSING_MEASUREMENT",
+      "scan_id": null,
+      "scan_revision_id": null,
+      "measurement_id": null,
+      "measurement_revision_id": null,
+      "evidence_reference": null,
+      "ground_truth": null,
+      "disposition_reason": "Physical sample and measurement not recorded; owner action required."
+    }
+  ],
+  "acceptance_thresholds": null,
+  "threshold_status": "NOT_DEFINED_BY_PROTOCOL",
+  "privacy_boundary": "raw_images_and_unnecessary_device_identity_private",
+  "raw_image_bytes_included": false,
+  "ambient_identity_included": false,
+  "synthetic_evidence_is_physical_evidence": false
+}
