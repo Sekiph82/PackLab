@@ -6,16 +6,17 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M09
 - Current Sprint: M09-C001 — Scale, Calibration & Measurement
-- Current Task: M09-C001 — Ordered Batch PL-0202 through PL-0224
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex must execute PL-0202 through PL-0224 in order and continue automatically while green. Stop only on a real failed/blocked/owner-required frontier; physical benchmark evidence must never be fabricated. Do not start M10.
-- Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/M08-C001_CHATGPT_AUDIT_V02.md — AUDITED_PASS; M08 PL-0184 through PL-0201 is complete.
+- Current Task: PL-0220 — Physical accuracy benchmark evidence
+- Current Task Status: OWNER_REQUIRED
+- Next Task/Action: Owner must provide an ACCEPTED_FOR_CAPTURE printed-mat verification record plus caliper ground truth for matte bottle, glossy bottle and jerrycan, each bound to authorized PackLab scan and measurement revisions. After that evidence is accepted, resume PL-0220 from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0220_CODEX_PROMPT_V01.md. Do not start PL-0221–PL-0224 or M10.
+- Required Actor: OWNER
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/M09-C001_CHATGPT_AUDIT_V01.md — AUDITED_PARTIAL_OWNER_REQUIRED; PL-0202 through PL-0219 accepted, PL-0220 blocked on physical benchmark evidence.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
 - Latest M08 Remaining-Batch Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMAINING_CHATGPT_AUDIT_V01.md — AUDITED_PASS for PL-0188 through PL-0201.
-- Active M09 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0202 through PL-0224 continuous Codex batch; physical evidence gaps stop truthfully as OWNER_REQUIRED. Master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
+- Active M09 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CODEX_PROMPT_V01.md — batch stopped truthfully at PL-0220 OWNER_REQUIRED. Master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
+- Latest M09 Accepted Frontier: PL-0202 through PL-0219 AUDITED_PASS; PL-0220 owner gate confirmed by https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0220_CHATGPT_AUDIT_V01.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -397,35 +398,35 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M09-S01 - Coordinate and scale normalization
 
-- [ ] **PL-0202** Detect calibration markers in source imagery and associate observations with reconstructed cameras. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0202_CODEX_PROMPT_V01.md
-- [ ] **PL-0203** Estimate global scale from marker geometry and reject inconsistent observations.
-- [ ] **PL-0204** Establish canonical PackLab axes: Z up, front direction, millimetres.
-- [ ] **PL-0205** Implement object ground-plane/base detection with user override.
-- [ ] **PL-0206** Implement automatic upright alignment with manual correction.
-- [ ] **PL-0207** Implement front-direction selection and persist it as project metadata.
-- [ ] **PL-0208** Apply scale/alignment as non-destructive transform before baking a normalized scan.
-- [ ] **PL-0209** Record scale provenance, uncertainty and explicit RELATIVE/METRIC_UNVERIFIED/METRIC_VERIFIED state. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0209_METRIC_SCALE_PROVENANCE.md
+- [x] **PL-0202** Detect calibration markers in source imagery and associate observations with reconstructed cameras. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0202_CODEX_PROMPT_V01.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0202_CHATGPT_AUDIT_V01.md
+- [x] **PL-0203** Estimate global scale from marker geometry and reject inconsistent observations. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0203_CHATGPT_AUDIT_V01.md
+- [x] **PL-0204** Establish canonical PackLab axes: Z up, front direction, millimetres. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0204_CHATGPT_AUDIT_V01.md
+- [x] **PL-0205** Implement object ground-plane/base detection with user override. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0205_CHATGPT_AUDIT_V01.md
+- [x] **PL-0206** Implement automatic upright alignment with manual correction. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0206_CHATGPT_AUDIT_V01.md
+- [x] **PL-0207** Implement front-direction selection and persist it as project metadata. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0207_CHATGPT_AUDIT_V01.md
+- [x] **PL-0208** Apply scale/alignment as non-destructive transform before baking a normalized scan. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0208_CHATGPT_AUDIT_V01.md
+- [x] **PL-0209** Record scale provenance, uncertainty and explicit RELATIVE/METRIC_UNVERIFIED/METRIC_VERIFIED state. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0209_METRIC_SCALE_PROVENANCE.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0209_CHATGPT_AUDIT_V01.md
 
 ## Sprint M09-S02 - Measurement tools
 
-- [ ] **PL-0210** Implement bounding dimensions: height, width and depth.
-- [ ] **PL-0211** Implement two-point distance measurement with snapping.
-- [ ] **PL-0212** Implement diameter/radius measurement from selected cross-sections.
-- [ ] **PL-0213** Implement horizontal cross-section extraction at arbitrary Z.
-- [ ] **PL-0214** Implement vertical profile/silhouette extraction.
-- [ ] **PL-0215** Implement neck/finish candidate measurement.
-- [ ] **PL-0216** Implement capacity-estimation groundwork using watertight interior assumptions, clearly separating estimate from certified volume.
-- [ ] **PL-0217** Display measurement uncertainty/confidence where known.
-- [ ] **PL-0218** Export measurement report with units and provenance.
+- [x] **PL-0210** Implement bounding dimensions: height, width and depth. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0210_CHATGPT_AUDIT_V01.md
+- [x] **PL-0211** Implement two-point distance measurement with snapping. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0211_CHATGPT_AUDIT_V01.md
+- [x] **PL-0212** Implement diameter/radius measurement from selected cross-sections. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0212_CHATGPT_AUDIT_V01.md
+- [x] **PL-0213** Implement horizontal cross-section extraction at arbitrary Z. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0213_CHATGPT_AUDIT_V01.md
+- [x] **PL-0214** Implement vertical profile/silhouette extraction. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0214_CHATGPT_AUDIT_V01.md
+- [x] **PL-0215** Implement neck/finish candidate measurement. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0215_CHATGPT_AUDIT_V01.md
+- [x] **PL-0216** Implement capacity-estimation groundwork using watertight interior assumptions, clearly separating estimate from certified volume. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0216_CHATGPT_AUDIT_V01.md
+- [x] **PL-0217** Display measurement uncertainty/confidence where known. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0217_CHATGPT_AUDIT_V01.md
+- [x] **PL-0218** Export measurement report with units and provenance. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0218_CHATGPT_AUDIT_V01.md
 
 ## Sprint M09-S03 - Accuracy benchmarks
 
-- [ ] **PL-0219** Define physical benchmark set with caliper-measured ground truth.
-- [ ] **PL-0220** Measure dimension error across at least matte bottle, glossy bottle and jerrycan.
-- [ ] **PL-0221** Establish V1 acceptance thresholds for overall dimensions and key features.
-- [ ] **PL-0222** Add repeat-scan reproducibility test for the same object.
-- [ ] **PL-0223** Add calibration-mat print-scale sensitivity test.
-- [ ] **PL-0224** Document conditions under which PackLab measurements must not be used for mold manufacturing.
+- [x] **PL-0219** Define physical benchmark set with caliper-measured ground truth. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0219_CHATGPT_AUDIT_V01.md
+- [ ] **PL-0220** Measure dimension error across at least matte bottle, glossy bottle and jerrycan. **OWNER_REQUIRED:** physical benchmark evidence is missing. Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0220_CHATGPT_AUDIT_V01.md Blocker: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0220_CODEX_LOG_V01.md
+- [ ] **PL-0221** Establish V1 acceptance thresholds for overall dimensions and key features. **BLOCKED_BY_PL-0220_OWNER_GATE**
+- [ ] **PL-0222** Add repeat-scan reproducibility test for the same object. **BLOCKED_BY_PL-0220_OWNER_GATE**
+- [ ] **PL-0223** Add calibration-mat print-scale sensitivity test. **BLOCKED_BY_PL-0220_OWNER_GATE**
+- [ ] **PL-0224** Document conditions under which PackLab measurements must not be used for mold manufacturing. **BLOCKED_BY_PL-0220_OWNER_GATE**
 
 ---
 
