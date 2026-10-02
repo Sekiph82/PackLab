@@ -468,6 +468,14 @@ def suggest_recapture_sectors(
             "sector_id": sector_id,
             "azimuth_index": azimuth_index,
             "elevation_band_index": elevation_index,
+            "azimuth_degrees": {
+                "start_inclusive": azimuth_index * 360.0 / policy.azimuth_sector_count,
+                "end_exclusive": (azimuth_index + 1) * 360.0 / policy.azimuth_sector_count,
+            },
+            "elevation_degrees": {
+                "start_inclusive": elevation_index * 180.0 / policy.elevation_band_count - 90.0,
+                "end_inclusive": (elevation_index + 1) * 180.0 / policy.elevation_band_count - 90.0,
+            },
             "nearest_observed_view_gap_degrees": round(angular_gap, 6),
             "reason_codes": ["unobserved_view_sector"],
             "associated_global_qa_gaps": gaps,

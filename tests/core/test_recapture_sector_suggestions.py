@@ -129,6 +129,10 @@ def test_partial_coverage_suggests_bounded_deterministic_relative_sectors() -> N
     )
     assert all("unobserved_view_sector" in item["reason_codes"] for item in suggestions)
     assert all(item["physical_orientation_claimed"] is False for item in suggestions)
+    assert all(
+        item["azimuth_degrees"]["start_inclusive"] < item["azimuth_degrees"]["end_exclusive"]
+        for item in suggestions
+    )
     assert geometry.as_dict() == original_geometry
     assert registration.serialize() == original_registration
     assert coverage.serialize() == original_coverage
