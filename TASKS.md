@@ -4,17 +4,18 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M08
-- Current Sprint: M08-C001 — Segmentation, Object Extraction & Reconstruction QA
-- Current Task: M08-C001 - Remaining Batch PL-0188 through PL-0201
+- Current Milestone: M09
+- Current Sprint: M09-C001 — Scale, Calibration & Measurement
+- Current Task: M09-C001 — Ordered Batch PL-0202 through PL-0224
 - Current Task Status: READY
-- Next Task/Action: Execute the continuous remaining-batch master prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMAINING_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMAINING_CHATGPT_AUDIT_CRITERIA_V02.md. Codex must execute PL-0188 through PL-0201 in order, publishing each child implementation/log boundary and continuing automatically while green. Stop only on a real failed/blocked/owner-required condition. Do not start M09.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex must execute PL-0202 through PL-0224 in order and continue automatically while green. Stop only on a real failed/blocked/owner-required frontier; physical benchmark evidence must never be fabricated. Do not start M10.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMEDIATION_CHATGPT_AUDIT_V01.md — AUDITED_PASS for the PL-0184 V02 then PL-0185 V02 remediation frontier. Its prior PL-0186 OWNER_REQUIRED blocker is superseded by the approved owner decision below.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/M08-C001_CHATGPT_AUDIT_V02.md — AUDITED_PASS; M08 PL-0184 through PL-0201 is complete.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
-- Active M08 Remaining-Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMAINING_CODEX_PROMPT_V02.md - PL-0188 through PL-0201 continuous ordered Codex batch; green children continue without intermediate ChatGPT audit. Master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMAINING_CHATGPT_AUDIT_CRITERIA_V02.md
+- Latest M08 Remaining-Batch Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMAINING_CHATGPT_AUDIT_V01.md — AUDITED_PASS for PL-0188 through PL-0201.
+- Active M09 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0202 through PL-0224 continuous Codex batch; physical evidence gaps stop truthfully as OWNER_REQUIRED. Master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -372,23 +373,23 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0185** Benchmark candidate local segmentation model(s) against bottle, jerrycan, cap and transparent/glossy examples. **AUDITED_PASS:** V02 independently closed the benchmark prediction/report-digest integrity finding; the production model/license/checkpoint/runtime decision remains the PL-0186 owner gate: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0185_CHATGPT_AUDIT_V02.md
 - [x] **PL-0186** Implement selected PyTorch segmentation backend. **AUDITED_PASS:** SAM 2.1 Hiera Base+ local backend accepted after V03 runtime/config provenance remediation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md
 - [x] **PL-0187** Implement mask post-processing: hole filling, edge cleanup and small-component removal. **AUDITED_PASS:** V03 independently closed parent raster/digest integrity while preserving deterministic V02 algorithms: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md
-- [ ] **PL-0188** Add manual mask-correction UI for difficult frames. **ACTIVE BATCH CHILD:** prompt V03 under the M08 remaining-batch master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0188_CODEX_PROMPT_V03.md
-- [ ] **PL-0189** Version masks separately from immutable source photos and make mask revision changes invalidate downstream object-capture geometry.
-- [ ] **PL-0190** Feed masks into reconstruction stages where supported **and** implement visibility-aware mask-to-3D lifting with multiview consensus to create `OBJECT_CAPTURE_GEOMETRY`; validate camera/image coordinate conventions. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0190_OBJECT_MASK_LIFT_MULTIVIEW_FUSION.md
-- [ ] **PL-0191** Add mask-quality overlays and contact-sheet review.
+- [x] **PL-0188** Add manual mask-correction UI for difficult frames. **ACTIVE BATCH CHILD:** prompt V03 under the M08 remaining-batch master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0188_CODEX_PROMPT_V03.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0188_CHATGPT_AUDIT_V01.md
+- [x] **PL-0189** Version masks separately from immutable source photos and make mask revision changes invalidate downstream object-capture geometry. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0189_CHATGPT_AUDIT_V01.md
+- [x] **PL-0190** Feed masks into reconstruction stages where supported **and** implement visibility-aware mask-to-3D lifting with multiview consensus to create `OBJECT_CAPTURE_GEOMETRY`; validate camera/image coordinate conventions. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0190_OBJECT_MASK_LIFT_MULTIVIEW_FUSION.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0190_CHATGPT_AUDIT_V01.md
+- [x] **PL-0191** Add mask-quality overlays and contact-sheet review. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0191_CHATGPT_AUDIT_V01.md
 
 ## Sprint M08-S02 - Photo/reconstruction QA
 
-- [ ] **PL-0192** Build pre-reconstruction QA report using sharpness, exposure, coverage and metadata consistency.
-- [ ] **PL-0193** Detect duplicate/near-duplicate photos on Windows as a second safety layer.
-- [ ] **PL-0194** Detect inconsistent focal/lens usage and warn before reconstruction.
-- [ ] **PL-0195** Calculate registered-photo ratio after COLMAP.
-- [ ] **PL-0196** Calculate sparse-cloud connectivity/fragmentation indicators.
-- [ ] **PL-0197** Calculate dense/object-cloud density and surface-coverage indicators, including multiview support statistics for `OBJECT_CAPTURE_GEOMETRY`.
-- [ ] **PL-0198** Detect obvious reconstruction artifacts and floating components.
-- [ ] **PL-0199** Produce overall reconstruction confidence with component scores, not a black-box number.
-- [ ] **PL-0200** Gate downstream parametric fitting when captured-geometry quality is below minimum acceptance thresholds; `AI_VISUAL_REFERENCE` can never satisfy this gate.
-- [ ] **PL-0201** Suggest targeted recapture sectors instead of demanding a complete rescan when possible.
+- [x] **PL-0192** Build pre-reconstruction QA report using sharpness, exposure, coverage and metadata consistency. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0192_CHATGPT_AUDIT_V01.md
+- [x] **PL-0193** Detect duplicate/near-duplicate photos on Windows as a second safety layer. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0193_CHATGPT_AUDIT_V01.md
+- [x] **PL-0194** Detect inconsistent focal/lens usage and warn before reconstruction. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0194_CHATGPT_AUDIT_V01.md
+- [x] **PL-0195** Calculate registered-photo ratio after COLMAP. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0195_CHATGPT_AUDIT_V01.md
+- [x] **PL-0196** Calculate sparse-cloud connectivity/fragmentation indicators. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0196_CHATGPT_AUDIT_V01.md
+- [x] **PL-0197** Calculate dense/object-cloud density and surface-coverage indicators, including multiview support statistics for `OBJECT_CAPTURE_GEOMETRY`. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0197_CHATGPT_AUDIT_V01.md
+- [x] **PL-0198** Detect obvious reconstruction artifacts and floating components. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0198_CHATGPT_AUDIT_V01.md
+- [x] **PL-0199** Produce overall reconstruction confidence with component scores, not a black-box number. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0199_CHATGPT_AUDIT_V01.md
+- [x] **PL-0200** Gate downstream parametric fitting when captured-geometry quality is below minimum acceptance thresholds; `AI_VISUAL_REFERENCE` can never satisfy this gate. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0200_CHATGPT_AUDIT_V01.md
+- [x] **PL-0201** Suggest targeted recapture sectors instead of demanding a complete rescan when possible. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0201_CHATGPT_AUDIT_V01.md
 
 ---
 
@@ -396,7 +397,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M09-S01 - Coordinate and scale normalization
 
-- [ ] **PL-0202** Detect calibration markers in source imagery and associate observations with reconstructed cameras.
+- [ ] **PL-0202** Detect calibration markers in source imagery and associate observations with reconstructed cameras. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0202_CODEX_PROMPT_V01.md
 - [ ] **PL-0203** Estimate global scale from marker geometry and reject inconsistent observations.
 - [ ] **PL-0204** Establish canonical PackLab axes: Z up, front direction, millimetres.
 - [ ] **PL-0205** Implement object ground-plane/base detection with user override.
