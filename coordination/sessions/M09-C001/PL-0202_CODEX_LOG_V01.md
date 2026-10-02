@@ -2,8 +2,10 @@
 
 Task: **Detect calibration markers and bind them to reconstructed cameras**
 
-Date: 2026-10-02  
-Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0202_CODEX_PROMPT_V01.md  
+Date: 2026-10-02
+
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0202_CODEX_PROMPT_V01.md
+
 Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0202_CHATGPT_AUDIT_CRITERIA_V01.md
 
 ## Repository and authorization
