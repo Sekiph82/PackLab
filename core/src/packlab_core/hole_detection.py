@@ -267,6 +267,17 @@ def analyze_mesh_holes(
     visited: set[int] = set()
     loops: list[BoundaryLoopReport] = []
     unresolved: list[UnresolvedBoundaryComponent] = []
+    referenced_vertices = {vertex for face in geometry.triangles for vertex in face}
+    unreferenced_vertices = tuple(
+        index for index in range(len(geometry.vertices)) if index not in referenced_vertices
+    )
+    if unreferenced_vertices:
+        unresolved.append(
+            UnresolvedBoundaryComponent(
+                unreferenced_vertices,
+                "unreferenced-vertices-not-part-of-boundary-topology",
+            )
+        )
     traversal_steps = 0
     for start in sorted(graph):
         if start in visited:

@@ -141,3 +141,15 @@ def test_report_identity_is_deterministic_parent_bound_and_preserves_scale_autho
 def test_uncertainty_indices_are_validated() -> None:
     with pytest.raises(HoleDetectionError, match="out of range"):
         _analyze(_triangle_disk(), uncertain_vertex_indices=(4,))
+
+
+def test_unreferenced_vertices_are_reported_as_ambiguous_topology() -> None:
+    mesh = TriangleMeshData(vertices=((0.0, 0.0, 0.0),), triangles=())
+    result = _analyze(mesh)
+
+    assert result.disposition == "PARTIAL_AMBIGUOUS_TOPOLOGY"
+    assert result.unresolved_components[0].vertex_indices == (0,)
+    assert (
+        result.unresolved_components[0].reason
+        == "unreferenced-vertices-not-part-of-boundary-topology"
+    )
