@@ -148,6 +148,16 @@ class Open3DCapability:
         return asdict(self) | {"status": self.status.value}
 
 
+@dataclass(frozen=True, slots=True)
+class PointCloudRegistrationOutput:
+    """PackLab-owned values returned from one pinned Open3D point-to-point ICP run."""
+
+    transformation: tuple[float, ...]
+    fitness: float
+    inlier_rmse: float
+    correspondences: tuple[tuple[int, int], ...]
+
+
 def _load_open3d() -> ModuleType:
     """Import the installed package only; this boundary never installs or downloads."""
 
@@ -240,6 +250,16 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
             getattr(getattr(geometry, "TriangleMesh", None), "simplify_quadric_decimation", None)
         ):
             operations.append("triangle_mesh_quadric_decimation")
+    registration = getattr(getattr(module, "pipelines", None), "registration", None)
+    if all(
+        callable(getattr(registration, name, None))
+        for name in (
+            "registration_icp",
+            "TransformationEstimationPointToPoint",
+            "ICPConvergenceCriteria",
+        )
+    ):
+        operations.append("point_to_point_registration")
 
     if version != OPEN3D_VERSION:
         status = CapabilityStatus.UNKNOWN
@@ -372,6 +392,86 @@ class Open3DGeometryAdapter:
             ),
         )
 
+    def register_point_clouds(
+        self,
+        source: PointCloudData,
+        target: PointCloudData,
+        *,
+        initial_transform: tuple[float, ...],
+        maximum_correspondence_distance: float,
+        relative_fitness: float,
+        relative_rmse: float,
+        maximum_iterations: int,
+    ) -> PointCloudRegistrationOutput:
+        """Run rigid point-to-point ICP and expose no Open3D-owned result objects."""
+
+        module = self._require_module()
+        registration = getattr(getattr(module, "pipelines", None), "registration", None)
+        registration_icp = getattr(registration, "registration_icp", None)
+        estimator_type = getattr(registration, "TransformationEstimationPointToPoint", None)
+        criteria_type = getattr(registration, "ICPConvergenceCriteria", None)
+        if not callable(registration_icp):
+            raise GeometryCapabilityUnavailable(
+                "Open3D geometry capability is missing point-to-point ICP registration"
+            )
+        if not callable(estimator_type):
+            raise GeometryCapabilityUnavailable(
+                "Open3D geometry capability is missing point-to-point ICP estimation"
+            )
+        if not callable(criteria_type):
+            raise GeometryCapabilityUnavailable(
+                "Open3D geometry capability is missing ICP convergence criteria"
+            )
+        if len(initial_transform) != 16 or any(
+            not math.isfinite(value) for value in initial_transform
+        ):
+            raise InvalidGeometry("registration initial transform must contain 16 finite values")
+        if (
+            not math.isfinite(maximum_correspondence_distance)
+            or maximum_correspondence_distance <= 0
+            or not math.isfinite(relative_fitness)
+            or relative_fitness < 0
+            or not math.isfinite(relative_rmse)
+            or relative_rmse < 0
+            or isinstance(maximum_iterations, bool)
+            or not isinstance(maximum_iterations, int)
+            or maximum_iterations < 1
+        ):
+            raise InvalidGeometry("registration convergence criteria are invalid")
+
+        source_cloud = self.round_trip_point_cloud(source)
+        target_cloud = self.round_trip_point_cloud(target)
+        point_cloud_type = _nested_attribute(module, "geometry", "PointCloud")
+        vector3d = _nested_attribute(module, "utility", "Vector3dVector")
+        converted_source = point_cloud_type()
+        converted_source.points = vector3d(source_cloud.points)
+        converted_target = point_cloud_type()
+        converted_target.points = vector3d(target_cloud.points)
+        criteria = criteria_type(
+            relative_fitness=relative_fitness,
+            relative_rmse=relative_rmse,
+            max_iteration=maximum_iterations,
+        )
+        result = registration_icp(
+            converted_source,
+            converted_target,
+            maximum_correspondence_distance,
+            [list(initial_transform[index : index + 4]) for index in range(0, 16, 4)],
+            estimator_type(with_scaling=False),
+            criteria,
+        )
+        matrix = tuple(float(value) for row in result.transformation for value in row)
+        if len(matrix) != 16 or any(not math.isfinite(value) for value in matrix):
+            raise GeometryAdapterError("Open3D returned a malformed registration transform")
+        fitness = float(result.fitness)
+        inlier_rmse = float(result.inlier_rmse)
+        correspondences = tuple(
+            sorted((int(pair[0]), int(pair[1])) for pair in result.correspondence_set)
+        )
+        if not math.isfinite(fitness) or (not math.isfinite(inlier_rmse) and correspondences):
+            raise GeometryAdapterError("Open3D returned non-finite registration statistics")
+        return PointCloudRegistrationOutput(matrix, fitness, inlier_rmse, correspondences)
+
     def _require_module(self) -> ModuleType:
         capability = self.probe()
         if capability.status is not CapabilityStatus.AVAILABLE:
@@ -389,6 +489,7 @@ __all__ = [
     "InvalidGeometry",
     "Open3DCapability",
     "Open3DGeometryAdapter",
+    "PointCloudRegistrationOutput",
     "Point3",
     "PointCloudData",
     "Triangle",
