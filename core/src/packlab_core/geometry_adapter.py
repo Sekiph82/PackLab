@@ -236,11 +236,15 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
         and callable(getattr(utility, "Vector3iVector", None))
     ):
         operations.append("triangle_mesh_conversion")
+        if callable(
+            getattr(getattr(geometry, "TriangleMesh", None), "simplify_quadric_decimation", None)
+        ):
+            operations.append("triangle_mesh_quadric_decimation")
 
     if version != OPEN3D_VERSION:
         status = CapabilityStatus.UNKNOWN
         detail = f"observed Open3D version {version!r}; expected exact pin {OPEN3D_VERSION}"
-    elif len(operations) != 2:
+    elif not {"point_cloud_conversion", "triangle_mesh_conversion"}.issubset(operations):
         status = CapabilityStatus.UNKNOWN
         detail = "the pinned Open3D build is missing a required geometry conversion capability"
     else:
@@ -318,6 +322,53 @@ class Open3DGeometryAdapter:
             ),
             vertex_normals=(
                 _from_vector(converted.vertex_normals) if mesh.vertex_normals is not None else None
+            ),
+        )
+
+    def simplify_triangle_mesh(
+        self,
+        mesh: TriangleMeshData,
+        *,
+        target_triangle_count: int,
+        maximum_error: float,
+        boundary_weight: float,
+    ) -> TriangleMeshData:
+        """Run Open3D quadric decimation and return only PackLab-owned values."""
+        module = self._require_module()
+        mesh_type = _nested_attribute(module, "geometry", "TriangleMesh")
+        vector3d = _nested_attribute(module, "utility", "Vector3dVector")
+        vector3i = _nested_attribute(module, "utility", "Vector3iVector")
+        converted = mesh_type()
+        converted.vertices = vector3d(mesh.vertices)
+        converted.triangles = vector3i(mesh.triangles)
+        if mesh.vertex_colors is not None:
+            converted.vertex_colors = vector3d(mesh.vertex_colors)
+        if mesh.vertex_normals is not None:
+            converted.vertex_normals = vector3d(mesh.vertex_normals)
+        simplify_method = getattr(converted, "simplify_quadric_decimation", None)
+        if not callable(simplify_method):
+            raise GeometryCapabilityUnavailable(
+                "Open3D geometry capability is missing TriangleMesh.simplify_quadric_decimation"
+            )
+        result = simplify_method(
+            target_number_of_triangles=target_triangle_count,
+            maximum_error=maximum_error,
+            boundary_weight=boundary_weight,
+        )
+        return TriangleMeshData(
+            vertices=_from_vector(result.vertices),
+            triangles=_from_triangles(result.triangles),
+            vertex_colors=(
+                _from_vector(result.vertex_colors)
+                if mesh.vertex_colors is not None
+                and len(result.vertex_colors) == len(result.vertices)
+                else None
+            ),
+            vertex_normals=(
+                _from_vector(result.vertex_normals)
+                if mesh.vertex_normals is not None
+                and len(result.vertex_normals) == len(result.vertices)
+                else None
             ),
         )
 
