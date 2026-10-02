@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "PackLab packaging digital-twin foundation"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "open3d==0.20.0",
     "PySide6>=6.8,<7",
 ]
 
