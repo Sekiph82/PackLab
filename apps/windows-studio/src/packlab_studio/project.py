@@ -10,11 +10,14 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .jobs import JobManager
 from .project_layout import ProjectLayout, ProjectLayoutError
 from .recovery import RecoveryItem, RecoveryManager
+
+if TYPE_CHECKING:
+    from packlab_core.front_direction import FrontDirectionRecord
 
 PROJECT_SCHEMA_VERSION = "1.0"
 AUTHORITY_SCHEMA_VERSION = 1
@@ -148,6 +151,48 @@ class ProjectManager:
         if workspace.path.parent != self.layout.path("working", "reconstruction"):
             raise ProjectError("workspace is outside the project reconstruction area")
         return ReconstructionWorkspaceManager(self.layout).materialize_working_set(workspace)
+
+    def persist_front_direction(
+        self,
+        record: FrontDirectionRecord,
+        *,
+        current_parent_ids: dict[str, str],
+        expected_revision: int,
+    ) -> ProjectMetadata:
+        """Append front-direction provenance to project authority state."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        from packlab_core.front_direction import (
+            FrontDirectionError,
+            append_front_direction_revision,
+        )
+
+        disk_metadata, state = self._read_authority(self.layout)
+        if (
+            disk_metadata.project_id != self.metadata.project_id
+            or disk_metadata.revision != self.metadata.revision
+        ):
+            raise RevisionConflict("project metadata changed on disk")
+        if expected_revision != self.metadata.revision:
+            raise RevisionConflict("editable state revision is stale")
+        measurement = state.get("measurement_provenance", {})
+        if not isinstance(measurement, dict):
+            raise ProjectError("measurement provenance is malformed")
+        try:
+            history = append_front_direction_revision(
+                measurement.get("front_direction_revisions", []),
+                record,
+                current_parent_ids=current_parent_ids,
+            )
+        except FrontDirectionError as error:
+            raise ProjectError(str(error)) from error
+        next_state = dict(state)
+        next_measurement = dict(measurement)
+        next_measurement["front_direction_revisions"] = history
+        next_measurement["active_front_direction_revision"] = record.revision_id
+        next_state["measurement_provenance"] = next_measurement
+        return self.commit_edit(next_state, expected_revision=expected_revision)
 
     def import_reconstruction_camera_priors(
         self,
