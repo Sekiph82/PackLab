@@ -4,19 +4,21 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M09
-- Current Sprint: M09-C001 — Scale, Calibration & Measurement
-- Current Task: PL-0220 — Physical accuracy benchmark evidence
-- Current Task Status: OWNER_REQUIRED
-- Next Task/Action: Owner must provide an ACCEPTED_FOR_CAPTURE printed-mat verification record plus caliper ground truth for matte bottle, glossy bottle and jerrycan, each bound to authorized PackLab scan and measurement revisions. After that evidence is accepted, resume PL-0220 from https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0220_CODEX_PROMPT_V01.md. Do not start PL-0221–PL-0224 or M10.
-- Required Actor: OWNER
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/M09-C001_CHATGPT_AUDIT_V01.md — AUDITED_PARTIAL_OWNER_REQUIRED; PL-0202 through PL-0219 accepted, PL-0220 blocked on physical benchmark evidence.
+- Current Milestone: M10
+- Current Sprint: M10-C001 — Mesh Processing & Scan Master
+- Current Task: M10-C001 — Ordered Batch PL-0225 through PL-0240
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex must execute PL-0225 through PL-0240 in order and continue automatically while green. PL-0220–PL-0224 physical validation is deferred by owner, not passed; inherited scale state and DEFERRED_OWNER_VALIDATION must be preserved. Do not start M11.
+- Required Actor: CODEX
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/M09-C001_CHATGPT_AUDIT_V01.md — AUDITED_PARTIAL_OWNER_REQUIRED; PL-0202 through PL-0219 accepted, PL-0220 physical frontier deferred by explicit owner decision.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
 - Latest M08 Remaining-Batch Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMAINING_CHATGPT_AUDIT_V01.md — AUDITED_PASS for PL-0188 through PL-0201.
 - Active M09 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CODEX_PROMPT_V01.md — batch stopped truthfully at PL-0220 OWNER_REQUIRED. Master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
 - Latest M09 Accepted Frontier: PL-0202 through PL-0219 AUDITED_PASS; PL-0220 owner gate confirmed by https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0220_CHATGPT_AUDIT_V01.md
+- M09 Physical Validation Deferral: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/M09_PHYSICAL_VALIDATION_DEFERRAL_OWNER_DECISION_V01.md — owner explicitly deferred PL-0220 through PL-0224 until printer/benchmark objects are available; no physical PASS is implied.
+- Active M10 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0225 through PL-0240 continuous Codex batch.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -422,11 +424,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Sprint M09-S03 - Accuracy benchmarks
 
 - [x] **PL-0219** Define physical benchmark set with caliper-measured ground truth. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0219_CHATGPT_AUDIT_V01.md
-- [ ] **PL-0220** Measure dimension error across at least matte bottle, glossy bottle and jerrycan. **OWNER_REQUIRED:** physical benchmark evidence is missing. Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0220_CHATGPT_AUDIT_V01.md Blocker: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0220_CODEX_LOG_V01.md
-- [ ] **PL-0221** Establish V1 acceptance thresholds for overall dimensions and key features. **BLOCKED_BY_PL-0220_OWNER_GATE**
-- [ ] **PL-0222** Add repeat-scan reproducibility test for the same object. **BLOCKED_BY_PL-0220_OWNER_GATE**
-- [ ] **PL-0223** Add calibration-mat print-scale sensitivity test. **BLOCKED_BY_PL-0220_OWNER_GATE**
-- [ ] **PL-0224** Document conditions under which PackLab measurements must not be used for mold manufacturing. **BLOCKED_BY_PL-0220_OWNER_GATE**
+- [ ] **PL-0220** Measure dimension error across at least matte bottle, glossy bottle and jerrycan. **DEFERRED_OWNER_VALIDATION:** printer/benchmark objects unavailable; resume later from existing PL-0220 prompt. No PASS implied.
+- [ ] **PL-0221** Establish V1 acceptance thresholds for overall dimensions and key features. **BLOCKED_BY_PL-0220_OWNER_GATE** **DEFERRED_OWNER_VALIDATION:** dependent physical benchmark evidence postponed by owner.
+- [ ] **PL-0222** Add repeat-scan reproducibility test for the same object. **BLOCKED_BY_PL-0220_OWNER_GATE** **DEFERRED_OWNER_VALIDATION:** dependent physical benchmark evidence postponed by owner.
+- [ ] **PL-0223** Add calibration-mat print-scale sensitivity test. **BLOCKED_BY_PL-0220_OWNER_GATE** **DEFERRED_OWNER_VALIDATION:** dependent physical benchmark evidence postponed by owner.
+- [ ] **PL-0224** Document conditions under which PackLab measurements must not be used for mold manufacturing. **BLOCKED_BY_PL-0220_OWNER_GATE** **DEFERRED_OWNER_VALIDATION:** dependent physical benchmark evidence postponed by owner.
 
 ---
 
@@ -434,7 +436,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M10-S01 - Open3D processing
 
-- [ ] **PL-0225** Integrate Open3D as the primary point-cloud/mesh analysis utility layer.
+- [ ] **PL-0225** Integrate Open3D as the primary point-cloud/mesh analysis utility layer. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0225_CODEX_PROMPT_V01.md
 - [ ] **PL-0226** Remove isolated floating components with configurable safeguards.
 - [ ] **PL-0227** Implement normal estimation/orientation repair.
 - [ ] **PL-0228** Implement conservative smoothing that preserves packaging edges.
