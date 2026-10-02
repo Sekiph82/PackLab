@@ -2,7 +2,7 @@
 
 Milestone: **M08 - Segmentation, Object Extraction & Reconstruction QA**
 Remaining batch: **PL-0188 through PL-0201**
-Status: **IN_PROGRESS**
+Status: **BATCH_COMPLETED**
 
 Master prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MASTER_REMAINING_CODEX_PROMPT_V02.md
@@ -12,30 +12,30 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/MAS
 
 ## Starting state
 
-- Starting synchronized SHA:
+- Starting synchronized SHA: `62d41db33dd4acf6cd6006784009e6251e2c3193`
 - Branch: `main`
-- Worktree:
-- origin/main parity:
+- Starting worktree: clean
+- Starting origin/main/GitHub main parity: synchronized; divergence `0 0`
 - Accepted frozen frontier: PL-0184 through PL-0187 `AUDITED_PASS`
 
 ## Child index
 
-| Child | Status | Prompt | Criteria | Implementation SHA(s) | Log SHA | Focused | Full suite | Limitations / stop reason |
+| Child | Status | Prompt URL | Criteria URL | Implementation SHA(s) | Log URL / log-only SHA | Focused | Full suite | Limitations / stop reason |
 |---|---|---|---|---|---|---|---|---|
-| PL-0188 | PENDING | PL-0188_CODEX_PROMPT_V03.md | PL-0188_CHATGPT_AUDIT_CRITERIA_V03.md | | | | | |
-| PL-0189 | PENDING | PL-0189_CODEX_PROMPT_V01.md | PL-0189_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0190 | PENDING | PL-0190_CODEX_PROMPT_V01.md | PL-0190_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0191 | PENDING | PL-0191_CODEX_PROMPT_V01.md | PL-0191_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0192 | PENDING | PL-0192_CODEX_PROMPT_V01.md | PL-0192_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0193 | PENDING | PL-0193_CODEX_PROMPT_V01.md | PL-0193_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0194 | PENDING | PL-0194_CODEX_PROMPT_V01.md | PL-0194_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0195 | PENDING | PL-0195_CODEX_PROMPT_V01.md | PL-0195_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0196 | PENDING | PL-0196_CODEX_PROMPT_V01.md | PL-0196_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0197 | PENDING | PL-0197_CODEX_PROMPT_V01.md | PL-0197_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0198 | PENDING | PL-0198_CODEX_PROMPT_V01.md | PL-0198_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0199 | PENDING | PL-0199_CODEX_PROMPT_V01.md | PL-0199_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0200 | PENDING | PL-0200_CODEX_PROMPT_V01.md | PL-0200_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0201 | PENDING | PL-0201_CODEX_PROMPT_V01.md | PL-0201_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0188 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0188_CODEX_PROMPT_V03.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0188_CHATGPT_AUDIT_CRITERIA_V03.md) | a334b85cb8e8f2c104d8a4d495ae01a534c2af29 | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0188_CODEX_LOG_V03.md) / 4f421ee43120e14777e747d81d8a2b7f4fea7beb | 51 passed | 870 passed, 6 skipped, 1 deselected | Qt/offscreen UI seam; no owner/device acceptance claim |
+| PL-0189 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0189_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0189_CHATGPT_AUDIT_CRITERIA_V01.md) | 096c428839324119b3fb159a556ebc4613f9e88d | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0189_CODEX_LOG_V01.md) / 233a97e471c23992a69522a570c906f2de44e5bd | 52 passed | 875 passed, 6 skipped, 1 deselected | Immutable mask revisions; downstream geometry may require regeneration |
+| PL-0190 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0190_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0190_CHATGPT_AUDIT_CRITERIA_V01.md) | bf61ca1df3ea5cf158ad499ce0594f2193b64bec | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0190_CODEX_LOG_V01.md) / 9f4501146a3e6dc653d376773552fdb989326ba2 | 61 passed | 884 passed, 6 skipped, 1 deselected | OBJECT_CAPTURE_GEOMETRY only; no metric verification |
+| PL-0191 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0191_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0191_CHATGPT_AUDIT_CRITERIA_V01.md) | 803f361c06a4a39ae7a8d1b2eb81eb8d90d5e78a | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0191_CODEX_LOG_V01.md) / 21911034908764f3a80aa5dc83a2f8cc0f2f3093 | 47 passed | 891 passed, 6 skipped, 1 deselected | Derived QA review artifacts only |
+| PL-0192 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0192_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0192_CHATGPT_AUDIT_CRITERIA_V01.md) | a81f47c49b81f17f9905c8e1089aa04a45cd577e | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0192_CODEX_LOG_V01.md) / aabf3eaf8fea86a47dd1616fe94a9ee2ca7ddeaa | 54 passed | 898 passed, 6 skipped, 1 deselected | No unsupported image decode or physical acceptance claim |
+| PL-0193 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0193_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0193_CHATGPT_AUDIT_CRITERIA_V01.md) | d1991190612eb2b06d3c7c215e37459c2ece3d29 | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0193_CODEX_LOG_V01.md) / 91b3c4573b05c2be215a94f95c1cdafe90e0f6fd | 67 passed | 911 passed, 6 skipped, 1 deselected | Deterministic duplicate/near-duplicate diagnostics only |
+| PL-0194 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0194_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0194_CHATGPT_AUDIT_CRITERIA_V01.md) | 5cf288d2d35e2d4d1ae4e6fcae570cf5e2dc6c91 | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0194_CODEX_LOG_V01.md) / d5e7d67efed3dc5818a58738a9da15a7fe493157 | 12 passed | 923 passed, 6 skipped, 1 deselected | Consistency warnings only; no lens calibration claim |
+| PL-0195 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0195_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0195_CHATGPT_AUDIT_CRITERIA_V01.md) | 44ac35e422862ab093d877324335759f83e870bc | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0195_CODEX_LOG_V01.md) / be39012ca9a28d90932129f5b2e4dded50b7f664 | 12 passed | 935 passed, 6 skipped, 1 deselected | Observed ratio only; acceptance not evaluated |
+| PL-0196 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0196_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0196_CHATGPT_AUDIT_CRITERIA_V01.md) | f17ba846a5c0217e8f202cc2e70901a4acf4e272 | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0196_CODEX_LOG_V01.md) / 6695200a5da67267f2ee995e5fe66c13dc0ad963 | 19 passed | 954 passed, 6 skipped, 1 deselected | Sparse connectivity proxy; no dense topology claim |
+| PL-0197 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0197_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0197_CHATGPT_AUDIT_CRITERIA_V01.md) | 6efb7761fc37bee62e3edd0d106cc3eb508368d9 | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0197_CODEX_LOG_V01.md) / f52ad1cce69dc5a1cc5d0119ad9803a5eef730e7 | 5 passed | 959 passed, 6 skipped, 1 deselected | Unitless occupancy proxies; no physical surface-area claim |
+| PL-0198 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0198_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0198_CHATGPT_AUDIT_CRITERIA_V01.md) | c0b785fae4f4c26d11a8b4da6ff0061df55fdca0 | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0198_CODEX_LOG_V01.md) / c1de742059052a6acaf7598ca6566d386c86a8da | 5 passed | 964 passed, 6 skipped, 1 deselected | Point-cloud review candidate only; no mesh topology or deletion |
+| PL-0199 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0199_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0199_CHATGPT_AUDIT_CRITERIA_V01.md) | cbf8b0a9cba9ede58e64510d867b1aea1dc704f2 | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0199_CODEX_LOG_V01.md) / 74336e23a0f954188f7cf219983f9270fcc66b14 | 7 passed | 971 passed, 6 skipped, 1 deselected | Explainable score only; not a probability or acceptance |
+| PL-0200 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0200_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0200_CHATGPT_AUDIT_CRITERIA_V01.md) | 8b14ae42997552fe28a946801c037ac3b488c216 | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0200_CODEX_LOG_V01.md) / a60a35f3aedd9d53a1e86f6915739de86a3a5101 | 7 passed | 978 passed, 6 skipped, 1 deselected | Gate only; no parametric fit execution or physical claim |
+| PL-0201 | READY_FOR_INDEPENDENT_AUDIT | [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0201_CODEX_PROMPT_V01.md) | [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0201_CHATGPT_AUDIT_CRITERIA_V01.md) | d6a179ab8d984d48d8de44d9bcb807b8ee3e4db3; 73a9c2207ee13089a0fc4efdde89f2a307f64c01 | [log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0201_CODEX_LOG_V01.md) / 708f16a0198f129687e1014a256b08a3222aafe4 | 5 passed | 983 passed, 6 skipped, 1 deselected | World-relative sectors only; no physical orientation or local mask-gap attribution |
 
 ## Batch stop rules
 
@@ -44,11 +44,9 @@ If a child cannot finish green within its frozen scope, set status `BATCH_STOPPE
 ## Final handoff
 
 On successful completion of PL-0201:
-- set status `BATCH_COMPLETED`;
-- record final local/origin/GitHub `main` SHA;
-- verify clean worktree and remote parity;
-- confirm M09 was not started.
+- Batch status: `BATCH_COMPLETED` after all 14 frozen children validated green in order; each child implementation and separate log-only commit is indexed above.
+- PL-0201 child-publication SHA before this master-log-only commit: `708f16a0198f129687e1014a256b08a3222aafe4`. At that checkpoint local `HEAD`, `origin/main`, and `git ls-remote origin refs/heads/main` matched; divergence was `0 0`, worktree clean, and the remotely visible PL-0201 log ended `READY_FOR_INDEPENDENT_AUDIT`.
+- The master log is committed and pushed separately after the PL-0201 child commits. Its commit becomes final `main`; exact local/origin/GitHub equality and clean status are rechecked after publication.
+- `TASKS.md` was not modified. M09 and later work were not started; no audit verdict or task acceptance is claimed by this builder log.
 
-The final line must be exactly:
-
-`AWAITING_MILESTONE_AUDIT`
+AWAITING_MILESTONE_AUDIT
