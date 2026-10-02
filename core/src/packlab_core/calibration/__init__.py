@@ -23,6 +23,14 @@ from .profile import (
     ProfileCompatibilityResult,
     check_profile_compatibility,
 )
+from .reconstruction_scale import (
+    PhysicalMarkerReference,
+    ReconstructedMarkerGeometry,
+    ReconstructionScaleError,
+    ReconstructionScaleEstimate,
+    ReconstructionScaleObservation,
+    estimate_reconstruction_scale,
+)
 from .scale_estimation import KnownMarkerObservation, ScaleEstimate, estimate_scale
 
 __all__ = [
@@ -39,12 +47,18 @@ __all__ = [
     "MarkerObservation",
     "MarkerAssociationError",
     "ProfileCompatibilityResult",
+    "PhysicalMarkerReference",
+    "ReconstructedMarkerGeometry",
+    "ReconstructionScaleError",
+    "ReconstructionScaleEstimate",
+    "ReconstructionScaleObservation",
     "ScaleEstimate",
     "check_profile_compatibility",
     "associate_marker_detections",
     "associated_observations_digest",
     "detect_markers",
     "estimate_scale",
+    "estimate_reconstruction_scale",
     "score_calibration_confidence",
     "serialize_associated_observations",
 ]
