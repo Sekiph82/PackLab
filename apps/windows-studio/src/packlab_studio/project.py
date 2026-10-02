@@ -17,6 +17,7 @@ from .project_layout import ProjectLayout, ProjectLayoutError
 from .recovery import RecoveryItem, RecoveryManager
 
 if TYPE_CHECKING:
+    from packlab_core.calibration.scale_provenance import ScaleProvenance
     from packlab_core.front_direction import FrontDirectionRecord
 
 PROJECT_SCHEMA_VERSION = "1.0"
@@ -191,6 +192,49 @@ class ProjectManager:
         next_measurement = dict(measurement)
         next_measurement["front_direction_revisions"] = history
         next_measurement["active_front_direction_revision"] = record.revision_id
+        next_state["measurement_provenance"] = next_measurement
+        return self.commit_edit(next_state, expected_revision=expected_revision)
+
+    def persist_scale_provenance(
+        self,
+        provenance: ScaleProvenance,
+        *,
+        current_reconstruction_revision: str,
+        expected_revision: int,
+    ) -> ProjectMetadata:
+        """Append immutable scale provenance to project authority state."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        from packlab_core.calibration.scale_provenance import (
+            ScaleProvenanceError,
+            append_scale_provenance_revision,
+        )
+
+        disk_metadata, state = self._read_authority(self.layout)
+        if (
+            disk_metadata.project_id != self.metadata.project_id
+            or disk_metadata.revision != self.metadata.revision
+        ):
+            raise RevisionConflict("project metadata changed on disk")
+        if expected_revision != self.metadata.revision:
+            raise RevisionConflict("editable state revision is stale")
+        measurement = state.get("measurement_provenance", {})
+        if not isinstance(measurement, dict):
+            raise ProjectError("measurement provenance is malformed")
+        try:
+            history = append_scale_provenance_revision(
+                measurement.get("scale_provenance_revisions", []),
+                provenance,
+                current_reconstruction_revision=current_reconstruction_revision,
+            )
+        except ScaleProvenanceError as error:
+            raise ProjectError(str(error)) from error
+        next_state = dict(state)
+        next_measurement = dict(measurement)
+        next_measurement["scale_provenance_revisions"] = history
+        next_measurement["active_scale_provenance_id"] = provenance.provenance_id
+        next_measurement["scale_state"] = provenance.scale_state.value
         next_state["measurement_provenance"] = next_measurement
         return self.commit_edit(next_state, expected_revision=expected_revision)
 

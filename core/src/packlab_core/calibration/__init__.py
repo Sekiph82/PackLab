@@ -32,6 +32,16 @@ from .reconstruction_scale import (
     estimate_reconstruction_scale,
 )
 from .scale_estimation import KnownMarkerObservation, ScaleEstimate, estimate_scale
+from .scale_provenance import (
+    ScalePromotionEvidence,
+    ScaleProvenance,
+    ScaleProvenanceError,
+    VerifiedPhysicalReference,
+    append_scale_provenance_revision,
+    create_scale_provenance,
+    promote_scale_provenance,
+    serialize_scale_provenance,
+)
 
 __all__ = [
     "CalibrationConfidence",
@@ -53,12 +63,20 @@ __all__ = [
     "ReconstructionScaleEstimate",
     "ReconstructionScaleObservation",
     "ScaleEstimate",
+    "ScalePromotionEvidence",
+    "ScaleProvenance",
+    "ScaleProvenanceError",
+    "VerifiedPhysicalReference",
+    "append_scale_provenance_revision",
     "check_profile_compatibility",
     "associate_marker_detections",
     "associated_observations_digest",
     "detect_markers",
     "estimate_scale",
     "estimate_reconstruction_scale",
+    "create_scale_provenance",
+    "promote_scale_provenance",
     "score_calibration_confidence",
     "serialize_associated_observations",
+    "serialize_scale_provenance",
 ]
