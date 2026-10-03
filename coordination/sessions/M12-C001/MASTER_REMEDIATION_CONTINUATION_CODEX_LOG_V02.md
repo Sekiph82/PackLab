@@ -45,7 +45,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 
 | Child | Status | Implementation SHA(s) | Log SHA | Focused | Full suite | Limitations |
 |---|---|---|---|---|---|---|
-| PL-0270 | PENDING | | | | | |
+| PL-0270 | READY_FOR_INDEPENDENT_AUDIT | `a86abecb198a8465b3498607ff0e1a2c907995ea` | `e0b585cd3bc5accd3c7691f0d5b12b66a87bb9d7` | 30 passed | 1,387 passed / 6 skipped / 1 deselected | Candidate AABB is 2D support only; contour and 3D extent remain unknown |
 | PL-0271 | PENDING | | | | | |
 | PL-0272 | PENDING | | | | | |
 | PL-0273 | PENDING | | | | | |
@@ -68,9 +68,10 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 ## Current continuation state
 
 - Batch status: IN_PROGRESS; resumed frontier PL-0270.
-- Current local SHA: `45c14ea51b5709fea17ddffca86f3c8714a88e58` before this master-log publication.
-- Current origin/main and GitHub main SHA: `45c14ea51b5709fea17ddffca86f3c8714a88e58` before this master-log publication.
+- PL-0270 implementation/evidence SHA: `a86abecb198a8465b3498607ff0e1a2c907995ea`; separate child-log-only SHA: `e0b585cd3bc5accd3c7691f0d5b12b66a87bb9d7`; both remotely visible.
+- Current local SHA: `e0b585cd3bc5accd3c7691f0d5b12b66a87bb9d7` before this master-log publication.
+- Current origin/main and GitHub main SHA: `e0b585cd3bc5accd3c7691f0d5b12b66a87bb9d7` before this master-log publication.
 - Worktree: clean detached M12 execution worktree; Desktop owner work preserved.
 - M13 started: NO
 
-Current batch frontier: **PL-0270** (`IN_PROGRESS`).
+Current batch frontier: **PL-0271** (`IN_PROGRESS`).
