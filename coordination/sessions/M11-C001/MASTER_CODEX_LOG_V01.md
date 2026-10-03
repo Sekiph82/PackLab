@@ -15,7 +15,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MAS
 - Starting synchronized SHA: `05d581d05413ced11e1ca5791e623acc7b29fffe`.
 - Branch: `main`
 - Worktree: `C:\Users\sekip\.codex\worktrees\m11-parametric-geometry\PackLab` on local branch `codex/m11-c001`.
-- origin/main parity: verified before each child; last verified SHA after PL-0255 log publication: `3ff279738ece3bc978cd9d600cffc2e1cde93924`.
+- origin/main parity: verified before each child; last verified SHA after PL-0256 log publication: `01b4c37a9c512194e12037a21689a821ea93870e`.
 - Accepted predecessor: M10 AUDITED_PASS
 - Deferred physical validation: PL-0220 through PL-0224
 - Inherited physical-validation status: `DEFERRED_OWNER_VALIDATION`
@@ -39,7 +39,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MAS
 | PL-0253 | READY_FOR_INDEPENDENT_AUDIT | PL-0253_CODEX_PROMPT_V01.md | PL-0253_CHATGPT_AUDIT_CRITERIA_V01.md | `194f49c92b1cd50de49169573fa8de2827bd1ac9` | `e5e483a2c1d208e3f879ed9a2c59edf49074c9ca` | 30 passed | 1,303 passed, 6 skipped, 1 deselected | Implementer evidence only; ambiguous zones and manual overrides stay review-required, with no finish/thread classification. |
 | PL-0254 | READY_FOR_INDEPENDENT_AUDIT | PL-0254_CODEX_PROMPT_V01.md | PL-0254_CHATGPT_AUDIT_CRITERIA_V01.md | `8d333d8484ac88252863c82f3d194ba2b61db2cf`, `2ace62dfc38297b0cc76acd2dc7cb7a4ee716195` | `d11fc47a28d3e1dd4fd8de5f2e5162b14e170a7e` | 27 passed | 1,307 passed, 6 skipped, 1 deselected | Implementer evidence only; Z-axis profile only, preview remains a proxy, and physical validation remains deferred. |
 | PL-0255 | READY_FOR_INDEPENDENT_AUDIT | PL-0255_CODEX_PROMPT_V01.md | PL-0255_CHATGPT_AUDIT_CRITERIA_V01.md | `33a4d8473f275cec6152e69e188a88c8ae4b760c` | `3ff279738ece3bc978cd9d600cffc2e1cde93924` | 24 passed | 1,312 passed, 6 skipped, 1 deselected | Implementer evidence only; simple one-contour sections only, symmetry constraints may be disabled, preview remains proxy. |
-| PL-0256 | PENDING | PL-0256_CODEX_PROMPT_V01.md | PL-0256_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0256 | READY_FOR_INDEPENDENT_AUDIT | PL-0256_CODEX_PROMPT_V01.md | PL-0256_CHATGPT_AUDIT_CRITERIA_V01.md | `3242dd649c05d749d5835e62f3bd2809cbacc284` | `01b4c37a9c512194e12037a21689a821ea93870e` | 38 passed | 1,322 passed, 6 skipped, 1 deselected | Implementer evidence only; invalid geometry rejects, captured disagreement is flagged, scale remains unverified. |
 | PL-0257 | PENDING | PL-0257_CODEX_PROMPT_V01.md | PL-0257_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0258 | PENDING | PL-0258_CODEX_PROMPT_V01.md | PL-0258_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0259 | PENDING | PL-0259_CODEX_PROMPT_V01.md | PL-0259_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
