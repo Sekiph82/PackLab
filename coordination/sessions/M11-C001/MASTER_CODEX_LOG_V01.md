@@ -15,7 +15,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MAS
 - Starting synchronized SHA: `05d581d05413ced11e1ca5791e623acc7b29fffe`.
 - Branch: `main`
 - Worktree: `C:\Users\sekip\.codex\worktrees\m11-parametric-geometry\PackLab` on local branch `codex/m11-c001`.
-- origin/main parity: verified before each child; last verified SHA after PL-0250 log publication: `4f4a89f10bf4d54adc0516f0597170afb0ce8b81`.
+- origin/main parity: verified before each child; last verified SHA after PL-0251 log publication: `a7a0f287ea19ff612039577f637c05a625ef6eaa`.
 - Accepted predecessor: M10 AUDITED_PASS
 - Deferred physical validation: PL-0220 through PL-0224
 - Inherited physical-validation status: `DEFERRED_OWNER_VALIDATION`
@@ -34,7 +34,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MAS
 | PL-0248 | READY_FOR_INDEPENDENT_AUDIT | PL-0248_CODEX_PROMPT_V01.md | PL-0248_CHATGPT_AUDIT_CRITERIA_V01.md | `62579ad91fe55f671998c2d63430857ca68626ed` | `325b7bffcd388ffee6ac8024a6bd8ddb8884338f` | 47 passed | 1,279 passed, 6 skipped, 1 deselected | Implementer evidence only; duplicate keys/tampering/stale authority reject. |
 | PL-0249 | READY_FOR_INDEPENDENT_AUDIT | PL-0249_CODEX_PROMPT_V01.md | PL-0249_CHATGPT_AUDIT_CRITERIA_V01.md | `4ec3f584399a953e7b48560261acde05e5b8b402` | `338b7b454f23541b58d15e11e8461317243f4e90` | 46 passed | 1,282 passed, 6 skipped, 1 deselected | Implementer evidence only; viewport surface shells do not claim capped/solid or CAD authority. |
 | PL-0250 | READY_FOR_INDEPENDENT_AUDIT | PL-0250_CODEX_PROMPT_V01.md | PL-0250_CHATGPT_AUDIT_CRITERIA_V01.md | `aca4c36d00695777cd5b2e0dee2898107efd6824` | `4f4a89f10bf4d54adc0516f0597170afb0ce8b81` | 46 passed | 1,288 passed, 6 skipped, 1 deselected | Implementer evidence only; recommendation cannot prove physical symmetry or replace owner review. |
-| PL-0251 | PENDING | PL-0251_CODEX_PROMPT_V01.md | PL-0251_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0251 | READY_FOR_INDEPENDENT_AUDIT | PL-0251_CODEX_PROMPT_V01.md | PL-0251_CHATGPT_AUDIT_CRITERIA_V01.md | `9a357cbb9c02a5f8d3dd83054e2748849d61076d` | `a7a0f287ea19ff612039577f637c05a625ef6eaa` | 38 passed | 1,292 passed, 6 skipped, 1 deselected | Implementer evidence only; gaps stay explicit and profile is not a closed/smoothed surface. |
 | PL-0252 | PENDING | PL-0252_CODEX_PROMPT_V01.md | PL-0252_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0253 | PENDING | PL-0253_CODEX_PROMPT_V01.md | PL-0253_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0254 | PENDING | PL-0254_CODEX_PROMPT_V01.md | PL-0254_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
