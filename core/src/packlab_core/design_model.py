@@ -38,6 +38,7 @@ class PackageFamily(StrEnum):
     BOTTLE = "bottle"
     JAR = "jar"
     CYLINDRICAL_CONTAINER = "cylindrical-container"
+    JERRYCAN = "jerrycan"
     OTHER = "other"
 
 
