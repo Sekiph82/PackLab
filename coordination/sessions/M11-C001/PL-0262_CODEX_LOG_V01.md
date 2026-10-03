@@ -2,8 +2,8 @@
 
 Task: **Fit basic cylindrical screw-cap exterior**
 
-Cycle: `M11-C001`  
-Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0262_CODEX_PROMPT_V01.md  
+Cycle: `M11-C001`
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0262_CODEX_PROMPT_V01.md
 Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0262_CHATGPT_AUDIT_CRITERIA_V01.md
 
 ## Synchronization and commits
