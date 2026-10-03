@@ -158,6 +158,16 @@ class PointCloudRegistrationOutput:
     correspondences: tuple[tuple[int, int], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class MeshSurfaceDistanceOutput:
+    """PackLab-owned point-to-triangle-surface distances and target topology facts."""
+
+    distances: tuple[float, ...]
+    signed: bool
+    target_watertight: bool
+    target_self_intersecting: bool
+
+
 def _load_open3d() -> ModuleType:
     """Import the installed package only; this boundary never installs or downloads."""
 
@@ -260,6 +270,11 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
         )
     ):
         operations.append("point_to_point_registration")
+    tensor_geometry = getattr(getattr(module, "t", None), "geometry", None)
+    raycasting_scene = getattr(tensor_geometry, "RaycastingScene", None)
+    tensor_mesh = getattr(getattr(tensor_geometry, "TriangleMesh", None), "from_legacy", None)
+    if callable(raycasting_scene) and callable(tensor_mesh):
+        operations.append("triangle_mesh_surface_distance")
 
     if version != OPEN3D_VERSION:
         status = CapabilityStatus.UNKNOWN
@@ -472,6 +487,81 @@ class Open3DGeometryAdapter:
             raise GeometryAdapterError("Open3D returned non-finite registration statistics")
         return PointCloudRegistrationOutput(matrix, fitness, inlier_rmse, correspondences)
 
+    def compute_mesh_surface_distances(
+        self,
+        mesh: TriangleMeshData,
+        query: PointCloudData,
+        *,
+        signed: bool,
+        maximum_query_points: int = 50_000,
+    ) -> MeshSurfaceDistanceOutput:
+        """Measure query points to exact mesh triangles through Open3D ray casting."""
+
+        if not isinstance(mesh, TriangleMeshData) or not mesh.vertices or not mesh.triangles:
+            raise InvalidGeometry("surface-distance target must be a non-empty triangle mesh")
+        if not isinstance(query, PointCloudData) or not query.points:
+            raise InvalidGeometry("surface-distance query point cloud must be non-empty")
+        if (
+            isinstance(maximum_query_points, bool)
+            or not isinstance(maximum_query_points, int)
+            or maximum_query_points < 1
+            or maximum_query_points > 100_000
+            or len(query.points) > maximum_query_points
+        ):
+            raise InvalidGeometry("surface-distance query point bound exceeded")
+        if not isinstance(signed, bool):
+            raise InvalidGeometry("surface-distance signed policy must be boolean")
+        if len(mesh.triangles) > 1_000_000:
+            raise InvalidGeometry("surface-distance target triangle bound exceeded")
+
+        module = self._require_module()
+        legacy_type = _nested_attribute(module, "geometry", "TriangleMesh")
+        vector3d = _nested_attribute(module, "utility", "Vector3dVector")
+        vector3i = _nested_attribute(module, "utility", "Vector3iVector")
+        legacy_mesh = legacy_type()
+        legacy_mesh.vertices = vector3d(mesh.vertices)
+        legacy_mesh.triangles = vector3i(mesh.triangles)
+        watertight = bool(legacy_mesh.is_watertight())
+        self_intersecting_check = getattr(legacy_mesh, "is_self_intersecting", None)
+        self_intersecting = (
+            bool(self_intersecting_check()) if callable(self_intersecting_check) else True
+        )
+        if signed and (not watertight or self_intersecting):
+            raise InvalidGeometry(
+                "signed surface distance requires a watertight, non-self-intersecting mesh"
+            )
+
+        tensor_geometry = getattr(getattr(module, "t", None), "geometry", None)
+        tensor_mesh_type = getattr(tensor_geometry, "TriangleMesh", None)
+        raycasting_scene_type = getattr(tensor_geometry, "RaycastingScene", None)
+        tensor_module = getattr(module, "core", None)
+        tensor_factory = getattr(tensor_module, "Tensor", None)
+        dtype = getattr(getattr(tensor_module, "Dtype", None), "Float32", None)
+        from_legacy = getattr(tensor_mesh_type, "from_legacy", None)
+        if (
+            not callable(from_legacy)
+            or not callable(raycasting_scene_type)
+            or not callable(tensor_factory)
+            or dtype is None
+        ):
+            raise GeometryCapabilityUnavailable(
+                "Open3D geometry capability is missing triangle-mesh surface distance"
+            )
+        tensor_mesh = from_legacy(legacy_mesh)
+        scene = raycasting_scene_type()
+        scene.add_triangles(tensor_mesh)
+        query_tensor = tensor_factory(query.points, dtype=dtype)
+        if signed:
+            distance_tensor = scene.compute_signed_distance(query_tensor, nthreads=1, nsamples=3)
+        else:
+            distance_tensor = scene.compute_distance(query_tensor, nthreads=1)
+        distances = tuple(float(value) for value in distance_tensor.numpy().reshape(-1))
+        if len(distances) != len(query.points) or any(
+            not math.isfinite(value) for value in distances
+        ):
+            raise GeometryAdapterError("Open3D returned malformed surface distances")
+        return MeshSurfaceDistanceOutput(distances, signed, watertight, self_intersecting)
+
     def _require_module(self) -> ModuleType:
         capability = self.probe()
         if capability.status is not CapabilityStatus.AVAILABLE:
@@ -487,6 +577,7 @@ __all__ = [
     "GeometryAdapterError",
     "GeometryCapabilityUnavailable",
     "InvalidGeometry",
+    "MeshSurfaceDistanceOutput",
     "Open3DCapability",
     "Open3DGeometryAdapter",
     "PointCloudRegistrationOutput",
