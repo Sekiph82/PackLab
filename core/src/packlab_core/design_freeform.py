@@ -9,6 +9,7 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .design_history import DesignEditCommand, EditTargetKind, create_edit_command
 from .design_model import (
     DesignModelError,
     DesignModelFeatureReference,
@@ -183,6 +184,59 @@ def edit_freeform_cage(
         weights,
     )
     return revised, edited
+
+
+def create_freeform_cage_edit_command(
+    before_model: DesignModelRevision,
+    after_model: DesignModelRevision,
+    cage_feature_id: str,
+) -> DesignEditCommand:
+    """Create a normal history command for one cage control/weight parameter edit."""
+
+    before_cage = resolve_freeform_cage(before_model, cage_feature_id)
+    after_cage = resolve_freeform_cage(after_model, cage_feature_id)
+    if (
+        after_model.previous_revision_id != before_model.revision_id
+        or before_model.project_id != after_model.project_id
+        or before_model.parent_binding_revision_id != after_model.parent_binding_revision_id
+        or before_model.fitted_to_scan_master_revision_id
+        != after_model.fitted_to_scan_master_revision_id
+        or before_model.scan_master_geometry_sha256 != after_model.scan_master_geometry_sha256
+        or before_model.features != after_model.features
+        or before_cage.source_model_revision_id != after_cage.source_model_revision_id
+        or before_cage.affected_feature_id != after_cage.affected_feature_id
+        or before_cage.region_bounds != after_cage.region_bounds
+        or before_cage.lattice_shape != after_cage.lattice_shape
+    ):
+        raise FreeformCageError("freeform_cage_history_binding_changed")
+    changed = tuple(
+        (
+            suffix,
+            _parameter(before_model, f"{_parameter_prefix(cage_feature_id)}:{suffix}"),
+            _parameter(after_model, f"{_parameter_prefix(cage_feature_id)}:{suffix}"),
+        )
+        for suffix in ("control_points", "control_weights")
+        if _parameter(before_model, f"{_parameter_prefix(cage_feature_id)}:{suffix}")
+        != _parameter(after_model, f"{_parameter_prefix(cage_feature_id)}:{suffix}")
+    )
+    if len(changed) != 1:
+        raise FreeformCageError("freeform_cage_history_requires_one_parameter_edit")
+    _suffix, before, after = changed[0]
+    before_parameters = {item.parameter_id: item for item in before_model.parameters}
+    after_parameters = {item.parameter_id: item for item in after_model.parameters}
+    if set(before_parameters) != set(after_parameters) or tuple(
+        parameter_id
+        for parameter_id in sorted(before_parameters)
+        if before_parameters[parameter_id] != after_parameters[parameter_id]
+    ) != (before.parameter_id,):
+        raise FreeformCageError("freeform_cage_history_requires_one_parameter_edit")
+    return create_edit_command(
+        before_model.revision_id,
+        EditTargetKind.PARAMETER,
+        before.parameter_id,
+        before,
+        after,
+    )
 
 
 def resolve_freeform_cage(
@@ -524,6 +578,7 @@ __all__ = [
     "FreeformCageError",
     "FreeformCageOperation",
     "create_freeform_cage",
+    "create_freeform_cage_edit_command",
     "deform_design_preview",
     "edit_freeform_cage",
     "identity_control_points",
