@@ -11,7 +11,8 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 
 ## Starting frontier
 
-- Starting synchronized SHA:
+- Starting synchronized SHA: `483948efb16ce8ae06caa13fc3d5824054f9ddfe` (R01 audit frontier after safe fast-forward).
+- R01 synchronization fast-forwarded clean execution worktree from `8ec5b4c822d4b97d13eea125c64691971baf3b58` to authorized audit frontier `483948efb16ce8ae06caa13fc3d5824054f9ddfe`; Desktop owner changes were preserved.
 - PL-0268: AUDITED_PASS
 - PL-0269 implementation: `c6f935fc0308256af528cc596ff01e55d3242763`
 - Original PL-0269 V01 status: `BLOCKED_FULL_SUITE_FAILURE`
@@ -21,24 +22,24 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 
 ## Phase A - Shared cancellation remediation
 
-- Implementation SHA:
-- Changed files:
-- Direct pre-set/no-spawn regression:
-- 20x cancellation-distinct result:
-- Live process-tree cancellation regression:
-- Timeout/success/nonzero regressions:
-- First final full suite:
-- Second consecutive final full suite:
-- Static/scope/security checks:
+- Implementation SHA: `5ec47d5f24b176136e80db914d21bf4e52407de8` (dedicated implementation/evidence commit).
+- Changed files: `core/src/packlab_core/subprocess_runner.py`, `tests/core/test_subprocess_runner.py`, `tests/core/test_reconstruction_process.py`.
+- Direct pre-set/no-spawn regression: marker-file side effect absent, callbacks not called, structured cancellation result verified; stage maps to `StageStatus.CANCELLED` with no exit code.
+- 20x cancellation-distinct result: 20/20 sequential invocations passed; existing assertions unchanged.
+- Live process-tree cancellation regression: passed within the 14-test runner/reconstruction focused suite; parent and child terminated.
+- Timeout/success/nonzero regressions: passed within that suite; timeout remains distinct.
+- First final full suite: passed, 1,381 passed / 6 skipped / 1 deselected / 2 duplicate-ZIP fixture warnings, 43.79s.
+- Second consecutive final full suite: passed, same counts/warnings, 41.82s. Both ran at the same remediation code SHA.
+- Static/scope/security checks: changed-file Ruff, format, targeted mypy, compileall and diff checks passed. No dependencies/licenses/private scan/generated geometry/binaries changed. Secret scan found only an existing synthetic redaction fixture in the reconstruction test file.
 
 ## Phase B - PL-0269 V02 closure
 
-- PL-0269 implementation SHA:
-- Remediation SHA:
-- Focused/predecessor:
-- Static/scope/security:
-- V02 log SHA:
-- V02 terminal marker:
+- PL-0269 implementation SHA: `c6f935fc0308256af528cc596ff01e55d3242763` (unchanged).
+- Remediation SHA: `5ec47d5f24b176136e80db914d21bf4e52407de8`.
+- Focused/predecessor: 8 passed; PL-0269 source diff from its implementation SHA is empty.
+- Static/scope/security: Ruff, format, targeted mypy, compileall, diff and no-match secret scan passed; candidate-only authority and limitations preserved.
+- V02 log SHA: `45c14ea51b5709fea17ddffca86f3c8714a88e58`.
+- V02 terminal marker: `READY_FOR_INDEPENDENT_AUDIT`.
 
 ## Phase C - Continuation
 
@@ -64,15 +65,12 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | PL-0287 | PENDING | | | | | |
 | PL-0288 | PENDING | | | | | |
 
-## Final handoff
+## Current continuation state
 
-- Batch status:
-- Final local SHA:
-- Final origin/main SHA:
-- Final GitHub main SHA:
-- Worktree:
+- Batch status: IN_PROGRESS; resumed frontier PL-0270.
+- Current local SHA: `45c14ea51b5709fea17ddffca86f3c8714a88e58` before this master-log publication.
+- Current origin/main and GitHub main SHA: `45c14ea51b5709fea17ddffca86f3c8714a88e58` before this master-log publication.
+- Worktree: clean detached M12 execution worktree; Desktop owner work preserved.
 - M13 started: NO
 
-The final line must be exactly:
-
-`AWAITING_MILESTONE_AUDIT`
+Current batch frontier: **PL-0270** (`IN_PROGRESS`).

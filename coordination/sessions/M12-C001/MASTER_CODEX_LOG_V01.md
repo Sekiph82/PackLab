@@ -2,7 +2,7 @@
 
 Milestone: **M12 - Advanced Packaging Geometry**
 Ordered batch: **PL-0268 through PL-0288**
-Status: **BATCH_STOPPED**
+Status: **IN_PROGRESS**
 
 Master prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CODEX_PROMPT_V01.md
@@ -25,7 +25,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | Child | Status | Prompt | Criteria | Implementation SHA(s) | Log SHA | Focused | Full suite | Limitations / stop reason |
 |---|---|---|---|---|---|---|---|---|
 | PL-0268 | READY_FOR_INDEPENDENT_AUDIT | PL-0268_CODEX_PROMPT_V01.md | PL-0268_CHATGPT_AUDIT_CRITERIA_V01.md | `25742d5d1fb738aca5dbfeb52cd1dd7685c5743e` | `a1427c6c3c8fe413d476f65f3736e869fe06c60e` | 11 passed | 1,375 passed / 6 skipped / 1 deselected | `mm_unverified`; physical validation deferred; no handle/void modeling |
-| PL-0269 | BLOCKED_FULL_SUITE_FAILURE | PL-0269_CODEX_PROMPT_V01.md | PL-0269_CHATGPT_AUDIT_CRITERIA_V01.md | `c6f935fc0308256af528cc596ff01e55d3242763` | `6fc9ca5c30a5bba7ecb1054c0bc2cc0985d9789b` | 8 passed | **Failed twice:** 1,378 passed / 1 failed / 6 skipped / 1 deselected | Existing `test_stage_cancellation_is_distinct` fails in full suite; isolated pass; outside frozen scope |
+| PL-0269 | READY_FOR_INDEPENDENT_AUDIT (V02 closure) | PL-0269_CODEX_PROMPT_V01.md | PL-0269_CHATGPT_AUDIT_CRITERIA_V01.md | `c6f935fc0308256af528cc596ff01e55d3242763` (unchanged) | V02 `PL-0269_CODEX_LOG_V02.md`, `45c14ea51b5709fea17ddffca86f3c8714a88e58` | 8 passed | 1,381 passed twice consecutively at remediation `5ec47d5f24b176136e80db914d21bf4e52407de8` | Shared pre-set cancellation determinism fixed; physical validation remains deferred |
 | PL-0270 | PENDING | PL-0270_CODEX_PROMPT_V01.md | PL-0270_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0271 | PENDING | PL-0271_CODEX_PROMPT_V01.md | PL-0271_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0272 | PENDING | PL-0272_CODEX_PROMPT_V01.md | PL-0272_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
@@ -55,15 +55,14 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 - No physical/mold/manufacturing/certification claim.
 - No M13 CAD/BREP/OpenCascade/STEP implementation.
 
-## Batch stop and final handoff
+## Remediation and continuation state
 
-- Stopped at PL-0269: the locked full suite twice failed at `tests/core/test_reconstruction_process.py::test_stage_cancellation_is_distinct` after 1,378 other tests passed. The test passes alone; its owning reconstruction-process code is outside PL-0269's frozen scope.
-- PL-0269 blocker log is published; PL-0270 through PL-0288 remain pending. PL-0269 is not marked ready for independent audit.
-- Last verified pre-master-log local/origin/GitHub SHA: `6fc9ca5c30a5bba7ecb1054c0bc2cc0985d9789b`; the final master-log publication SHA is the terminal synchronized SHA.
+- The V01 PL-0269 blocker history remains preserved in `PL-0269_CODEX_LOG_V01.md`; its cancellation race was remediated in shared `subprocess_runner.py` without changing PL-0269 implementation bytes.
+- PL-0269 V02 closure log is published at `45c14ea51b5709fea17ddffca86f3c8714a88e58` and ends `READY_FOR_INDEPENDENT_AUDIT`.
+- The unchanged PL-0269 implementation SHA `c6f935fc0308256af528cc596ff01e55d3242763` passed the focused/predecessor and static gates again.
+- The pre-set cancellation regression passed 20/20 sequential runs; the exact locked full suite passed twice consecutively at remediation SHA `5ec47d5f24b176136e80db914d21bf4e52407de8` (each 1,381 passed, 6 skipped, 1 deselected).
+- The V02 continuation resumes at PL-0270. PL-0270 through PL-0288 remain pending until their own ordered child gates complete.
 - M13 was not started. Physical validation remains deferred.
-- Batch result: `BATCH_STOPPED`.
-- Terminal local/origin/GitHub SHA is verified by the final master-log commit and remote-ref check.
+- Current published GitHub main before this master-log update: `45c14ea51b5709fea17ddffca86f3c8714a88e58`.
 
-The final line must be exactly:
-
-`AWAITING_MILESTONE_AUDIT`
+Current batch frontier: **PL-0270** (`IN_PROGRESS`).
