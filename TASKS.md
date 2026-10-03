@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M12
 - Current Sprint: M12-C001 — Advanced Packaging Geometry
-- Current Task: M12-C001 — Ordered Batch PL-0268 through PL-0288
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex must execute PL-0268 through PL-0288 in order and continue automatically while green. Preserve DEFERRED_OWNER_VALIDATION and do not start M13.
+- Current Task: M12-C001-R01 — Cancellation determinism remediation + PL-0269 closure + continuation PL-0270 through PL-0288
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_REMEDIATION_CONTINUATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_REMEDIATION_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md. First fix deterministic pre-set subprocess cancellation and prove two consecutive green locked full suites; then close PL-0269 with V02 evidence and continue PL-0270 through PL-0288 automatically. Do not start M13.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/M11-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0241 through PL-0267 accepted, M11 complete.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
@@ -21,7 +21,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Active M10 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CODEX_PROMPT_V01.md — original ordered PL-0225 through PL-0240 batch.
 - Latest M10 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/M10-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 16/16 M10 children accepted.
 - Latest M11 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/M11-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 27/27 M11 children accepted.
-- Active M12 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0268 through PL-0288 continuous Codex batch.
+- Active M12 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CODEX_PROMPT_V01.md — original batch stopped at PL-0269 after unrelated locked-suite cancellation failure.
+- Latest M12 Partial Audit: PL-0268 AUDITED_PASS; PL-0269 child-scope source review PASS but global suite gate blocked by deterministic pre-set cancellation race. Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0269_CHATGPT_AUDIT_V01.md
+- Active M12 Remediation/Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_REMEDIATION_CONTINUATION_CODEX_PROMPT_V02.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -505,8 +507,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M12-S01 - Jerrycans and handles
 
-- [ ] **PL-0268** Implement asymmetric/symmetric jerrycan body fitting from stacked cross-sections. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0268_CODEX_PROMPT_V01.md
-- [ ] **PL-0269** Detect handle-void candidate and isolate it from body silhouette.
+- [x] **PL-0268** Implement asymmetric/symmetric jerrycan body fitting from stacked cross-sections. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0268_CHATGPT_AUDIT_V01.md
+- [ ] **PL-0269** Detect handle-void candidate and isolate it from body silhouette. **BLOCKED_BY_GLOBAL_SUITE_DETERMINISM:** implementation retained at `c6f935fc0308256af528cc596ff01e55d3242763`; close via M12 remediation/continuation V02. Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0269_CHATGPT_AUDIT_V01.md
 - [ ] **PL-0270** Model handle opening as editable constrained feature rather than baked scan triangles.
 - [ ] **PL-0271** Implement local grip/indent feature representation.
 - [ ] **PL-0272** Add cage/freeform deformation layer for details not captured by simple parameters.
