@@ -13,7 +13,7 @@ Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M1
 - Starting synchronized commit: `843fd5851583c0fd43093d1754fd569020faec96`.
 - `origin/main` was fetched before implementation; starting `HEAD` and `origin/main` matched with divergence `0 0`. Execution used a detached worktree at canonical `main` to preserve the dirty Desktop owner checkout. The authorized publication target is `origin/main`.
 - Implementation/evidence commit: `25742d5d1fb738aca5dbfeb52cd1dd7685c5743e`.
-- Child-log-only commit: pending.
+- Initial child-log-only commit: `a6af8a06d1a8bae38e6a3f0aea4993435a36bd2d`; the final log update is committed/published separately and indexed in the master log.
 
 ## Authorization and files read
 
@@ -60,6 +60,6 @@ An initial test run exposed fixture/assertion assumptions about lexically sorted
 - Jerrycan fitting here supports observed Z-stacked cross-sections only; unsupported geometry/constraints fail closed for review/remediation.
 - Physical accuracy validation remains `DEFERRED_OWNER_VALIDATION`; `mm_unverified` remains unverified; no Scan Master mutation or manufacturing/mold claim is made.
 - No ChatGPT audit artifact was created and no acceptance verdict is claimed.
-- Push/remote evidence: pending.
+- Published with `git push origin HEAD:main`. `git ls-remote origin refs/heads/main` returned `a6af8a06d1a8bae38e6a3f0aea4993435a36bd2d`, matching the initial child-log-only commit. This log update is separately pushed; the current final SHA is verified and indexed by the master-log publication.
 
 READY_FOR_INDEPENDENT_AUDIT
