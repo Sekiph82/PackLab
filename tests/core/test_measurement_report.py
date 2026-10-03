@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from test_flip_top_exterior import _fit as _fit_flip_top
+from test_flip_top_exterior import _fixture as _flip_top_fixture
+from test_screw_cap_exterior_fit import _fit as _fit_screw_cap
+from test_screw_cap_exterior_fit import _inputs_with_sections as _screw_cap_inputs
 
 from packlab_core.bounding_dimensions import (
     NormalizedMeasurementGeometry,
@@ -182,3 +186,149 @@ def test_report_never_claims_certified_or_mold_ready_outputs() -> None:
     assert markdown.endswith("\n")
     assert "(reconstruction_units)" in markdown
     assert "uncertainty:" in markdown
+
+
+def _modeled_context(scan, model, source_geometry_id, normalized_revision):
+    return MeasurementReportContext(
+        scan.project_id,
+        "project-revision-modeled",
+        "reconstruction-revision-modeled",
+        source_geometry_id,
+        normalized_revision,
+        model.scale_provenance_id,
+        model.scale_state,
+        model.coordinate_unit,
+    )
+
+
+def test_cylindrical_closure_dimensions_are_separate_from_captured_measurements() -> None:
+    args = _screw_cap_inputs()
+    scan, _, _, _, _, sections = args
+    fit = _fit_screw_cap(*args)
+    assert fit.model is not None
+    context = _modeled_context(
+        scan,
+        fit.model,
+        sections[0].source_geometry_id,
+        sections[0].normalized_geometry_revision,
+    )
+
+    report = build_measurement_report(
+        context,
+        sections,
+        scan_master=scan,
+        design_model=fit.model,
+        expected_scan_master_revision_id=scan.revision_id,
+        expected_design_model_revision_id=fit.model.revision_id,
+    )
+    payload = report.as_dict()
+    assert len(payload["artifacts"]) == len(sections)
+    assert [item["source_kind"] for item in payload["modeled_closure_dimensions"]] == [
+        "PARAMETRIC_DESIGN_MODEL"
+    ]
+    modeled = payload["modeled_closure_dimensions"][0]
+    assert modeled["scale_state"] == "metric-unverified"
+    assert modeled["coordinate_unit"] == "mm_unverified"
+    assert modeled["dimensions"] == [
+        {"name": "exterior_diameter", "unit": "mm_unverified", "value": 5.0},
+        {"name": "exterior_height", "unit": "mm_unverified", "value": 1.0},
+    ]
+    assert modeled["captured_fit_support"]["source_kind"] == ("CAPTURED_CROSS_SECTION_MEASUREMENTS")
+    assert modeled["captured_fit_support"]["measurement_ids"]["cylindrical_exterior_fit"]
+    assert modeled["uncertainty"]["scale_uncertainty_propagated_to_dimensions"] is False
+    assert modeled["certified_claimed"] is False
+    assert modeled["mold_ready_claimed"] is False
+    assert (
+        payload["authority_and_limitations"]["modeled_closure_dimensions_are_captured_measurements"]
+        is False
+    )
+    assert serialize_measurement_report(report) == serialize_measurement_report(
+        build_measurement_report(
+            context,
+            tuple(reversed(sections)),
+            scan_master=scan,
+            design_model=fit.model,
+            expected_scan_master_revision_id=scan.revision_id,
+            expected_design_model_revision_id=fit.model.revision_id,
+        )
+    )
+
+
+def test_flip_top_closure_dimensions_keep_observed_regions_and_deferred_status() -> None:
+    args = _flip_top_fixture()
+    scan, _, _, _, _, _, _, _, _ = args
+    fit = _fit_flip_top(args)
+    assert fit.model is not None
+    context = _modeled_context(scan, fit.model, "captured-flip-geometry", "normalized-flip-r1")
+
+    report = build_measurement_report(
+        context,
+        (),
+        scan_master=scan,
+        design_model=fit.model,
+        expected_scan_master_revision_id=scan.revision_id,
+        expected_design_model_revision_id=fit.model.revision_id,
+    )
+    assert report.artifacts == ()
+    modeled = report.as_dict()["modeled_closure_dimensions"][0]
+    assert modeled["closure_kind"] == "flip_top_exterior"
+    assert modeled["physical_accuracy_validation_status"] == "DEFERRED_OWNER_VALIDATION"
+    assert {item["name"] for item in modeled["dimensions"]} == {
+        "base_diameter",
+        "base_supported_z_span",
+        "lid_envelope_diameter",
+        "lid_envelope_supported_z_span",
+    }
+    assert modeled["captured_fit_support"]["measurement_ids"]["base"]
+    assert modeled["captured_fit_support"]["measurement_ids"]["lid_envelope"]
+    markdown = render_measurement_report_markdown(report)
+    assert "## Parametric closure dimensions" in markdown
+    assert "lid_envelope_diameter" in markdown
+    assert "mm_unverified" in markdown
+    assert report.as_dict()["authority_and_limitations"]["certified_measurement_claimed"] is False
+
+
+def test_modeled_closure_report_rejects_stale_model_and_scale_parent() -> None:
+    args = _screw_cap_inputs()
+    scan, _, _, _, _, sections = args
+    fit = _fit_screw_cap(*args)
+    assert fit.model is not None
+    context = _modeled_context(
+        scan,
+        fit.model,
+        sections[0].source_geometry_id,
+        sections[0].normalized_geometry_revision,
+    )
+    with pytest.raises(MeasurementReportError, match="design_model_parent_or_scale_mismatch"):
+        build_measurement_report(
+            context,
+            sections,
+            scan_master=scan,
+            design_model=fit.model,
+            expected_scan_master_revision_id=scan.revision_id,
+            expected_design_model_revision_id="stale-design-model",
+        )
+    with pytest.raises(MeasurementReportError, match="scan_master_stale"):
+        build_measurement_report(
+            context,
+            sections,
+            scan_master=scan,
+            design_model=fit.model,
+            expected_scan_master_revision_id="stale-scan-master",
+            expected_design_model_revision_id=fit.model.revision_id,
+        )
+    wrong_scale_context = replace(
+        context,
+        scale_state=ScaleState.RELATIVE,
+        scale_provenance_id=None,
+        coordinate_unit="reconstruction_units",
+    )
+    with pytest.raises(MeasurementReportError, match="design_model_parent_or_scale_mismatch"):
+        build_measurement_report(
+            wrong_scale_context,
+            (),
+            scan_master=scan,
+            design_model=fit.model,
+            expected_scan_master_revision_id=scan.revision_id,
+            expected_design_model_revision_id=fit.model.revision_id,
+        )
