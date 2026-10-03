@@ -172,7 +172,7 @@ class DesignModelParameter:
         if self.unit is not None:
             if not isinstance(self.unit, str) or not self.unit or len(self.unit) > 64:
                 raise DesignModelError("parameter_unit_invalid")
-            if self.unit not in {"relative", "mm_unverified"}:
+            if self.unit not in {"reconstruction_units", "mm_unverified"}:
                 raise DesignModelError("parameter_unit_unauthorized")
 
     def as_dict(self) -> dict[str, object]:
@@ -273,7 +273,9 @@ class DesignModelRevision:
             ScaleState.METRIC_UNVERIFIED,
         }:
             raise DesignModelError("design_model_scale_state_unauthorized")
-        expected_unit = "relative" if self.scale_state is ScaleState.RELATIVE else "mm_unverified"
+        expected_unit = (
+            "reconstruction_units" if self.scale_state is ScaleState.RELATIVE else "mm_unverified"
+        )
         if self.coordinate_unit != expected_unit:
             raise DesignModelError("design_model_coordinate_unit_mismatch")
         if self.physical_accuracy_validation_status != _DEFERRED:
@@ -344,7 +346,7 @@ def create_design_model_revision(
     ordered_parameters = tuple(sorted(parameters, key=lambda item: item.parameter_id))
     ordered_features = tuple(sorted(features, key=lambda item: item.feature_id))
     scale_state = parent_binding.scale_state
-    unit = "relative" if scale_state is ScaleState.RELATIVE else "mm_unverified"
+    unit = "reconstruction_units" if scale_state is ScaleState.RELATIVE else "mm_unverified"
     provisional = object.__new__(DesignModelRevision)
     provisional_values = (
         ("project_id", parent_binding.project_id),

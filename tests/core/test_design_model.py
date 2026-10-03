@@ -116,7 +116,7 @@ def test_parent_scale_semantics_and_physical_validation_deferral_are_preserved()
         reason="Relative-scale model.",
         created_at_utc="2026-10-03T12:00:00Z",
     )
-    assert relative.coordinate_unit == "relative"
+    assert relative.coordinate_unit == "reconstruction_units"
     assert relative.physical_accuracy_validation_status == "DEFERRED_OWNER_VALIDATION"
     assert relative.mold_use_authorized is False
     with pytest.raises(DesignModelError, match="design_model_coordinate_unit_mismatch"):
