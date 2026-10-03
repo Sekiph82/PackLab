@@ -48,7 +48,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | PL-0270 | READY_FOR_INDEPENDENT_AUDIT | `a86abecb198a8465b3498607ff0e1a2c907995ea` | `e0b585cd3bc5accd3c7691f0d5b12b66a87bb9d7` | 30 passed | 1,387 passed / 6 skipped / 1 deselected | Candidate AABB is 2D support only; contour and 3D extent remain unknown |
 | PL-0271 | READY_FOR_INDEPENDENT_AUDIT | `bb44b41c5c27ddaedff0b164153d40fafa92b666` | `fc8212aefc911a01ddd5ef70bc8e5a0b3b314b80` | 29 passed | 1,393 passed / 6 skipped / 1 deselected | Vertex-derived local envelope only; metric and physical validation remain deferred |
 | PL-0272 | READY_FOR_INDEPENDENT_AUDIT | `558fc7949a3a224b5ddfc62cf95a70a922f27a01` | `4521eb2663be72b700c0ba073b751f14b02512e2` | 27 passed | 1,400 passed / 6 skipped / 1 deselected | Authored cage and preview deformation only; no physical or CAD authority |
-| PL-0273 | PENDING | | | | | |
+| PL-0273 | READY_FOR_INDEPENDENT_AUDIT | `8d73fb0a5970c94a33d556ffb350a4931f77b7f9` | `731ef024113ca3211bcb97face4aef30a2dc2aac` | 37 passed | 1,406 passed / 6 skipped / 1 deselected | Exact design-space checks only; no physical or compatibility claim |
 | PL-0274 | PENDING | | | | | |
 | PL-0275 | PENDING | | | | | |
 | PL-0276 | PENDING | | | | | |
@@ -67,13 +67,14 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 
 ## Current continuation state
 
-- Batch status: IN_PROGRESS; resumed frontier PL-0270. PL-0270, PL-0271 and PL-0272 have implementation and separate child-log commits published, each ending at its independent audit handoff.
+- Batch status: IN_PROGRESS; resumed frontier PL-0270. PL-0270 through PL-0273 have implementation and separate child-log commits published, each ending at its independent audit handoff.
 - PL-0270 implementation/evidence SHA: `a86abecb198a8465b3498607ff0e1a2c907995ea`; separate child-log-only SHA: `e0b585cd3bc5accd3c7691f0d5b12b66a87bb9d7`; both remotely visible.
 - PL-0271 implementation/evidence SHA: `bb44b41c5c27ddaedff0b164153d40fafa92b666`; separate child-log-only SHA: `fc8212aefc911a01ddd5ef70bc8e5a0b3b314b80`; both remotely visible.
 - PL-0272 implementation/evidence SHA: `558fc7949a3a224b5ddfc62cf95a70a922f27a01`; separate child-log-only SHA: `4521eb2663be72b700c0ba073b751f14b02512e2`; both remotely visible.
-- Current local SHA: `4521eb2663be72b700c0ba073b751f14b02512e2` before this master-log publication.
-- Current origin/main and GitHub main SHA: `4521eb2663be72b700c0ba073b751f14b02512e2` before this master-log publication.
+- PL-0273 implementation/evidence SHA: `8d73fb0a5970c94a33d556ffb350a4931f77b7f9`; separate child-log-only SHA: `731ef024113ca3211bcb97face4aef30a2dc2aac`; both remotely visible.
+- Current local SHA: `731ef024113ca3211bcb97face4aef30a2dc2aac` before this master-log publication.
+- Current origin/main and GitHub main SHA: `731ef024113ca3211bcb97face4aef30a2dc2aac` before this master-log publication.
 - Worktree: clean detached M12 execution worktree; Desktop owner work preserved.
 - M13 started: NO
 
-Current batch frontier: **PL-0273** (`IN_PROGRESS`).
+Current batch frontier: **PL-0274** (`IN_PROGRESS`).
