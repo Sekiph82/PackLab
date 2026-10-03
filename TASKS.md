@@ -4,13 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M10
-- Current Sprint: M10-C001 — Mesh Processing & Scan Master
-- Current Task: M10-C001 — Continuation PL-0235 through PL-0240
+- Current Milestone: M11
+- Current Sprint: M11-C001 — Parametric Geometry Engine V1
+- Current Task: M11-C001 — Ordered Batch PL-0241 through PL-0267
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CONTINUATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md. First backfill the stale master log from published PL-0225–PL-0234 evidence without reimplementing those children, then continue PL-0235 through PL-0240 in order. Do not start M11.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex must execute PL-0241 through PL-0267 in order and continue automatically while green. PL-0220–PL-0224 remain DEFERRED_OWNER_VALIDATION; do not promote unverified metric data or start M12.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/M09-C001_CHATGPT_AUDIT_V01.md — AUDITED_PARTIAL_OWNER_REQUIRED; PL-0202 through PL-0219 accepted, PL-0220 physical frontier deferred by explicit owner decision.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/M10-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0225 through PL-0240 accepted, M10 complete.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -19,7 +19,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest M09 Accepted Frontier: PL-0202 through PL-0219 AUDITED_PASS; PL-0220 owner gate confirmed by https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/PL-0220_CHATGPT_AUDIT_V01.md
 - M09 Physical Validation Deferral: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/M09_PHYSICAL_VALIDATION_DEFERRAL_OWNER_DECISION_V01.md — owner explicitly deferred PL-0220 through PL-0224 until printer/benchmark objects are available; no physical PASS is implied.
 - Active M10 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CODEX_PROMPT_V01.md — original ordered PL-0225 through PL-0240 batch.
-- Latest M10 Builder Frontier: PL-0225 through PL-0234 published and awaiting independent audit; execution stopped without blocker after PL-0234 at `e2cb34f26cb5774c2b895131a4fc5a3f6bf166f0`. Continuation master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CONTINUATION_CODEX_PROMPT_V02.md
+- Latest M10 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/M10-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 16/16 M10 children accepted.
+- Active M11 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0241 through PL-0267 continuous Codex batch.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -437,25 +438,25 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M10-S01 - Open3D processing
 
-- [ ] **PL-0225** Integrate Open3D as the primary point-cloud/mesh analysis utility layer. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0225_CODEX_PROMPT_V01.md
-- [ ] **PL-0226** Remove isolated floating components with configurable safeguards.
-- [ ] **PL-0227** Implement normal estimation/orientation repair.
-- [ ] **PL-0228** Implement conservative smoothing that preserves packaging edges.
-- [ ] **PL-0229** Implement hole detection and report hole size/location before any repair.
-- [ ] **PL-0230** Implement optional hole filling with non-destructive before/after versions.
-- [ ] **PL-0231** Implement decimation for viewport/proxy meshes while preserving the Scan Master.
-- [ ] **PL-0232** Compute geometric statistics needed by later fitting stages.
-- [ ] **PL-0233** Create Scan Master asset with captured-evidence-only ancestry and provenance back to PackScan, reconstruction, masks, scale and cleanup settings; generated AI geometry is ineligible. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0233_SCAN_MASTER_AUTHORITY.md
+- [x] **PL-0225** Integrate Open3D as the primary point-cloud/mesh analysis utility layer. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0225_CODEX_PROMPT_V01.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0225_CHATGPT_AUDIT_V01.md
+- [x] **PL-0226** Remove isolated floating components with configurable safeguards. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0226_CHATGPT_AUDIT_V01.md
+- [x] **PL-0227** Implement normal estimation/orientation repair. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0227_CHATGPT_AUDIT_V01.md
+- [x] **PL-0228** Implement conservative smoothing that preserves packaging edges. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0228_CHATGPT_AUDIT_V01.md
+- [x] **PL-0229** Implement hole detection and report hole size/location before any repair. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0229_CHATGPT_AUDIT_V01.md
+- [x] **PL-0230** Implement optional hole filling with non-destructive before/after versions. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0230_CHATGPT_AUDIT_V01.md
+- [x] **PL-0231** Implement decimation for viewport/proxy meshes while preserving the Scan Master. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0231_CHATGPT_AUDIT_V01.md
+- [x] **PL-0232** Compute geometric statistics needed by later fitting stages. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0232_CHATGPT_AUDIT_V01.md
+- [x] **PL-0233** Create Scan Master asset with captured-evidence-only ancestry and provenance back to PackScan, reconstruction, masks, scale and cleanup settings; generated AI geometry is ineligible. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0233_SCAN_MASTER_AUTHORITY.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0233_CHATGPT_AUDIT_V01.md
 
 ## Sprint M10-S02 - Scan comparison and revisions
 
-- [ ] **PL-0234** Implement point-cloud/mesh registration for comparing repeat scans.
-- [ ] **PL-0235** Implement distance heatmap between scan and fitted Design Model.
-- [ ] **PL-0236** Implement cross-section comparison overlay.
-- [ ] **PL-0237** Record reconstruction versions and allow switching between them.
-- [ ] **PL-0238** Add Promote to Scan Master action with audit metadata and a hard authority gate rejecting generated/AI-visual-reference assets.
-- [ ] **PL-0239** Prevent downstream Design Model from silently changing when reconstruction is rerun.
-- [ ] **PL-0240** Add Scan Master export as PLY/OBJ/GLB plus original texture assets.
+- [x] **PL-0234** Implement point-cloud/mesh registration for comparing repeat scans. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0234_CHATGPT_AUDIT_V01.md
+- [x] **PL-0235** Implement distance heatmap between scan and fitted Design Model. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0235_CHATGPT_AUDIT_V01.md
+- [x] **PL-0236** Implement cross-section comparison overlay. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0236_CHATGPT_AUDIT_V01.md
+- [x] **PL-0237** Record reconstruction versions and allow switching between them. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0237_CHATGPT_AUDIT_V01.md
+- [x] **PL-0238** Add Promote to Scan Master action with audit metadata and a hard authority gate rejecting generated/AI-visual-reference assets. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0238_CHATGPT_AUDIT_V01.md
+- [x] **PL-0239** Prevent downstream Design Model from silently changing when reconstruction is rerun. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0239_CHATGPT_AUDIT_V01.md
+- [x] **PL-0240** Add Scan Master export as PLY/OBJ/GLB plus original texture assets. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0240_CHATGPT_AUDIT_V01.md
 
 ---
 
@@ -463,7 +464,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M11-S01 - Common parametric kernel
 
-- [ ] **PL-0241** Define Design Model parameter graph separate from triangle-mesh data.
+- [ ] **PL-0241** Define Design Model parameter graph separate from triangle-mesh data. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0241_CODEX_PROMPT_V01.md
 - [ ] **PL-0242** Define feature IDs and stable references for body, base, shoulder, neck, finish and cap.
 - [ ] **PL-0243** Implement spline/profile primitives with millimetre coordinates.
 - [ ] **PL-0244** Implement editable cross-section primitive with symmetry options.
