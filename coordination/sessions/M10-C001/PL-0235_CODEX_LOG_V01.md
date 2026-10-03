@@ -1,8 +1,8 @@
 # PL-0235 - Codex Implementation Log V01
 
-Task: **Implement scan-to-design distance heatmap contract**  
-Cycle: **M10-C001**  
-Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0235_CODEX_PROMPT_V01.md  
+Task: **Implement scan-to-design distance heatmap contract**
+Cycle: **M10-C001**
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0235_CODEX_PROMPT_V01.md
 Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/PL-0235_CHATGPT_AUDIT_CRITERIA_V01.md
 
 ## Synchronization and authorization
