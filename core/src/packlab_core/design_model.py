@@ -59,6 +59,7 @@ class FeatureKind(StrEnum):
     FINISH = "finish"
     CAP = "cap"
     HANDLE_OPENING = "handle-opening"
+    GRIP_INDENT = "grip-indent"
 
 
 def stable_feature_id(component_id: str, feature_kind: FeatureKind, semantic_key: str) -> str:

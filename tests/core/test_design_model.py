@@ -192,6 +192,7 @@ def test_stable_feature_ids_survive_parameter_edits_and_serialize_semantically()
         FeatureKind.FINISH,
         FeatureKind.CAP,
         FeatureKind.HANDLE_OPENING,
+        FeatureKind.GRIP_INDENT,
     ],
 )
 def test_all_package_feature_kinds_use_semantic_ids(kind: FeatureKind) -> None:
