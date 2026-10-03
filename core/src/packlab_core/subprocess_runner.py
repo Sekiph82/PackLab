@@ -86,6 +86,16 @@ def run_process(
         raise ValueError("args must be a non-empty sequence of non-empty strings")
     if max_output_chars is not None and max_output_chars < 1:
         raise ValueError("max_output_chars must be positive")
+    if cancel_event is not None and cancel_event.is_set():
+        return ProcessResult(
+            command,
+            None,
+            "",
+            "",
+            False,
+            True,
+            "cancelled before process start",
+        )
     if os.name == "nt":
         process = subprocess.Popen(
             list(command),

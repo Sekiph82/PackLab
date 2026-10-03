@@ -42,3 +42,12 @@ def test_stage_cancellation_is_distinct() -> None:
     result = run_reconstruction_stage("dense", _child("print('not run')"), cancel_event=event)
     assert result.status is StageStatus.CANCELLED
     assert result.cancelled is True
+
+
+def test_pre_set_stage_cancellation_does_not_succeed() -> None:
+    event = threading.Event()
+    event.set()
+    result = run_reconstruction_stage("dense", _child("print('not run')"), cancel_event=event)
+    assert result.status is StageStatus.CANCELLED
+    assert result.cancelled is True
+    assert result.exit_code is None

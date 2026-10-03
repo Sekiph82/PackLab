@@ -38,6 +38,36 @@ def test_nonzero_exit_is_structured():
     assert result.cancelled is False
 
 
+def test_pre_set_cancellation_prevents_child_execution_and_callbacks(tmp_path):
+    marker = tmp_path / "child-ran.txt"
+    event = threading.Event()
+    event.set()
+    stdout, stderr = [], []
+    command = child(
+        "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text('ran'); "
+        "print('out'); print('err', file=sys.stderr)",
+        str(marker),
+    )
+
+    result = run_process(
+        command,
+        cancel_event=event,
+        on_stdout=stdout.append,
+        on_stderr=stderr.append,
+    )
+
+    assert result.args == tuple(command)
+    assert result.returncode is None
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert result.timed_out is False
+    assert result.cancelled is True
+    assert result.error == "cancelled before process start"
+    assert marker.exists() is False
+    assert stdout == []
+    assert stderr == []
+
+
 def _parent_with_child(marker: Path):
     return child(
         "import os, pathlib, subprocess, sys, time; "
