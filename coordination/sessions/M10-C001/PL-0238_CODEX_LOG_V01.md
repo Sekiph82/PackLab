@@ -54,8 +54,9 @@ Changed files:
 
 - Starting SHA: `54b0db0eb0ea0cb3aa7e2aeb12843b108344b888`.
 - Implementation commit: `e0c6a32448606a163eb9174b108d88223fd6f88a` (`Add audited Scan Master promotion action`).
-- Product/evidence commit is separate from this child log. Child log will be committed alone next.
-- Push/parity result: pending child log commit and authorized `origin/main` fast-forward publication.
+- Child log was published in a separate log-only commit; the initial log commit was `ed8f257929d72343768133fa1c38966e9b2fb0b8`. This log-only evidence correction records the completed push/parity result.
+- `git push origin HEAD:main` succeeded as a fast-forward. Follow-up `git fetch origin main --prune` and `git ls-remote origin refs/heads/main` confirmed GitHub `main`, `origin/main`, and local HEAD all equal `ed8f257929d72343768133fa1c38966e9b2fb0b8` before this log-only correction.
+- The master continuation log will record the final child-log commit SHA and test/evidence summary.
 - No owner work was overwritten. No independent audit verdict was created.
 
 READY_FOR_INDEPENDENT_AUDIT
