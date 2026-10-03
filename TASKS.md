@@ -4,13 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M11
-- Current Sprint: M11-C001 — Parametric Geometry Engine V1
-- Current Task: M11-C001 — Ordered Batch PL-0241 through PL-0267
+- Current Milestone: M12
+- Current Sprint: M12-C001 — Advanced Packaging Geometry
+- Current Task: M12-C001 — Ordered Batch PL-0268 through PL-0288
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex must execute PL-0241 through PL-0267 in order and continue automatically while green. PL-0220–PL-0224 remain DEFERRED_OWNER_VALIDATION; do not promote unverified metric data or start M12.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex must execute PL-0268 through PL-0288 in order and continue automatically while green. Preserve DEFERRED_OWNER_VALIDATION and do not start M13.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/M10-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0225 through PL-0240 accepted, M10 complete.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/M11-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0241 through PL-0267 accepted, M11 complete.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -20,7 +20,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - M09 Physical Validation Deferral: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M09-C001/M09_PHYSICAL_VALIDATION_DEFERRAL_OWNER_DECISION_V01.md — owner explicitly deferred PL-0220 through PL-0224 until printer/benchmark objects are available; no physical PASS is implied.
 - Active M10 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CODEX_PROMPT_V01.md — original ordered PL-0225 through PL-0240 batch.
 - Latest M10 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/M10-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 16/16 M10 children accepted.
-- Active M11 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0241 through PL-0267 continuous Codex batch.
+- Latest M11 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/M11-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 27/27 M11 children accepted.
+- Active M12 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0268 through PL-0288 continuous Codex batch.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -464,39 +465,39 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M11-S01 - Common parametric kernel
 
-- [ ] **PL-0241** Define Design Model parameter graph separate from triangle-mesh data. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0241_CODEX_PROMPT_V01.md
-- [ ] **PL-0242** Define feature IDs and stable references for body, base, shoulder, neck, finish and cap.
-- [ ] **PL-0243** Implement spline/profile primitives with millimetre coordinates.
-- [ ] **PL-0244** Implement editable cross-section primitive with symmetry options.
-- [ ] **PL-0245** Implement loft/revolve abstraction independent of final CAD backend.
-- [ ] **PL-0246** Implement parameter validation and impossible-geometry rejection.
-- [ ] **PL-0247** Implement undo/redo command model for parametric edits.
-- [ ] **PL-0248** Serialize Design Model parameters in a versioned human-readable project format.
-- [ ] **PL-0249** Generate tessellated preview mesh from parameters for interactive viewport use.
+- [x] **PL-0241** Define Design Model parameter graph separate from triangle-mesh data. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0241_CODEX_PROMPT_V01.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0241_CHATGPT_AUDIT_V01.md
+- [x] **PL-0242** Define feature IDs and stable references for body, base, shoulder, neck, finish and cap. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0242_CHATGPT_AUDIT_V01.md
+- [x] **PL-0243** Implement spline/profile primitives with millimetre coordinates. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0243_CHATGPT_AUDIT_V01.md
+- [x] **PL-0244** Implement editable cross-section primitive with symmetry options. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0244_CHATGPT_AUDIT_V01.md
+- [x] **PL-0245** Implement loft/revolve abstraction independent of final CAD backend. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0245_CHATGPT_AUDIT_V01.md
+- [x] **PL-0246** Implement parameter validation and impossible-geometry rejection. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0246_CHATGPT_AUDIT_V01.md
+- [x] **PL-0247** Implement undo/redo command model for parametric edits. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0247_CHATGPT_AUDIT_V01.md
+- [x] **PL-0248** Serialize Design Model parameters in a versioned human-readable project format. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0248_CHATGPT_AUDIT_V01.md
+- [x] **PL-0249** Generate tessellated preview mesh from parameters for interactive viewport use. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0249_CHATGPT_AUDIT_V01.md
 
 ## Sprint M11-S02 - Bottle/jar fitting
 
-- [ ] **PL-0250** Detect rotational/symmetry characteristics and choose bottle fitting strategy.
-- [ ] **PL-0251** Extract robust vertical body profile from normalized Scan Master.
-- [ ] **PL-0252** Fit smoothed profile while preserving shoulder/base transitions.
-- [ ] **PL-0253** Detect body, shoulder, neck and base zones with editable boundaries.
-- [ ] **PL-0254** Generate revolved Design Model for axisymmetric bottle/jar.
-- [ ] **PL-0255** Fit non-circular but symmetric body using stacked cross-sections and lofting.
-- [ ] **PL-0256** Add front/back and left/right symmetry constraints with user toggle.
-- [ ] **PL-0257** Calculate scan-to-design deviation and expose problem regions.
-- [ ] **PL-0258** Allow user to edit height/width/depth while maintaining parameter relationships.
-- [ ] **PL-0259** Allow direct profile/cross-section control-point editing.
-- [ ] **PL-0260** Save fitting preset and parameters independently of the raw scan.
+- [x] **PL-0250** Detect rotational/symmetry characteristics and choose bottle fitting strategy. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0250_CHATGPT_AUDIT_V01.md
+- [x] **PL-0251** Extract robust vertical body profile from normalized Scan Master. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0251_CHATGPT_AUDIT_V01.md
+- [x] **PL-0252** Fit smoothed profile while preserving shoulder/base transitions. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0252_CHATGPT_AUDIT_V01.md
+- [x] **PL-0253** Detect body, shoulder, neck and base zones with editable boundaries. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0253_CHATGPT_AUDIT_V01.md
+- [x] **PL-0254** Generate revolved Design Model for axisymmetric bottle/jar. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0254_CHATGPT_AUDIT_V01.md
+- [x] **PL-0255** Fit non-circular but symmetric body using stacked cross-sections and lofting. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0255_CHATGPT_AUDIT_V01.md
+- [x] **PL-0256** Add front/back and left/right symmetry constraints with user toggle. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0256_CHATGPT_AUDIT_V01.md
+- [x] **PL-0257** Calculate scan-to-design deviation and expose problem regions. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0257_CHATGPT_AUDIT_V01.md
+- [x] **PL-0258** Allow user to edit height/width/depth while maintaining parameter relationships. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0258_CHATGPT_AUDIT_V01.md
+- [x] **PL-0259** Allow direct profile/cross-section control-point editing. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0259_CHATGPT_AUDIT_V01.md
+- [x] **PL-0260** Save fitting preset and parameters independently of the raw scan. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0260_CHATGPT_AUDIT_V01.md
 
 ## Sprint M11-S03 - Caps and closures V1
 
-- [ ] **PL-0261** Separate cap/closure from body when scan evidence allows.
-- [ ] **PL-0262** Fit basic cylindrical screw-cap exterior.
-- [ ] **PL-0263** Fit flip-top/simple closure exterior as an editable component.
-- [ ] **PL-0264** Define neck/closure mating reference planes and axes.
-- [ ] **PL-0265** Add cap visibility/replacement workflow.
-- [ ] **PL-0266** Add closure dimensions to measurement report.
-- [ ] **PL-0267** Validate bottle/cap assembly transforms on export.
+- [x] **PL-0261** Separate cap/closure from body when scan evidence allows. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0261_CHATGPT_AUDIT_V01.md
+- [x] **PL-0262** Fit basic cylindrical screw-cap exterior. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0262_CHATGPT_AUDIT_V01.md
+- [x] **PL-0263** Fit flip-top/simple closure exterior as an editable component. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0263_CHATGPT_AUDIT_V01.md
+- [x] **PL-0264** Define neck/closure mating reference planes and axes. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0264_CHATGPT_AUDIT_V01.md
+- [x] **PL-0265** Add cap visibility/replacement workflow. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0265_CHATGPT_AUDIT_V01.md
+- [x] **PL-0266** Add closure dimensions to measurement report. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0266_CHATGPT_AUDIT_V01.md
+- [x] **PL-0267** Validate bottle/cap assembly transforms on export. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/PL-0267_CHATGPT_AUDIT_V01.md
 
 ---
 
@@ -504,7 +505,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M12-S01 - Jerrycans and handles
 
-- [ ] **PL-0268** Implement asymmetric/symmetric jerrycan body fitting from stacked cross-sections.
+- [ ] **PL-0268** Implement asymmetric/symmetric jerrycan body fitting from stacked cross-sections. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0268_CODEX_PROMPT_V01.md
 - [ ] **PL-0269** Detect handle-void candidate and isolate it from body silhouette.
 - [ ] **PL-0270** Model handle opening as editable constrained feature rather than baked scan triangles.
 - [ ] **PL-0271** Implement local grip/indent feature representation.
