@@ -15,7 +15,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MAS
 - Starting synchronized SHA: `05d581d05413ced11e1ca5791e623acc7b29fffe`.
 - Branch: `main`
 - Worktree: `C:\Users\sekip\.codex\worktrees\m11-parametric-geometry\PackLab` on local branch `codex/m11-c001`.
-- origin/main parity: verified before each child; last verified SHA after PL-0259 log publication: `afb130f29528825669067f2242bacd8981e0786f`.
+- origin/main parity: verified before each child; last verified SHA after PL-0260 log publication: `b9d9fbfc3b83fbcaac0d5267300c89fbbefec990`.
 - Accepted predecessor: M10 AUDITED_PASS
 - Deferred physical validation: PL-0220 through PL-0224
 - Inherited physical-validation status: `DEFERRED_OWNER_VALIDATION`
@@ -43,7 +43,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MAS
 | PL-0257 | READY_FOR_INDEPENDENT_AUDIT | PL-0257_CODEX_PROMPT_V01.md | PL-0257_CHATGPT_AUDIT_CRITERIA_V01.md | `ed2353b240e3eac3e0972efc389c487fb7b6dd72` | `085472b3e4c7078d80a565ece4713227b700b281` | 30 passed | 1,327 passed, 6 skipped, 1 deselected | Implementer evidence only; feature-specific overlays use explicit parent-bound geometry; deviation remains unsigned diagnostic. |
 | PL-0258 | READY_FOR_INDEPENDENT_AUDIT | PL-0258_CODEX_PROMPT_V01.md | PL-0258_CHATGPT_AUDIT_CRITERIA_V01.md | `94d9640590c9f9519df865080949b7ff99b4ade4` | `8307ae2c14bf7cd5d9991b189481166afdc04f7b` | 49 passed | 1,338 passed, 6 skipped, 1 deselected | Implementer evidence only; proportional groups are explicit; other feature geometry remains unchanged. |
 | PL-0259 | READY_FOR_INDEPENDENT_AUDIT | PL-0259_CODEX_PROMPT_V01.md | PL-0259_CHATGPT_AUDIT_CRITERIA_V01.md | `fa3acde61ccfcc153ccb9ee8c3fe900b42af3525` | `afb130f29528825669067f2242bacd8981e0786f` | 68 passed | 1,342 passed, 6 skipped, 1 deselected | Implementer evidence only; section movement enforces symmetry, profile edits preserve ordering, previews remain proxies. |
-| PL-0260 | PENDING | PL-0260_CODEX_PROMPT_V01.md | PL-0260_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0260 | READY_FOR_INDEPENDENT_AUDIT | PL-0260_CODEX_PROMPT_V01.md | PL-0260_CHATGPT_AUDIT_CRITERIA_V01.md | `c5fe5942775478ea6c8764f93cf93506940b111a` | `b9d9fbfc3b83fbcaac0d5267300c89fbbefec990` | 67 passed | 1,346 passed, 6 skipped, 1 deselected | Implementer evidence only; preset stores no scan geometry and application recomputes parent-bound strategy evidence. |
 | PL-0261 | PENDING | PL-0261_CODEX_PROMPT_V01.md | PL-0261_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0262 | PENDING | PL-0262_CODEX_PROMPT_V01.md | PL-0262_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0263 | PENDING | PL-0263_CODEX_PROMPT_V01.md | PL-0263_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
