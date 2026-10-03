@@ -28,7 +28,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | PL-0269 | READY_FOR_INDEPENDENT_AUDIT (V02 closure) | PL-0269_CODEX_PROMPT_V01.md | PL-0269_CHATGPT_AUDIT_CRITERIA_V01.md | `c6f935fc0308256af528cc596ff01e55d3242763` (unchanged) | V02 `PL-0269_CODEX_LOG_V02.md`, `45c14ea51b5709fea17ddffca86f3c8714a88e58` | 8 passed | 1,381 passed twice consecutively at remediation `5ec47d5f24b176136e80db914d21bf4e52407de8` | Shared pre-set cancellation determinism fixed; physical validation remains deferred |
 | PL-0270 | READY_FOR_INDEPENDENT_AUDIT | PL-0270_CODEX_PROMPT_V01.md | PL-0270_CHATGPT_AUDIT_CRITERIA_V01.md | `a86abecb198a8465b3498607ff0e1a2c907995ea` | `e0b585cd3bc5accd3c7691f0d5b12b66a87bb9d7` | 30 passed | 1,387 passed / 6 skipped / 1 deselected | Candidate AABB is 2D support only; contour and 3D extent remain unknown |
 | PL-0271 | READY_FOR_INDEPENDENT_AUDIT | PL-0271_CODEX_PROMPT_V01.md | PL-0271_CHATGPT_AUDIT_CRITERIA_V01.md | `bb44b41c5c27ddaedff0b164153d40fafa92b666` | `fc8212aefc911a01ddd5ef70bc8e5a0b3b314b80` | 29 passed | 1,393 passed / 6 skipped / 1 deselected | Vertex-derived local envelope only; metric and physical validation remain deferred |
-| PL-0272 | PENDING | PL-0272_CODEX_PROMPT_V01.md | PL-0272_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0272 | READY_FOR_INDEPENDENT_AUDIT | PL-0272_CODEX_PROMPT_V01.md | PL-0272_CHATGPT_AUDIT_CRITERIA_V01.md | `558fc7949a3a224b5ddfc62cf95a70a922f27a01` | `4521eb2663be72b700c0ba073b751f14b02512e2` | 27 passed | 1,400 passed / 6 skipped / 1 deselected | Authored cage and preview deformation only; no physical or CAD authority |
 | PL-0273 | PENDING | PL-0273_CODEX_PROMPT_V01.md | PL-0273_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0274 | PENDING | PL-0274_CODEX_PROMPT_V01.md | PL-0274_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0275 | PENDING | PL-0275_CODEX_PROMPT_V01.md | PL-0275_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
@@ -64,7 +64,8 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 - The V02 continuation resumed at PL-0270. PL-0271 through PL-0288 remain pending until their own ordered child gates complete.
 - PL-0270 implementation commit `a86abecb198a8465b3498607ff0e1a2c907995ea` and separate log-only commit `e0b585cd3bc5accd3c7691f0d5b12b66a87bb9d7` are remotely visible; its focused/full/static/scope gates are recorded in `PL-0270_CODEX_LOG_V01.md`.
 - PL-0271 implementation commit `bb44b41c5c27ddaedff0b164153d40fafa92b666` and separate child-log-only commit `fc8212aefc911a01ddd5ef70bc8e5a0b3b314b80` are remotely visible; its focused/full/static/scope gates and limitations are recorded in `PL-0271_CODEX_LOG_V01.md`.
+- PL-0272 implementation commit `558fc7949a3a224b5ddfc62cf95a70a922f27a01` and separate child-log-only commit `4521eb2663be72b700c0ba073b751f14b02512e2` are remotely visible; its focused/full/static/scope gates and limitations are recorded in `PL-0272_CODEX_LOG_V01.md`.
 - M13 was not started. Physical validation remains deferred.
-- Current published GitHub main before this master-log update: `fc8212aefc911a01ddd5ef70bc8e5a0b3b314b80`.
+- Current published GitHub main before this master-log update: `4521eb2663be72b700c0ba073b751f14b02512e2`.
 
-Current batch frontier: **PL-0272** (`IN_PROGRESS`).
+Current batch frontier: **PL-0273** (`IN_PROGRESS`).
