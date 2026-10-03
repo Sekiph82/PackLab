@@ -2,7 +2,7 @@
 
 Milestone: **M11 - Parametric Geometry Engine V1**
 Ordered batch: **PL-0241 through PL-0267**
-Status: **IN_PROGRESS**
+Status: **BATCH_COMPLETED**
 
 Master prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MASTER_CODEX_PROMPT_V01.md
@@ -15,7 +15,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MAS
 - Starting synchronized SHA: `05d581d05413ced11e1ca5791e623acc7b29fffe`.
 - Branch: `main`
 - Worktree: `C:\Users\sekip\.codex\worktrees\m11-parametric-geometry\PackLab` on local branch `codex/m11-c001`.
-- origin/main parity: verified before each child; last verified SHA after PL-0261 log publication: `7f6540e30e03a17fc494848f112a18f578130673`.
+- origin/main parity: verified before each child; last verified child-publication SHA after PL-0267 log publication: `fcef4470941d40761b244b0f38165b66d970f8e0`.
 - Accepted predecessor: M10 AUDITED_PASS
 - Deferred physical validation: PL-0220 through PL-0224
 - Inherited physical-validation status: `DEFERRED_OWNER_VALIDATION`
@@ -50,7 +50,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/MAS
 | PL-0264 | READY_FOR_INDEPENDENT_AUDIT | PL-0264_CODEX_PROMPT_V01.md | PL-0264_CHATGPT_AUDIT_CRITERIA_V01.md | `30c05be1d30212ca25b89151aadef3e8289845d1` | `b0094e8ef75623b2d450cc3ba540d3fe7202e963` | 35 passed | 1,358 passed, 6 skipped, 1 deselected | Implementer evidence only; explicit stable axes and planes expose alignment without fit/seal claims. |
 | PL-0265 | READY_FOR_INDEPENDENT_AUDIT | PL-0265_CODEX_PROMPT_V01.md | PL-0265_CHATGPT_AUDIT_CRITERIA_V01.md | `d5f7f49b1bdc2369b15044b176605e42d7088a77` | `e817a0c562ddebf6b3f00ed96ba3a313afbb6954` | 22 passed | 1,363 passed, 6 skipped, 1 deselected | Implementer evidence only; Scan Master remains immutable and all physical/compatibility claims are deferred. |
 | PL-0266 | READY_FOR_INDEPENDENT_AUDIT | PL-0266_CODEX_PROMPT_V01.md | PL-0266_CHATGPT_AUDIT_CRITERIA_V01.md | `ae94bf57aa4471c41a341f8d2ba59d8327cba717` | `d6581d0a0e836dbb830655345efa8729dbaddddf` | 24 passed | 1,366 passed, 6 skipped, 1 deselected | Implementer evidence only; dimensions remain review-required, `mm_unverified`, and uncertified. |
-| PL-0267 | PENDING | PL-0267_CODEX_PROMPT_V01.md | PL-0267_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0267 | READY_FOR_INDEPENDENT_AUDIT | PL-0267_CODEX_PROMPT_V01.md | PL-0267_CHATGPT_AUDIT_CRITERIA_V01.md | `b0b8f988cea65e37b99c30719e14ec6bd5fbf1d8` | `fcef4470941d40761b244b0f38165b66d970f8e0` | 36 passed | 1,369 passed, 6 skipped, 1 deselected | Implementer evidence only; transforms are rigid preview relationships, with CAD/STEP and physical validation deferred. |
 
 ## Non-negotiable limitations
 
@@ -64,10 +64,11 @@ M12/M13 are unauthorized during this batch.
 
 ## Final handoff
 
-Record final local/origin/GitHub SHA, clean worktree, M12 not started and one of:
-- `BATCH_COMPLETED`, or
-- `BATCH_STOPPED` with exact frontier/reason.
-
-The final line must be exactly:
+- All children PL-0241 through PL-0267 have separate implementation/evidence and child-log publication commits; each row remains `READY_FOR_INDEPENDENT_AUDIT` pending ChatGPT audit.
+- Final child log publication SHA before this master-log-only publication: `fcef4470941d40761b244b0f38165b66d970f8e0`.
+- Before this master-log update, fetched `origin/main` matched local `HEAD`; child implementation, child log, and index commits were visible on GitHub main.
+- Master status: `BATCH_COMPLETED`; no child was skipped or blocked.
+- M12/M13 were not started. PL-0220–PL-0224 remain `DEFERRED_OWNER_VALIDATION`; metric dimensions remain `METRIC_UNVERIFIED` / `mm_unverified`; no physical, manufacturing, mold, thread, or seal acceptance is claimed.
+- This master-log-only commit is the final publication. Verify its local/origin/GitHub SHA and clean worktree after push.
 
 `AWAITING_MILESTONE_AUDIT`
