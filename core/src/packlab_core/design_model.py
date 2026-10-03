@@ -390,6 +390,71 @@ def create_design_model_revision(
     )
 
 
+def revise_design_model_revision(
+    current: DesignModelRevision,
+    *,
+    parameters: tuple[DesignModelParameter, ...],
+    features: tuple[DesignModelFeatureReference, ...],
+    actor_id: str,
+    reason: str,
+    created_at_utc: str,
+) -> DesignModelRevision:
+    """Create an immutable edit revision while retaining the exact captured parent pin."""
+    if not isinstance(current, DesignModelRevision):
+        raise DesignModelError("current_design_model_revision_required")
+    if not isinstance(parameters, tuple) or not isinstance(features, tuple):
+        raise DesignModelError("graph_nodes_must_be_tuples")
+    if any(not isinstance(item, DesignModelParameter) for item in parameters):
+        raise DesignModelError("parameter_node_invalid")
+    if any(not isinstance(item, DesignModelFeatureReference) for item in features):
+        raise DesignModelError("feature_reference_invalid")
+    ordered_parameters = tuple(sorted(parameters, key=lambda item: item.parameter_id))
+    ordered_features = tuple(sorted(features, key=lambda item: item.feature_id))
+    provisional = object.__new__(DesignModelRevision)
+    values = (
+        ("project_id", current.project_id),
+        ("package_family", current.package_family),
+        ("parameters", ordered_parameters),
+        ("features", ordered_features),
+        ("parent_binding_revision_id", current.parent_binding_revision_id),
+        (
+            "fitted_to_scan_master_revision_id",
+            current.fitted_to_scan_master_revision_id,
+        ),
+        ("scan_master_geometry_sha256", current.scan_master_geometry_sha256),
+        ("scale_state", current.scale_state),
+        ("scale_provenance_id", current.scale_provenance_id),
+        ("coordinate_unit", current.coordinate_unit),
+        ("physical_accuracy_validation_status", _DEFERRED),
+        ("mold_use_authorized", False),
+        ("previous_revision_id", current.revision_id),
+        ("actor_id", actor_id),
+        ("reason", reason),
+        ("created_at_utc", created_at_utc),
+    )
+    for field_name, value in values:
+        object.__setattr__(provisional, field_name, value)
+    return DesignModelRevision(
+        revision_id=_revision_id(provisional),
+        project_id=current.project_id,
+        package_family=current.package_family,
+        parameters=ordered_parameters,
+        features=ordered_features,
+        parent_binding_revision_id=current.parent_binding_revision_id,
+        fitted_to_scan_master_revision_id=current.fitted_to_scan_master_revision_id,
+        scan_master_geometry_sha256=current.scan_master_geometry_sha256,
+        scale_state=current.scale_state,
+        scale_provenance_id=current.scale_provenance_id,
+        coordinate_unit=current.coordinate_unit,
+        physical_accuracy_validation_status=_DEFERRED,
+        mold_use_authorized=False,
+        previous_revision_id=current.revision_id,
+        actor_id=actor_id,
+        reason=reason,
+        created_at_utc=created_at_utc,
+    )
+
+
 def _revision_id(revision: DesignModelRevision) -> str:
     payload = {
         "contract": "packlab.design-model.v1",
@@ -423,6 +488,7 @@ __all__ = [
     "PackageFamily",
     "ParameterType",
     "create_design_model_revision",
+    "revise_design_model_revision",
     "resolve_design_model_feature",
     "stable_feature_id",
 ]
