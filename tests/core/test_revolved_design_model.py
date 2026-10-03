@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from dataclasses import replace
 
@@ -14,6 +16,7 @@ from packlab_core.design_profile_fit import (
 )
 from packlab_core.design_profile_zones import detect_design_profile_zones
 from packlab_core.fitting_strategy import (
+    STRATEGY_CONTRACT,
     FittingStrategy,
     PrincipalAxis,
     recommend_fitting_strategy,
@@ -207,5 +210,32 @@ def test_stale_strategy_or_profile_parent_and_review_required_zones_reject() -> 
 def test_axis_strategy_must_match_profile_axis() -> None:
     scan, strategy, profile_fit, zones = _evidence()
     wrong_axis = replace(strategy, principal_axis=PrincipalAxis.X)
-    with pytest.raises(RevolvedDesignModelError, match="fitting_strategy_identity_invalid"):
+    axis_index = {PrincipalAxis.X: 0, PrincipalAxis.Y: 1, PrincipalAxis.Z: 2}[
+        wrong_axis.principal_axis
+    ]
+    body = {
+        "contract": STRATEGY_CONTRACT,
+        "strategy": wrong_axis.strategy.value,
+        "axis": axis_index,
+        "elongation": wrong_axis.axis_elongation_ratio,
+        "sections": [item.as_dict() for item in wrong_axis.section_evidence],
+        "scan_master_revision_id": wrong_axis.scan_master_revision_id,
+        "scan_master_geometry_sha256": wrong_axis.scan_master_geometry_sha256,
+        "parent_binding": wrong_axis.parent_binding.as_dict(),
+        "geometry_statistics": wrong_axis.geometry_statistics.as_dict(),
+        "m09_vertical_profile_ids": list(wrong_axis.m09_vertical_profile_ids),
+        "m09_cross_section_measurement_ids": list(wrong_axis.m09_cross_section_measurement_ids),
+        "uncertainty_codes": list(wrong_axis.uncertainty_codes),
+        "policy": wrong_axis.policy.as_dict(),
+    }
+    recommendation_id = (
+        "fitting-strategy:"
+        + hashlib.sha256(
+            json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("ascii")
+        ).hexdigest()
+    )
+    wrong_axis = replace(wrong_axis, recommendation_id=recommendation_id)
+    with pytest.raises(
+        RevolvedDesignModelError, match="revolve_profile_axis_must_match_z_strategy"
+    ):
         _build((scan, wrong_axis, profile_fit, zones))
