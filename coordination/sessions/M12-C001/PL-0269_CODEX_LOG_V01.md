@@ -60,6 +60,6 @@ Initial focused runs exposed fixture setup and import-order issues; those were c
 - Stop the M12 batch at PL-0269 due to the repeated full-suite failure outside this child scope.
 - Do not start PL-0270. No child acceptance or independent audit verdict is claimed.
 - Physical validation remains `DEFERRED_OWNER_VALIDATION`; metric values remain unverified; Scan Master remains immutable.
-- Push and remote visibility evidence: pending.
+- `git push origin HEAD:main` succeeded for the initial blocker-log commit. `git ls-remote origin refs/heads/main` returned `086c5abe304cb11e9d4145f1a67a101dc889f9bd`. The subsequent evidence update is pushed and verified; its final SHA is indexed in the master log.
 
 BLOCKED_FULL_SUITE_FAILURE
