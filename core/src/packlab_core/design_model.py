@@ -58,6 +58,7 @@ class FeatureKind(StrEnum):
     NECK = "neck"
     FINISH = "finish"
     CAP = "cap"
+    HANDLE_OPENING = "handle-opening"
 
 
 def stable_feature_id(component_id: str, feature_kind: FeatureKind, semantic_key: str) -> str:
