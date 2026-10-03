@@ -47,8 +47,9 @@ Changed files:
 
 - Starting SHA: `24123d6dd8e913e367b08e4bca76e5ddaff67a8a`.
 - Implementation commit: `ee6a86135bdd3a350457b95297e7cbb3640478df` (`Pin future Design Model Scan Master parents`).
-- Product/evidence commit is separate from the required child-log-only commit.
-- Push/parity result: pending child log and authorized `origin/main` fast-forward publication.
+- Implementation commit and child log were published separately. Initial child log commit: `d0895c6261d0af6b3e34ad82f69ca5ee33c3caff`.
+- `git push origin HEAD:main` succeeded as a fast-forward. Follow-up `git fetch origin main --prune` and `git ls-remote origin refs/heads/main` confirmed local HEAD, `origin/main`, and GitHub `main` all equal `d0895c6261d0af6b3e34ad82f69ca5ee33c3caff` before this log-only publication-evidence correction.
+- The master continuation log records the final child-log commit SHA after this evidence correction.
 - No owner work was overwritten. No independent audit verdict was created.
 
 READY_FOR_INDEPENDENT_AUDIT
