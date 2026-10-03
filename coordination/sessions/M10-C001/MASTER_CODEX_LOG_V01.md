@@ -2,7 +2,7 @@
 
 Milestone: **M10 - Mesh Processing & Scan Master**
 Ordered batch: **PL-0225 through PL-0240**
-Status: **IN_PROGRESS - CONTINUATION V02**
+Status: **BATCH_COMPLETED - AWAITING MILESTONE AUDIT**
 
 Master prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M10-C001/MASTER_CODEX_PROMPT_V01.md
@@ -44,7 +44,7 @@ Continuation V02 backfill note: verified the published PL-0225 through PL-0234 c
 | PL-0237 | PUBLISHED_AWAITING_INDEPENDENT_AUDIT | PL-0237_CODEX_PROMPT_V01.md | PL-0237_CHATGPT_AUDIT_CRITERIA_V01.md | `6aff6284043f13f706eee2c6c80a217f565f524c` | `428e3484cae59f290e7f71e1b6e21ce3b1ecd11d` ([log](https://github.com/Sekiph82/PackLab/blob/428e3484cae59f290e7f71e1b6e21ce3b1ecd11d/coordination/sessions/M10-C001/PL-0237_CODEX_LOG_V01.md)) | 52 passed | 1221 passed, 6 skipped, 1 deselected | Revision metadata is serialized for project persistence; no geometry is mutated, validation remains deferred. |
 | PL-0238 | PUBLISHED_AWAITING_INDEPENDENT_AUDIT | PL-0238_CODEX_PROMPT_V01.md | PL-0238_CHATGPT_AUDIT_CRITERIA_V01.md | `e0c6a32448606a163eb9174b108d88223fd6f88a` | `db7e03d0c6ebf75d62586cbd7e6732bb39c505f6` ([log](https://github.com/Sekiph82/PackLab/blob/db7e03d0c6ebf75d62586cbd7e6732bb39c505f6/coordination/sessions/M10-C001/PL-0238_CODEX_LOG_V01.md)) | 24 passed | 1227 passed, 6 skipped, 1 deselected | Application cleanup-selection provider is an integration seam; default shell reports unavailable until typed eligible input is loaded. Physical validation deferred. |
 | PL-0239 | PUBLISHED_AWAITING_INDEPENDENT_AUDIT | PL-0239_CODEX_PROMPT_V01.md | PL-0239_CHATGPT_AUDIT_CRITERIA_V01.md | `ee6a86135bdd3a350457b95297e7cbb3640478df` | `b91bca1e36831c6c538b11ab8164551db76e7e90` ([log](https://github.com/Sekiph82/PackLab/blob/b91bca1e36831c6c538b11ab8164551db76e7e90/coordination/sessions/M10-C001/PL-0239_CODEX_LOG_V01.md)) | 21 passed | 1232 passed, 6 skipped, 1 deselected | Metadata-only immutable parent binding; M11 geometry kernel not implemented; physical validation remains deferred. |
-| PL-0240 | PENDING | PL-0240_CODEX_PROMPT_V01.md | PL-0240_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0240 | PUBLISHED_AWAITING_INDEPENDENT_AUDIT | PL-0240_CODEX_PROMPT_V01.md | PL-0240_CHATGPT_AUDIT_CRITERIA_V01.md | `26561d5c1da01b4ec651b788c71db48761f64dc0` | `897db57751a8b4f742649d6a268c39dfb0330d11` ([log](https://github.com/Sekiph82/PackLab/blob/897db57751a8b4f742649d6a268c39dfb0330d11/coordination/sessions/M10-C001/PL-0240_CODEX_LOG_V01.md)) | 18 passed | 1237 passed, 6 skipped, 1 deselected | Deterministic PLY/OBJ/GLB and digest-bound texture sidecars; UV mapping unavailable and explicitly disclosed; metric status remains unverified and physical validation deferred. |
 
 ## Non-negotiable inherited limitation
 
@@ -57,10 +57,12 @@ Until deferred physical validation is later completed:
 
 ## Final handoff
 
-Record final local/origin/GitHub SHA, clean-worktree state, M11 not started, and either:
-- `BATCH_COMPLETED`, or
-- `BATCH_STOPPED` with exact child/reason.
+Status: **BATCH_COMPLETED**. PL-0225 through PL-0240 each have a published implementation/evidence commit and separate child log. This is builder completion only; none of these entries asserts independent audit acceptance.
 
-The final line must be exactly:
+- Final pre-master-log publication SHA: `897db57751a8b4f742649d6a268c39dfb0330d11` (PL-0240 child-log commit; local/origin/GitHub `main` equal before this master-log-only commit).
+- The master-log-only commit is the final published tree. Its exact SHA and the equality check against local `HEAD`, fetched `origin/main`, and `git ls-remote origin refs/heads/main` are reported in the Codex handoff because a commit cannot contain its own SHA.
+- Worktree state after the master-log-only commit: clean (verified before handoff).
+- M11 was not started.
+- PL-0220 through PL-0224 remain `DEFERRED_OWNER_VALIDATION`; `METRIC_UNVERIFIED` remains unverified; physical validation remains deferred; `mold_use_authorized=false`.
 
-`AWAITING_MILESTONE_AUDIT`
+AWAITING_MILESTONE_AUDIT
