@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from collections.abc import Callable
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QStandardPaths, Qt
@@ -12,10 +13,17 @@ from PySide6.QtWidgets import QMainWindow, QSplitter
 from .autosave import AutosaveService
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .jobs import JobManager
-from .navigation import NavigationController, NavigationPanel, Route, RouteStack
+from .navigation import (
+    NavigationController,
+    NavigationPanel,
+    Route,
+    RouteStack,
+    ScanMasterEditorView,
+)
 from .preferences import PreferencesStore, WindowPreferences
 from .project import ProjectManager
 from .recovery import RecoveryManager
+from .scan_master_promotion import ScanMasterPromotionAction, ScanMasterPromotionRequest
 from .shutdown import ShutdownCoordinator
 from .version import current_build_info
 from .workspace import WorkspaceManager
@@ -34,6 +42,8 @@ class StudioMainWindow(QMainWindow):
         preferences: PreferencesStore | None = None,
         diagnostics_root: str | Path | None = None,
         available_work_area: tuple[int, int, int, int] | None = None,
+        scan_master_request_provider: Callable[[str, str], ScanMasterPromotionRequest | None]
+        | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName(self.WINDOW_OBJECT_NAME)
@@ -44,6 +54,8 @@ class StudioMainWindow(QMainWindow):
         self.navigation = NavigationController()
         self.job_manager = JobManager()
         self.project_manager = ProjectManager(job_manager=self.job_manager)
+        self.scan_master_promotion = ScanMasterPromotionAction(self.project_manager)
+        self.scan_master_request_provider = scan_master_request_provider
         self.project_manager.add_listener(self._on_project_changed)
         self.autosave = AutosaveService(self.project_manager)
         self.recovery: RecoveryManager | None = None
@@ -60,6 +72,9 @@ class StudioMainWindow(QMainWindow):
         self._shutdown_requested = False
         self.navigation_panel = NavigationPanel()
         self.route_stack = RouteStack(ingest_controller=ingest_controller, receiver=receiver)
+        editor = self.route_stack.views[Route.EDITOR]
+        if isinstance(editor, ScanMasterEditorView):
+            editor.promotion_requested.connect(self._promote_scan_master_from_editor)
         self.navigation_panel.route_requested.connect(self.navigation.navigate)
         self.navigation.route_changed.connect(
             lambda value: self.route_stack.show_route(Route(value))
@@ -117,6 +132,34 @@ class StudioMainWindow(QMainWindow):
         self.navigation_panel.set_project_available(available)
         self.route_stack.set_project_available(available)
         self.workspace.set_project_available(available)
+
+    def _promote_scan_master_from_editor(self, actor_id: str, reason: str) -> None:
+        editor = self.route_stack.views[Route.EDITOR]
+        if not isinstance(editor, ScanMasterEditorView):
+            return
+        if self.scan_master_request_provider is None:
+            editor.set_promotion_status("No eligible captured cleanup selection is loaded.")
+            return
+        metadata = self.project_manager.current
+        if metadata is None:
+            editor.set_promotion_status("Open a project before promoting Scan Master.")
+            return
+        try:
+            request = self.scan_master_request_provider(actor_id, reason)
+            if request is None:
+                editor.set_promotion_status("Promotion cancelled; no revision was created.")
+                return
+            request = replace(request, actor_id=actor_id, reason=reason)
+            revision = self.scan_master_promotion.promote(
+                request, expected_project_revision=metadata.revision
+            )
+        except Exception as error:
+            editor.set_promotion_status(f"Promotion rejected: {error}")
+            return
+        editor.set_promotion_status(
+            f"Selected Scan Master {revision.revision_id}; "
+            "DEFERRED_OWNER_VALIDATION; scale state inherited; mold_use_authorized=false."
+        )
 
     def new_project(self, root: str | Path, name: str):
         return self.project_manager.new_project(root, name)

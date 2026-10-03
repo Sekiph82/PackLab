@@ -7,9 +7,12 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
+    QFormLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -76,6 +79,50 @@ class CaptureInboxView(QWidget):
         layout.addWidget(QLabel("Capture Inbox"))
 
 
+class ScanMasterEditorView(QWidget):
+    """Studio action surface; all authority and eligibility checks stay in core."""
+
+    promotion_requested = Signal(str, str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("packlab.view.editor")
+        self.actor_input = QLineEdit(self)
+        self.actor_input.setObjectName("packlab.scan-master.actor")
+        self.reason_input = QLineEdit(self)
+        self.reason_input.setObjectName("packlab.scan-master.reason")
+        self.promote_button = QPushButton("Promote to Scan Master", self)
+        self.promote_button.setObjectName("packlab.scan-master.promote")
+        self.authority_status = QLabel(
+            "Before physical validation: DEFERRED_OWNER_VALIDATION; inherited scale state; "
+            "mold_use_authorized=false.",
+            self,
+        )
+        self.authority_status.setObjectName("packlab.scan-master.authority-status")
+        self.status = QLabel("No promotion requested.", self)
+        self.status.setObjectName("packlab.scan-master.status")
+        form = QFormLayout()
+        form.addRow("Actor", self.actor_input)
+        form.addRow("Promotion reason", self.reason_input)
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(self.promote_button)
+        layout.addWidget(self.authority_status)
+        layout.addWidget(self.status)
+        self.promote_button.clicked.connect(self._request_promotion)
+
+    def _request_promotion(self) -> None:
+        actor = self.actor_input.text().strip()
+        reason = self.reason_input.text().strip()
+        if not actor or not reason:
+            self.status.setText("Promotion requires an actor and reason.")
+            return
+        self.promotion_requested.emit(actor, reason)
+
+    def set_promotion_status(self, text: str) -> None:
+        self.status.setText(text)
+
+
 class NavigationPanel(QWidget):
     route_requested = Signal(str)
 
@@ -130,6 +177,8 @@ class RouteStack(QStackedWidget):
                 view = MaskCorrectionView()
             elif route is Route.SETTINGS:
                 view = AboutView()
+            elif route is Route.EDITOR:
+                view = ScanMasterEditorView()
             else:
                 view = QLabel(route.name.replace("_", " ").title())
                 view.setObjectName(f"packlab.view.{route.value}")

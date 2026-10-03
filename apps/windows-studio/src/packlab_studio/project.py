@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import tempfile
 import uuid
 from collections.abc import Callable
@@ -237,6 +239,173 @@ class ProjectManager:
         next_measurement["scale_state"] = provenance.scale_state.value
         next_state["measurement_provenance"] = next_measurement
         return self.commit_edit(next_state, expected_revision=expected_revision)
+
+    def persist_scan_master_revision(
+        self, revision: object, *, expected_revision: int
+    ) -> ProjectMetadata:
+        """Persist a core-created immutable Scan Master and select it in project state."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        from packlab_core.scan_master import ScanMasterRevision, mesh_sha256
+
+        from .scan_master_promotion import (
+            ScanMasterPromotionError,
+            _mesh_payload,
+            _validate_revision_payload,
+        )
+
+        if not isinstance(revision, ScanMasterRevision):
+            raise ProjectError("core scan master revision required")
+        if revision.project_id != self.metadata.project_id:
+            raise ProjectError("scan master belongs to another project")
+        try:
+            manifest = json.loads(revision.manifest_bytes())
+            _validate_revision_payload(revision, manifest, revision.mesh)
+        except (TypeError, ValueError, ScanMasterPromotionError) as error:
+            raise ProjectError("scan master manifest is invalid") from error
+        digest_match = re.fullmatch(r"scan-master:([0-9a-f]{64})", revision.revision_id)
+        if digest_match is None:
+            raise ProjectError("scan master revision id is invalid")
+        artifact_id = digest_match.group(1)
+        mesh_bytes = _mesh_payload(revision.mesh) + b"\n"
+        manifest_bytes = revision.manifest_bytes() + b"\n"
+        mesh_file_digest = hashlib.sha256(mesh_bytes).hexdigest()
+        manifest_file_digest = hashlib.sha256(manifest_bytes).hexdigest()
+        relative_dir = f"scan_master/{artifact_id}"
+        artifact_dir = self.layout.path("derived", relative_dir)
+
+        disk_metadata, state = self._read_authority(self.layout)
+        if (
+            disk_metadata.project_id != self.metadata.project_id
+            or disk_metadata.revision != self.metadata.revision
+        ):
+            raise RevisionConflict("project metadata changed on disk")
+        if expected_revision != self.metadata.revision:
+            raise RevisionConflict("editable state revision is stale")
+        records = state.get("scan_master_revisions", [])
+        if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+            raise ProjectError("scan master history is malformed")
+        if any(item.get("revision_id") == revision.revision_id for item in records):
+            raise ProjectError("scan master revision is append-only")
+        events = state.get("scan_master_selection_events", [])
+        if not isinstance(events, list) or any(not isinstance(item, dict) for item in events):
+            raise ProjectError("scan master selection history is malformed")
+
+        artifact_dir.mkdir(parents=True, exist_ok=False)
+        self._write_new_bytes(artifact_dir / "mesh.json", mesh_bytes)
+        self._write_new_bytes(artifact_dir / "manifest.json", manifest_bytes)
+        record = {
+            "revision_id": revision.revision_id,
+            "artifact_directory": relative_dir,
+            "mesh_sha256": mesh_sha256(revision.mesh),
+            "mesh_file_sha256": mesh_file_digest,
+            "manifest_file_sha256": manifest_file_digest,
+            "parent_revision_id": manifest.get("hole_report", {}).get("parent_revision_id"),
+            "scale_state": manifest.get("scale_state"),
+            "scale_provenance_id": manifest.get("scale_provenance_id"),
+            "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
+            "mold_use_authorized": False,
+            "promotion_actor": manifest.get("promotion_actor"),
+            "promotion_reason": manifest.get("promotion_reason"),
+        }
+        next_state = dict(state)
+        next_state["scan_master_revisions"] = [*records, record]
+        next_state["active_scan_master_revision_id"] = revision.revision_id
+        next_state["scan_master_selection_events"] = [
+            *events,
+            {
+                "project_revision": expected_revision + 1,
+                "previous_revision_id": state.get("active_scan_master_revision_id"),
+                "selected_revision_id": revision.revision_id,
+                "actor_id": manifest.get("promotion_actor"),
+                "reason": manifest.get("promotion_reason"),
+            },
+        ]
+        return self.commit_edit(next_state, expected_revision=expected_revision)
+
+    def load_scan_master_revision(self, revision_id: str):
+        """Load and verify an immutable Scan Master record persisted in this project."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        from packlab_core.geometry_adapter import TriangleMeshData
+        from packlab_core.scan_master import ScanMasterRevision, mesh_sha256
+
+        _, state = self._read_authority(self.layout)
+        records = state.get("scan_master_revisions", [])
+        if not isinstance(records, list):
+            raise ProjectError("scan master history is malformed")
+        matching = [
+            item
+            for item in records
+            if isinstance(item, dict) and item.get("revision_id") == revision_id
+        ]
+        if len(matching) != 1:
+            raise ProjectError("scan master revision missing or duplicated")
+        record = matching[0]
+        digest_match = re.fullmatch(r"scan-master:([0-9a-f]{64})", revision_id)
+        if (
+            digest_match is None
+            or record.get("artifact_directory") != f"scan_master/{digest_match.group(1)}"
+        ):
+            raise ProjectError("scan master artifact path is invalid")
+        artifact_dir = self.layout.path("derived", record["artifact_directory"])
+        try:
+            mesh_bytes = (artifact_dir / "mesh.json").read_bytes()
+            manifest_bytes = (artifact_dir / "manifest.json").read_bytes()
+            if hashlib.sha256(mesh_bytes).hexdigest() != record.get("mesh_file_sha256"):
+                raise ProjectError("scan master mesh file digest mismatch")
+            if hashlib.sha256(manifest_bytes).hexdigest() != record.get("manifest_file_sha256"):
+                raise ProjectError("scan master manifest file digest mismatch")
+            mesh_value = json.loads(mesh_bytes)
+            manifest = json.loads(manifest_bytes)
+            if mesh_value.get("contract") != "packlab.scan-master-mesh.v1":
+                raise ProjectError("scan master mesh contract invalid")
+            mesh = TriangleMeshData(
+                tuple(tuple(point) for point in mesh_value["vertices"]),
+                tuple(tuple(face) for face in mesh_value["triangles"]),
+                None
+                if mesh_value["vertex_colors"] is None
+                else tuple(tuple(color) for color in mesh_value["vertex_colors"]),
+                None
+                if mesh_value["vertex_normals"] is None
+                else tuple(tuple(normal) for normal in mesh_value["vertex_normals"]),
+            )
+            revision = ScanMasterRevision(revision_id, self.metadata.project_id, mesh, manifest)
+            from .scan_master_promotion import _validate_revision_payload
+
+            _validate_revision_payload(revision, manifest, mesh)
+            if mesh_sha256(mesh) != record.get("mesh_sha256"):
+                raise ProjectError("scan master geometry digest mismatch")
+            if (
+                record.get("physical_accuracy_validation_status") != "DEFERRED_OWNER_VALIDATION"
+                or record.get("mold_use_authorized") is not False
+                or record.get("scale_state") != manifest.get("scale_state")
+                or record.get("scale_provenance_id") != manifest.get("scale_provenance_id")
+            ):
+                raise ProjectError("scan master persisted authority state mismatch")
+            return revision
+        except (OSError, KeyError, TypeError, ValueError) as error:
+            if isinstance(error, ProjectError):
+                raise
+            raise ProjectError("scan master artifact is corrupt") from error
+
+    @staticmethod
+    def _write_new_bytes(target: Path, payload: bytes) -> None:
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{target.name}-", suffix=".tmp", dir=target.parent
+        )
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.link(temporary_name, target)
+        except FileExistsError as error:
+            raise ProjectError("immutable project artifact already exists") from error
+        finally:
+            Path(temporary_name).unlink(missing_ok=True)
 
     def import_reconstruction_camera_priors(
         self,

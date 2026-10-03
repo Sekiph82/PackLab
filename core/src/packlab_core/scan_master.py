@@ -229,6 +229,7 @@ def promote_scan_master(
     hole_report: MeshHoleReport,
     promoted_at_utc: str,
     actor_id: str,
+    promotion_reason: str,
     known_limitations: tuple[str, ...],
     coverage_gaps: tuple[str, ...],
     preview_proxy: PreviewProxyRevision | None = None,
@@ -237,6 +238,14 @@ def promote_scan_master(
 
     _identifier(parent_revision_id, "parent_revision")
     _identifier(actor_id, "promotion_actor")
+    if (
+        not isinstance(promotion_reason, str)
+        or not promotion_reason.strip()
+        or promotion_reason != promotion_reason.strip()
+        or len(promotion_reason) > 1000
+        or any(ord(character) < 32 and character not in "\t\n" for character in promotion_reason)
+    ):
+        raise ScanMasterError("promotion_reason_invalid")
     _utc_timestamp(promoted_at_utc)
     if not isinstance(lineage, CapturedScanLineage):
         raise ScanMasterError("captured_lineage_required")
@@ -342,6 +351,7 @@ def promote_scan_master(
         "mold_use_authorized": False,
         "known_limitations": list(limitations),
         "coverage_gaps": list(gaps),
+        "promotion_reason": promotion_reason,
         "preview_proxy": proxy_manifest,
     }
     digest = hashlib.sha256(
@@ -355,6 +365,7 @@ def promote_scan_master(
         "scan_master_revision_id": revision_id,
         "promoted_at_utc": promoted_at_utc,
         "promotion_actor": actor_id,
+        "promotion_reason": promotion_reason,
         "parent_object_geometry_revision_id": lineage.object_geometry.geometry_id,
         "parent_object_geometry_source_input_digest": lineage.object_geometry.source_input_digest,
         "mask_set_digest": lineage.object_geometry.mask_set_revision_digest,

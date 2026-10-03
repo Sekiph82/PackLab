@@ -202,6 +202,7 @@ def _promote(**overrides):
         "hole_report": _report(),
         "promoted_at_utc": "2026-10-02T11:00:00Z",
         "actor_id": "operator-1",
+        "promotion_reason": "Operator reviewed captured scan and cleanup lineage.",
         "known_limitations": ("synthetic fixture; no physical accuracy validation",),
         "coverage_gaps": ("synthetic fixture has no measured scan coverage",),
     }
@@ -328,6 +329,21 @@ def test_revision_identity_is_deterministic_and_excludes_actor_timestamp() -> No
     second = _promote(promoted_at_utc="2026-10-02T12:00:00Z", actor_id="operator-2")
     assert first.revision_id == second.revision_id
     assert first.manifest_bytes() != second.manifest_bytes()
+
+
+def test_promotion_reason_is_required_bounded_and_bound_to_revision_identity() -> None:
+    first = _promote()
+    assert (
+        first.manifest["promotion_reason"] == "Operator reviewed captured scan and cleanup lineage."
+    )
+    assert _promote(actor_id="operator-2").revision_id == first.revision_id
+    assert (
+        _promote(promotion_reason="Different reviewed disposition.").revision_id
+        != first.revision_id
+    )
+    for reason in ("", "  ", " leading", "trailing ", "x" * 1001):
+        with pytest.raises(ScanMasterError, match="promotion_reason_invalid"):
+            _promote(promotion_reason=reason)
 
 
 def test_promoted_mesh_digest_and_scale_state_cannot_be_forged() -> None:
