@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import replace
+
+import pytest
+
+from packlab_core.design_model import (
+    DesignModelError,
+    DesignModelFeatureReference,
+    DesignModelParameter,
+    PackageFamily,
+    ParameterType,
+    create_design_model_revision,
+)
+from packlab_core.design_model_binding import bind_design_model_parent
+from packlab_core.geometry_adapter import TriangleMeshData
+from packlab_core.reconstruction import ScaleState
+from packlab_core.scan_master import ScanMasterRevision, mesh_sha256
+
+PROJECT = "bd6b5b12-18f4-4e8a-9d0d-62fe7116212a"
+MESH = TriangleMeshData(
+    ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+    ((0, 1, 2),),
+)
+
+
+def _parent(scale_state: ScaleState = ScaleState.METRIC_UNVERIFIED):
+    revision_id = f"scan-master:{hashlib.sha256(b'sm-1').hexdigest()}"
+    scan_master = ScanMasterRevision(
+        revision_id,
+        PROJECT,
+        MESH,
+        {
+            "scan_master_revision_id": revision_id,
+            "project_id": PROJECT,
+            "authority_class": "SCAN_MASTER",
+            "output_geometry_sha256": mesh_sha256(MESH),
+            "reconstruction_revision_id": "reconstruction-r1",
+            "scale_state": scale_state.value,
+            "scale_provenance_id": "scale-provenance:r1",
+            "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
+            "mold_use_authorized": False,
+        },
+    )
+    return bind_design_model_parent(
+        scan_master,
+        actor_id="operator-1",
+        reason="Initial exact Scan Master selection.",
+        created_at_utc="2026-10-03T11:00:00Z",
+    )
+
+
+def _model(parameters: tuple[DesignModelParameter, ...] = ()):
+    return create_design_model_revision(
+        _parent(),
+        package_family=PackageFamily.BOTTLE,
+        parameters=parameters,
+        features=(DesignModelFeatureReference("body", "container", "body"),),
+        actor_id="operator-1",
+        reason="Initial parameter graph.",
+        created_at_utc="2026-10-03T12:00:00Z",
+    )
+
+
+def test_graph_identity_is_deterministic_and_parent_is_pinned() -> None:
+    parameter = DesignModelParameter("overall-height", 240.0, ParameterType.NUMBER, "mm_unverified")
+    first = _model((parameter,))
+    repeat = _model((parameter,))
+    assert first.revision_id == repeat.revision_id
+    assert first.fitted_to_scan_master_revision_id == _parent().fitted_to_scan_master_revision_id
+    assert first.parent_binding_revision_id == _parent().revision_id
+    assert first.scale_state is ScaleState.METRIC_UNVERIFIED
+    assert first.coordinate_unit == "mm_unverified"
+
+
+def test_parameter_nodes_are_unique_typed_immutable_and_json_ready() -> None:
+    with pytest.raises(DesignModelError, match="parameter_value_type_mismatch"):
+        DesignModelParameter("height", True, ParameterType.NUMBER)
+    with pytest.raises(DesignModelError, match="parameter_number_must_be_finite"):
+        DesignModelParameter("height", float("nan"), ParameterType.NUMBER)
+    with pytest.raises(DesignModelError, match="parameter_unit_unauthorized"):
+        DesignModelParameter("height", 20.0, ParameterType.NUMBER, "mm")
+    params = (
+        DesignModelParameter("height", 20.0, ParameterType.NUMBER, "mm_unverified"),
+        DesignModelParameter("height", 30.0, ParameterType.NUMBER, "mm_unverified"),
+    )
+    with pytest.raises(DesignModelError, match="parameter_id_duplicate"):
+        _model(params)
+    nested = DesignModelParameter(
+        "metadata", {"empty": {}, "labels": ["front", "back"]}, ParameterType.OBJECT
+    )
+    serialized = _model((nested,)).as_dict()
+    encoded = json.dumps(serialized, sort_keys=True, allow_nan=False)
+    assert '"empty": {}' in encoded
+    assert "triangle" not in encoded.lower()
+    assert "mesh" not in encoded.lower()
+
+
+def test_parent_scale_semantics_and_physical_validation_deferral_are_preserved() -> None:
+    relative = create_design_model_revision(
+        _parent(ScaleState.RELATIVE),
+        package_family=PackageFamily.JAR,
+        actor_id="operator-1",
+        reason="Relative-scale model.",
+        created_at_utc="2026-10-03T12:00:00Z",
+    )
+    assert relative.coordinate_unit == "relative"
+    assert relative.physical_accuracy_validation_status == "DEFERRED_OWNER_VALIDATION"
+    assert relative.mold_use_authorized is False
+    with pytest.raises(DesignModelError, match="design_model_coordinate_unit_mismatch"):
+        replace(relative, coordinate_unit="mm")
+    with pytest.raises(DesignModelError, match="design_model_scale_state_unauthorized"):
+        replace(relative, scale_state=ScaleState.METRIC_VERIFIED)
+
+
+def test_edit_creates_distinct_revision_and_preserves_parent_ancestry() -> None:
+    original = _model((DesignModelParameter("height", 20.0, ParameterType.NUMBER),))
+    edited = create_design_model_revision(
+        _parent(),
+        package_family=PackageFamily.BOTTLE,
+        parameters=(DesignModelParameter("height", 25.0, ParameterType.NUMBER),),
+        features=original.features,
+        actor_id="operator-2",
+        reason="Height edit.",
+        created_at_utc="2026-10-03T13:00:00Z",
+        previous_revision_id=original.revision_id,
+    )
+    assert edited.revision_id != original.revision_id
+    assert edited.previous_revision_id == original.revision_id
+    assert edited.parent_binding_revision_id == original.parent_binding_revision_id
+    assert original.parameters[0].value == 20.0
