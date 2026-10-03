@@ -2,7 +2,7 @@
 
 Milestone: **M12 - Advanced Packaging Geometry**
 Ordered batch: **PL-0268 through PL-0288**
-Status: **IN_PROGRESS**
+Status: **BATCH_STOPPED**
 
 Master prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CODEX_PROMPT_V01.md
@@ -15,7 +15,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 - Starting synchronized SHA: `843fd5851583c0fd43093d1754fd569020faec96`.
 - Branch: `main`
 - Worktree: detached execution worktree at the synchronized `origin/main` SHA; dirty Desktop owner checkout preserved.
-- origin/main parity: `0 0` before PL-0268 implementation; current `main` remotely verified after child-log publication.
+- origin/main parity: `0 0` before PL-0268 and PL-0269; remote main verified after each child/evidence publication.
 - Accepted predecessor: M11 AUDITED_PASS
 - Deferred physical validation: PL-0220 through PL-0224
 - Inherited status: `DEFERRED_OWNER_VALIDATION`
@@ -25,7 +25,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | Child | Status | Prompt | Criteria | Implementation SHA(s) | Log SHA | Focused | Full suite | Limitations / stop reason |
 |---|---|---|---|---|---|---|---|---|
 | PL-0268 | READY_FOR_INDEPENDENT_AUDIT | PL-0268_CODEX_PROMPT_V01.md | PL-0268_CHATGPT_AUDIT_CRITERIA_V01.md | `25742d5d1fb738aca5dbfeb52cd1dd7685c5743e` | `a1427c6c3c8fe413d476f65f3736e869fe06c60e` | 11 passed | 1,375 passed / 6 skipped / 1 deselected | `mm_unverified`; physical validation deferred; no handle/void modeling |
-| PL-0269 | PENDING | PL-0269_CODEX_PROMPT_V01.md | PL-0269_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0269 | BLOCKED_FULL_SUITE_FAILURE | PL-0269_CODEX_PROMPT_V01.md | PL-0269_CHATGPT_AUDIT_CRITERIA_V01.md | `c6f935fc0308256af528cc596ff01e55d3242763` | `6fc9ca5c30a5bba7ecb1054c0bc2cc0985d9789b` | 8 passed | **Failed twice:** 1,378 passed / 1 failed / 6 skipped / 1 deselected | Existing `test_stage_cancellation_is_distinct` fails in full suite; isolated pass; outside frozen scope |
 | PL-0270 | PENDING | PL-0270_CODEX_PROMPT_V01.md | PL-0270_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0271 | PENDING | PL-0271_CODEX_PROMPT_V01.md | PL-0271_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0272 | PENDING | PL-0272_CODEX_PROMPT_V01.md | PL-0272_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
@@ -55,12 +55,14 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 - No physical/mold/manufacturing/certification claim.
 - No M13 CAD/BREP/OpenCascade/STEP implementation.
 
-## Final handoff
+## Batch stop and final handoff
 
-Record final local/origin/GitHub SHA, clean worktree, M13 not started and one of:
-
-- `BATCH_COMPLETED`, or
-- `BATCH_STOPPED` with exact child/reason.
+- Stopped at PL-0269: the locked full suite twice failed at `tests/core/test_reconstruction_process.py::test_stage_cancellation_is_distinct` after 1,378 other tests passed. The test passes alone; its owning reconstruction-process code is outside PL-0269's frozen scope.
+- PL-0269 blocker log is published; PL-0270 through PL-0288 remain pending. PL-0269 is not marked ready for independent audit.
+- Last verified pre-master-log local/origin/GitHub SHA: `6fc9ca5c30a5bba7ecb1054c0bc2cc0985d9789b`; the final master-log publication SHA is the terminal synchronized SHA.
+- M13 was not started. Physical validation remains deferred.
+- Batch result: `BATCH_STOPPED`.
+- Terminal local/origin/GitHub SHA is verified by the final master-log commit and remote-ref check.
 
 The final line must be exactly:
 
