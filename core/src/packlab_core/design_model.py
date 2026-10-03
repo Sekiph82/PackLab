@@ -16,6 +16,7 @@ from .design_model_binding import DesignModelParentBindingRevision
 from .reconstruction import ScaleState
 
 _REVISION_PREFIX = "design-model:"
+_FEATURE_PREFIX = "packlab-feature:"
 _DEFERRED = "DEFERRED_OWNER_VALIDATION"
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 type _JSONScalar = str | int | float | bool | None
@@ -47,6 +48,33 @@ class ParameterType(StrEnum):
     STRING = "string"
     ARRAY = "array"
     OBJECT = "object"
+
+
+class FeatureKind(StrEnum):
+    BODY = "body"
+    BASE = "base"
+    SHOULDER = "shoulder"
+    NECK = "neck"
+    FINISH = "finish"
+    CAP = "cap"
+
+
+def stable_feature_id(component_id: str, feature_kind: FeatureKind, semantic_key: str) -> str:
+    """Return a stable semantic ID; parameter values and mesh indices are not inputs."""
+    _identifier(component_id, "component_id")
+    if not isinstance(feature_kind, FeatureKind):
+        raise DesignModelError("feature_kind_invalid")
+    _identifier(semantic_key, "feature_semantic_key")
+    payload = {
+        "contract": "packlab.design-model-feature.v1",
+        "component_id": component_id,
+        "feature_kind": feature_kind.value,
+        "semantic_key": semantic_key,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return _FEATURE_PREFIX + digest
 
 
 def _identifier(value: object, field: str) -> str:
@@ -162,19 +190,42 @@ class DesignModelFeatureReference:
 
     feature_id: str
     component_id: str
-    feature_kind: str
+    feature_kind: FeatureKind
+    semantic_key: str
 
     def __post_init__(self) -> None:
         _identifier(self.feature_id, "feature_id")
         _identifier(self.component_id, "component_id")
-        _identifier(self.feature_kind, "feature_kind")
+        _identifier(self.semantic_key, "feature_semantic_key")
+        if not isinstance(self.feature_kind, FeatureKind):
+            raise DesignModelError("feature_kind_invalid")
+        if self.feature_id != stable_feature_id(
+            self.component_id, self.feature_kind, self.semantic_key
+        ):
+            raise DesignModelError("feature_id_semantic_mismatch")
 
     def as_dict(self) -> dict[str, str]:
         return {
             "feature_id": self.feature_id,
             "component_id": self.component_id,
-            "feature_kind": self.feature_kind,
+            "feature_kind": self.feature_kind.value,
+            "semantic_key": self.semantic_key,
         }
+
+
+def resolve_design_model_feature(
+    revision: DesignModelRevision, feature_id: str
+) -> DesignModelFeatureReference:
+    """Resolve only the exact ID; deleted/replaced IDs never retarget implicitly."""
+    if not isinstance(revision, DesignModelRevision):
+        raise DesignModelError("design_model_revision_required")
+    _identifier(feature_id, "feature_id")
+    matches = tuple(feature for feature in revision.features if feature.feature_id == feature_id)
+    if not matches:
+        raise DesignModelError("feature_reference_stale_or_deleted")
+    if len(matches) != 1:
+        raise DesignModelError("feature_reference_ambiguous")
+    return matches[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,7 +417,10 @@ __all__ = [
     "DesignModelFeatureReference",
     "DesignModelParameter",
     "DesignModelRevision",
+    "FeatureKind",
     "PackageFamily",
     "ParameterType",
     "create_design_model_revision",
+    "resolve_design_model_feature",
+    "stable_feature_id",
 ]

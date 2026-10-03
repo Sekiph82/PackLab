@@ -10,9 +10,12 @@ from packlab_core.design_model import (
     DesignModelError,
     DesignModelFeatureReference,
     DesignModelParameter,
+    FeatureKind,
     PackageFamily,
     ParameterType,
     create_design_model_revision,
+    resolve_design_model_feature,
+    stable_feature_id,
 )
 from packlab_core.design_model_binding import bind_design_model_parent
 from packlab_core.geometry_adapter import TriangleMeshData
@@ -57,7 +60,14 @@ def _model(parameters: tuple[DesignModelParameter, ...] = ()):
         _parent(),
         package_family=PackageFamily.BOTTLE,
         parameters=parameters,
-        features=(DesignModelFeatureReference("body", "container", "body"),),
+        features=(
+            DesignModelFeatureReference(
+                stable_feature_id("container", FeatureKind.BODY, "primary-shell"),
+                "container",
+                FeatureKind.BODY,
+                "primary-shell",
+            ),
+        ),
         actor_id="operator-1",
         reason="Initial parameter graph.",
         created_at_utc="2026-10-03T12:00:00Z",
@@ -131,3 +141,85 @@ def test_edit_creates_distinct_revision_and_preserves_parent_ancestry() -> None:
     assert edited.previous_revision_id == original.revision_id
     assert edited.parent_binding_revision_id == original.parent_binding_revision_id
     assert original.parameters[0].value == 20.0
+
+
+def test_stable_feature_ids_survive_parameter_edits_and_serialize_semantically() -> None:
+    body = DesignModelFeatureReference(
+        stable_feature_id("container", FeatureKind.BODY, "primary-shell"),
+        "container",
+        FeatureKind.BODY,
+        "primary-shell",
+    )
+    first = _model((DesignModelParameter("height", 20.0, ParameterType.NUMBER),))
+    edited = create_design_model_revision(
+        _parent(),
+        package_family=PackageFamily.BOTTLE,
+        parameters=(DesignModelParameter("height", 25.0, ParameterType.NUMBER),),
+        features=(body,),
+        actor_id="operator-2",
+        reason="Height edit.",
+        created_at_utc="2026-10-03T13:00:00Z",
+        previous_revision_id=first.revision_id,
+    )
+    assert resolve_design_model_feature(first, body.feature_id) == body
+    assert resolve_design_model_feature(edited, body.feature_id).feature_id == body.feature_id
+    assert body.as_dict() == {
+        "feature_id": body.feature_id,
+        "component_id": "container",
+        "feature_kind": "body",
+        "semantic_key": "primary-shell",
+    }
+    with pytest.raises(DesignModelError, match="feature_id_semantic_mismatch"):
+        DesignModelFeatureReference("mesh-index:42", "container", FeatureKind.BODY, "primary-shell")
+    with pytest.raises(DesignModelError, match="feature_id_duplicate"):
+        create_design_model_revision(
+            _parent(),
+            package_family=PackageFamily.BOTTLE,
+            features=(body, body),
+            actor_id="operator-2",
+            reason="Duplicate feature rejection.",
+            created_at_utc="2026-10-03T13:30:00Z",
+        )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        FeatureKind.BODY,
+        FeatureKind.BASE,
+        FeatureKind.SHOULDER,
+        FeatureKind.NECK,
+        FeatureKind.FINISH,
+        FeatureKind.CAP,
+    ],
+)
+def test_all_package_feature_kinds_use_semantic_ids(kind: FeatureKind) -> None:
+    feature = DesignModelFeatureReference(
+        stable_feature_id("container", kind, "primary"), "container", kind, "primary"
+    )
+    assert feature.feature_id == stable_feature_id("container", kind, "primary")
+
+
+def test_deleted_or_replaced_feature_reference_fails_without_retargeting() -> None:
+    old = DesignModelFeatureReference(
+        stable_feature_id("container", FeatureKind.CAP, "closure-a"),
+        "container",
+        FeatureKind.CAP,
+        "closure-a",
+    )
+    replacement = DesignModelFeatureReference(
+        stable_feature_id("container", FeatureKind.CAP, "closure-b"),
+        "container",
+        FeatureKind.CAP,
+        "closure-b",
+    )
+    revision = create_design_model_revision(
+        _parent(),
+        package_family=PackageFamily.BOTTLE,
+        features=(replacement,),
+        actor_id="operator-2",
+        reason="Replace cap component.",
+        created_at_utc="2026-10-03T14:00:00Z",
+    )
+    with pytest.raises(DesignModelError, match="feature_reference_stale_or_deleted"):
+        resolve_design_model_feature(revision, old.feature_id)
