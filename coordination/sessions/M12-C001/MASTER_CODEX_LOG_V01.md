@@ -12,10 +12,10 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 
 ## Starting state
 
-- Starting synchronized SHA:
+- Starting synchronized SHA: `843fd5851583c0fd43093d1754fd569020faec96`.
 - Branch: `main`
-- Worktree:
-- origin/main parity:
+- Worktree: detached execution worktree at the synchronized `origin/main` SHA; dirty Desktop owner checkout preserved.
+- origin/main parity: `0 0` before PL-0268 implementation; current `main` remotely verified after child-log publication.
 - Accepted predecessor: M11 AUDITED_PASS
 - Deferred physical validation: PL-0220 through PL-0224
 - Inherited status: `DEFERRED_OWNER_VALIDATION`
@@ -24,7 +24,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 
 | Child | Status | Prompt | Criteria | Implementation SHA(s) | Log SHA | Focused | Full suite | Limitations / stop reason |
 |---|---|---|---|---|---|---|---|---|
-| PL-0268 | PENDING | PL-0268_CODEX_PROMPT_V01.md | PL-0268_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0268 | READY_FOR_INDEPENDENT_AUDIT | PL-0268_CODEX_PROMPT_V01.md | PL-0268_CHATGPT_AUDIT_CRITERIA_V01.md | `25742d5d1fb738aca5dbfeb52cd1dd7685c5743e` | `a1427c6c3c8fe413d476f65f3736e869fe06c60e` | 11 passed | 1,375 passed / 6 skipped / 1 deselected | `mm_unverified`; physical validation deferred; no handle/void modeling |
 | PL-0269 | PENDING | PL-0269_CODEX_PROMPT_V01.md | PL-0269_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0270 | PENDING | PL-0270_CODEX_PROMPT_V01.md | PL-0270_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0271 | PENDING | PL-0271_CODEX_PROMPT_V01.md | PL-0271_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
