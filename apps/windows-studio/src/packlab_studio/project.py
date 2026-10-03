@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from .jobs import JobManager
 from .project_layout import ProjectLayout, ProjectLayoutError
@@ -21,6 +21,7 @@ from .recovery import RecoveryItem, RecoveryManager
 if TYPE_CHECKING:
     from packlab_core.calibration.scale_provenance import ScaleProvenance
     from packlab_core.front_direction import FrontDirectionRecord
+    from packlab_core.scan_master_export import ScanMasterTextureAsset
 
 PROJECT_SCHEMA_VERSION = "1.0"
 AUTHORITY_SCHEMA_VERSION = 1
@@ -390,6 +391,62 @@ class ProjectManager:
             if isinstance(error, ProjectError):
                 raise
             raise ProjectError("scan master artifact is corrupt") from error
+
+    def export_selected_scan_master(
+        self,
+        revision_id: str,
+        *,
+        destination_relative_dir: str,
+        formats: tuple[str, ...],
+        texture_assets: tuple[ScanMasterTextureAsset, ...] = (),
+    ):
+        """Export only the project's currently selected, persisted Scan Master revision."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        from packlab_core.scan_master_export import (
+            ScanMasterExportRequest,
+            ScanMasterTextureAsset,
+            export_scan_master,
+        )
+
+        _, state = self._read_authority(self.layout)
+        if state.get("active_scan_master_revision_id") != revision_id:
+            raise ProjectError("scan master export requires the selected project revision")
+        if not isinstance(texture_assets, tuple) or any(
+            not isinstance(item, ScanMasterTextureAsset) for item in texture_assets
+        ):
+            raise ProjectError("eligible original reconstruction texture assets required")
+        eligible_textures = cast(tuple[ScanMasterTextureAsset, ...], texture_assets)
+        project_root = self.layout.root.resolve()
+        for item in eligible_textures:
+            parts = item.source_asset_id.split("/")
+            if parts[0] not in {"working", "derived"}:
+                raise ProjectError("texture source must be a project-derived reconstruction asset")
+            source = project_root.joinpath(*parts)
+            current = project_root
+            for part in parts:
+                current = current / part
+                if current.is_symlink():
+                    raise ProjectError("texture source path contains a symlink")
+            try:
+                resolved = source.resolve(strict=True)
+                if os.path.commonpath((str(project_root), str(resolved))) != str(project_root):
+                    raise ProjectError("texture source path escapes the project")
+                if not resolved.is_file() or resolved.read_bytes() != item.data:
+                    raise ProjectError("texture source bytes do not match the project asset")
+            except (OSError, ValueError) as error:
+                raise ProjectError("texture source is missing or inaccessible") from error
+        revision = self.load_scan_master_revision(revision_id)
+        request = ScanMasterExportRequest(
+            revision,
+            revision_id,
+            project_root,
+            destination_relative_dir,
+            formats,
+            eligible_textures,
+        )
+        return export_scan_master(request)
 
     @staticmethod
     def _write_new_bytes(target: Path, payload: bytes) -> None:

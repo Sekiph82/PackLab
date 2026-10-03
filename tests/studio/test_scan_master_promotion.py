@@ -34,7 +34,7 @@ def _revision(project_id: str) -> ScanMasterRevision:
         "reconstruction_revision_id": "reconstruction-r1",
         "parent_object_geometry_revision_id": "object-r1",
         "output_geometry_sha256": mesh_sha256(MESH),
-        "scale_state": "METRIC_UNVERIFIED",
+        "scale_state": "metric-unverified",
         "scale_provenance_id": "scale-provenance:r1",
         "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
         "mold_use_authorized": False,
@@ -86,7 +86,7 @@ def test_action_delegates_to_core_persists_revision_and_reopens_with_deferred_st
     assert state["scan_master_revisions"][0]["physical_accuracy_validation_status"] == (
         "DEFERRED_OWNER_VALIDATION"
     )
-    assert state["scan_master_revisions"][0]["scale_state"] == "METRIC_UNVERIFIED"
+    assert state["scan_master_revisions"][0]["scale_state"] == "metric-unverified"
     assert state["scan_master_revisions"][0]["mold_use_authorized"] is False
     assert state["scan_master_selection_events"][0]["reason"] == (
         "Reviewed captured cleanup lineage."

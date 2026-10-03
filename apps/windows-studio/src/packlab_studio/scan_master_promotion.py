@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from packlab_core.geometry_adapter import TriangleMeshData
 from packlab_core.hole_detection import MeshHoleReport
 from packlab_core.proxy_decimation import PreviewProxyRevision
+from packlab_core.reconstruction import ScaleState
 from packlab_core.scan_master import (
     CapturedScanLineage,
     CleanupOperationEvidence,
@@ -114,7 +115,8 @@ def _validate_revision_payload(
         or manifest.get("authority_class") != "SCAN_MASTER"
         or manifest.get("physical_accuracy_validation_status") != "DEFERRED_OWNER_VALIDATION"
         or manifest.get("mold_use_authorized") is not False
-        or manifest.get("scale_state") not in {"RELATIVE", "METRIC_UNVERIFIED"}
+        or manifest.get("scale_state")
+        not in {ScaleState.RELATIVE.value, ScaleState.METRIC_UNVERIFIED.value}
         or not isinstance(manifest.get("scale_provenance_id"), str)
         or not manifest.get("scale_provenance_id")
         or not isinstance(manifest.get("promotion_actor"), str)
