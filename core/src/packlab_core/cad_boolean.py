@@ -198,7 +198,13 @@ def cut_design_model_feature(
             (diagnostic,),
             None,
         )
-    representation = _representation_from_lineage(model, operation_id, input_ids, build.shape_build)
+    representation = _representation_from_lineage(
+        model,
+        operation_id,
+        input_ids,
+        build.shape_build,
+        source_feature_ids=(feature_id, *bodies),
+    )
     return CadBooleanFeatureResult(
         operation_id,
         operation_type,

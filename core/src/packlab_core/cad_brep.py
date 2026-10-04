@@ -19,7 +19,7 @@ from .design_operations import DesignOperation, LoftSectionInput
 from .design_profile import DesignProfile
 from .reconstruction import ScaleState
 
-CAD_BREP_CONTRACT = "packlab.cad-brep-revision.v1"
+CAD_BREP_CONTRACT = "packlab.cad-brep-revision.v2"
 _DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -34,6 +34,7 @@ class CadBrepRepresentationRevision:
     source_design_model_revision_id: str
     source_operation_id: str
     source_input_ids: tuple[str, ...]
+    source_feature_ids: tuple[str, ...]
     shape_handle: CadShapeHandle
     parent_kind: DesignModelParentKind
     parent_authority_revision_id: str
@@ -55,6 +56,12 @@ class CadBrepRepresentationRevision:
             not isinstance(item, str) or not item for item in self.source_input_ids
         ):
             raise CadBrepError("cad_brep_source_input_ids_invalid")
+        if (
+            not isinstance(self.source_feature_ids, tuple)
+            or any(not isinstance(item, str) or not item for item in self.source_feature_ids)
+            or len(self.source_feature_ids) != len(set(self.source_feature_ids))
+        ):
+            raise CadBrepError("cad_brep_source_feature_ids_invalid")
         if not isinstance(self.shape_handle, CadShapeHandle):
             raise CadBrepError("cad_brep_shape_handle_invalid")
         if self.parent_kind is not self.shape_handle.parent_kind:
@@ -113,6 +120,7 @@ class CadBrepRepresentationRevision:
             "source_design_model_revision_id": self.source_design_model_revision_id,
             "source_operation_id": self.source_operation_id,
             "source_input_ids": list(self.source_input_ids),
+            "source_feature_ids": list(self.source_feature_ids),
             "parent_authority": parent_authority,
             "scale_state": self.scale_state.value,
             "coordinate_unit": self.coordinate_unit,
@@ -190,6 +198,7 @@ def _representation_from_build(
         operation.operation_id,
         operation.input_ids,
         shape_build,
+        source_feature_ids=operation.parent_feature_ids,
         profile_sample_count=profile_sample_count,
     )
 
@@ -200,6 +209,7 @@ def _representation_from_lineage(
     input_ids: tuple[str, ...],
     shape_build: CadShapeBuild,
     *,
+    source_feature_ids: tuple[str, ...] = (),
     profile_sample_count: int | None = None,
 ) -> CadBrepRepresentationRevision:
     if not isinstance(shape_build, CadShapeBuild):
@@ -219,6 +229,7 @@ def _representation_from_lineage(
         ("source_design_model_revision_id", model.revision_id),
         ("source_operation_id", operation_id),
         ("source_input_ids", input_ids),
+        ("source_feature_ids", source_feature_ids),
         ("shape_handle", shape_build.shape_handle),
         ("parent_kind", model.parent_kind),
         ("parent_authority_revision_id", parent_authority_revision_id),
@@ -237,6 +248,7 @@ def _representation_from_lineage(
         source_design_model_revision_id=model.revision_id,
         source_operation_id=operation_id,
         source_input_ids=input_ids,
+        source_feature_ids=source_feature_ids,
         shape_handle=shape_build.shape_handle,
         parent_kind=model.parent_kind,
         parent_authority_revision_id=parent_authority_revision_id,
@@ -256,6 +268,7 @@ def _revision_id(revision: CadBrepRepresentationRevision) -> str:
         "source_design_model_revision_id": revision.source_design_model_revision_id,
         "source_operation_id": revision.source_operation_id,
         "source_input_ids": list(revision.source_input_ids),
+        "source_feature_ids": list(revision.source_feature_ids),
         "shape_handle_id": revision.shape_handle.handle_id,
         "parent_kind": revision.parent_kind.value,
         "parent_authority_revision_id": revision.parent_authority_revision_id,
