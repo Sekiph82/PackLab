@@ -61,6 +61,8 @@ class FeatureKind(StrEnum):
     HANDLE_OPENING = "handle-opening"
     GRIP_INDENT = "grip-indent"
     FREEFORM_CAGE = "freeform-cage"
+    TRIGGER_PUMP = "trigger-pump"
+    DIP_TUBE = "dip-tube"
 
 
 def stable_feature_id(component_id: str, feature_kind: FeatureKind, semantic_key: str) -> str:
