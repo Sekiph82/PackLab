@@ -30,7 +30,7 @@ Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M1
 | Read-only cylinder feature-map probe using `uv run --locked python -c ...` | Determine whether exact source feature attribution is available for CAD surface candidates. | STOP: both lineage features map ambiguously to the same whole solid; no stable subshape selector is returned. |
 | `git status --short`; `git diff --check` after removing exploration | Confirm no uncommitted implementation remains and whitespace is clean. | PASS: clean; no product source/test edits retained. |
 | Focused and locked full test suites, static checks | Run only after authority permits implementation; stop condition fired before implementation. | NOT RUN: no PL-0312 implementation was made; no test or static pass is claimed. |
-| Child log publication | Publish this blocker log separately and verify local/origin/GitHub parity. | To be recorded after push in the separate log-only commit. |
+| Child log publication | Publish this blocker log separately and verify local/origin/GitHub parity. | PASS: log-only publication commit `89abed1b02cf7640d7c7e5627d3d581b0ccd20c9`; local `HEAD`, `origin/main`, and GitHub `main` matched at that SHA after push. |
 
 ## Exact blocker and requested authority resolution
 
@@ -40,7 +40,7 @@ The ordered batch stops at PL-0312. PL-0310 and PL-0311 remain builder-ready for
 
 ## Handoff
 
-- This log-only commit contains only `coordination/sessions/M14-C001/PL-0312_CODEX_LOG_V01.md`.
+- Log-only publication commit: `89abed1b02cf7640d7c7e5627d3d581b0ccd20c9`; the log file is the only changed path in its publication range.
 - No implementation/evidence commit exists for PL-0312 because the authority stop condition preceded implementation.
 - M14 master log will record `BATCH_STOPPED`, the exact PL-0312 blocker, and the `AWAITING_MILESTONE_AUDIT` terminal handoff.
 
