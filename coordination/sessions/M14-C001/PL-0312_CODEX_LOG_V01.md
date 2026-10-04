@@ -2,7 +2,7 @@
 
 Task: **Implement curvature/slope analysis to suggest label-safe regions**
 
-Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0312_CODEX_PROMPT_V01.md  
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0312_CODEX_PROMPT_V01.md
 Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0312_CHATGPT_AUDIT_CRITERIA_V01.md
 
 ## Authorization and synchronization
