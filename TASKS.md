@@ -4,13 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M12
-- Current Sprint: M12-C001 — Advanced Packaging Geometry
-- Current Task: M12-C001-R02 — Standalone Design Geometry authority + PL-0283 through PL-0288 V02
+- Current Milestone: M13
+- Current Sprint: M13-C001 — CAD/BREP & Engineering Export
+- Current Task: M13-C001 — Ordered Batch PL-0289 through PL-0309
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_AUTHORITY_RESOLUTION_CONTINUATION_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_AUTHORITY_RESOLUTION_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V03.md. Preserve audited PL-0268–PL-0282, implement ADR-0005 in PL-0283 V02, then continue PL-0284–PL-0288 V02 automatically while green. Do not start M13.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex must execute PL-0289 through PL-0309 in order and continue automatically while green. Preserve DEFERRED_OWNER_VALIDATION and do not start M14.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M11-C001/M11-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0241 through PL-0267 accepted, M11 complete.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/M12-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0268 through PL-0288 accepted, M12 complete.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -26,7 +26,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Active M12 Remediation/Continuation: superseded after successful PL-0269 remediation and continuation through PL-0282.
 - Latest M12 Accepted Frontier: PL-0268 through PL-0282 AUDITED_PASS. Partial audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/M12-C001_CHATGPT_PARTIAL_AUDIT_V02.md
 - M12 Authority Resolution: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0005-standalone-design-geometry-root.md — explicit STANDALONE_DESIGN_GEOMETRY root added alongside captured Scan Master binding.
-- Active M12 R02 Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_AUTHORITY_RESOLUTION_CONTINUATION_CODEX_PROMPT_V03.md
+- Active M12 R02 Continuation: completed and superseded by final audit.
+- Latest M12 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/M12-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 21/21 M12 children accepted.
+- Active M13 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0289 through PL-0309 continuous Codex batch.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -531,12 +533,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M12-S03 - Tubes, sachets and flexible packs
 
-- [ ] **PL-0283** Define tube parametric family: body, shoulder, neck, cap and crimp. **V02 ACTIVE:** standalone Design Geometry authority resolution + tube family. https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0283_CODEX_PROMPT_V02.md
-- [ ] **PL-0284** Implement tube fitting from scan/reference dimensions. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0284_CODEX_PROMPT_V02.md
-- [ ] **PL-0285** Define sachet/pouch simplified Design Model focused on artwork and overall dimensions rather than mold-grade surfaces. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0285_CODEX_PROMPT_V02.md
-- [ ] **PL-0286** Implement front/back flexible-pack surface and seal-zone representation. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0286_CODEX_PROMPT_V02.md
-- [ ] **PL-0287** Explicitly mark flexible-pack geometry as visualization/design geometry with appropriate accuracy limitations. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0287_CODEX_PROMPT_V02.md
-- [ ] **PL-0288** Add package-family selection and conversion safeguards. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0288_CODEX_PROMPT_V02.md
+- [x] **PL-0283** Define tube parametric family: body, shoulder, neck, cap and crimp. **V02 ACTIVE:** standalone Design Geometry authority resolution + tube family. https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0283_CODEX_PROMPT_V02.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0283_CHATGPT_AUDIT_V02.md
+- [x] **PL-0284** Implement tube fitting from scan/reference dimensions. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0284_CODEX_PROMPT_V02.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0284_CHATGPT_AUDIT_V02.md
+- [x] **PL-0285** Define sachet/pouch simplified Design Model focused on artwork and overall dimensions rather than mold-grade surfaces. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0285_CODEX_PROMPT_V02.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0285_CHATGPT_AUDIT_V02.md
+- [x] **PL-0286** Implement front/back flexible-pack surface and seal-zone representation. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0286_CODEX_PROMPT_V02.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0286_CHATGPT_AUDIT_V02.md
+- [x] **PL-0287** Explicitly mark flexible-pack geometry as visualization/design geometry with appropriate accuracy limitations. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0287_CODEX_PROMPT_V02.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0287_CHATGPT_AUDIT_V02.md
+- [x] **PL-0288** Add package-family selection and conversion safeguards. **V02 AUTHORIZED AFTER PREDECESSOR:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0288_CODEX_PROMPT_V02.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0288_CHATGPT_AUDIT_V02.md
 
 ---
 
@@ -544,7 +546,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M13-S01 - OpenCascade integration
 
-- [ ] **PL-0289** Benchmark/select supported Python OpenCascade binding for Windows packaging.
+- [ ] **PL-0289** Benchmark/select supported Python OpenCascade binding for Windows packaging. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0289_CODEX_PROMPT_V01.md
 - [ ] **PL-0290** Implement CAD capability adapter and version diagnostics.
 - [ ] **PL-0291** Convert profile/revolve Design Models into OpenCascade BREP solids.
 - [ ] **PL-0292** Convert lofted cross-section Design Models into BREP solids.
