@@ -29,7 +29,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 | Child | Status | Implementation SHA(s) | Log SHA | Focused | Full suite | Limitations |
 |---|---|---|---|---|---|---|
 | PL-0300 | READY_FOR_INDEPENDENT_AUDIT | `3560826a1cdb69025c3874f04cdc15d3292ab46b` | `57605cc69f91eeec3e956f95768727ff4fe240a0` | 45 focused manifest/export regressions PASS | 1,565 passed, 6 skipped, 1 deselected | Shared path-free STEP/STL/OBJ/GLB manifests; deferred physical validation and native redistribution license gate remain. |
-| PL-0301 | PENDING | | | | | |
+| PL-0301 | READY_FOR_INDEPENDENT_AUDIT | `c897e602d3b00c01bd330d8d2c6e78c5adb88bc3` | `ff90d6a01ef4a93f9b0110045031b6b45c179018` | 49 focused/predecessor regressions PASS | 1,569 passed, 6 skipped, 1 deselected | Deterministic STEP read-back validates mm units, solid topology, PRODUCT name and numeric bounds before publication; no physical accuracy claim. OCP/OCCT redistribution license gate remains. |
 | PL-0302 | PENDING | | | | | |
 | PL-0303 | PENDING | | | | | |
 | PL-0304 | PENDING | | | | | |
@@ -41,6 +41,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 
 ## Final handoff
 
+- PL-0301 implementation/evidence commit: `c897e602d3b00c01bd330d8d2c6e78c5adb88bc3`; V01 child log publication commit: `ff90d6a01ef4a93f9b0110045031b6b45c179018`.
 - Batch status:
 - Final local SHA:
 - Final origin/main SHA:
