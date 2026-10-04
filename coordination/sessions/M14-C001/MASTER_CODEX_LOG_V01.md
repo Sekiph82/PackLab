@@ -26,7 +26,7 @@ Master audit criteria: https://github.com/Sekiph82/PackLab/blob/main/coordinatio
 | Child | Status | Prompt | Criteria | Implementation/evidence SHA | Child log commit SHA | Focused | Full suite | Limitations / blocker |
 |---|---|---|---|---|---|---|---|---|
 | PL-0310 | READY_FOR_INDEPENDENT_AUDIT | PL-0310_CODEX_PROMPT_V01.md | PL-0310_CHATGPT_AUDIT_CRITERIA_V01.md | `5f2f6216168516c9205d6fdfba719ba1a46fff28` | `f98b5b6454832b34d99e88030c2bf20b5e97ad44` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0310_CODEX_LOG_V01.md)) | 50 label-zone/model/BREP/feature-map tests PASS | 1,634 passed, 6 skipped, 1 deselected | Normalized feature-local UV is design intent only; no artwork, physical-fit, print, or manufacturing claim. Physical validation deferral and OCP/OCCT redistribution gate persist. |
-| PL-0311 | PENDING | PL-0311_CODEX_PROMPT_V01.md | PL-0311_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0311 | READY_FOR_INDEPENDENT_AUDIT | PL-0311_CODEX_PROMPT_V01.md | PL-0311_CHATGPT_AUDIT_CRITERIA_V01.md | `1eb43d6a7e217a10363668288dca646c88fe7a3e` | `d97c571d771d5c5b5f01d0077985d17c0772907f` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0311_CODEX_LOG_V01.md)) | 61 Label Zone/placement/model/CAD predecessor tests PASS | 1,645 passed, 6 skipped, 1 deselected | Canonical orientation plus finite normalized [0,1] placement domain and deterministic edit revisions; M13 feature map does not expose stable native face IDs, so physical face fit is not claimed. RELATIVE/mm_unverified and deferred physical authority remain explicit. |
 | PL-0312 | PENDING | PL-0312_CODEX_PROMPT_V01.md | PL-0312_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0313 | PENDING | PL-0313_CODEX_PROMPT_V01.md | PL-0313_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0314 | PENDING | PL-0314_CODEX_PROMPT_V01.md | PL-0314_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
@@ -51,7 +51,7 @@ Master audit criteria: https://github.com/Sekiph82/PackLab/blob/main/coordinatio
 ## Batch status and final handoff
 
 - Batch status: `BATCH_IN_PROGRESS`.
-- Current completed child: PL-0310 (`READY_FOR_INDEPENDENT_AUDIT`); no independent child audit is claimed.
+- Current completed child: PL-0311 (`READY_FOR_INDEPENDENT_AUDIT`); PL-0310 and PL-0311 builder evidence is awaiting independent child audits.
 - M14 stop conditions and PL-0324 real Blender capability gate remain active.
 - M15 started: NO.
 
