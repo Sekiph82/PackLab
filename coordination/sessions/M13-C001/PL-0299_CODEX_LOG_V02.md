@@ -2,8 +2,8 @@
 
 Task: **Export OBJ and GLB from one exact Design Model/CAD preview source with stable naming**
 
-Cycle: M13-C001-R01  
-Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0299_CODEX_PROMPT_V02.md  
+Cycle: M13-C001-R01
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0299_CODEX_PROMPT_V02.md
 Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0299_CHATGPT_AUDIT_CRITERIA_V02.md
 
 ## Authorization and synchronization
@@ -46,6 +46,7 @@ Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M1
 - Initial focused tests exposed non-canonical naming when source-feature order selected the axis feature; semantic part selection now sorts exact source features by component, semantic key, and feature ID.
 - The initial mismatch test reused a deterministic fixture and therefore produced the same model revision; it now uses a distinct valid standalone model and confirms fail-closed revision mismatch.
 - Ruff formatting and one invariant generic type error were corrected before the final full-suite run. A strengthened GLB regression now parses and bounds-checks every index and checks float32 source positions against the binary accessor.
+- The first staged check of this log identified two trailing Markdown hard-break spaces; both were removed, and the corrected staged log passes `git diff --cached --check`.
 
 ## Scope, privacy, and limitations
 
