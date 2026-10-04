@@ -4,13 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M13
-- Current Sprint: M13-C001 — CAD/BREP & Engineering Export
-- Current Task: M13-C001-R02 — final handoff evidence closure after 21/21 M13 children independently accepted
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_FINAL_HANDOFF_EVIDENCE_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_FINAL_HANDOFF_EVIDENCE_CHATGPT_AUDIT_CRITERIA_V01.md. Documentation/evidence only: fill the continuation handoff parity/worktree fields truthfully, publish the R02 evidence log, and stop. Do not change production/tests/dependencies and do not start M14.
+- Current Milestone: M14
+- Current Sprint: M14-C001 — Labels, Materials & Rendering
+- Current Task: M14-C001 — ordered batch PL-0310 through PL-0331
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Run PL-0310 through PL-0331 in exact order while green; stop truthfully on a real blocker. PL-0324 is the real Blender capability gate; do not auto-download Blender and do not start M15.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001_CHATGPT_AUDIT_V01.md — AUDITED_PARTIAL_CHANGES_REQUIRED; PL-0289 through PL-0309 are 21/21 independently AUDITED_PASS; only final continuation handoff evidence remains open.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; M13-C001 and M13 complete, 21/21 children accepted.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -32,8 +32,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Active M13 Batch Master: original batch stopped correctly at PL-0299 V01 authority conflict.
 - Latest M13 Partial Audit: PL-0289 through PL-0298 AUDITED_PASS; PL-0299 V01 blocker accepted. https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001_CHATGPT_PARTIAL_AUDIT_V01.md
 - M13 R01 Continuation: completed; PL-0299 V02 through PL-0309 implementations are independently accepted. Original continuation prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CODEX_PROMPT_V02.md
-- Latest M13 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001_CHATGPT_AUDIT_V01.md — 21/21 child tasks accepted; milestone held open only for F01 final-handoff evidence completion.
-- Active M13 R02 Evidence Closure: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_FINAL_HANDOFF_EVIDENCE_CODEX_PROMPT_V01.md
+- Latest M13 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; F01 closed, 21/21 M13 children accepted, M13 complete.
+- M13 R02 Evidence Closure: completed and independently accepted.
+- Active M14 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0310 through PL-0331; master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -95,7 +96,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 | M10 | Mesh Processing & Scan Master | Clean, aligned, optimized reference scan assets | [ ] |
 | M11 | Parametric Geometry Engine V1 | Editable bottles, jars, caps and cylindrical packaging | [ ] |
 | M12 | Advanced Packaging Geometry | Jerrycans, grips, asymmetry, triggers, pumps and tubes | [ ] |
-| M13 | CAD/BREP & Engineering Export | Editable solids, STEP/DXF/SVG/STL exports | [ ] |
+| M13 | CAD/BREP & Engineering Export | Editable solids, STEP/DXF/SVG/STL exports | [x] |
 | M14 | Labels, Materials & Rendering | Artwork zones, PBR materials and production mockups | [ ] |
 | M15 | Kenya Packaging Library | Searchable digital-twin library and metadata | [ ] |
 | M16 | CI/CD, Signing & Distribution | Free-first Windows/macOS GitHub Actions pipeline | [ ] |
