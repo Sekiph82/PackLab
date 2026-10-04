@@ -1,7 +1,7 @@
 # PL-0282 - Codex Implementation Log V01
 
-Task: **Export assembly hierarchy metadata for component-capable formats**  
-Cycle: **M12-C001**  
+Task: **Export assembly hierarchy metadata for component-capable formats**
+Cycle: **M12-C001**
 Status: **READY_FOR_INDEPENDENT_AUDIT**
 
 ## Authorization and synchronization
