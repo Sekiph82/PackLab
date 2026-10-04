@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
 import importlib
 import importlib.metadata
 import math
 import platform
 import tempfile
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -16,6 +18,7 @@ from typing import Any
 
 from .cross_section import CrossSection
 from .design_model import DesignModelParentKind, DesignModelRevision
+from .design_operations import DesignOperation, OperationKind
 from .design_profile import DesignProfile
 from .reconstruction import ScaleState
 
@@ -147,6 +150,19 @@ class CadShapeHandle:
             raise CadAdapterError("cad_mold_use_forbidden")
 
 
+@dataclass(frozen=True, slots=True)
+class CadShapeBuild:
+    """PackLab-owned metadata for one locally generated BREP solid."""
+
+    shape_handle: CadShapeHandle
+    geometry_sha256: str
+    solid_count: int
+
+
+_SHAPE_REGISTRY: dict[str, tuple[str, Any]] = {}
+_SHAPE_REGISTRY_LOCK = threading.RLock()
+
+
 def profile_to_cad_input(profile: DesignProfile) -> CadProfileInput:
     """Copy PackLab profile values deterministically without changing axes or units."""
     if not isinstance(profile, DesignProfile):
@@ -199,6 +215,268 @@ def shape_handle_for_model(handle_id: str, model: DesignModelRevision) -> CadSha
         physical_accuracy_validation_status=model.physical_accuracy_validation_status,
         mold_use_authorized=model.mold_use_authorized,
     )
+
+
+def build_revolved_shape(
+    model: DesignModelRevision,
+    profile: DesignProfile,
+    operation: DesignOperation,
+    *,
+    profile_sample_count: int = 257,
+) -> CadShapeBuild:
+    """Build and register a validated single-solid revolve behind an opaque handle."""
+    _validate_revolve_inputs(model, profile, operation, profile_sample_count)
+    polygon = _closed_profile_polygon(profile, profile_sample_count)
+    module_gp = importlib.import_module("OCP.gp")
+    module_builder = importlib.import_module("OCP.BRepBuilderAPI")
+    module_primitive = importlib.import_module("OCP.BRepPrimAPI")
+    module_check = importlib.import_module("OCP.BRepCheck")
+    module_top_exp = importlib.import_module("OCP.TopExp")
+    module_top_abs = importlib.import_module("OCP.TopAbs")
+    module_brep_tools = importlib.import_module("OCP.BRepTools")
+
+    axis = operation.axis_direction
+    origin = operation.axis_origin
+    assert axis is not None and origin is not None
+    reference = (1.0, 0.0, 0.0) if abs(axis[0]) < 0.9 else (0.0, 1.0, 0.0)
+    radial = _unit_vector(_cross_product(axis, reference))
+    points = tuple(
+        module_gp.gp_Pnt(
+            origin[0] + axial * axis[0] + radius * radial[0],
+            origin[1] + axial * axis[1] + radius * radial[1],
+            origin[2] + axial * axis[2] + radius * radial[2],
+        )
+        for axial, radius in polygon
+    )
+    wire_builder = module_builder.BRepBuilderAPI_MakeWire()
+    for left, right in zip(points, (*points[1:], points[0])):
+        edge = module_builder.BRepBuilderAPI_MakeEdge(left, right)
+        if not edge.IsDone():
+            raise CadAdapterError("revolve_profile_edge_build_failed")
+        wire_builder.Add(edge.Edge())
+    if not wire_builder.IsDone():
+        raise CadAdapterError("revolve_profile_wire_build_failed")
+    face_builder = module_builder.BRepBuilderAPI_MakeFace(wire_builder.Wire())
+    if not face_builder.IsDone():
+        raise CadAdapterError("revolve_profile_face_build_failed")
+    axis_line = module_gp.gp_Ax1(module_gp.gp_Pnt(*origin), module_gp.gp_Dir(*axis))
+    revolver = module_primitive.BRepPrimAPI_MakeRevol(face_builder.Face(), axis_line, 2.0 * math.pi)
+    revolver.Build()
+    if not revolver.IsDone():
+        raise CadAdapterError("revolve_brep_build_failed")
+    shape = revolver.Shape()
+    if shape.IsNull() or not module_check.BRepCheck_Analyzer(shape).IsValid():
+        raise CadAdapterError("revolve_brep_topology_invalid")
+    explorer = module_top_exp.TopExp_Explorer(shape, module_top_abs.TopAbs_SOLID)
+    solid_count = 0
+    while explorer.More():
+        solid_count += 1
+        explorer.Next()
+    if solid_count != 1:
+        raise CadAdapterError("revolve_brep_single_solid_required")
+
+    with tempfile.TemporaryDirectory(prefix="packlab-brep-digest-") as directory:
+        brep_path = Path(directory) / "shape.brep"
+        if not module_brep_tools.BRepTools.Write_s(shape, str(brep_path)):
+            raise CadAdapterError("revolve_brep_serialization_failed")
+        geometry_digest = hashlib.sha256(brep_path.read_bytes()).hexdigest()
+    handle_seed = "|".join(
+        (model.revision_id, operation.operation_id, profile.profile_id, geometry_digest)
+    )
+    handle_id = "cad-shape:" + hashlib.sha256(handle_seed.encode("utf-8")).hexdigest()
+    parent_revision = (
+        model.standalone_root.revision_id
+        if model.standalone_root is not None
+        else model.parent_binding_revision_id
+    )
+    if parent_revision is None:
+        raise CadAdapterError("design_model_parent_authority_missing")
+    handle = CadShapeHandle(
+        handle_id=handle_id,
+        source_design_model_revision_id=model.revision_id,
+        parent_kind=model.parent_kind,
+        parent_authority_revision_id=parent_revision,
+        scale_state=model.scale_state,
+        coordinate_unit=model.coordinate_unit,
+        physical_accuracy_validation_status=model.physical_accuracy_validation_status,
+        mold_use_authorized=model.mold_use_authorized,
+    )
+    with _SHAPE_REGISTRY_LOCK:
+        registered = _SHAPE_REGISTRY.get(handle_id)
+        if registered is not None and registered[0] != geometry_digest:
+            raise CadAdapterError("cad_shape_handle_collision")
+        _SHAPE_REGISTRY[handle_id] = (geometry_digest, shape)
+    return CadShapeBuild(handle, geometry_digest, solid_count)
+
+
+def _shape_for_handle(handle: CadShapeHandle) -> Any:
+    """Resolve a live opaque handle for adapter-internal downstream CAD operations."""
+    if not isinstance(handle, CadShapeHandle):
+        raise CadAdapterError("cad_shape_handle_required")
+    with _SHAPE_REGISTRY_LOCK:
+        registered = _SHAPE_REGISTRY.get(handle.handle_id)
+    if registered is None:
+        raise CadAdapterError("cad_shape_handle_unavailable_in_runtime")
+    return registered[1]
+
+
+def _validate_revolve_inputs(
+    model: DesignModelRevision,
+    profile: DesignProfile,
+    operation: DesignOperation,
+    profile_sample_count: int,
+) -> None:
+    if not isinstance(model, DesignModelRevision):
+        raise CadAdapterError("design_model_revision_required")
+    if not isinstance(profile, DesignProfile):
+        raise CadAdapterError("design_profile_required")
+    if not isinstance(operation, DesignOperation) or operation.kind is not OperationKind.REVOLVE:
+        raise CadAdapterError("revolve_operation_required")
+    if (
+        operation.model_revision_id != model.revision_id
+        or operation.input_ids != (profile.profile_id,)
+        or operation.scale_state is not model.scale_state
+        or operation.coordinate_unit != model.coordinate_unit
+        or profile.scale_state is not model.scale_state
+        or profile.coordinate_unit != model.coordinate_unit
+        or operation.physical_accuracy_validation_status
+        != model.physical_accuracy_validation_status
+        or operation.physical_accuracy_validation_status != PHYSICAL_VALIDATION_DEFERRED
+        or operation.mold_use_authorized is not False
+        or model.mold_use_authorized is not False
+    ):
+        raise CadAdapterError("revolve_model_profile_or_authority_mismatch")
+    if len(operation.parent_feature_ids) != 2:
+        raise CadAdapterError("revolve_profile_and_axis_features_required")
+    if any(
+        feature_id not in {feature.feature_id for feature in model.features}
+        for feature_id in operation.parent_feature_ids
+    ):
+        raise CadAdapterError("revolve_feature_reference_stale_or_missing")
+    if (
+        operation.axis_origin is None
+        or operation.axis_direction is None
+        or operation.angle_degrees != 360.0
+    ):
+        raise CadAdapterError("closed_full_revolution_required")
+    if (
+        not isinstance(profile_sample_count, int)
+        or isinstance(profile_sample_count, bool)
+        or not 3 <= profile_sample_count <= 2048
+    ):
+        raise CadAdapterError("revolve_profile_sample_count_invalid")
+    if (
+        not isinstance(operation.axis_origin, tuple)
+        or len(operation.axis_origin) != 3
+        or not isinstance(operation.axis_direction, tuple)
+        or len(operation.axis_direction) != 3
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in (*operation.axis_origin, *operation.axis_direction)
+        )
+    ):
+        raise CadAdapterError("revolve_axis_values_must_be_finite")
+    if abs(math.sqrt(sum(value * value for value in operation.axis_direction)) - 1.0) > 1e-9:
+        raise CadAdapterError("revolve_axis_direction_must_be_unit_length")
+
+
+def _closed_profile_polygon(
+    profile: DesignProfile, sample_count: int
+) -> tuple[tuple[float, float], ...]:
+    samples = profile.sample(sample_count)
+    if any(not math.isfinite(item.axial) or not math.isfinite(item.radius) for item in samples):
+        raise CadAdapterError("revolve_profile_samples_must_be_finite")
+    if any(item.radius < 0.0 for item in samples):
+        raise CadAdapterError("revolve_profile_radius_must_be_nonnegative")
+    if any(item.radius == 0.0 for item in samples[1:-1]):
+        raise CadAdapterError("revolve_profile_must_not_touch_axis_interior")
+    boundary = [(item.axial, item.radius) for item in samples]
+    boundary.extend(((samples[-1].axial, 0.0), (samples[0].axial, 0.0)))
+    polygon: list[tuple[float, float]] = []
+    for point in boundary:
+        if not polygon or point != polygon[-1]:
+            polygon.append(point)
+    if len(polygon) > 1 and polygon[0] == polygon[-1]:
+        polygon.pop()
+    if len(polygon) < 3 or _polygon_self_intersects(polygon):
+        raise CadAdapterError("revolve_profile_must_form_simple_closed_region")
+    area_twice = sum(
+        left[0] * right[1] - right[0] * left[1]
+        for left, right in zip(polygon, (*polygon[1:], polygon[0]))
+    )
+    if not math.isfinite(area_twice) or area_twice == 0.0:
+        raise CadAdapterError("revolve_profile_region_degenerate")
+    if area_twice < 0.0:
+        polygon.reverse()
+    return tuple(polygon)
+
+
+def _polygon_self_intersects(polygon: list[tuple[float, float]]) -> bool:
+    segments = tuple(zip(polygon, (*polygon[1:], polygon[0])))
+    count = len(segments)
+    for left_index, (left_start, left_end) in enumerate(segments):
+        for right_index in range(left_index + 1, count):
+            if right_index == left_index + 1 or (left_index == 0 and right_index == count - 1):
+                continue
+            right_start, right_end = segments[right_index]
+            if _segments_intersect(left_start, left_end, right_start, right_end):
+                return True
+    return False
+
+
+def _segments_intersect(
+    a: tuple[float, float],
+    b: tuple[float, float],
+    c: tuple[float, float],
+    d: tuple[float, float],
+) -> bool:
+    def orientation(
+        first: tuple[float, float], second: tuple[float, float], third: tuple[float, float]
+    ) -> float:
+        return (second[0] - first[0]) * (third[1] - first[1]) - (second[1] - first[1]) * (
+            third[0] - first[0]
+        )
+
+    def on_segment(
+        first: tuple[float, float], second: tuple[float, float], point: tuple[float, float]
+    ) -> bool:
+        return min(first[0], second[0]) <= point[0] <= max(first[0], second[0]) and min(
+            first[1], second[1]
+        ) <= point[1] <= max(first[1], second[1])
+
+    first = orientation(a, b, c)
+    second = orientation(a, b, d)
+    third = orientation(c, d, a)
+    fourth = orientation(c, d, b)
+    if ((first > 0.0 and second < 0.0) or (first < 0.0 and second > 0.0)) and (
+        (third > 0.0 and fourth < 0.0) or (third < 0.0 and fourth > 0.0)
+    ):
+        return True
+    return (
+        (first == 0.0 and on_segment(a, b, c))
+        or (second == 0.0 and on_segment(a, b, d))
+        or (third == 0.0 and on_segment(c, d, a))
+        or (fourth == 0.0 and on_segment(c, d, b))
+    )
+
+
+def _cross_product(
+    left: tuple[float, float, float], right: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    return (
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    )
+
+
+def _unit_vector(vector: tuple[float, float, float]) -> tuple[float, float, float]:
+    magnitude = math.sqrt(sum(value * value for value in vector))
+    if not math.isfinite(magnitude) or magnitude == 0.0:
+        raise CadAdapterError("revolve_radial_basis_invalid")
+    return tuple(value / magnitude for value in vector)  # type: ignore[return-value]
 
 
 def probe_cad_runtime() -> CadRuntimeDiagnostics:
@@ -515,7 +793,9 @@ __all__ = [
     "CadProfileInput",
     "CadRuntimeDiagnostics",
     "CadRuntimeStatus",
+    "CadShapeBuild",
     "CadShapeHandle",
+    "build_revolved_shape",
     "cross_section_to_cad_input",
     "probe_cad_runtime",
     "profile_to_cad_input",
