@@ -173,6 +173,19 @@ class CadBooleanBuild:
     kernel_operation_done: bool
 
 
+@dataclass(frozen=True, slots=True)
+class CadTopologySnapshot:
+    """PackLab-owned counts and non-repairing OCCT topology observations."""
+
+    kernel_valid: bool
+    solid_count: int
+    shell_count: int
+    closed_shell_count: int
+    open_edge_count: int
+    nonmanifold_edge_count: int
+    invalid_statuses: tuple[str, ...]
+
+
 _SHAPE_REGISTRY: dict[str, tuple[str, Any]] = {}
 _SHAPE_REGISTRY_LOCK = threading.RLock()
 
@@ -469,6 +482,70 @@ def cad_shape_bounds(handle: CadShapeHandle) -> tuple[float, float, float, float
     if len(bounds) != 6 or any(not math.isfinite(value) for value in bounds):
         raise CadAdapterError("cad_shape_bounds_invalid")
     return tuple(float(value) for value in bounds)  # type: ignore[return-value]
+
+
+def inspect_shape_topology(handle: CadShapeHandle) -> CadTopologySnapshot:
+    """Inspect a registered shape with OCCT without healing or mutating it."""
+    shape = _shape_for_handle(handle)
+    if shape.IsNull():
+        raise CadAdapterError("cad_topology_shape_null")
+    top_abs = importlib.import_module("OCP.TopAbs")
+    top_exp = importlib.import_module("OCP.TopExp")
+    check_module = importlib.import_module("OCP.BRepCheck")
+    brep_tool = importlib.import_module("OCP.BRep").BRep_Tool
+
+    def collect(shape_type: Any) -> tuple[Any, ...]:
+        explorer = top_exp.TopExp_Explorer(shape, shape_type)
+        found: list[Any] = []
+        while explorer.More():
+            found.append(explorer.Current())
+            explorer.Next()
+        return tuple(found)
+
+    solids = collect(top_abs.TopAbs_SOLID)
+    shells = collect(top_abs.TopAbs_SHELL)
+    closed_shell_count = sum(1 for shell in shells if brep_tool.IsClosed_s(shell))
+    edge_faces = importlib.import_module("OCP.TopTools").TopTools_IndexedDataMapOfShapeListOfShape()
+    top_exp.TopExp.MapShapesAndAncestors_s(
+        shape, top_abs.TopAbs_EDGE, top_abs.TopAbs_FACE, edge_faces
+    )
+    open_edge_count = 0
+    nonmanifold_edge_count = 0
+    for index in range(1, edge_faces.Extent() + 1):
+        adjacent_faces = edge_faces.FindFromIndex(index).Size()
+        if adjacent_faces == 1:
+            open_edge_count += 1
+        elif adjacent_faces > 2:
+            nonmanifold_edge_count += 1
+
+    analyzer = check_module.BRepCheck_Analyzer(shape)
+    statuses: set[str] = set()
+    for shape_name, shape_type in (
+        ("vertex", top_abs.TopAbs_VERTEX),
+        ("edge", top_abs.TopAbs_EDGE),
+        ("wire", top_abs.TopAbs_WIRE),
+        ("face", top_abs.TopAbs_FACE),
+        ("shell", top_abs.TopAbs_SHELL),
+        ("solid", top_abs.TopAbs_SOLID),
+        ("compsolid", top_abs.TopAbs_COMPSOLID),
+    ):
+        for subshape in collect(shape_type):
+            status_list = analyzer.Result(subshape).Status()
+            while not status_list.IsEmpty():
+                status = status_list.First()
+                status_name = getattr(status, "name", str(status))
+                if status_name != "BRepCheck_NoError":
+                    statuses.add(f"{shape_name}:{status_name}")
+                status_list.RemoveFirst()
+    return CadTopologySnapshot(
+        kernel_valid=analyzer.IsValid(),
+        solid_count=len(solids),
+        shell_count=len(shells),
+        closed_shell_count=closed_shell_count,
+        open_edge_count=open_edge_count,
+        nonmanifold_edge_count=nonmanifold_edge_count,
+        invalid_statuses=tuple(sorted(statuses)),
+    )
 
 
 def _shape_build_result(
@@ -1080,11 +1157,13 @@ __all__ = [
     "CadRuntimeStatus",
     "CadShapeBuild",
     "CadShapeHandle",
+    "CadTopologySnapshot",
     "build_lofted_shape",
     "build_polygon_prism_cut",
     "build_revolved_shape",
     "cad_shape_bounds",
     "cross_section_to_cad_input",
+    "inspect_shape_topology",
     "probe_cad_runtime",
     "profile_to_cad_input",
     "shape_handle_for_model",
