@@ -36,7 +36,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 | PL-0305 | READY_FOR_INDEPENDENT_AUDIT | `22f1d1dad3c154b68c5efa7343e399e3be2f80b7` | `c3177d098d3f29b10655f1d8a2af8cf33b35e5bc` | 70 focused dimension/drawing/CAD/BREP/validation/feature-map/preview/design-dimensions regressions PASS | 1,594 passed, 6 skipped, 1 deselected | CAD-derived H/W/D and unambiguous whole-solid feature extents include deterministic anchors/stacking and unit disclaimers. Unresolved topology is rejected; caller placement metadata is not independently accepted as assembly authority. OCP/OCCT redistribution license gate persists. |
 | PL-0306 | READY_FOR_INDEPENDENT_AUDIT | `fa204ff412802f026a5ea20813f4c82c6531231e` | `cb9d496eba76e6d5d4f68ec277ac26772e5c0fd4` | 67 focused title-block/drawing/CAD/BREP regressions PASS | 1,599 passed, 6 skipped, 1 deselected | Deterministic exact-source title block with explicit authority/unit/version disclaimers; timestamp is presentation-only and machine/path identity omitted. Physical validation deferred; OCP/OCCT redistribution license gate persists. |
 | PL-0307 | READY_FOR_INDEPENDENT_AUDIT | `a12e7d3ff4b7eb10e401139496e32452fd78c923` | `e06ab4ba8d90e6d99100e5242a5a9d1324d17a20` | 71 focused vector-export/drawing/CAD/BREP regressions PASS | 1,603 passed, 6 skipped, 1 deselected | Deterministic SVG and R2000 DXF exports carry source/drawing revisions, units, disclaimers and output digests; no raster or unit promotion. Physical validation deferred; OCP/OCCT redistribution license gate persists. |
-| PL-0308 | PENDING | | | | | |
+| PL-0308 | READY_FOR_INDEPENDENT_AUDIT | `39a6e2fb8e66b054c8a26787c709e114fd9329f7` | `5dce968b8da412cda57428c976cd34ebaffd60b3` | 75 focused PDF/vector-export/drawing/CAD/BREP regressions PASS | 1,607 passed, 6 skipped, 1 deselected | Offline PySide6/Qt PDF parses/renders the canonical SVG to one vector A4 landscape page; no raster image or new dependency. Physical validation deferred; Qt/OCCT release notices remain gates. |
 | PL-0309 | PENDING | | | | | |
 
 ## Final handoff
@@ -47,6 +47,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 - PL-0305 implementation/evidence commit: `22f1d1dad3c154b68c5efa7343e399e3be2f80b7`; V01 child log publication commit: `c3177d098d3f29b10655f1d8a2af8cf33b35e5bc`.
 - PL-0306 implementation/evidence commit: `fa204ff412802f026a5ea20813f4c82c6531231e`; V01 child log publication/correction commit: `cb9d496eba76e6d5d4f68ec277ac26772e5c0fd4`.
 - PL-0307 implementation/evidence commit: `a12e7d3ff4b7eb10e401139496e32452fd78c923`; V01 child log publication commit: `e06ab4ba8d90e6d99100e5242a5a9d1324d17a20`.
+- PL-0308 implementation/evidence commit: `39a6e2fb8e66b054c8a26787c709e114fd9329f7`; V01 child log publication commit: `5dce968b8da412cda57428c976cd34ebaffd60b3`.
 - PL-0301 implementation/evidence commit: `c897e602d3b00c01bd330d8d2c6e78c5adb88bc3`; V01 child log publication commit: `ff90d6a01ef4a93f9b0110045031b6b45c179018`.
 - Batch status:
 - Final local SHA:
