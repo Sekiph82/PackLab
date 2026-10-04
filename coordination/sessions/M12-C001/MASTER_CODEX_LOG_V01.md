@@ -34,7 +34,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | PL-0275 | READY_FOR_INDEPENDENT_AUDIT | PL-0275_CODEX_PROMPT_V01.md | PL-0275_CHATGPT_AUDIT_CRITERIA_V01.md | `d8f263c26c5a512dfd9b283616060d9eabbc14bf` | `fcb739486a056b6ce89b893c3a86b10004a1a4c8` | 37 passed | 1,414 passed / 6 skipped / 1 deselected | Synthetic scale-style fixtures only; physical validation and metric scale remain deferred |
 | PL-0276 | READY_FOR_INDEPENDENT_AUDIT | PL-0276_CODEX_PROMPT_V01.md | PL-0276_CHATGPT_AUDIT_CRITERIA_V01.md | `d8d43e252982dc4772ef4fdcf885d8cdff34ab61` | `e7e2ac5432aaa3e3c6b0ee0eb5c041d20cf687b9` | 25 passed | 1,418 passed / 6 skipped / 1 deselected | Exact component and Scan Master pins; metadata references only, no fit or compatibility claim |
 | PL-0277 | READY_FOR_INDEPENDENT_AUDIT | PL-0277_CODEX_PROMPT_V01.md | PL-0277_CHATGPT_AUDIT_CRITERIA_V01.md | `723b6f4744d1da9ba115fceb4eb5c07761f5016e` | `b6cb5e936a476ed7d0b3bd9251a440999b3bd949` | 37 passed | 1,430 passed / 6 skipped / 1 deselected | Local verified JSON reference only; no download, private asset, license inference, or physical claim |
-| PL-0278 | PENDING | PL-0278_CODEX_PROMPT_V01.md | PL-0278_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0278 | READY_FOR_INDEPENDENT_AUDIT | PL-0278_CODEX_PROMPT_V01.md | PL-0278_CHATGPT_AUDIT_CRITERIA_V01.md | `8a2664a6cd63964492e322452f9cfca73dd39c74`, `4ec27039b555d059a050f6eee807e8d5d231cfbe` | `87ef57613c947705c3c0d3d24b8daf2e3484675e` | 25 passed | 1,433 passed / 6 skipped / 1 deselected | Verified attachment frame aligned to M11 plane; parametric placement only, no fit/compatibility or physical claim |
 | PL-0279 | PENDING | PL-0279_CODEX_PROMPT_V01.md | PL-0279_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0280 | PENDING | PL-0280_CODEX_PROMPT_V01.md | PL-0280_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0281 | PENDING | PL-0281_CODEX_PROMPT_V01.md | PL-0281_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
@@ -70,7 +70,8 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 - PL-0275 synthetic 2 L/5 L-style benchmark implementation commit `d8f263c26c5a512dfd9b283616060d9eabbc14bf` and separate child-log-only commit `fcb739486a056b6ce89b893c3a86b10004a1a4c8` are remotely visible. Focused: 37 passed; locked full suite: 1,414 passed / 6 skipped / 1 deselected. Capacity labels are illustrative; physical validation remains deferred.
 - PL-0276 four-role assembly graph implementation commit `d8d43e252982dc4772ef4fdcf885d8cdff34ab61` and separate child-log-only commit `e7e2ac5432aaa3e3c6b0ee0eb5c041d20cf687b9` are remotely visible. Focused: 25 passed; locked full suite: 1,418 passed / 6 skipped / 1 deselected. Component ancestry remains individually pinned; geometry/export and physical compatibility are not claimed.
 - PL-0277 local trigger/pump reference importer implementation commit `723b6f4744d1da9ba115fceb4eb5c07761f5016e` and separate child-log-only commit `b6cb5e936a476ed7d0b3bd9251a440999b3bd949` are remotely visible. Focused: 37 passed; locked full suite: 1,430 passed / 6 skipped / 1 deselected. Local JSON only; no third-party asset or auto-download.
+- PL-0278 trigger/pump alignment implementation commits `8a2664a6cd63964492e322452f9cfca73dd39c74` and `4ec27039b555d059a050f6eee807e8d5d231cfbe`, plus separate child-log-only commit `87ef57613c947705c3c0d3d24b8daf2e3484675e`, are remotely visible. Focused: 25 passed; locked full suite: 1,433 passed / 6 skipped / 1 deselected. Attachment frame is digest-pinned; thread/seal/physical compatibility is not claimed.
 - M13 was not started. Physical validation remains deferred.
-- Current published GitHub main before this master-log update: `b6cb5e936a476ed7d0b3bd9251a440999b3bd949`.
+- Current published GitHub main before this master-log update: `87ef57613c947705c3c0d3d24b8daf2e3484675e`.
 
-Current batch frontier: **PL-0278** (`IN_PROGRESS`).
+Current batch frontier: **PL-0279** (`IN_PROGRESS`).
