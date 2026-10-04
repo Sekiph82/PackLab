@@ -2,8 +2,8 @@
 
 Task: **Generate front/side/top orthographic views from Design Model**
 
-Cycle: M13-C001-R01  
-Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0303_CODEX_PROMPT_V01.md  
+Cycle: M13-C001-R01
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0303_CODEX_PROMPT_V01.md
 Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0303_CHATGPT_AUDIT_CRITERIA_V01.md
 
 ## Authorization and synchronization
