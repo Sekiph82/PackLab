@@ -2,7 +2,7 @@
 
 Milestone: **M13 - CAD/BREP & Engineering Export**
 Ordered batch: **PL-0289 through PL-0309**
-Status: **IN_PROGRESS**
+Status: **BATCH_STOPPED at PL-0299**
 
 Master prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_CODEX_PROMPT_V01.md
@@ -45,7 +45,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 | PL-0296 | READY_FOR_INDEPENDENT_AUDIT | PL-0296_CODEX_PROMPT_V01.md | PL-0296_CHATGPT_AUDIT_CRITERIA_V01.md | `ffdffd443cc95d8d1b836cfece38c6f5f26c4aa9` | `d3003effe41f9f0985fbba17811d5c424d93f445` | 27 tessellation/BREP/validation/feature-map regressions PASS | 1,541 passed, 6 skipped, 1 deselected | Bounded deterministic BREP-copy tessellation emits serialized PREVIEW_PROXY geometry with bounds/count diagnostics and conservative whole-solid feature mapping; relative/mm_unverified and deferred physical authority persist. Scoped mypy passes; two imported marker-detection errors remain. PL-0289 redistribution license/notice gate persists. |
 | PL-0297 | READY_FOR_INDEPENDENT_AUDIT | PL-0297_CODEX_PROMPT_V01.md | PL-0297_CHATGPT_AUDIT_CRITERIA_V01.md | `afc2a4d97ed902b9e774480f5bebecdaa09541c3` | `5e132b6ecb1d1ad3d94e20f4411f35dd0b3f4430` | 32 STEP/BREP/validation/feature-map/calibration regressions PASS | 1,549 passed, 6 skipped, 1 deselected | Deterministic one-solid STEP export encodes `mm_unverified` numerically as millimetres, reopens and verifies units, preserves exact revisions/parent modes and feature-map diagnostics, and makes no physical/mold claim. Scoped mypy passes; two imported marker-detection errors remain. Assembly payload is not supported by the current one-BREP input contract. PL-0289 redistribution license/notice gate persists. |
 | PL-0298 | READY_FOR_INDEPENDENT_AUDIT | PL-0298_CODEX_PROMPT_V01.md | PL-0298_CHATGPT_AUDIT_CRITERIA_V01.md | `f7fdb05bece9feb9752e7dfb7066e0de92ad8449` | `4367c0b1c63f187958eea64337629ecb576f7a47` | 28 STL/preview/BREP/topology regressions PASS | 1,555 passed, 6 skipped, 1 deselected | Deterministic bounded binary STL plus mandatory provenance sidecar; only `mm_unverified` accepted; relative and invalid BREP inputs fail closed; no physical/print-fit/production claim. Scoped mypy passes; two imported marker-detection errors remain. PL-0289 redistribution license/notice gate persists. |
-| PL-0299 | PENDING | PL-0299_CODEX_PROMPT_V01.md | PL-0299_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0299 | BATCH_STOPPED_AUTHORITY_CONFLICT | PL-0299_CODEX_PROMPT_V01.md | PL-0299_CHATGPT_AUDIT_CRITERIA_V01.md | — (implementation not started) | `843afbf445f866178c5366131d680f396d0327ab` | Not run - stopped before implementation | Not run - stopped before implementation | Mandatory pre-read defines assembly hierarchy as metadata-only for a later non-M13 component-capable exporter; frozen PL-0299 requires multipart OBJ and hierarchy coverage without defining M13 assembly geometry/placement authority. Await authorized prompt/criteria resolution. |
 | PL-0300 | PENDING | PL-0300_CODEX_PROMPT_V01.md | PL-0300_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0301 | PENDING | PL-0301_CODEX_PROMPT_V01.md | PL-0301_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0302 | PENDING | PL-0302_CODEX_PROMPT_V01.md | PL-0302_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
@@ -75,4 +75,8 @@ Record:
 - selected CAD binding/kernel facts;
 - M14 not started.
 
-BATCH_IN_PROGRESS
+- PL-0299 stopped before implementation due to a mandatory-pre-read authority conflict: `assembly_hierarchy_export.py` defines metadata-only handoff for a later non-M13 component-capable exporter, while PL-0299 requires multipart/assembly export without defining component geometry and placement authority. Resume only after an authorized prompt/criteria revision resolves the conflict.
+- PL-0299 stop-log commit: `843afbf445f866178c5366131d680f396d0327ab`; master stop checkpoint will be published separately.
+- M14 not started.
+
+AWAITING_MILESTONE_AUDIT
