@@ -2,8 +2,8 @@
 
 Task: **Implement boolean feature support for handle openings and simple indentations**
 
-Cycle: M13-C001  
-Prompt: `PL-0293_CODEX_PROMPT_V01.md`  
+Cycle: M13-C001
+Prompt: `PL-0293_CODEX_PROMPT_V01.md`
 Criteria: `PL-0293_CHATGPT_AUDIT_CRITERIA_V01.md`
 
 ## Authorization and synchronization
@@ -53,6 +53,7 @@ No tracker, audit, prompt, criteria, dependency, lockfile, M14+, private scan, s
 - Initial focused testing found a bounds tuple unpacking error; corrected the axis-aligned bounds mapping.
 - Full-suite run one time failed in `test_unknown_marker_fails_collection` because its subprocess failed collection before reporting the intentionally unknown marker. The isolated guard then passed, and the final full-suite rerun passed.
 - A short through-body prism margin triggered an OCCT sweep-constructor error. Expanded the prism beyond the BREP axis bounds using a deterministic 10% span margin; focused and final full tests pass.
+- The first child-log commit's staged whitespace check reported two trailing-space Markdown hard breaks. The shell sequence continued to commit despite that diagnostic; both spaces have been removed and this correction is recorded in a separate log-only commit.
 - Unsilenced mypy still reports diagnostics in unmodified imported M12/calibration modules listed above. Scoped changed-module mypy passes.
 - CAD topology and successful subtraction are software geometry evidence only. They do not establish hidden physical extent, physical accuracy, mold readiness, or manufacturing suitability. PL-0220 through PL-0224 remain deferred. PL-0289's HIGH native-library licensing/notice redistribution gate remains unresolved.
 
