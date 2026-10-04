@@ -55,6 +55,6 @@ Master audit criteria: https://github.com/Sekiph82/PackLab/blob/main/coordinatio
 - PL-0312 V01's authority stop remains preserved; V02 implemented truthful BREP-scoped analysis without changing M13 mapping behavior. PL-0313 stopped before implementation because no accepted contract maps normalized Label Zone UV to millimetres on the exact CAD surface. PL-0314 through PL-0331 were not started.
 - M14 stop conditions and PL-0324 real Blender capability gate remain active.
 - M15 started: NO.
-- PL-0313 blocker-log publication parity: local `HEAD`, `origin/main`, and GitHub `main` verified equal at `808102f22bf73b3d57fbf57692da58a471ded8ae`; R01 index updates are pending separately.
+- PL-0313 blocker-log publication parity: local `HEAD`, `origin/main`, and GitHub `main` verified equal at `808102f22bf73b3d57fbf57692da58a471ded8ae`. The separate original-master/continuation-index update commit `5fb5e62e69a835e5ef55f082d933a44b709ac423` records the stopped frontier.
 
 AWAITING_MILESTONE_AUDIT
