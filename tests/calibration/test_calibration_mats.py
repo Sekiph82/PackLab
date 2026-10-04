@@ -13,6 +13,49 @@ SVG_NS = "{http://www.w3.org/2000/svg}"
 MARKER_SIDE_MM = 40.0
 REFERENCE_BAR_MM = 100.0
 
+EXPECTED_APRILTAG_36H11_8X8 = {
+    "0": (
+        "########",
+        "###.####",
+        "##..#.##",
+        "####.#.#",
+        "####..##",
+        "#.#...##",
+        "#.#.#..#",
+        "########",
+    ),
+    "1": (
+        "########",
+        "#.##.###",
+        "#.#..#.#",
+        "####..##",
+        "###....#",
+        "#...#.##",
+        "##..#..#",
+        "########",
+    ),
+    "2": (
+        "########",
+        "##...###",
+        "###.####",
+        "#.##.###",
+        "######.#",
+        "##.##.##",
+        "#...#..#",
+        "########",
+    ),
+    "3": (
+        "########",
+        "####..##",
+        "##.##..#",
+        "#.##.#.#",
+        "#...##.#",
+        "#...####",
+        "#.##...#",
+        "########",
+    ),
+}
+
 
 def _mm(value: str) -> float:
     assert value.endswith("mm")
@@ -52,6 +95,32 @@ def _assert_reference_bar(root: ET.Element) -> None:
     assert min(tick_x_values) == pytest.approx(rect_x)
     assert max(tick_x_values) == pytest.approx(rect_x + REFERENCE_BAR_MM)
     assert max(tick_x_values) - min(tick_x_values) == pytest.approx(REFERENCE_BAR_MM)
+
+
+
+def _marker_bitmap(marker: ET.Element) -> tuple[str, ...]:
+    rect = _marker_rect(marker)
+    origin_x = _number(rect.attrib["x"])
+    origin_y = _number(rect.attrib["y"])
+    path = marker.find(f"{SVG_NS}path")
+    assert path is not None
+    cells = [["." for _ in range(8)] for _ in range(8)]
+    for match in re.finditer(r"M([0-9.]+),([0-9.]+)h5v5h-5z", path.attrib["d"]):
+        x = float(match.group(1))
+        y = float(match.group(2))
+        col = round((x - origin_x) / 5.0)
+        row = round((y - origin_y) / 5.0)
+        assert 0 <= row < 8
+        assert 0 <= col < 8
+        cells[row][col] = "#"
+    return tuple("".join(row) for row in cells)
+
+
+def _assert_marker_encoding(root: ET.Element) -> None:
+    markers = root.findall(f"{SVG_NS}g[@data-marker-id]")
+    for marker in markers:
+        marker_id = marker.attrib["data-marker-id"]
+        assert _marker_bitmap(marker) == EXPECTED_APRILTAG_36H11_8X8[marker_id]
 
 
 def _assert_mat_geometry(
@@ -98,6 +167,7 @@ def _assert_mat_geometry(
     assert centers["3"][1] - centers["1"][1] == pytest.approx(y_distance_mm)
 
     _assert_reference_bar(root)
+    _assert_marker_encoding(root)
 
 
 def _assert_mat(path: Path, width: str, height: str, x_distance: str, y_distance: str) -> None:
@@ -144,3 +214,14 @@ def test_geometry_boundary_detects_reference_bar_drift_with_unchanged_metadata(
     rect.attrib["width"] = "101"
     with pytest.raises(AssertionError):
         _assert_mat_geometry(root, 210.0, 297.0, 150.0, 207.0)
+
+
+def test_marker_encoding_boundary_detects_single_missing_border_cell(repo_root: Path) -> None:
+    root = _root_copy(repo_root / "assets/calibration/a4-packlab-calibration-mat.svg")
+    marker_2 = root.find(f"{SVG_NS}g[@id='marker-2']")
+    assert marker_2 is not None
+    path = marker_2.find(f"{SVG_NS}path")
+    assert path is not None
+    path.attrib["d"] = path.attrib["d"].replace("M45,237h5v5h-5z ", "", 1)
+    with pytest.raises(AssertionError):
+        _assert_marker_encoding(root)

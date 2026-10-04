@@ -25,3 +25,11 @@ The four black/white marker matrices are deterministic vector encodings of
 IDs 0, 1, 2, and 3 in `DICT_APRILTAG_36h11`; their known square geometry is
 40 mm in the source coordinate system. No physical mat has been printed or
 verified by this builder pass.
+
+
+## Encoding correction history
+
+- Source version `1.0.0` had a malformed ID 2 marker in both A4 and A3 assets: the third-row rightmost 5 x 5 mm border cell was missing.
+- Source version `1.0.1` restores that required black border cell.
+- Static regression now checks all four full 8 x 8 `DICT_APRILTAG_36h11` bitmaps, not only page/marker dimensions.
+- Any physical print made from v1.0.0 is dimensionally measurable but is not accepted for the four-marker PackLab capture contract; reprint from v1.0.1.

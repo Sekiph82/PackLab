@@ -3,7 +3,7 @@
 ## Record identity
 
 - record_version: `1.0.0`
-- status: `ACCEPTED_FOR_CAPTURE`
+- status: `REJECTED_MARKER_ENCODING`
 - mat_asset: `assets/calibration/a4-packlab-calibration-mat.svg`
 - printed_derivative: `PackLab_A4_Calibration_Mat_CLEAN.pdf` — textless print derivative preserving the canonical A4 calibration geometry
 - canonical_source_blob_sha: `efeebcf45606cbb359c1165fbd04d0a1cc62143a`
@@ -38,7 +38,7 @@ Each required dimension was treated as repeated reading 1 / reading 2 from the o
 - reprint_attempt: `0`
 - reprint_action: `NOT_APPLICABLE`
 - owner_measured_geometry_provenance: `owner-controlled physical ruler measurements on the printed A4 calibration mat, 2026-10-04`
-- final_status: `ACCEPTED_FOR_CAPTURE`
+- final_status: `REJECTED_MARKER_ENCODING`
 - owner_signature_or_reference: `OWNER_CHAT_CONFIRMATION_2026-10-04`
 
 ## Scope and limitation
@@ -54,3 +54,14 @@ It does **not** establish:
 - mold/manufacturing suitability.
 
 PL-0220 through PL-0224 remain `DEFERRED_OWNER_VALIDATION` until the later owner-controlled physical benchmark requirements are completed and independently audited.
+
+
+## Post-acceptance correction — 2026-10-04
+
+The physical print-scaling measurements above remain a truthful PASS for page/bar/marker dimensions.
+
+However, subsequent owner capture evidence and independent PackLab detector investigation found that canonical source version `1.0.0` encoded marker ID 2 with one missing 5 x 5 mm black border cell. The defect exists in both A4 and A3 v1.0.0 SVG assets. As a result, the printed mat cannot satisfy the selected `DICT_APRILTAG_36h11` four-marker capture contract even though its physical dimensions are correct.
+
+Therefore the earlier `ACCEPTED_FOR_CAPTURE` decision is revoked. This print is now `REJECTED_MARKER_ENCODING`.
+
+Corrected calibration assets use source version `1.0.1`. A new physical print and owner verification record are required before capture. The failed/corrected history is retained; no prior photo is promoted to accepted evidence.
