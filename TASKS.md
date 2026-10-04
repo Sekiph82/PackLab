@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M13
 - Current Sprint: M13-C001 — CAD/BREP & Engineering Export
-- Current Task: M13-C001 — Ordered Batch PL-0289 through PL-0309
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Codex must execute PL-0289 through PL-0309 in order and continue automatically while green. Preserve DEFERRED_OWNER_VALIDATION and do not start M14.
+- Current Task: M13-C001-R01 — PL-0299 authority resolution + continuation PL-0300 through PL-0309
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md. Close PL-0299 V02 using single-source OBJ/GLB authority, then continue PL-0300 through PL-0309 automatically while green. Do not start M14.
 - Required Actor: CODEX
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/M12-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0268 through PL-0288 accepted, M12 complete.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
@@ -29,7 +29,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - M12 Authority Resolution: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0005-standalone-design-geometry-root.md — explicit STANDALONE_DESIGN_GEOMETRY root added alongside captured Scan Master binding.
 - Active M12 R02 Continuation: completed and superseded by final audit.
 - Latest M12 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/M12-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 21/21 M12 children accepted.
-- Active M13 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0289 through PL-0309 continuous Codex batch.
+- Active M13 Batch Master: original batch stopped correctly at PL-0299 V01 authority conflict.
+- Latest M13 Partial Audit: PL-0289 through PL-0298 AUDITED_PASS; PL-0299 V01 blocker accepted. https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001_CHATGPT_PARTIAL_AUDIT_V01.md
+- Active M13 R01 Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CODEX_PROMPT_V02.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -547,20 +549,20 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M13-S01 - OpenCascade integration
 
-- [ ] **PL-0289** Benchmark/select supported Python OpenCascade binding for Windows packaging. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0289_CODEX_PROMPT_V01.md
-- [ ] **PL-0290** Implement CAD capability adapter and version diagnostics.
-- [ ] **PL-0291** Convert profile/revolve Design Models into OpenCascade BREP solids.
-- [ ] **PL-0292** Convert lofted cross-section Design Models into BREP solids.
-- [ ] **PL-0293** Implement boolean feature support needed for handle openings and simple indentations.
-- [ ] **PL-0294** Validate solid topology and report non-manifold/invalid BREP failures.
-- [ ] **PL-0295** Preserve named feature references where practical across regeneration.
-- [ ] **PL-0296** Tessellate BREP back to preview mesh with controlled tolerance.
+- [x] **PL-0289** Benchmark/select supported Python OpenCascade binding for Windows packaging. **ACTIVE BATCH CHILD:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0289_CODEX_PROMPT_V01.md **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0289_CHATGPT_AUDIT_V01.md
+- [x] **PL-0290** Implement CAD capability adapter and version diagnostics. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0290_CHATGPT_AUDIT_V01.md
+- [x] **PL-0291** Convert profile/revolve Design Models into OpenCascade BREP solids. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0291_CHATGPT_AUDIT_V01.md
+- [x] **PL-0292** Convert lofted cross-section Design Models into BREP solids. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0292_CHATGPT_AUDIT_V01.md
+- [x] **PL-0293** Implement boolean feature support needed for handle openings and simple indentations. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0293_CHATGPT_AUDIT_V01.md
+- [x] **PL-0294** Validate solid topology and report non-manifold/invalid BREP failures. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0294_CHATGPT_AUDIT_V01.md
+- [x] **PL-0295** Preserve named feature references where practical across regeneration. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0295_CHATGPT_AUDIT_V01.md
+- [x] **PL-0296** Tessellate BREP back to preview mesh with controlled tolerance. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0296_CHATGPT_AUDIT_V01.md
 
 ## Sprint M13-S02 - STEP/STL/mesh export
 
-- [ ] **PL-0297** Export Design Model/assembly to STEP with millimetre units.
-- [ ] **PL-0298** Export printable STL with explicit unit handling and mesh-quality options.
-- [ ] **PL-0299** Export OBJ and GLB from Design Model with part naming.
+- [x] **PL-0297** Export Design Model/assembly to STEP with millimetre units. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0297_CHATGPT_AUDIT_V01.md
+- [x] **PL-0298** Export printable STL with explicit unit handling and mesh-quality options. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0298_CHATGPT_AUDIT_V01.md
+- [ ] **PL-0299** Export OBJ and GLB from Design Model with part naming. **V02 ACTIVE:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0299_CODEX_PROMPT_V02.md
 - [ ] **PL-0300** Add export manifest recording source project, revision, scale and software versions.
 - [ ] **PL-0301** Add round-trip validation that reopens exported STEP and rechecks bounding dimensions.
 - [ ] **PL-0302** Add export UI with clear distinction between Scan Mesh and editable Design Model.
