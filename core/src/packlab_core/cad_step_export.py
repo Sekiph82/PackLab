@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .cad_adapter import _shape_for_handle, probe_cad_runtime
 from .cad_brep import CadBrepRepresentationRevision
+from .cad_export_manifest import build_cad_export_manifest
 from .cad_feature_map import map_design_model_features_to_brep
 from .cad_validation import validate_cad_brep
 from .design_model import DesignModelRevision
@@ -30,6 +31,8 @@ class CadStepExportError(ValueError):
 @dataclass(frozen=True, slots=True)
 class CadStepExportRevision:
     export_id: str
+    manifest_id: str
+    manifest_sha256: str
     artifact_sha256: str
     artifact_size_bytes: int
     part_name: str
@@ -57,6 +60,8 @@ class CadStepExportRevision:
             "contract": self.contract,
             "authority_class": self.authority_class,
             "export_id": self.export_id,
+            "manifest_id": self.manifest_id,
+            "manifest_sha256": self.manifest_sha256,
             "artifact_sha256": self.artifact_sha256,
             "artifact_size_bytes": self.artifact_size_bytes,
             "part_name": self.part_name,
@@ -158,11 +163,12 @@ def export_design_model_step(
         raise CadStepExportError("cad_step_capability_unavailable")
 
     destination = Path(output_path)
+    sidecar_path = Path(str(destination) + ".json")
     if destination.suffix.lower() not in {".step", ".stp"}:
         raise CadStepExportError("cad_step_extension_invalid")
     if not destination.parent.is_dir():
         raise CadStepExportError("cad_step_destination_directory_missing")
-    if destination.exists():
+    if destination.exists() or sidecar_path.exists() or destination.is_symlink():
         raise CadStepExportError("cad_step_destination_exists")
     timestamp = _model_timestamp(model.created_at_utc)
 
@@ -244,7 +250,6 @@ def export_design_model_step(
                 ):
                     raise CadStepExportError("cad_step_reopened_unit_not_millimetre")
                 artifact_bytes = temporary_path.read_bytes()
-                temporary_path.replace(destination)
             finally:
                 interface.SetCVal_s("write.step.unit", previous_unit)
                 interface.SetCVal_s("write.step.product.name", previous_product_name)
@@ -274,8 +279,40 @@ def export_design_model_step(
             json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
     )
+    manifest = build_cad_export_manifest(
+        model=model,
+        representation=representation,
+        format="step",
+        export_id=export_id,
+        artifact_sha256=artifact_sha256,
+        artifact_size_bytes=len(artifact_bytes),
+        validation=validation,
+        diagnostics=diagnostics,
+        part_names=(part_name,),
+        feature_mapping=tuple(reference.as_dict() for reference in feature_mapping.references),
+        coordinate_transform={
+            "kind": "identity_numeric_coordinates_with_step_unit_label",
+            "source_unit": "mm_unverified",
+            "target_unit": "millimetre",
+            "scale": [1.0, 1.0, 1.0],
+            "reversible": True,
+            "physical_authority_upgraded": False,
+        },
+        tessellation=None,
+        limitations=(
+            "mm_unit_is_numerically_encoded_from_mm_unverified_design_values",
+            "step_round_trip_is_software_evidence_not_physical_accuracy_validation",
+            "this_export_contract_accepts_one_validated_brep_solid",
+        ),
+    )
+    try:
+        _publish_step_bundle(destination, artifact_bytes, sidecar_path, manifest.canonical_json)
+    except OSError as error:
+        raise CadStepExportError("cad_step_atomic_publication_failed") from error
     return CadStepExportRevision(
         export_id=export_id,
+        manifest_id=manifest.manifest_id,
+        manifest_sha256=manifest.manifest_sha256,
         artifact_sha256=artifact_sha256,
         artifact_size_bytes=len(artifact_bytes),
         part_name=part_name,
@@ -307,6 +344,37 @@ def _model_timestamp(value: str) -> str:
         return timestamp.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
     except ValueError as error:
         raise CadStepExportError("cad_step_source_timestamp_invalid") from error
+
+
+def _publish_step_bundle(
+    artifact_path: Path, artifact: bytes, manifest_path: Path, manifest: bytes
+) -> None:
+    if not artifact_path.parent.is_dir() or not manifest_path.parent.is_dir():
+        raise OSError("destination_directory_missing")
+    if any(path.exists() or path.is_symlink() for path in (artifact_path, manifest_path)):
+        raise OSError("destination_exists")
+    temporary: list[Path] = []
+    published: list[Path] = []
+    try:
+        for path, payload in ((artifact_path, artifact), (manifest_path, manifest)):
+            with tempfile.NamedTemporaryFile(
+                prefix="packlab-step-bundle-", suffix=path.suffix, dir=path.parent, delete=False
+            ) as handle:
+                temporary_path = Path(handle.name)
+                temporary.append(temporary_path)
+                handle.write(payload)
+        for temporary_path, path in zip(temporary, (artifact_path, manifest_path)):
+            temporary_path.rename(path)
+            published.append(path)
+    except Exception:
+        for path in published:
+            if path.exists():
+                path.unlink()
+        raise
+    finally:
+        for path in temporary:
+            if path.exists():
+                path.unlink()
 
 
 def _replace_step_product_label(match: re.Match[bytes], label: bytes) -> bytes:

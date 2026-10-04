@@ -14,7 +14,9 @@ from pathlib import Path
 from .assembly_hierarchy_export import (
     AssemblyHierarchyExportHandoff,
 )
+from .cad_adapter import probe_cad_runtime
 from .cad_brep import CadBrepRepresentationRevision
+from .cad_export_manifest import build_cad_export_manifest
 from .cad_preview import CadPreviewError, CadPreviewMeshRevision, tessellate_brep_preview
 from .cad_validation import validate_cad_brep
 from .design_model import DesignModelRevision
@@ -34,8 +36,12 @@ class CadMeshExportRevision:
     export_id: str
     obj_sha256: str
     obj_size_bytes: int
+    obj_manifest_id: str
+    obj_manifest_sha256: str
     glb_sha256: str
     glb_size_bytes: int
+    glb_manifest_id: str
+    glb_manifest_sha256: str
     source_design_model_revision_id: str
     source_brep_revision_id: str
     source_brep_geometry_sha256: str
@@ -60,7 +66,11 @@ class CadMeshExportRevision:
             "export_id": self.export_id,
             "artifacts": {
                 "obj": {"sha256": self.obj_sha256, "byte_length": self.obj_size_bytes},
+                "obj_manifest_id": self.obj_manifest_id,
+                "obj_manifest_sha256": self.obj_manifest_sha256,
                 "glb": {"sha256": self.glb_sha256, "byte_length": self.glb_size_bytes},
+                "glb_manifest_id": self.glb_manifest_id,
+                "glb_manifest_sha256": self.glb_manifest_sha256,
             },
             "source_design_model_revision_id": self.source_design_model_revision_id,
             "source_brep_revision_id": self.source_brep_revision_id,
@@ -142,6 +152,13 @@ def export_design_model_obj_glb(
         raise CadMeshExportError("cad_mesh_brep_validation_failed") from error
     if not validation.valid_closed_solid:
         raise CadMeshExportError("cad_mesh_valid_closed_solid_required")
+    diagnostics = probe_cad_runtime()
+    if (
+        diagnostics.status.value != "READY"
+        or not diagnostics.binding_version
+        or not diagnostics.kernel_version
+    ):
+        raise CadMeshExportError("cad_mesh_runtime_version_unavailable")
     try:
         expected_preview = tessellate_brep_preview(
             model,
@@ -209,13 +226,70 @@ def export_design_model_obj_glb(
         "semantic_part_name": semantic_name,
     }
     export_id = "cad-mesh-export:" + _sha256(_canonical_json(export_identity))
-    _publish_pair(Path(obj_path), obj_bytes, Path(glb_path), glb_bytes)
+    obj_manifest = build_cad_export_manifest(
+        model=model,
+        representation=representation,
+        format="obj",
+        export_id=export_id,
+        artifact_sha256=_sha256(obj_bytes),
+        artifact_size_bytes=len(obj_bytes),
+        validation=validation,
+        diagnostics=diagnostics,
+        part_names=(semantic_name,),
+        feature_mapping=feature_mapping,
+        coordinate_transform={
+            "kind": "identity_source_coordinates",
+            "source_unit": representation.coordinate_unit,
+            "target_unit": representation.coordinate_unit,
+            "scale": [1.0, 1.0, 1.0],
+            "reversible": True,
+            "physical_authority_upgraded": False,
+        },
+        tessellation=_preview_tessellation(preview),
+        limitations=(
+            "obj_coordinates_are_preserved_in_source_units",
+            "mesh_is_a_disposable_cad_preview",
+            "feature_mapping_is_conservative_and_may_be_unresolved",
+        ),
+    )
+    glb_manifest = build_cad_export_manifest(
+        model=model,
+        representation=representation,
+        format="glb",
+        export_id=export_id,
+        artifact_sha256=_sha256(glb_bytes),
+        artifact_size_bytes=len(glb_bytes),
+        validation=validation,
+        diagnostics=diagnostics,
+        part_names=(semantic_name,),
+        feature_mapping=feature_mapping,
+        coordinate_transform=_glb_view_transform(representation.scale_state),
+        tessellation=_preview_tessellation(preview),
+        limitations=(
+            "glb_positions_are_float32",
+            "glb_node_transform_is_viewer_space_only_and_does_not_upgrade_authority",
+            "mesh_is_a_disposable_cad_preview",
+        ),
+    )
+    obj_output, glb_output = Path(obj_path), Path(glb_path)
+    _publish_pair(
+        (
+            (obj_output, obj_bytes),
+            (Path(str(obj_output) + ".json"), obj_manifest.canonical_json),
+            (glb_output, glb_bytes),
+            (Path(str(glb_output) + ".json"), glb_manifest.canonical_json),
+        )
+    )
     return CadMeshExportRevision(
         export_id=export_id,
         obj_sha256=_sha256(obj_bytes),
         obj_size_bytes=len(obj_bytes),
+        obj_manifest_id=obj_manifest.manifest_id,
+        obj_manifest_sha256=obj_manifest.manifest_sha256,
         glb_sha256=_sha256(glb_bytes),
         glb_size_bytes=len(glb_bytes),
+        glb_manifest_id=glb_manifest.manifest_id,
+        glb_manifest_sha256=glb_manifest.manifest_sha256,
         source_design_model_revision_id=model.revision_id,
         source_brep_revision_id=representation.revision_id,
         source_brep_geometry_sha256=representation.geometry_sha256,
@@ -394,12 +468,48 @@ def _encode_glb(
     )
 
 
-def _publish_pair(obj_path: Path, obj_data: bytes, glb_path: Path, glb_data: bytes) -> None:
-    if obj_path.suffix.lower() != ".obj" or glb_path.suffix.lower() != ".glb":
+def _preview_tessellation(preview: CadPreviewMeshRevision) -> dict[str, object]:
+    return {
+        "linear_deflection": preview.linear_deflection,
+        "angular_deflection_radians": preview.angular_deflection,
+        "maximum_vertices": preview.maximum_vertices,
+        "maximum_triangles": preview.maximum_triangles,
+        "maximum_faces": preview.maximum_faces,
+        "source_face_count": preview.source_face_count,
+        "vertex_count": len(preview.mesh.vertices),
+        "triangle_count": len(preview.mesh.triangles),
+    }
+
+
+def _glb_view_transform(scale_state: ScaleState) -> dict[str, object]:
+    scale = 0.001 if scale_state is ScaleState.METRIC_UNVERIFIED else 1.0
+    return {
+        "kind": "uniform_scale",
+        "source_unit": "mm_unverified"
+        if scale_state is ScaleState.METRIC_UNVERIFIED
+        else "reconstruction_units",
+        "target_unit": "meters"
+        if scale_state is ScaleState.METRIC_UNVERIFIED
+        else "relative_viewer_units",
+        "scale": [scale, scale, scale],
+        "inverse_scale": [1.0 / scale] * 3,
+        "reversible": True,
+        "source_coordinates_preserved_in_buffer": True,
+        "physical_authority_upgraded": False,
+    }
+
+
+def _publish_pair(files: tuple[tuple[Path, bytes], ...]) -> None:
+    paths = tuple(path for path, _payload in files)
+    if any(path.suffix.lower() not in {".obj", ".glb", ".json"} for path in paths):
         raise CadMeshExportError("cad_mesh_export_extension_invalid")
-    if obj_path.resolve(strict=False) == glb_path.resolve(strict=False):
+    if len({path.resolve(strict=False) for path in paths}) != len(paths):
         raise CadMeshExportError("cad_mesh_export_destinations_must_differ")
-    for path in (obj_path, glb_path):
+    if not any(path.suffix.lower() == ".obj" for path in paths) or not any(
+        path.suffix.lower() == ".glb" for path in paths
+    ):
+        raise CadMeshExportError("cad_mesh_export_extension_invalid")
+    for path in paths:
         if not path.parent.is_dir():
             raise CadMeshExportError("cad_mesh_export_destination_directory_missing")
         if path.exists() or path.is_symlink():
@@ -407,14 +517,14 @@ def _publish_pair(obj_path: Path, obj_data: bytes, glb_path: Path, glb_data: byt
     temporary: list[Path] = []
     published: list[Path] = []
     try:
-        for path, data in ((obj_path, obj_data), (glb_path, glb_data)):
+        for path, data in files:
             with tempfile.NamedTemporaryFile(
                 prefix=".packlab-cad-mesh-", suffix=path.suffix, dir=path.parent, delete=False
             ) as handle:
                 temp_path = Path(handle.name)
                 temporary.append(temp_path)
                 handle.write(data)
-        for temp_path, path in zip(temporary, (obj_path, glb_path)):
+        for temp_path, path in zip(temporary, paths):
             temp_path.rename(path)
             published.append(path)
     except Exception as error:

@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .cad_adapter import CadAdapterError, probe_cad_runtime, tessellate_cad_shape
 from .cad_brep import CadBrepRepresentationRevision
+from .cad_export_manifest import build_cad_export_manifest
 from .cad_feature_map import map_design_model_features_to_brep
 from .cad_validation import validate_cad_brep
 from .design_model import DesignModelRevision
@@ -40,6 +41,7 @@ class CadStlMeshQuality(StrEnum):
 @dataclass(frozen=True, slots=True)
 class CadStlExportRevision:
     export_id: str
+    manifest_id: str
     artifact_sha256: str
     artifact_size_bytes: int
     sidecar_sha256: str
@@ -76,6 +78,7 @@ class CadStlExportRevision:
             "contract": self.contract,
             "authority_class": self.authority_class,
             "export_id": self.export_id,
+            "manifest_id": self.manifest_id,
             "artifact_mode": self.artifact_mode,
             "artifact_sha256": self.artifact_sha256,
             "artifact_size_bytes": self.artifact_size_bytes,
@@ -210,53 +213,22 @@ def export_design_model_stl(
         raise CadStlExportError("cad_stl_destination_exists")
     artifact_sha256 = hashlib.sha256(stl_bytes).hexdigest()
     feature_refs = tuple(reference.as_dict() for reference in feature_mapping.references)
-    sidecar_material = {
-        "contract": CAD_STL_EXPORT_CONTRACT,
-        "artifact_mode": "BINARY_STL",
-        "artifact_sha256": artifact_sha256,
-        "artifact_size_bytes": len(stl_bytes),
-        "source_design_model_revision_id": model.revision_id,
-        "source_brep_revision_id": representation.revision_id,
-        "source_brep_geometry_sha256": representation.geometry_sha256,
-        "source_operation_id": representation.source_operation_id,
-        "parent_kind": representation.parent_kind.value,
-        "parent_authority_revision_id": representation.parent_authority_revision_id,
-        "scale_state": representation.scale_state.value,
-        "coordinate_unit": representation.coordinate_unit,
-        "stl_coordinate_interpretation": "millimetres",
-        "millimetres_numerically_encoded_from_unverified_design_units": True,
-        "physical_accuracy_validation_status": representation.physical_accuracy_validation_status,
-        "mold_use_authorized": representation.mold_use_authorized,
-        "topology_validation_status": validation.status,
-        "quality": {
-            "preset": preset.value,
-            "linear_deflection": tessellation.linear_deflection,
-            "angular_deflection_radians": tessellation.angular_deflection,
-            "maximum_vertices": tessellation.maximum_vertices,
-            "maximum_triangles": tessellation.maximum_triangles,
-            "maximum_faces": tessellation.maximum_faces,
-            "source_face_count": tessellation.face_count,
-            "vertex_count": len(tessellation.mesh.vertices),
-            "triangle_count": len(tessellation.mesh.triangles),
-        },
-        "binding_package": diagnostics.binding_package,
-        "binding_version": diagnostics.binding_version,
-        "kernel_version": diagnostics.kernel_version,
-        "feature_mapping": list(feature_refs),
-        "disposable_export": True,
-        "scan_master_promoted": False,
-        "design_model_replaced": False,
-        "cad_brep_replaced": False,
-        "physical_accuracy_inferred": False,
-        "print_fit_inferred": False,
-        "production_ready_claimed": False,
-        "manufacturing_suitability_inferred": False,
-        "limitations": [
-            "stl_has_no_reliable_embedded_unit_metadata",
-            "sidecar_must_remain_with_artifact_to_interpret_coordinates_as_mm",
-            "mesh_tolerance_is_not_physical_accuracy_or_print_fit_evidence",
-        ],
+    quality_metadata: dict[str, object] = {
+        "preset": preset.value,
+        "linear_deflection": tessellation.linear_deflection,
+        "angular_deflection_radians": tessellation.angular_deflection,
+        "maximum_vertices": tessellation.maximum_vertices,
+        "maximum_triangles": tessellation.maximum_triangles,
+        "maximum_faces": tessellation.maximum_faces,
+        "source_face_count": tessellation.face_count,
+        "vertex_count": len(tessellation.mesh.vertices),
+        "triangle_count": len(tessellation.mesh.triangles),
     }
+    limitations = (
+        "stl_has_no_reliable_embedded_unit_metadata",
+        "sidecar_must_remain_with_artifact_to_interpret_coordinates_as_mm",
+        "mesh_tolerance_is_not_physical_accuracy_or_print_fit_evidence",
+    )
     export_identity = {
         "artifact_sha256": artifact_sha256,
         "source_design_model_revision_id": model.revision_id,
@@ -275,10 +247,39 @@ def export_design_model_stl(
             json.dumps(export_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
     )
-    sidecar_material["export_id"] = export_id
-    sidecar_bytes = (
-        json.dumps(sidecar_material, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode("utf-8")
+    model_features = {item.feature_id: item for item in model.features}
+    part_names = tuple(
+        sorted(
+            {
+                f"{model_features[item].component_id}:{model_features[item].semantic_key}"
+                for item in representation.source_feature_ids
+                if item in model_features
+            }
+        )
+    )
+    manifest = build_cad_export_manifest(
+        model=model,
+        representation=representation,
+        format="stl",
+        export_id=export_id,
+        artifact_sha256=artifact_sha256,
+        artifact_size_bytes=len(stl_bytes),
+        validation=validation,
+        diagnostics=diagnostics,
+        part_names=part_names,
+        feature_mapping=feature_refs,
+        coordinate_transform={
+            "kind": "identity_numeric_coordinates",
+            "source_unit": "mm_unverified",
+            "target_unit": "millimetres",
+            "scale": [1.0, 1.0, 1.0],
+            "reversible": True,
+            "physical_authority_upgraded": False,
+        },
+        tessellation=quality_metadata,
+        limitations=limitations,
+    )
+    sidecar_bytes = manifest.canonical_json
     sidecar_sha256 = hashlib.sha256(sidecar_bytes).hexdigest()
 
     temporary_artifact: Path | None = None
@@ -309,6 +310,7 @@ def export_design_model_stl(
 
     return CadStlExportRevision(
         export_id=export_id,
+        manifest_id=manifest.manifest_id,
         artifact_sha256=artifact_sha256,
         artifact_size_bytes=len(stl_bytes),
         sidecar_sha256=sidecar_sha256,

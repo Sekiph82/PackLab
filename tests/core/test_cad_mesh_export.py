@@ -45,6 +45,8 @@ def test_obj_and_glb_are_deterministic_named_and_provenance_bound(tmp_path) -> N
 
     assert obj_a.read_bytes() == obj_b.read_bytes()
     assert glb_a.read_bytes() == glb_b.read_bytes()
+    assert (tmp_path / "a.obj.json").read_bytes() == (tmp_path / "b.obj.json").read_bytes()
+    assert (tmp_path / "a.glb.json").read_bytes() == (tmp_path / "b.glb.json").read_bytes()
     assert first.export_id == second.export_id
     assert first.obj_sha256 == second.obj_sha256
     assert first.glb_sha256 == second.glb_sha256

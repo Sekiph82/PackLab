@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from tests.core.test_cad_brep import _inputs
 
@@ -20,6 +22,10 @@ def test_step_export_is_deterministic_named_and_reopens_as_millimetres(tmp_path)
     )
 
     assert first_path.read_bytes() == second_path.read_bytes()
+    assert (
+        Path(str(first_path) + ".json").read_bytes()
+        == Path(str(second_path) + ".json").read_bytes()
+    )
     assert first.artifact_sha256 == second.artifact_sha256
     assert first.export_id == second.export_id
     assert first.encoded_step_unit == "millimetre"
