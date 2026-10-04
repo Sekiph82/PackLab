@@ -514,6 +514,35 @@ def cad_shape_bounds(handle: CadShapeHandle) -> tuple[float, float, float, float
     return tuple(float(value) for value in bounds)  # type: ignore[return-value]
 
 
+def cad_shape_precise_bounds(
+    handle: CadShapeHandle,
+    *,
+    placement_matrix: tuple[float, ...] | None = None,
+) -> tuple[float, float, float, float, float, float]:
+    """Return tight numerical BREP bounds, optionally in an explicit rigid frame."""
+    shape = _shape_for_handle(handle)
+    if shape.IsNull():
+        raise CadAdapterError("cad_shape_bounds_shape_null")
+    if placement_matrix is not None:
+        _drawing_rigid_transform(placement_matrix)
+        gp = importlib.import_module("OCP.gp")
+        transform = gp.gp_Trsf()
+        transform.SetValues(*(float(value) for value in placement_matrix[:12]))
+        shape = (
+            importlib.import_module("OCP.BRepBuilderAPI")
+            .BRepBuilderAPI_Transform(shape, transform, True)
+            .Shape()
+        )
+        if shape.IsNull():
+            raise CadAdapterError("cad_shape_bounds_placed_shape_null")
+    box = importlib.import_module("OCP.Bnd").Bnd_Box()
+    importlib.import_module("OCP.BRepBndLib").BRepBndLib.AddOptimal_s(shape, box, False, False)
+    bounds = box.Get()
+    if len(bounds) != 6 or any(not math.isfinite(value) for value in bounds):
+        raise CadAdapterError("cad_shape_bounds_invalid")
+    return tuple(float(value) for value in bounds)  # type: ignore[return-value]
+
+
 def project_visible_cad_edges(
     handle: CadShapeHandle,
     *,
@@ -1595,6 +1624,7 @@ __all__ = [
     "build_polygon_prism_cut",
     "build_revolved_shape",
     "cad_shape_bounds",
+    "cad_shape_precise_bounds",
     "cross_section_to_cad_input",
     "inspect_shape_topology",
     "probe_cad_runtime",
