@@ -29,7 +29,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | Child | Status | Implementation SHA(s) | Log SHA | Focused | Full suite | Limitations |
 |---|---|---|---|---|---|---|
 | PL-0283 V02 | READY_FOR_INDEPENDENT_AUDIT | `2d0d5c34e279ba9617a504c75cbc0e266a86df53` | `8ef61fba9b41a1a533b2e52ae607238f23294375` | 70 passed | 1,459 passed twice / 6 skipped / 1 deselected | No physical/mold/CAD authority; PL-0220 through PL-0224 remain deferred |
-| PL-0284 V02 | PENDING | | | | | |
+| PL-0284 V02 | READY_FOR_INDEPENDENT_AUDIT | `4496d40fe0287724073a295a2c128be00d80784e` | `30ea4631292abb0213dea3d35e1c890be378e73e` | 98 passed | 1,464 passed / 6 skipped / 1 deselected | Captured, reference and user dimensions remain distinct; hidden wall/material/physical claims deferred |
 | PL-0285 V02 | PENDING | | | | | |
 | PL-0286 V02 | PENDING | | | | | |
 | PL-0287 V02 | PENDING | | | | | |
