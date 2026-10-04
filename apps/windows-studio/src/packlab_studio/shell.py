@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QMainWindow, QSplitter
 
 from .autosave import AutosaveService
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
+from .engineering_export import DesignModelExportSource, DestinationProvider
 from .jobs import JobManager
 from .navigation import (
     NavigationController,
@@ -44,6 +45,9 @@ class StudioMainWindow(QMainWindow):
         available_work_area: tuple[int, int, int, int] | None = None,
         scan_master_request_provider: Callable[[str, str], ScanMasterPromotionRequest | None]
         | None = None,
+        design_model_export_source_provider: Callable[[], DesignModelExportSource | None]
+        | None = None,
+        export_destination_provider: DestinationProvider | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName(self.WINDOW_OBJECT_NAME)
@@ -71,7 +75,13 @@ class StudioMainWindow(QMainWindow):
         self.shutdown = ShutdownCoordinator(self.job_manager)
         self._shutdown_requested = False
         self.navigation_panel = NavigationPanel()
-        self.route_stack = RouteStack(ingest_controller=ingest_controller, receiver=receiver)
+        self.route_stack = RouteStack(
+            ingest_controller=ingest_controller,
+            receiver=receiver,
+            project_manager=self.project_manager,
+            design_model_export_source_provider=design_model_export_source_provider,
+            export_destination_provider=export_destination_provider,
+        )
         editor = self.route_stack.views[Route.EDITOR]
         if isinstance(editor, ScanMasterEditorView):
             editor.promotion_requested.connect(self._promote_scan_master_from_editor)

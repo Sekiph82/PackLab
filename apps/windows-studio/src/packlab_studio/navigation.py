@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .engineering_export import EngineeringExportView
 from .mask_correction import MaskCorrectionView
 from .version import AboutView
 
@@ -28,6 +29,7 @@ class Route(StrEnum):
     RECONSTRUCTION = "reconstruction"
     EDITOR = "editor"
     MASK_CORRECTION = "mask-correction"
+    EXPORTS = "exports"
     SETTINGS = "settings"
 
 
@@ -143,7 +145,12 @@ class NavigationPanel(QWidget):
         for index in range(self.list.count()):
             item = self.list.item(index)
             route = item.data(Qt.ItemDataRole.UserRole)
-            if route in {Route.CAPTURE_INBOX.value, Route.RECONSTRUCTION.value, Route.EDITOR.value}:
+            if route in {
+                Route.CAPTURE_INBOX.value,
+                Route.RECONSTRUCTION.value,
+                Route.EDITOR.value,
+                Route.EXPORTS.value,
+            }:
                 flags = item.flags()
                 item.setFlags(
                     flags | Qt.ItemFlag.ItemIsEnabled
@@ -165,7 +172,15 @@ class NavigationPanel(QWidget):
 
 
 class RouteStack(QStackedWidget):
-    def __init__(self, *, ingest_controller: Any = None, receiver: Any = None) -> None:
+    def __init__(
+        self,
+        *,
+        ingest_controller: Any = None,
+        receiver: Any = None,
+        project_manager: Any = None,
+        design_model_export_source_provider: Any = None,
+        export_destination_provider: Any = None,
+    ) -> None:
         super().__init__()
         self.setObjectName("packlab.navigation.stack")
         self.views: dict[Route, QWidget] = {}
@@ -179,6 +194,12 @@ class RouteStack(QStackedWidget):
                 view = AboutView()
             elif route is Route.EDITOR:
                 view = ScanMasterEditorView()
+            elif route is Route.EXPORTS:
+                view = EngineeringExportView(
+                    project_manager,
+                    design_model_source_provider=design_model_export_source_provider,
+                    destination_provider=export_destination_provider,
+                )
             else:
                 view = QLabel(route.name.replace("_", " ").title())
                 view.setObjectName(f"packlab.view.{route.value}")
@@ -194,5 +215,9 @@ class RouteStack(QStackedWidget):
             Route.RECONSTRUCTION,
             Route.EDITOR,
             Route.MASK_CORRECTION,
+            Route.EXPORTS,
         ):
             self.views[route].setEnabled(available)
+        export_view = self.views[Route.EXPORTS]
+        if isinstance(export_view, EngineeringExportView):
+            export_view.refresh_source()

@@ -392,6 +392,19 @@ class ProjectManager:
                 raise
             raise ProjectError("scan master artifact is corrupt") from error
 
+    def selected_scan_master_revision(self):
+        """Return the exact persisted Scan Master selected by current project authority."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        _, state = self._read_authority(self.layout)
+        revision_id = state.get("active_scan_master_revision_id")
+        if revision_id is None:
+            return None
+        if not isinstance(revision_id, str) or not revision_id:
+            raise ProjectError("selected Scan Master revision identity is malformed")
+        return self.load_scan_master_revision(revision_id)
+
     def export_selected_scan_master(
         self,
         revision_id: str,
