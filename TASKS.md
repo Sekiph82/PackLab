@@ -6,11 +6,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M13
 - Current Sprint: M13-C001 — CAD/BREP & Engineering Export
-- Current Task: M13-C001-R01 — PL-0299 authority resolution + continuation PL-0300 through PL-0309
+- Current Task: M13-C001-R02 — final handoff evidence closure after 21/21 M13 children independently accepted
 - Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md. Close PL-0299 V02 using single-source OBJ/GLB authority, then continue PL-0300 through PL-0309 automatically while green. Do not start M14.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_FINAL_HANDOFF_EVIDENCE_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_FINAL_HANDOFF_EVIDENCE_CHATGPT_AUDIT_CRITERIA_V01.md. Documentation/evidence only: fill the continuation handoff parity/worktree fields truthfully, publish the R02 evidence log, and stop. Do not change production/tests/dependencies and do not start M14.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/M12-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0268 through PL-0288 accepted, M12 complete.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001_CHATGPT_AUDIT_V01.md — AUDITED_PARTIAL_CHANGES_REQUIRED; PL-0289 through PL-0309 are 21/21 independently AUDITED_PASS; only final continuation handoff evidence remains open.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -31,7 +31,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest M12 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/M12-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 21/21 M12 children accepted.
 - Active M13 Batch Master: original batch stopped correctly at PL-0299 V01 authority conflict.
 - Latest M13 Partial Audit: PL-0289 through PL-0298 AUDITED_PASS; PL-0299 V01 blocker accepted. https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001_CHATGPT_PARTIAL_AUDIT_V01.md
-- Active M13 R01 Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CODEX_PROMPT_V02.md
+- M13 R01 Continuation: completed; PL-0299 V02 through PL-0309 implementations are independently accepted. Original continuation prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CODEX_PROMPT_V02.md
+- Latest M13 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001_CHATGPT_AUDIT_V01.md — 21/21 child tasks accepted; milestone held open only for F01 final-handoff evidence completion.
+- Active M13 R02 Evidence Closure: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_FINAL_HANDOFF_EVIDENCE_CODEX_PROMPT_V01.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -562,20 +564,20 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - [x] **PL-0297** Export Design Model/assembly to STEP with millimetre units. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0297_CHATGPT_AUDIT_V01.md
 - [x] **PL-0298** Export printable STL with explicit unit handling and mesh-quality options. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0298_CHATGPT_AUDIT_V01.md
-- [ ] **PL-0299** Export OBJ and GLB from Design Model with part naming. **V02 ACTIVE:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0299_CODEX_PROMPT_V02.md
-- [ ] **PL-0300** Add export manifest recording source project, revision, scale and software versions.
-- [ ] **PL-0301** Add round-trip validation that reopens exported STEP and rechecks bounding dimensions.
-- [ ] **PL-0302** Add export UI with clear distinction between Scan Mesh and editable Design Model.
+- [x] **PL-0299** Export OBJ and GLB from Design Model with part naming. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0299_CHATGPT_AUDIT_V02.md
+- [x] **PL-0300** Add export manifest recording source project, revision, scale and software versions. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0300_CHATGPT_AUDIT_V01.md
+- [x] **PL-0301** Add round-trip validation that reopens exported STEP and rechecks bounding dimensions. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0301_CHATGPT_AUDIT_V01.md
+- [x] **PL-0302** Add export UI with clear distinction between Scan Mesh and editable Design Model. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0302_CHATGPT_AUDIT_V01.md
 
 ## Sprint M13-S03 - Technical drawings
 
-- [ ] **PL-0303** Generate front/side/top orthographic views from Design Model.
-- [ ] **PL-0304** Generate section views at user-selected heights/planes.
-- [ ] **PL-0305** Add dimension annotations for overall H/W/D, neck and selected features.
-- [ ] **PL-0306** Add title block with package ID, revision, units and disclaimer.
-- [ ] **PL-0307** Export drawing to SVG and DXF.
-- [ ] **PL-0308** Export PDF drawing if a stable PDF path is available without compromising vector source.
-- [ ] **PL-0309** Validate drawing dimensions against Design Model numerical values.
+- [x] **PL-0303** Generate front/side/top orthographic views from Design Model. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0303_CHATGPT_AUDIT_V01.md
+- [x] **PL-0304** Generate section views at user-selected heights/planes. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0304_CHATGPT_AUDIT_V01.md
+- [x] **PL-0305** Add dimension annotations for overall H/W/D, neck and selected features. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0305_CHATGPT_AUDIT_V01.md
+- [x] **PL-0306** Add title block with package ID, revision, units and disclaimer. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0306_CHATGPT_AUDIT_V01.md
+- [x] **PL-0307** Export drawing to SVG and DXF. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0307_CHATGPT_AUDIT_V01.md
+- [x] **PL-0308** Export PDF drawing if a stable PDF path is available without compromising vector source. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0308_CHATGPT_AUDIT_V01.md
+- [x] **PL-0309** Validate drawing dimensions against Design Model numerical values. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/PL-0309_CHATGPT_AUDIT_V01.md
 
 ---
 
