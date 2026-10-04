@@ -56,7 +56,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | PL-0278 | READY_FOR_INDEPENDENT_AUDIT | `8a2664a6cd63964492e322452f9cfca73dd39c74`, `4ec27039b555d059a050f6eee807e8d5d231cfbe` | `87ef57613c947705c3c0d3d24b8daf2e3484675e` | 25 passed | 1,433 passed / 6 skipped / 1 deselected | Verified attachment frame aligned to M11 plane; parametric placement only, no fit/compatibility or physical claim |
 | PL-0279 | READY_FOR_INDEPENDENT_AUDIT | `2bf1b0344961faa3f6a21de6cd7a8b923767f950` | `876961a9321165e552d7c32776e55d5c92bafe2e` | 15 passed | 1,441 passed / 6 skipped / 1 deselected | Authored parametric path and dimensions only; metric/physical validation remains deferred; no collision or geometry generation |
 | PL-0280 | READY_FOR_INDEPENDENT_AUDIT | `07a0a0fb202b39221f5a250bb79738f408f2ae44` | `a8c792c64d6fe2104f7093a2ec3783904b640675` | 23 passed | 1,446 passed / 6 skipped / 1 deselected | PREVIEW_PROXY AABB candidates only; no certified fit or manufacturing interference analysis |
-| PL-0281 | PENDING | | | | | |
+| PL-0281 | READY_FOR_INDEPENDENT_AUDIT | `fa24e5cd76db1e5b3ba633f94ff1dbe7739e9c17` | `7baac3dc78e4262afb0cb07af3646c5707736ad5` | 23 passed | 1,449 passed / 6 skipped / 1 deselected | New exact pump and tube revisions with immutable graph history; body/closure unchanged; no physical compatibility claim |
 | PL-0282 | PENDING | | | | | |
 | PL-0283 | PENDING | | | | | |
 | PL-0284 | PENDING | | | | | |
@@ -67,7 +67,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 
 ## Current continuation state
 
-- Batch status: IN_PROGRESS; resumed frontier PL-0270. PL-0270 through PL-0280 have implementation and separate child-log commits published, each ending at its independent audit handoff.
+- Batch status: IN_PROGRESS; resumed frontier PL-0270. PL-0270 through PL-0281 have implementation and separate child-log commits published, each ending at its independent audit handoff.
 - PL-0270 implementation/evidence SHA: `a86abecb198a8465b3498607ff0e1a2c907995ea`; separate child-log-only SHA: `e0b585cd3bc5accd3c7691f0d5b12b66a87bb9d7`; both remotely visible.
 - PL-0271 implementation/evidence SHA: `bb44b41c5c27ddaedff0b164153d40fafa92b666`; separate child-log-only SHA: `fc8212aefc911a01ddd5ef70bc8e5a0b3b314b80`; both remotely visible.
 - PL-0272 implementation/evidence SHA: `558fc7949a3a224b5ddfc62cf95a70a922f27a01`; separate child-log-only SHA: `4521eb2663be72b700c0ba073b751f14b02512e2`; both remotely visible.
@@ -79,9 +79,10 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 - PL-0278 implementation/evidence SHAs: `8a2664a6cd63964492e322452f9cfca73dd39c74`, `4ec27039b555d059a050f6eee807e8d5d231cfbe`; separate child-log-only SHA: `87ef57613c947705c3c0d3d24b8daf2e3484675e`; all remotely visible.
 - PL-0279 implementation/evidence SHA: `2bf1b0344961faa3f6a21de6cd7a8b923767f950`; separate child-log-only SHA: `876961a9321165e552d7c32776e55d5c92bafe2e`; both remotely visible.
 - PL-0280 implementation/evidence SHA: `07a0a0fb202b39221f5a250bb79738f408f2ae44`; separate child-log-only SHA: `a8c792c64d6fe2104f7093a2ec3783904b640675`; both remotely visible.
-- Current local SHA: `a8c792c64d6fe2104f7093a2ec3783904b640675` before this master-log publication.
-- Current origin/main and GitHub main SHA: `a8c792c64d6fe2104f7093a2ec3783904b640675` before this master-log publication.
+- PL-0281 implementation/evidence SHA: `fa24e5cd76db1e5b3ba633f94ff1dbe7739e9c17`; separate child-log-only SHA: `7baac3dc78e4262afb0cb07af3646c5707736ad5`; both remotely visible.
+- Current local SHA: `7baac3dc78e4262afb0cb07af3646c5707736ad5` before this master-log publication.
+- Current origin/main and GitHub main SHA: `7baac3dc78e4262afb0cb07af3646c5707736ad5` before this master-log publication.
 - Worktree: clean detached M12 execution worktree; Desktop owner work preserved.
 - M13 started: NO
 
-Current batch frontier: **PL-0281** (`IN_PROGRESS`).
+Current batch frontier: **PL-0282** (`IN_PROGRESS`).
