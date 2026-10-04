@@ -1,6 +1,6 @@
 # M13-C001-R01 - PL-0299 Continuation Codex Log V02
 
-Status: **IN_PROGRESS**
+Status: **BATCH_COMPLETED**
 
 Prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CODEX_PROMPT_V02.md
@@ -37,7 +37,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 | PL-0306 | READY_FOR_INDEPENDENT_AUDIT | `fa204ff412802f026a5ea20813f4c82c6531231e` | `cb9d496eba76e6d5d4f68ec277ac26772e5c0fd4` | 67 focused title-block/drawing/CAD/BREP regressions PASS | 1,599 passed, 6 skipped, 1 deselected | Deterministic exact-source title block with explicit authority/unit/version disclaimers; timestamp is presentation-only and machine/path identity omitted. Physical validation deferred; OCP/OCCT redistribution license gate persists. |
 | PL-0307 | READY_FOR_INDEPENDENT_AUDIT | `a12e7d3ff4b7eb10e401139496e32452fd78c923` | `e06ab4ba8d90e6d99100e5242a5a9d1324d17a20` | 71 focused vector-export/drawing/CAD/BREP regressions PASS | 1,603 passed, 6 skipped, 1 deselected | Deterministic SVG and R2000 DXF exports carry source/drawing revisions, units, disclaimers and output digests; no raster or unit promotion. Physical validation deferred; OCP/OCCT redistribution license gate persists. |
 | PL-0308 | READY_FOR_INDEPENDENT_AUDIT | `39a6e2fb8e66b054c8a26787c709e114fd9329f7` | `5dce968b8da412cda57428c976cd34ebaffd60b3` | 75 focused PDF/vector-export/drawing/CAD/BREP regressions PASS | 1,607 passed, 6 skipped, 1 deselected | Offline PySide6/Qt PDF parses/renders the canonical SVG to one vector A4 landscape page; no raster image or new dependency. Physical validation deferred; Qt/OCCT release notices remain gates. |
-| PL-0309 | PENDING | | | | | |
+| PL-0309 | READY_FOR_INDEPENDENT_AUDIT | `1958de8f48409f512abbe06bc3f8c5d141187a6e` | `7826342d3285f8f7747b4e47216c865e839a16f0` | 82 focused drawing-validation/PDF/vector/CAD/BREP regressions PASS | 1,614 passed, 6 skipped, 1 deselected | Exact-source overall/selected-feature numerical checks bind revision/unit/title/section provenance; explicit software tolerance is not physical metrology. RELATIVE/mm_unverified remain explicit; physical validation and OCP/OCCT release license gates persist. |
 
 ## Final handoff
 
@@ -48,6 +48,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 - PL-0306 implementation/evidence commit: `fa204ff412802f026a5ea20813f4c82c6531231e`; V01 child log publication/correction commit: `cb9d496eba76e6d5d4f68ec277ac26772e5c0fd4`.
 - PL-0307 implementation/evidence commit: `a12e7d3ff4b7eb10e401139496e32452fd78c923`; V01 child log publication commit: `e06ab4ba8d90e6d99100e5242a5a9d1324d17a20`.
 - PL-0308 implementation/evidence commit: `39a6e2fb8e66b054c8a26787c709e114fd9329f7`; V01 child log publication commit: `5dce968b8da412cda57428c976cd34ebaffd60b3`.
+- PL-0309 implementation/evidence commit: `1958de8f48409f512abbe06bc3f8c5d141187a6e`; V01 child log publication commit: `7826342d3285f8f7747b4e47216c865e839a16f0`.
 - PL-0301 implementation/evidence commit: `c897e602d3b00c01bd330d8d2c6e78c5adb88bc3`; V01 child log publication commit: `ff90d6a01ef4a93f9b0110045031b6b45c179018`.
 - Batch status:
 - Final local SHA:
@@ -56,4 +57,4 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 - Worktree:
 - M14 started: NO
 
-BATCH_IN_PROGRESS
+AWAITING_MILESTONE_AUDIT
