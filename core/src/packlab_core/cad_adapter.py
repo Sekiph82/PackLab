@@ -208,6 +208,14 @@ class CadProjectedCurveData:
     points: tuple[tuple[float, float], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class CadSectionResultData:
+    """Sampled section curves plus conservative bounds from the CAD cut shape."""
+
+    curves: tuple[CadProjectedCurveData, ...]
+    bounds: tuple[float, float, float, float] | None
+
+
 _SHAPE_REGISTRY: dict[str, tuple[str, Any]] = {}
 _SHAPE_REGISTRY_LOCK = threading.RLock()
 
@@ -569,6 +577,183 @@ def project_visible_cad_edges(
     if not curves:
         raise CadAdapterError("cad_projection_visible_edges_missing")
     return tuple(curves)
+
+
+def section_cad_shape(
+    handle: CadShapeHandle,
+    *,
+    plane_origin: tuple[float, float, float],
+    plane_normal: tuple[float, float, float],
+    screen_right: tuple[float, float, float],
+    screen_up: tuple[float, float, float],
+    placement_matrix: tuple[float, ...] = (
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ),
+    maximum_edges: int = 4096,
+) -> CadSectionResultData:
+    """Intersect one exact BREP with a bounded plane and return curves/bounds."""
+    if not isinstance(handle, CadShapeHandle):
+        raise CadAdapterError("cad_shape_handle_required")
+    origin = _drawing_vector(plane_origin, "cad_section_plane_origin_invalid")
+    normal = _drawing_unit_vector(plane_normal, "cad_section_plane_normal_invalid")
+    right = _drawing_unit_vector(screen_right, "cad_section_screen_right_invalid")
+    up = _drawing_unit_vector(screen_up, "cad_section_screen_up_invalid")
+    if (
+        abs(_drawing_dot(normal, right)) > 1e-9
+        or abs(_drawing_dot(normal, up)) > 1e-9
+        or abs(_drawing_dot(right, up)) > 1e-9
+        or _drawing_dot(_drawing_cross(right, up), normal) < 1.0 - 1e-9
+    ):
+        raise CadAdapterError("cad_section_plane_axes_invalid")
+    if (
+        not isinstance(maximum_edges, int)
+        or isinstance(maximum_edges, bool)
+        or not 1 <= maximum_edges <= 16384
+    ):
+        raise CadAdapterError("cad_section_edge_limit_invalid")
+    _drawing_rigid_transform(placement_matrix)
+    shape = _shape_for_handle(handle)
+    if shape.IsNull():
+        raise CadAdapterError("cad_section_shape_null")
+    try:
+        section_module = importlib.import_module("OCP.BRepAlgoAPI")
+        gp = importlib.import_module("OCP.gp")
+        top_abs = importlib.import_module("OCP.TopAbs")
+        top_exp = importlib.import_module("OCP.TopExp")
+        topods = importlib.import_module("OCP.TopoDS")
+        adaptor_module = importlib.import_module("OCP.BRepAdaptor")
+        geom_abs = importlib.import_module("OCP.GeomAbs")
+        transform_module = importlib.import_module("OCP.BRepBuilderAPI")
+        axes = gp.gp_Ax3(gp.gp_Pnt(*origin), gp.gp_Dir(*normal), gp.gp_Dir(*right))
+        transform = gp.gp_Trsf()
+        transform.SetValues(*(float(value) for value in placement_matrix[:12]))
+        placed_shape = transform_module.BRepBuilderAPI_Transform(shape, transform, True).Shape()
+        if placed_shape.IsNull():
+            raise CadAdapterError("cad_section_placed_shape_null")
+        algorithm = section_module.BRepAlgoAPI_Section(placed_shape, gp.gp_Pln(axes), False)
+        algorithm.Build()
+        if not algorithm.IsDone():
+            raise CadAdapterError("cad_section_intersection_failed")
+        section_shape = algorithm.Shape()
+        if section_shape.IsNull():
+            raise CadAdapterError("cad_section_result_null")
+        explorer = top_exp.TopExp_Explorer(section_shape, top_abs.TopAbs_EDGE)
+        curves: list[CadProjectedCurveData] = []
+        edge_count = 0
+        while explorer.More():
+            edge_count += 1
+            if edge_count > maximum_edges:
+                raise CadAdapterError("cad_section_edge_limit_exceeded")
+            edge = topods.TopoDS.Edge_s(explorer.Current())
+            curve = adaptor_module.BRepAdaptor_Curve(edge)
+            first = float(curve.FirstParameter())
+            last = float(curve.LastParameter())
+            if math.isfinite(first) and math.isfinite(last) and last > first:
+                kind = curve.GetType()
+                sample_count = 2 if kind == geom_abs.GeomAbs_Line else 48
+                points: list[tuple[float, float]] = []
+                for index in range(sample_count):
+                    parameter = first + (last - first) * index / (sample_count - 1)
+                    point = curve.Value(parameter)
+                    xyz = (float(point.X()), float(point.Y()), float(point.Z()))
+                    projected = (_drawing_dot(xyz, right), _drawing_dot(xyz, up))
+                    if all(math.isfinite(value) for value in projected):
+                        points.append(projected)
+                if len(points) >= 2:
+                    curves.append(CadProjectedCurveData(str(kind).split(".")[-1], tuple(points)))
+            explorer.Next()
+        section_bounds = None
+        if curves:
+            box = importlib.import_module("OCP.Bnd").Bnd_Box()
+            importlib.import_module("OCP.BRepBndLib").BRepBndLib.Add_s(section_shape, box)
+            if box.IsVoid():
+                raise CadAdapterError("cad_section_bounds_invalid")
+            else:
+                xmin, ymin, zmin, xmax, ymax, zmax = (float(value) for value in box.Get())
+                corners = tuple(
+                    (x, y, z) for x in (xmin, xmax) for y in (ymin, ymax) for z in (zmin, zmax)
+                )
+                projected_bounds = tuple(
+                    (_drawing_dot(point, right), _drawing_dot(point, up)) for point in corners
+                )
+                section_bounds = (
+                    min(point[0] for point in projected_bounds),
+                    min(point[1] for point in projected_bounds),
+                    max(point[0] for point in projected_bounds),
+                    max(point[1] for point in projected_bounds),
+                )
+                if any(not math.isfinite(value) for value in section_bounds):
+                    raise CadAdapterError("cad_section_bounds_invalid")
+    except CadAdapterError:
+        raise
+    except Exception as error:
+        raise CadAdapterError("cad_section_intersection_failed") from error
+    return CadSectionResultData(tuple(curves), section_bounds)
+
+
+def _drawing_vector(
+    vector: tuple[float, float, float], error_code: str
+) -> tuple[float, float, float]:
+    if (
+        not isinstance(vector, tuple)
+        or len(vector) != 3
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in vector
+        )
+    ):
+        raise CadAdapterError(error_code)
+    return tuple(float(value) for value in vector)  # type: ignore[return-value]
+
+
+def _drawing_rigid_transform(matrix: tuple[float, ...]) -> None:
+    if (
+        not isinstance(matrix, tuple)
+        or len(matrix) != 16
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in matrix
+        )
+        or any(
+            abs(matrix[index] - expected) > 1e-8
+            for index, expected in zip((12, 13, 14, 15), (0.0, 0.0, 0.0, 1.0), strict=True)
+        )
+    ):
+        raise CadAdapterError("cad_section_placement_invalid")
+    rows = tuple(tuple(float(matrix[row * 4 + col]) for col in range(3)) for row in range(3))
+    for row in rows:
+        if abs(sum(value * value for value in row) - 1.0) > 1e-8:
+            raise CadAdapterError("cad_section_placement_not_rigid")
+    for left in range(3):
+        for right_index in range(left + 1, 3):
+            if abs(sum(a * b for a, b in zip(rows[left], rows[right_index]))) > 1e-8:
+                raise CadAdapterError("cad_section_placement_not_rigid")
+    determinant = (
+        rows[0][0] * (rows[1][1] * rows[2][2] - rows[1][2] * rows[2][1])
+        - rows[0][1] * (rows[1][0] * rows[2][2] - rows[1][2] * rows[2][0])
+        + rows[0][2] * (rows[1][0] * rows[2][1] - rows[1][1] * rows[2][0])
+    )
+    if abs(determinant - 1.0) > 1e-8:
+        raise CadAdapterError("cad_section_placement_not_rigid")
 
 
 def _drawing_unit_vector(
@@ -1399,6 +1584,7 @@ __all__ = [
     "CadProfileControlPoint",
     "CadProfileInput",
     "CadProjectedCurveData",
+    "CadSectionResultData",
     "CadRuntimeDiagnostics",
     "CadRuntimeStatus",
     "CadShapeBuild",
@@ -1414,6 +1600,7 @@ __all__ = [
     "probe_cad_runtime",
     "profile_to_cad_input",
     "project_visible_cad_edges",
+    "section_cad_shape",
     "shape_handle_for_model",
     "tessellate_cad_shape",
 ]
