@@ -28,7 +28,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 
 | Child | Status | Implementation SHA(s) | Log SHA | Focused | Full suite | Limitations |
 |---|---|---|---|---|---|---|
-| PL-0300 | PENDING | | | | | |
+| PL-0300 | READY_FOR_INDEPENDENT_AUDIT | `3560826a1cdb69025c3874f04cdc15d3292ab46b` | `57605cc69f91eeec3e956f95768727ff4fe240a0` | 45 focused manifest/export regressions PASS | 1,565 passed, 6 skipped, 1 deselected | Shared path-free STEP/STL/OBJ/GLB manifests; deferred physical validation and native redistribution license gate remain. |
 | PL-0301 | PENDING | | | | | |
 | PL-0302 | PENDING | | | | | |
 | PL-0303 | PENDING | | | | | |
