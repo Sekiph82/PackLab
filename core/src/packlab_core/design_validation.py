@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from math import isfinite
 
 from .cross_section import CrossSection
-from .design_model import DesignModelRevision, ParameterType
+from .design_model import DesignModelParentKind, DesignModelRevision, ParameterType
 from .design_operations import DesignOperation, OperationKind
 from .design_profile import DesignProfile
 
@@ -240,7 +240,18 @@ def validate_design_model(
                     )
 
     available = policy.available_scan_master_revision_ids
-    if available is not None and model.fitted_to_scan_master_revision_id not in available:
+    if (
+        available is not None
+        and model.parent_kind is DesignModelParentKind.STANDALONE_DESIGN_GEOMETRY
+    ):
+        issues.append(
+            ValidationIssue(
+                "captured_parent_required",
+                "parent.scan_master_revision_id",
+                "This validation policy requires a captured Scan Master parent.",
+            )
+        )
+    elif available is not None and model.fitted_to_scan_master_revision_id not in available:
         issues.append(
             ValidationIssue(
                 "scan_master_parent_stale",

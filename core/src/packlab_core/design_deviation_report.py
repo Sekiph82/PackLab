@@ -17,6 +17,7 @@ from .cross_section_overlay import (
 )
 from .design_model import (
     DesignModelError,
+    DesignModelParentKind,
     DesignModelRevision,
     FeatureKind,
     resolve_design_model_feature,
@@ -318,10 +319,12 @@ def calculate_design_deviation_report(
     adapter: Open3DGeometryAdapter | None = None,
 ) -> DesignDeviationReport:
     """Summarize unsigned M10 surface and section comparisons for one exact parent."""
-    if not isinstance(scan_master, ScanMasterRevision):
-        raise DeviationReportError("scan_master_revision_required")
     if not isinstance(design_model, DesignModelRevision):
         raise DeviationReportError("design_model_revision_required")
+    if design_model.parent_kind is not DesignModelParentKind.CAPTURED_SCAN_MASTER:
+        raise DeviationReportError("captured_scan_master_parent_required")
+    if not isinstance(scan_master, ScanMasterRevision):
+        raise DeviationReportError("scan_master_revision_required")
     if not isinstance(geometry, DesignModelGeometryReference):
         raise DeviationReportError("design_model_geometry_reference_required")
     if (
@@ -498,10 +501,12 @@ def calculate_feature_deviation_report(
     parametric model and feature meshes are distance targets and never fill scan support.
     """
 
-    if not isinstance(scan_master, ScanMasterRevision):
-        raise DeviationReportError("scan_master_revision_required")
     if not isinstance(design_model, DesignModelRevision):
         raise DeviationReportError("design_model_revision_required")
+    if design_model.parent_kind is not DesignModelParentKind.CAPTURED_SCAN_MASTER:
+        raise DeviationReportError("captured_scan_master_parent_required")
+    if not isinstance(scan_master, ScanMasterRevision):
+        raise DeviationReportError("scan_master_revision_required")
     if not isinstance(full_geometry, DesignModelGeometryReference):
         raise DeviationReportError("design_model_geometry_reference_required")
     scan_digest = mesh_sha256(scan_master.mesh)

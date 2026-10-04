@@ -113,10 +113,18 @@ def create_cross_section(
     center_x: float = 0.0,
     center_y: float = 0.0,
     scale_state: ScaleState = ScaleState.METRIC_UNVERIFIED,
+    previous_section_id: str | None = None,
 ) -> CrossSection:
     unit = "reconstruction_units" if scale_state is ScaleState.RELATIVE else "mm_unverified"
     section_id = _section_id(
-        component_id, points, symmetry, center_x, center_y, scale_state, unit, None
+        component_id,
+        points,
+        symmetry,
+        center_x,
+        center_y,
+        scale_state,
+        unit,
+        previous_section_id,
     )
     return CrossSection(
         section_id,
@@ -127,6 +135,7 @@ def create_cross_section(
         center_y,
         scale_state,
         unit,
+        previous_section_id,
     )
 
 

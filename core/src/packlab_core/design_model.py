@@ -12,7 +12,10 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any, cast
 
-from .design_model_binding import DesignModelParentBindingRevision
+from .design_model_binding import (
+    DesignModelParentBindingRevision,
+    StandaloneDesignGeometryRoot,
+)
 from .reconstruction import ScaleState
 
 _REVISION_PREFIX = "design-model:"
@@ -39,7 +42,13 @@ class PackageFamily(StrEnum):
     JAR = "jar"
     CYLINDRICAL_CONTAINER = "cylindrical-container"
     JERRYCAN = "jerrycan"
+    TUBE = "tube"
     OTHER = "other"
+
+
+class DesignModelParentKind(StrEnum):
+    CAPTURED_SCAN_MASTER = "CAPTURED_SCAN_MASTER"
+    STANDALONE_DESIGN_GEOMETRY = "STANDALONE_DESIGN_GEOMETRY"
 
 
 class ParameterType(StrEnum):
@@ -63,6 +72,7 @@ class FeatureKind(StrEnum):
     FREEFORM_CAGE = "freeform-cage"
     TRIGGER_PUMP = "trigger-pump"
     DIP_TUBE = "dip-tube"
+    CRIMP = "crimp"
 
 
 def stable_feature_id(component_id: str, feature_kind: FeatureKind, semantic_key: str) -> str:
@@ -236,18 +246,18 @@ def resolve_design_model_feature(
 
 @dataclass(frozen=True, slots=True)
 class DesignModelRevision:
-    """One immutable parameter-graph revision with an exact captured parent pin."""
+    """One immutable graph with an explicit captured or standalone parent authority."""
 
     revision_id: str
     project_id: str
     package_family: PackageFamily
     parameters: tuple[DesignModelParameter, ...]
     features: tuple[DesignModelFeatureReference, ...]
-    parent_binding_revision_id: str
-    fitted_to_scan_master_revision_id: str
-    scan_master_geometry_sha256: str
+    parent_binding_revision_id: str | None
+    fitted_to_scan_master_revision_id: str | None
+    scan_master_geometry_sha256: str | None
     scale_state: ScaleState
-    scale_provenance_id: str
+    scale_provenance_id: str | None
     coordinate_unit: str
     physical_accuracy_validation_status: str
     mold_use_authorized: bool
@@ -255,6 +265,7 @@ class DesignModelRevision:
     actor_id: str
     reason: str
     created_at_utc: str
+    standalone_root: StandaloneDesignGeometryRoot | None = None
 
     def __post_init__(self) -> None:
         _identifier(self.project_id, "project_id")
@@ -288,11 +299,33 @@ class DesignModelRevision:
             raise DesignModelError("design_model_physical_validation_must_remain_deferred")
         if self.mold_use_authorized is not False:
             raise DesignModelError("design_model_mold_use_forbidden")
-        _identifier(self.parent_binding_revision_id, "parent_binding_revision_id")
-        _identifier(self.fitted_to_scan_master_revision_id, "scan_master_revision_id")
-        if not re.fullmatch(r"[0-9a-f]{64}", self.scan_master_geometry_sha256):
-            raise DesignModelError("scan_master_geometry_digest_invalid")
-        _identifier(self.scale_provenance_id, "scale_provenance_id")
+        if self.standalone_root is None:
+            _identifier(self.parent_binding_revision_id, "parent_binding_revision_id")
+            _identifier(self.fitted_to_scan_master_revision_id, "scan_master_revision_id")
+            if not isinstance(self.scan_master_geometry_sha256, str) or not re.fullmatch(
+                r"[0-9a-f]{64}", self.scan_master_geometry_sha256
+            ):
+                raise DesignModelError("scan_master_geometry_digest_invalid")
+            _identifier(self.scale_provenance_id, "scale_provenance_id")
+        else:
+            if not isinstance(self.standalone_root, StandaloneDesignGeometryRoot):
+                raise DesignModelError("standalone_design_geometry_root_required")
+            if any(
+                value is not None
+                for value in (
+                    self.parent_binding_revision_id,
+                    self.fitted_to_scan_master_revision_id,
+                    self.scan_master_geometry_sha256,
+                    self.scale_provenance_id,
+                )
+            ):
+                raise DesignModelError("standalone_parent_contains_captured_ancestry")
+            if (
+                self.project_id != self.standalone_root.project_id
+                or self.scale_state is not self.standalone_root.scale_state
+                or self.coordinate_unit != self.standalone_root.coordinate_unit
+            ):
+                raise DesignModelError("standalone_parent_project_or_units_mismatch")
         _identifier(self.actor_id, "actor_id")
         if self.previous_revision_id is not None:
             _identifier(self.previous_revision_id, "previous_revision_id")
@@ -305,6 +338,24 @@ class DesignModelRevision:
 
     def as_dict(self) -> dict[str, object]:
         """Return deterministic, human-readable serialization-ready data."""
+        if self.standalone_root is not None:
+            return {
+                "contract": "packlab.design-model.v2",
+                "revision_id": self.revision_id,
+                "project_id": self.project_id,
+                "package_family": self.package_family.value,
+                "parameters": [item.as_dict() for item in self.parameters],
+                "features": [item.as_dict() for item in self.features],
+                "parent_authority": self.standalone_root.as_dict(),
+                "scale_state": self.scale_state.value,
+                "coordinate_unit": self.coordinate_unit,
+                "physical_accuracy_validation_status": self.physical_accuracy_validation_status,
+                "mold_use_authorized": self.mold_use_authorized,
+                "previous_revision_id": self.previous_revision_id,
+                "actor_id": self.actor_id,
+                "reason": self.reason,
+                "created_at_utc": self.created_at_utc,
+            }
         return {
             "contract": "packlab.design-model.v1",
             "revision_id": self.revision_id,
@@ -327,6 +378,14 @@ class DesignModelRevision:
             "reason": self.reason,
             "created_at_utc": self.created_at_utc,
         }
+
+    @property
+    def parent_kind(self) -> DesignModelParentKind:
+        return (
+            DesignModelParentKind.STANDALONE_DESIGN_GEOMETRY
+            if self.standalone_root is not None
+            else DesignModelParentKind.CAPTURED_SCAN_MASTER
+        )
 
 
 def create_design_model_revision(
@@ -371,6 +430,7 @@ def create_design_model_revision(
         ("actor_id", actor_id),
         ("reason", reason),
         ("created_at_utc", created_at_utc),
+        ("standalone_root", None),
     )
     for field_name, value in provisional_values:
         object.__setattr__(provisional, field_name, value)
@@ -396,6 +456,72 @@ def create_design_model_revision(
     )
 
 
+def create_standalone_design_model_revision(
+    root: StandaloneDesignGeometryRoot,
+    *,
+    package_family: PackageFamily,
+    parameters: tuple[DesignModelParameter, ...] = (),
+    features: tuple[DesignModelFeatureReference, ...] = (),
+    actor_id: str,
+    reason: str,
+    created_at_utc: str,
+    previous_revision_id: str | None = None,
+) -> DesignModelRevision:
+    """Create a model-only Design Model revision under an explicit standalone root."""
+    if not isinstance(root, StandaloneDesignGeometryRoot):
+        raise DesignModelError("standalone_design_geometry_root_required")
+    if not isinstance(parameters, tuple) or not isinstance(features, tuple):
+        raise DesignModelError("graph_nodes_must_be_tuples")
+    if any(not isinstance(item, DesignModelParameter) for item in parameters):
+        raise DesignModelError("parameter_node_invalid")
+    if any(not isinstance(item, DesignModelFeatureReference) for item in features):
+        raise DesignModelError("feature_reference_invalid")
+    ordered_parameters = tuple(sorted(parameters, key=lambda item: item.parameter_id))
+    ordered_features = tuple(sorted(features, key=lambda item: item.feature_id))
+    provisional = object.__new__(DesignModelRevision)
+    values = (
+        ("project_id", root.project_id),
+        ("package_family", package_family),
+        ("parameters", ordered_parameters),
+        ("features", ordered_features),
+        ("parent_binding_revision_id", None),
+        ("fitted_to_scan_master_revision_id", None),
+        ("scan_master_geometry_sha256", None),
+        ("scale_state", root.scale_state),
+        ("scale_provenance_id", None),
+        ("coordinate_unit", root.coordinate_unit),
+        ("physical_accuracy_validation_status", _DEFERRED),
+        ("mold_use_authorized", False),
+        ("previous_revision_id", previous_revision_id),
+        ("actor_id", actor_id),
+        ("reason", reason),
+        ("created_at_utc", created_at_utc),
+        ("standalone_root", root),
+    )
+    for field_name, value in values:
+        object.__setattr__(provisional, field_name, value)
+    return DesignModelRevision(
+        revision_id=_revision_id(provisional),
+        project_id=root.project_id,
+        package_family=package_family,
+        parameters=ordered_parameters,
+        features=ordered_features,
+        parent_binding_revision_id=None,
+        fitted_to_scan_master_revision_id=None,
+        scan_master_geometry_sha256=None,
+        scale_state=root.scale_state,
+        scale_provenance_id=None,
+        coordinate_unit=root.coordinate_unit,
+        physical_accuracy_validation_status=_DEFERRED,
+        mold_use_authorized=False,
+        previous_revision_id=previous_revision_id,
+        actor_id=actor_id,
+        reason=reason,
+        created_at_utc=created_at_utc,
+        standalone_root=root,
+    )
+
+
 def revise_design_model_revision(
     current: DesignModelRevision,
     *,
@@ -405,7 +531,7 @@ def revise_design_model_revision(
     reason: str,
     created_at_utc: str,
 ) -> DesignModelRevision:
-    """Create an immutable edit revision while retaining the exact captured parent pin."""
+    """Create an immutable edit revision while retaining its exact parent authority."""
     if not isinstance(current, DesignModelRevision):
         raise DesignModelError("current_design_model_revision_required")
     if not isinstance(parameters, tuple) or not isinstance(features, tuple):
@@ -414,6 +540,17 @@ def revise_design_model_revision(
         raise DesignModelError("parameter_node_invalid")
     if any(not isinstance(item, DesignModelFeatureReference) for item in features):
         raise DesignModelError("feature_reference_invalid")
+    if current.standalone_root is not None:
+        return create_standalone_design_model_revision(
+            current.standalone_root,
+            package_family=current.package_family,
+            parameters=parameters,
+            features=features,
+            actor_id=actor_id,
+            reason=reason,
+            created_at_utc=created_at_utc,
+            previous_revision_id=current.revision_id,
+        )
     ordered_parameters = tuple(sorted(parameters, key=lambda item: item.parameter_id))
     ordered_features = tuple(sorted(features, key=lambda item: item.feature_id))
     provisional = object.__new__(DesignModelRevision)
@@ -437,6 +574,7 @@ def revise_design_model_revision(
         ("actor_id", actor_id),
         ("reason", reason),
         ("created_at_utc", created_at_utc),
+        ("standalone_root", None),
     )
     for field_name, value in values:
         object.__setattr__(provisional, field_name, value)
@@ -462,6 +600,27 @@ def revise_design_model_revision(
 
 
 def _revision_id(revision: DesignModelRevision) -> str:
+    if revision.standalone_root is not None:
+        payload = {
+            "contract": "packlab.design-model.v2",
+            "project_id": revision.project_id,
+            "package_family": revision.package_family.value,
+            "parameters": [item.as_dict() for item in revision.parameters],
+            "features": [item.as_dict() for item in revision.features],
+            "parent_authority": revision.standalone_root.as_dict(),
+            "scale_state": revision.scale_state.value,
+            "coordinate_unit": revision.coordinate_unit,
+            "physical_accuracy_validation_status": revision.physical_accuracy_validation_status,
+            "mold_use_authorized": revision.mold_use_authorized,
+            "previous_revision_id": revision.previous_revision_id,
+            "reason": revision.reason,
+        }
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        return f"design-model:{digest}"
     payload = {
         "contract": "packlab.design-model.v1",
         "project_id": revision.project_id,
@@ -488,12 +647,14 @@ def _revision_id(revision: DesignModelRevision) -> str:
 __all__ = [
     "DesignModelError",
     "DesignModelFeatureReference",
+    "DesignModelParentKind",
     "DesignModelParameter",
     "DesignModelRevision",
     "FeatureKind",
     "PackageFamily",
     "ParameterType",
     "create_design_model_revision",
+    "create_standalone_design_model_revision",
     "revise_design_model_revision",
     "resolve_design_model_feature",
     "stable_feature_id",

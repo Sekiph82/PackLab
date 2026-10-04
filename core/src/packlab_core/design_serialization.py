@@ -16,11 +16,16 @@ from .design_model import (
     PackageFamily,
     ParameterType,
 )
+from .design_model_binding import (
+    StandaloneDesignGeometryRoot,
+    StandaloneDesignGeometrySourceKind,
+)
 from .design_operations import DesignOperation, OperationKind
 from .design_profile import DesignProfile, ProfilePoint, create_design_profile
 from .reconstruction import ScaleState
 
 DOCUMENT_CONTRACT = "packlab.design-model-document.v1"
+STANDALONE_DOCUMENT_CONTRACT = "packlab.design-model-document.v2"
 MAX_DOCUMENT_BYTES = 16 * 1024 * 1024
 
 
@@ -46,8 +51,9 @@ def serialize_design_model(
     """Encode canonical UTF-8 JSON with a SHA-256 digest over the complete document body."""
     document = DesignModelDocument(model, profiles, cross_sections, operations)
     _validate_document_references(document)
+    standalone = model.standalone_root is not None
     body = {
-        "contract": DOCUMENT_CONTRACT,
+        "contract": STANDALONE_DOCUMENT_CONTRACT if standalone else DOCUMENT_CONTRACT,
         "model": model.as_dict(),
         "profiles": [item.as_dict() for item in sorted(profiles, key=lambda item: item.profile_id)],
         "cross_sections": [
@@ -103,7 +109,7 @@ def deserialize_design_model(
         "operations",
     }:
         raise DesignSerializationError("document_body_invalid")
-    if body["contract"] != DOCUMENT_CONTRACT:
+    if body["contract"] not in {DOCUMENT_CONTRACT, STANDALONE_DOCUMENT_CONTRACT}:
         raise DesignSerializationError("document_version_unsupported")
     digest = decoded["content_sha256"]
     if not isinstance(digest, str) or len(digest) != 64:
@@ -111,30 +117,98 @@ def deserialize_design_model(
     if hashlib.sha256(_canonical_json(body)).hexdigest() != digest:
         raise DesignSerializationError("document_digest_mismatch")
     model = _deserialize_model(body["model"])
+    if (model.standalone_root is not None) != (body["contract"] == STANDALONE_DOCUMENT_CONTRACT):
+        raise DesignSerializationError("document_parent_authority_contract_mismatch")
     profiles = _deserialize_profiles(body["profiles"])
     sections = _deserialize_sections(body["cross_sections"])
     operations = _deserialize_operations(body["operations"])
     document = DesignModelDocument(model, profiles, sections, operations)
     _validate_document_references(document)
-    if (
-        expected_scan_master_revision_id is not None
-        and model.fitted_to_scan_master_revision_id != expected_scan_master_revision_id
+    if expected_scan_master_revision_id is not None and (
+        model.fitted_to_scan_master_revision_id is None
+        or model.fitted_to_scan_master_revision_id != expected_scan_master_revision_id
     ):
         raise DesignSerializationError("scan_master_parent_revision_stale")
-    if (
-        expected_scan_master_geometry_sha256 is not None
-        and model.scan_master_geometry_sha256 != expected_scan_master_geometry_sha256
+    if expected_scan_master_geometry_sha256 is not None and (
+        model.scan_master_geometry_sha256 is None
+        or model.scan_master_geometry_sha256 != expected_scan_master_geometry_sha256
     ):
         raise DesignSerializationError("scan_master_parent_digest_stale")
-    if (
-        expected_parent_binding_revision_id is not None
-        and model.parent_binding_revision_id != expected_parent_binding_revision_id
+    if expected_parent_binding_revision_id is not None and (
+        model.parent_binding_revision_id is None
+        or model.parent_binding_revision_id != expected_parent_binding_revision_id
     ):
         raise DesignSerializationError("parent_binding_revision_stale")
     return document
 
 
 def _deserialize_model(value: object) -> DesignModelRevision:
+    if not isinstance(value, dict) or not isinstance(value.get("contract"), str):
+        raise DesignSerializationError("model_fields_invalid")
+    contract = value["contract"]
+    if contract == "packlab.design-model.v2":
+        model = _mapping(
+            value,
+            {
+                "contract",
+                "revision_id",
+                "project_id",
+                "package_family",
+                "parameters",
+                "features",
+                "parent_authority",
+                "scale_state",
+                "coordinate_unit",
+                "physical_accuracy_validation_status",
+                "mold_use_authorized",
+                "previous_revision_id",
+                "actor_id",
+                "reason",
+                "created_at_utc",
+            },
+            "model",
+        )
+        root = _deserialize_standalone_root(model["parent_authority"])
+        parameters = tuple(
+            _deserialize_parameter(item) for item in _array(model["parameters"], "model.parameters")
+        )
+        features = tuple(
+            _deserialize_feature(item) for item in _array(model["features"], "model.features")
+        )
+        try:
+            return DesignModelRevision(
+                revision_id=_string(model["revision_id"], "model.revision_id"),
+                project_id=_string(model["project_id"], "model.project_id"),
+                package_family=_enum(
+                    PackageFamily, model["package_family"], "model.package_family"
+                ),
+                parameters=parameters,
+                features=features,
+                parent_binding_revision_id=None,
+                fitted_to_scan_master_revision_id=None,
+                scan_master_geometry_sha256=None,
+                scale_state=_enum(ScaleState, model["scale_state"], "model.scale_state"),
+                scale_provenance_id=None,
+                coordinate_unit=_string(model["coordinate_unit"], "model.coordinate_unit"),
+                physical_accuracy_validation_status=_string(
+                    model["physical_accuracy_validation_status"],
+                    "model.physical_accuracy_validation_status",
+                ),
+                mold_use_authorized=_boolean(
+                    model["mold_use_authorized"], "model.mold_use_authorized"
+                ),
+                previous_revision_id=_optional_string(
+                    model["previous_revision_id"], "model.previous_revision_id"
+                ),
+                actor_id=_string(model["actor_id"], "model.actor_id"),
+                reason=_string(model["reason"], "model.reason"),
+                created_at_utc=_string(model["created_at_utc"], "model.created_at_utc"),
+                standalone_root=root,
+            )
+        except ValueError as error:
+            raise DesignSerializationError("standalone_design_model_invalid") from error
+    if contract != "packlab.design-model.v1":
+        raise DesignSerializationError("design_model_version_unsupported")
     model = _mapping(
         value,
         {
@@ -157,8 +231,6 @@ def _deserialize_model(value: object) -> DesignModelRevision:
         },
         "model",
     )
-    if model["contract"] != "packlab.design-model.v1":
-        raise DesignSerializationError("design_model_version_unsupported")
     parent = _mapping(
         model["parent"],
         {"binding_revision_id", "scan_master_revision_id", "scan_master_geometry_sha256"},
@@ -200,6 +272,62 @@ def _deserialize_model(value: object) -> DesignModelRevision:
         reason=_string(model["reason"], "model.reason"),
         created_at_utc=_string(model["created_at_utc"], "model.created_at_utc"),
     )
+
+
+def _deserialize_standalone_root(value: object) -> StandaloneDesignGeometryRoot:
+    root = _mapping(
+        value,
+        {
+            "contract",
+            "authority_class",
+            "revision_id",
+            "content_sha256",
+            "project_id",
+            "source_kind",
+            "source_provenance_id",
+            "scale_state",
+            "coordinate_unit",
+            "unit_provenance_id",
+            "physical_accuracy_validation_status",
+            "mold_use_authorized",
+            "captured_ancestry_exists",
+            "actor_id",
+            "reason",
+            "created_at_utc",
+        },
+        "model.parent_authority",
+    )
+    if (
+        root["contract"] != "packlab.standalone-design-geometry-root.v1"
+        or root["authority_class"] != "STANDALONE_DESIGN_GEOMETRY"
+    ):
+        raise DesignSerializationError("standalone_parent_authority_contract_invalid")
+    try:
+        return StandaloneDesignGeometryRoot(
+            revision_id=_string(root["revision_id"], "root.revision_id"),
+            content_sha256=_string(root["content_sha256"], "root.content_sha256"),
+            project_id=_string(root["project_id"], "root.project_id"),
+            source_kind=_enum(
+                StandaloneDesignGeometrySourceKind, root["source_kind"], "root.source_kind"
+            ),
+            source_provenance_id=_string(root["source_provenance_id"], "root.source_provenance_id"),
+            scale_state=_enum(ScaleState, root["scale_state"], "root.scale_state"),
+            coordinate_unit=_string(root["coordinate_unit"], "root.coordinate_unit"),
+            unit_provenance_id=_string(root["unit_provenance_id"], "root.unit_provenance_id"),
+            actor_id=_string(root["actor_id"], "root.actor_id"),
+            reason=_string(root["reason"], "root.reason"),
+            created_at_utc=_string(root["created_at_utc"], "root.created_at_utc"),
+            physical_accuracy_validation_status=_string(
+                root["physical_accuracy_validation_status"],
+                "root.physical_accuracy_validation_status",
+            ),
+            mold_use_authorized=_boolean(root["mold_use_authorized"], "root.mold_use_authorized"),
+            captured_ancestry_exists=_boolean(
+                root["captured_ancestry_exists"], "root.captured_ancestry_exists"
+            ),
+        )
+    except ValueError as error:
+        raise DesignSerializationError("standalone_parent_authority_invalid") from error
 
 
 def _deserialize_parameter(value: object) -> DesignModelParameter:

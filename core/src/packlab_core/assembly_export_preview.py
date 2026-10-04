@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from .design_model import (
     DesignModelFeatureReference,
+    DesignModelParentKind,
     DesignModelRevision,
     FeatureKind,
     ParameterType,
@@ -107,6 +108,18 @@ def validate_bottle_closure_assembly_for_export(
         for item in (assembly_model, bottle_model, closure_model)
     ):
         raise AssemblyExportPreviewError("assembly_design_model_revisions_required")
+    if any(
+        item.parent_kind is not DesignModelParentKind.CAPTURED_SCAN_MASTER
+        for item in (assembly_model, bottle_model, closure_model)
+    ):
+        raise AssemblyExportPreviewError("captured_scan_master_parent_required")
+    for model in (assembly_model, bottle_model, closure_model):
+        assert model.parent_binding_revision_id is not None
+        assert model.fitted_to_scan_master_revision_id is not None
+        assert model.scan_master_geometry_sha256 is not None
+        assert model.scale_provenance_id is not None
+    assert assembly_model.scale_provenance_id is not None
+    assembly_scale_provenance_id = assembly_model.scale_provenance_id
     digest = mesh_sha256(scan_master.mesh)
     manifest = scan_master.manifest
     if (
@@ -247,7 +260,7 @@ def validate_bottle_closure_assembly_for_export(
         "assembly_model_revision_id": assembly_model.revision_id,
         "mating_reference_set_id": mating_references.reference_set_id,
         "scale_state": scale_state.value,
-        "scale_provenance_id": assembly_model.scale_provenance_id,
+        "scale_provenance_id": assembly_scale_provenance_id,
         "coordinate_unit": expected_unit,
         "components": components,
         "mating_relationship": relationship,
@@ -265,7 +278,7 @@ def validate_bottle_closure_assembly_for_export(
         assembly_model.revision_id,
         mating_references.reference_set_id,
         scale_state,
-        assembly_model.scale_provenance_id,
+        assembly_scale_provenance_id,
         expected_unit,
         components,
         relationship,

@@ -12,6 +12,7 @@ from enum import StrEnum
 
 from .design_model import (
     DesignModelError,
+    DesignModelParentKind,
     DesignModelRevision,
     FeatureKind,
     resolve_design_model_feature,
@@ -221,6 +222,12 @@ def create_parametric_assembly_graph(
     for item in components:
         if not isinstance(item.model, DesignModelRevision):
             raise AssemblyGraphError("assembly_component_model_required")
+        if item.model.parent_kind is not DesignModelParentKind.CAPTURED_SCAN_MASTER:
+            raise AssemblyGraphError("assembly_captured_scan_master_parent_required")
+        assert item.model.parent_binding_revision_id is not None
+        assert item.model.fitted_to_scan_master_revision_id is not None
+        assert item.model.scan_master_geometry_sha256 is not None
+        assert item.model.scale_provenance_id is not None
         if item.expected_model_revision_id != item.model.revision_id or (
             expected_component_revision_ids.get(item.role) != item.model.revision_id
         ):

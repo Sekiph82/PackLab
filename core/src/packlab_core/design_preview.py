@@ -33,9 +33,9 @@ class DesignPreview:
 
     mesh: TriangleMeshData
     model_revision_id: str
-    scan_master_revision_id: str
-    scan_master_geometry_sha256: str
-    parent_binding_revision_id: str
+    scan_master_revision_id: str | None
+    scan_master_geometry_sha256: str | None
+    parent_binding_revision_id: str | None
     scale_state: ScaleState
     coordinate_unit: str
     physical_accuracy_validation_status: str
@@ -43,6 +43,7 @@ class DesignPreview:
     feature_vertex_indices: tuple[tuple[str, tuple[int, ...]], ...]
     authority_class: str = PREVIEW_AUTHORITY
     contract: str = PREVIEW_CONTRACT
+    standalone_root_revision_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.authority_class != PREVIEW_AUTHORITY or self.contract != PREVIEW_CONTRACT:
@@ -52,9 +53,45 @@ class DesignPreview:
             or self.mold_use_authorized is not False
         ):
             raise DesignPreviewError("preview_physical_authority_invalid")
+        captured = (
+            self.scan_master_revision_id is not None
+            and self.scan_master_geometry_sha256 is not None
+            and self.parent_binding_revision_id is not None
+            and self.standalone_root_revision_id is None
+        )
+        standalone = (
+            self.standalone_root_revision_id is not None
+            and self.scan_master_revision_id is None
+            and self.scan_master_geometry_sha256 is None
+            and self.parent_binding_revision_id is None
+        )
+        if not captured and not standalone:
+            raise DesignPreviewError("preview_parent_authority_invalid")
 
     def as_dict(self) -> dict[str, object]:
         """Return metadata only; geometry remains a disposable derived payload."""
+        if self.standalone_root_revision_id is not None:
+            return {
+                "contract": self.contract,
+                "authority_class": self.authority_class,
+                "model_revision_id": self.model_revision_id,
+                "parent_authority": {
+                    "kind": "STANDALONE_DESIGN_GEOMETRY",
+                    "root_revision_id": self.standalone_root_revision_id,
+                },
+                "scale_state": self.scale_state.value,
+                "coordinate_unit": self.coordinate_unit,
+                "physical_accuracy_validation_status": self.physical_accuracy_validation_status,
+                "mold_use_authorized": self.mold_use_authorized,
+                "vertex_count": len(self.mesh.vertices),
+                "triangle_count": len(self.mesh.triangles),
+                "feature_vertex_indices": [
+                    {"feature_id": feature_id, "indices": list(indices)}
+                    for feature_id, indices in self.feature_vertex_indices
+                ],
+                "disposable": True,
+                "scan_master_promoted": False,
+            }
         return {
             "contract": self.contract,
             "authority_class": self.authority_class,
@@ -183,6 +220,9 @@ def _tessellate_operation(
         physical_accuracy_validation_status=model.physical_accuracy_validation_status,
         mold_use_authorized=model.mold_use_authorized,
         feature_vertex_indices=mapping,
+        standalone_root_revision_id=(
+            model.standalone_root.revision_id if model.standalone_root is not None else None
+        ),
     )
 
 

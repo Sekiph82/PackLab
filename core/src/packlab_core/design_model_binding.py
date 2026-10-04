@@ -1,4 +1,4 @@
-"""Immutable future Design Model bindings to exact Scan Master revisions."""
+"""Immutable captured Scan Master bindings and standalone design authority roots."""
 
 from __future__ import annotations
 
@@ -29,6 +29,12 @@ class ParentBindingStatus(StrEnum):
     NEWER_SCAN_MASTER_AND_RECONSTRUCTION_AVAILABLE = (
         "NEWER_SCAN_MASTER_AND_RECONSTRUCTION_AVAILABLE"
     )
+
+
+class StandaloneDesignGeometrySourceKind(StrEnum):
+    USER_AUTHORED_NOMINAL_DIMENSIONS = "USER_AUTHORED_NOMINAL_DIMENSIONS"
+    REFERENCE_DIMENSIONS = "REFERENCE_DIMENSIONS"
+    REVIEWED_REUSABLE_TEMPLATE = "REVIEWED_REUSABLE_TEMPLATE"
 
 
 def _text(value: object, field: str, *, maximum: int = 1000) -> str:
@@ -169,6 +175,176 @@ class DesignModelParentBindingRevision:
             "created_at_utc": self.created_at_utc,
             "previous_binding_revision_id": self.previous_binding_revision_id,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class StandaloneDesignGeometryRoot:
+    """Immutable design-only root with no Scan Master or captured ancestry."""
+
+    revision_id: str
+    content_sha256: str
+    project_id: str
+    source_kind: StandaloneDesignGeometrySourceKind
+    source_provenance_id: str
+    scale_state: ScaleState
+    coordinate_unit: str
+    unit_provenance_id: str
+    actor_id: str
+    reason: str
+    created_at_utc: str
+    physical_accuracy_validation_status: str = _DEFERRED
+    mold_use_authorized: bool = False
+    captured_ancestry_exists: bool = False
+
+    def __post_init__(self) -> None:
+        _text(self.project_id, "project_id")
+        if not isinstance(self.source_kind, StandaloneDesignGeometrySourceKind):
+            raise DesignModelBindingError("standalone_source_kind_invalid")
+        _text(self.source_provenance_id, "source_provenance_id")
+        if not isinstance(self.scale_state, ScaleState) or self.scale_state not in {
+            ScaleState.RELATIVE,
+            ScaleState.METRIC_UNVERIFIED,
+        }:
+            raise DesignModelBindingError("standalone_scale_state_invalid")
+        expected_unit = (
+            "reconstruction_units" if self.scale_state is ScaleState.RELATIVE else "mm_unverified"
+        )
+        if self.coordinate_unit != expected_unit:
+            raise DesignModelBindingError("standalone_coordinate_unit_mismatch")
+        _text(self.unit_provenance_id, "unit_provenance_id")
+        _text(self.actor_id, "actor_id")
+        why = _text(self.reason, "standalone_root_reason")
+        _utc_timestamp(self.created_at_utc)
+        if (
+            self.physical_accuracy_validation_status != _DEFERRED
+            or self.mold_use_authorized is not False
+            or self.captured_ancestry_exists is not False
+        ):
+            raise DesignModelBindingError("standalone_root_authority_forbidden")
+        payload = _standalone_root_payload(
+            self.project_id,
+            self.source_kind,
+            self.source_provenance_id,
+            self.scale_state,
+            self.coordinate_unit,
+            self.unit_provenance_id,
+            self.actor_id,
+            why,
+            self.created_at_utc,
+        )
+        digest = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        if self.content_sha256 != digest:
+            raise DesignModelBindingError("standalone_root_digest_mismatch")
+        if self.revision_id != f"standalone-design-geometry:{digest}":
+            raise DesignModelBindingError("standalone_root_revision_id_mismatch")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "contract": "packlab.standalone-design-geometry-root.v1",
+            "authority_class": "STANDALONE_DESIGN_GEOMETRY",
+            "revision_id": self.revision_id,
+            "content_sha256": self.content_sha256,
+            "project_id": self.project_id,
+            "source_kind": self.source_kind.value,
+            "source_provenance_id": self.source_provenance_id,
+            "scale_state": self.scale_state.value,
+            "coordinate_unit": self.coordinate_unit,
+            "unit_provenance_id": self.unit_provenance_id,
+            "physical_accuracy_validation_status": self.physical_accuracy_validation_status,
+            "mold_use_authorized": self.mold_use_authorized,
+            "captured_ancestry_exists": self.captured_ancestry_exists,
+            "actor_id": self.actor_id,
+            "reason": self.reason,
+            "created_at_utc": self.created_at_utc,
+        }
+
+
+def create_standalone_design_geometry_root(
+    *,
+    project_id: str,
+    source_kind: StandaloneDesignGeometrySourceKind,
+    source_provenance_id: str,
+    scale_state: ScaleState,
+    unit_provenance_id: str,
+    actor_id: str,
+    reason: str,
+    created_at_utc: str,
+) -> StandaloneDesignGeometryRoot:
+    """Create a truthful, versioned model-only design root without captured ancestry."""
+    _text(project_id, "project_id")
+    if not isinstance(source_kind, StandaloneDesignGeometrySourceKind):
+        raise DesignModelBindingError("standalone_source_kind_invalid")
+    _text(source_provenance_id, "source_provenance_id")
+    if not isinstance(scale_state, ScaleState) or scale_state not in {
+        ScaleState.RELATIVE,
+        ScaleState.METRIC_UNVERIFIED,
+    }:
+        raise DesignModelBindingError("standalone_scale_state_invalid")
+    _text(unit_provenance_id, "unit_provenance_id")
+    _text(actor_id, "actor_id")
+    _text(reason, "standalone_root_reason")
+    _utc_timestamp(created_at_utc)
+    unit = "reconstruction_units" if scale_state is ScaleState.RELATIVE else "mm_unverified"
+    payload = _standalone_root_payload(
+        project_id,
+        source_kind,
+        source_provenance_id,
+        scale_state,
+        unit,
+        unit_provenance_id,
+        actor_id,
+        reason,
+        created_at_utc,
+    )
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    return StandaloneDesignGeometryRoot(
+        revision_id=f"standalone-design-geometry:{digest}",
+        content_sha256=digest,
+        project_id=project_id,
+        source_kind=source_kind,
+        source_provenance_id=source_provenance_id,
+        scale_state=scale_state,
+        coordinate_unit=unit,
+        unit_provenance_id=unit_provenance_id,
+        actor_id=actor_id,
+        reason=reason,
+        created_at_utc=created_at_utc,
+    )
+
+
+def _standalone_root_payload(
+    project_id: str,
+    source_kind: StandaloneDesignGeometrySourceKind,
+    source_provenance_id: str,
+    scale_state: ScaleState,
+    coordinate_unit: str,
+    unit_provenance_id: str,
+    actor_id: str,
+    reason: str,
+    created_at_utc: str,
+) -> dict[str, object]:
+    return {
+        "contract": "packlab.standalone-design-geometry-root.v1",
+        "authority_class": "STANDALONE_DESIGN_GEOMETRY",
+        "project_id": project_id,
+        "source_kind": source_kind.value,
+        "source_provenance_id": source_provenance_id,
+        "scale_state": scale_state.value,
+        "coordinate_unit": coordinate_unit,
+        "unit_provenance_id": unit_provenance_id,
+        "physical_accuracy_validation_status": _DEFERRED,
+        "mold_use_authorized": False,
+        "captured_ancestry_exists": False,
+        "actor_id": actor_id,
+        "reason": reason,
+        "created_at_utc": created_at_utc,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -363,7 +539,10 @@ __all__ = [
     "DesignModelParentBindingRevision",
     "DesignModelParentStatus",
     "ParentBindingStatus",
+    "StandaloneDesignGeometryRoot",
+    "StandaloneDesignGeometrySourceKind",
     "bind_design_model_parent",
+    "create_standalone_design_geometry_root",
     "inspect_design_model_parent",
     "rebind_design_model_parent",
 ]

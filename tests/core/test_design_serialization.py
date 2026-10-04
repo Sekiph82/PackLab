@@ -138,6 +138,12 @@ def test_serialized_bytes_are_canonical_and_exclude_preview_mesh_authority() -> 
     first = serialize_design_model(
         model, profiles=profiles, cross_sections=sections, operations=operations
     )
+    assert model.revision_id == (
+        "design-model:073ffb34da80cf16b1569f5d7dbc0b69e8fddb68c164edeb374bb37f9c90dcd0"
+    )
+    assert hashlib.sha256(first).hexdigest() == (
+        "c90772fe0630c6c9fc6eb80b3cc563cdd710e2541fe03d67b83a0ef805e92f09"
+    )
     repeat = serialize_design_model(
         model,
         profiles=tuple(reversed(profiles)),
