@@ -2,8 +2,8 @@
 
 Task: **Tessellate BREP back to preview mesh with controlled tolerance**
 
-Cycle: M13-C001  
-Prompt: `PL-0296_CODEX_PROMPT_V01.md`  
+Cycle: M13-C001
+Prompt: `PL-0296_CODEX_PROMPT_V01.md`
 Criteria: `PL-0296_CHATGPT_AUDIT_CRITERIA_V01.md`
 
 ## Authorization and synchronization
@@ -50,6 +50,7 @@ No tracker, audit, prompt, criteria, dependency, lockfile, later-child, private 
 - Initial focused run exposed that OCCT's Bnd_Box tuple groups minima before maxima, while preview AABBs use interleaved axis pairs. The source bounds are now normalized before comparison; the corrected bound test passes within the requested linear deflection.
 - Initial shell-invalid fixture used an incorrect OCP module cast. It now extracts the shell through `TopExp_Explorer`; invalid shell rejection passes.
 - A first mypy check identified an unused return-value ignore, which was removed. The final scoped typing check passes.
+- The first child-log commit retained two Markdown hard-break spaces and `git diff --check` flagged them. A follow-up log-only commit removes the whitespace; the corrected log passes `git diff --check`.
 
 ## Limitations
 
