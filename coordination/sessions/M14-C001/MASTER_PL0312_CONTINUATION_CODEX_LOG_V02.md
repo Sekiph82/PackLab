@@ -1,6 +1,6 @@
 # M14-C001-R01 - PL-0312 Authority Resolution & Continuation Codex Log V02
 
-Master prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CODEX_PROMPT_V02.md  
+Master prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CODEX_PROMPT_V02.md
 Master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md
 
 ## Authorization and starting state
