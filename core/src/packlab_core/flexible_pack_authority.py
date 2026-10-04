@@ -22,7 +22,7 @@ class FlexiblePackAuthorityError(ValueError):
 def is_flexible_pack_model(model: object) -> bool:
     if not isinstance(model, DesignModelRevision):
         return False
-    return model.package_family is PackageFamily.TUBE or any(
+    return model.package_family in {PackageFamily.TUBE, PackageFamily.FLEXIBLE_PACK} or any(
         parameter.parameter_id.startswith("pouch_") for parameter in model.parameters
     )
 

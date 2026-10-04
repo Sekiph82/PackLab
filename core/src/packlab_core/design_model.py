@@ -43,6 +43,7 @@ class PackageFamily(StrEnum):
     CYLINDRICAL_CONTAINER = "cylindrical-container"
     JERRYCAN = "jerrycan"
     TUBE = "tube"
+    FLEXIBLE_PACK = "flexible-pack"
     OTHER = "other"
 
 
@@ -599,6 +600,77 @@ def revise_design_model_revision(
     )
 
 
+def convert_design_model_family_revision(
+    current: DesignModelRevision,
+    *,
+    package_family: PackageFamily,
+    parameters: tuple[DesignModelParameter, ...],
+    features: tuple[DesignModelFeatureReference, ...],
+    actor_id: str,
+    reason: str,
+    created_at_utc: str,
+) -> DesignModelRevision:
+    """Create a new family revision while retaining the exact current parent authority."""
+    if not isinstance(current, DesignModelRevision):
+        raise DesignModelError("current_design_model_revision_required")
+    if not isinstance(package_family, PackageFamily):
+        raise DesignModelError("package_family_invalid")
+    if package_family is current.package_family:
+        raise DesignModelError("family_conversion_target_must_differ")
+    if not isinstance(parameters, tuple) or any(
+        not isinstance(item, DesignModelParameter) for item in parameters
+    ):
+        raise DesignModelError("parameters_must_be_immutable_tuple")
+    if not isinstance(features, tuple) or any(
+        not isinstance(item, DesignModelFeatureReference) for item in features
+    ):
+        raise DesignModelError("features_must_be_immutable_tuple")
+    ordered_parameters = tuple(sorted(parameters, key=lambda item: item.parameter_id))
+    ordered_features = tuple(sorted(features, key=lambda item: item.feature_id))
+    provisional = object.__new__(DesignModelRevision)
+    values = (
+        ("project_id", current.project_id),
+        ("package_family", package_family),
+        ("parameters", ordered_parameters),
+        ("features", ordered_features),
+        ("parent_binding_revision_id", current.parent_binding_revision_id),
+        ("fitted_to_scan_master_revision_id", current.fitted_to_scan_master_revision_id),
+        ("scan_master_geometry_sha256", current.scan_master_geometry_sha256),
+        ("scale_state", current.scale_state),
+        ("scale_provenance_id", current.scale_provenance_id),
+        ("coordinate_unit", current.coordinate_unit),
+        ("physical_accuracy_validation_status", _DEFERRED),
+        ("mold_use_authorized", False),
+        ("previous_revision_id", current.revision_id),
+        ("actor_id", actor_id),
+        ("reason", reason),
+        ("created_at_utc", created_at_utc),
+        ("standalone_root", current.standalone_root),
+    )
+    for field_name, value in values:
+        object.__setattr__(provisional, field_name, value)
+    return DesignModelRevision(
+        revision_id=_revision_id(provisional),
+        project_id=current.project_id,
+        package_family=package_family,
+        parameters=ordered_parameters,
+        features=ordered_features,
+        parent_binding_revision_id=current.parent_binding_revision_id,
+        fitted_to_scan_master_revision_id=current.fitted_to_scan_master_revision_id,
+        scan_master_geometry_sha256=current.scan_master_geometry_sha256,
+        scale_state=current.scale_state,
+        scale_provenance_id=current.scale_provenance_id,
+        coordinate_unit=current.coordinate_unit,
+        physical_accuracy_validation_status=_DEFERRED,
+        mold_use_authorized=False,
+        previous_revision_id=current.revision_id,
+        actor_id=actor_id,
+        reason=reason,
+        created_at_utc=created_at_utc,
+        standalone_root=current.standalone_root,
+    )
+
+
 def _revision_id(revision: DesignModelRevision) -> str:
     if revision.standalone_root is not None:
         payload = {
@@ -655,6 +727,7 @@ __all__ = [
     "ParameterType",
     "create_design_model_revision",
     "create_standalone_design_model_revision",
+    "convert_design_model_family_revision",
     "revise_design_model_revision",
     "resolve_design_model_feature",
     "stable_feature_id",

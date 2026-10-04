@@ -214,7 +214,7 @@ def build_pouch_family(
     parameters = _parameters(dimensions, front_bulge, back_bulge, anchors, root.coordinate_unit)
     model = create_standalone_design_model_revision(
         root,
-        package_family=PackageFamily.OTHER,
+        package_family=PackageFamily.FLEXIBLE_PACK,
         parameters=parameters,
         features=feature_tuple,
         actor_id=actor_id,
