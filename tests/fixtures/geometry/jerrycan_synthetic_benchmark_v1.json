@@ -1,0 +1,40 @@
+{
+  "benchmark_id": "packlab.jerrycan.synthetic_geometry.v1",
+  "benchmark_kind": "software_geometry_only",
+  "disclaimer": "Synthetic parametric behavior only. Not a physical dimensional-accuracy benchmark and not a substitute for deferred PL-0220 through PL-0224 owner validation.",
+  "source_class": "PackLab-authored synthetic fixture; contains no owner scans, private scans, supplier files, or raw scan points.",
+  "authority_limits": {
+    "coordinate_unit": "mm_unverified",
+    "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
+    "mold_use_authorized": false,
+    "manufacturing_tolerance_claim": false,
+    "scan_master_mutable": false,
+    "preview_is_parametric_truth": false
+  },
+  "styles": [
+    {
+      "style_id": "2l_style",
+      "nominal_capacity_label": "2 L style",
+      "capacity_is_geometry_claim": false,
+      "synthetic_scale": 1.0,
+      "section_heights": [2.0, 5.0, 8.0],
+      "expected_body_sections": 3,
+      "expected_feature_kinds": ["body", "handle_opening", "grip_indent"]
+    },
+    {
+      "style_id": "5l_style",
+      "nominal_capacity_label": "5 L style",
+      "capacity_is_geometry_claim": false,
+      "synthetic_scale": 1.5,
+      "section_heights": [3.0, 7.5, 12.0],
+      "expected_body_sections": 3,
+      "expected_feature_kinds": ["body", "handle_opening", "grip_indent"]
+    }
+  ],
+  "diagnostic_expectations": {
+    "body_fit": "Repeated fits from the same synthetic Scan Master produce identical Design Model and preview records.",
+    "feature_edits": "Handle identity survives bounded move/resize and history undo/redo; grip depth remains inside its synthetic evidence envelope.",
+    "deviation": "Only software geometry deviation diagnostics are permitted; distances remain mm_unverified, unsigned where applicable, and are not physical accuracy or tolerance claims.",
+    "invalid_fixture": "Missing, ambiguous, or unsupported synthetic surface evidence must fail closed or remain review-required."
+  }
+}
