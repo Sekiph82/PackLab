@@ -337,7 +337,7 @@ def _render_svg(
         chunks.append("</g>")
         label_y = sheet_y - panel.offset[1] + 4.0
         chunks.append(
-            f'<text x="{_number(sheet_x + panel.offset[0])}" y="{_number(label_y)}" data-layer="ANNOTATIONS">{html.escape(panel.label)}</text>'
+            f'<text x="{_number(sheet_x + panel.offset[0])}" y="{_number(label_y)}" font-size="{_number(_TEXT_HEIGHT)}" data-layer="ANNOTATIONS">{html.escape(panel.label)}</text>'
         )
     for dimension in dimensions.dimensions:
         dimension_panel = panel_lookup.get(dimension.view_id)
@@ -353,12 +353,12 @@ def _render_svg(
                 f'<circle cx="{_number(tx + anchor[0])}" cy="{_number(ty - anchor[1])}" r="0.8" data-layer="DIMENSIONS"/>'
             )
         chunks.append(
-            f'<text x="{_number(tx + dimension.text_anchor[0])}" y="{_number(ty - dimension.text_anchor[1])}" data-layer="DIMENSIONS">{html.escape(_dimension_label(dimension))}</text>'
+            f'<text x="{_number(tx + dimension.text_anchor[0])}" y="{_number(ty - dimension.text_anchor[1])}" font-size="{_number(_TEXT_HEIGHT)}" data-layer="DIMENSIONS">{html.escape(_dimension_label(dimension))}</text>'
         )
     title_start = height - _MARGIN - _TEXT_HEIGHT
     for index, line in enumerate(title_lines):
         chunks.append(
-            f'<text x="{_number(_MARGIN)}" y="{_number(title_start - index * (_TEXT_HEIGHT + 1.5))}" data-layer="TITLE_BLOCK">{html.escape(line)}</text>'
+            f'<text x="{_number(_MARGIN)}" y="{_number(title_start - index * (_TEXT_HEIGHT + 1.5))}" font-size="{_number(_TEXT_HEIGHT)}" data-layer="TITLE_BLOCK">{html.escape(line)}</text>'
         )
     chunks.extend(["</g>", "</svg>"])
     return ("\n".join(chunks) + "\n").encode("utf-8")
@@ -517,7 +517,8 @@ def _dimension_label(dimension: object) -> str:
 
 
 def _text_width(text: str) -> float:
-    return max(1.0, len(text) * _TEXT_HEIGHT * 0.65)
+    # Reserve one full text-height per code point so fonts/Qt versions cannot clip the title block.
+    return max(1.0, len(text) * _TEXT_HEIGHT)
 
 
 def _number(value: float) -> str:
