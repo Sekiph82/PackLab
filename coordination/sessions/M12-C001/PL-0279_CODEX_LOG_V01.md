@@ -2,8 +2,8 @@
 
 Task: **Model dip tube as parameterized length/diameter path**
 
-Cycle: `M12-C001`  
-Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0279_CODEX_PROMPT_V01.md  
+Cycle: `M12-C001`
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0279_CODEX_PROMPT_V01.md
 Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/PL-0279_CHATGPT_AUDIT_CRITERIA_V01.md
 
 ## Synchronization and commits
