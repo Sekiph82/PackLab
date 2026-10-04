@@ -2,7 +2,7 @@
 
 Milestone: **M12 - Advanced Packaging Geometry**
 Ordered batch: **PL-0268 through PL-0288**
-Status: **R02 IN_PROGRESS at PL-0285; V01 PL-0283 blocker resolved by ADR-0005**
+Status: **R02 IN_PROGRESS at PL-0286; V01 PL-0283 blocker resolved by ADR-0005**
 
 Master prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CODEX_PROMPT_V01.md
@@ -41,7 +41,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | PL-0282 | READY_FOR_INDEPENDENT_AUDIT | PL-0282_CODEX_PROMPT_V01.md | PL-0282_CHATGPT_AUDIT_CRITERIA_V01.md | `d54bffd673c68f041ac5c39990dbb5a91225b310` | `dcb8993fab2790af7aa1364299f9d0c7da67c9b2` | 41 passed | 1,452 passed / 6 skipped / 1 deselected | Deterministic hierarchy metadata only; `mm_unverified`/physical accuracy remain deferred; no CAD/STEP/geometry export |
 | PL-0283 | READY_FOR_INDEPENDENT_AUDIT V02 (R02) | PL-0283_CODEX_PROMPT_V02.md | PL-0283_CHATGPT_AUDIT_CRITERIA_V02.md | `2d0d5c34e279ba9617a504c75cbc0e266a86df53` | V02 `PL-0283_CODEX_LOG_V02.md`, `8ef61fba9b41a1a533b2e52ae607238f23294375` | 70 passed | 1,459 passed twice consecutively / 6 skipped / 1 deselected | ADR-0005 standalone authority and tube Design Model/preview only; physical validation remains deferred |
 | PL-0284 | READY_FOR_INDEPENDENT_AUDIT V02 (R02) | PL-0284_CODEX_PROMPT_V02.md | PL-0284_CHATGPT_AUDIT_CRITERIA_V02.md | `4496d40fe0287724073a295a2c128be00d80784e` | V02 `PL-0284_CODEX_LOG_V02.md`, `30ea4631292abb0213dea3d35e1c890be378e73e` | 98 passed | 1,464 passed / 6 skipped / 1 deselected | Captured/reference/user dimensions stay separately labeled; no wall, material, physical or manufacturing inference |
-| PL-0285 | PENDING | PL-0285_CODEX_PROMPT_V01.md | PL-0285_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0285 | READY_FOR_INDEPENDENT_AUDIT V02 (R02) | PL-0285_CODEX_PROMPT_V02.md | PL-0285_CHATGPT_AUDIT_CRITERIA_V02.md | `7951022bec55f0027479fe41cf58653527b562a7` | V02 `PL-0285_CODEX_LOG_V02.md`, `889d94dd6b6ab7e8242ef17aa7f3781c4fdbfc92` | 7 passed | 1,471 passed / 6 skipped / 1 deselected | Standalone nominal pouch preview only; no physical, mold, manufacturing, or captured-surface authority |
 | PL-0286 | PENDING | PL-0286_CODEX_PROMPT_V01.md | PL-0286_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0287 | PENDING | PL-0287_CODEX_PROMPT_V01.md | PL-0287_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0288 | PENDING | PL-0288_CODEX_PROMPT_V01.md | PL-0288_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
@@ -81,8 +81,9 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 - PL-0283 V02 focused: 70 passed. The exact locked full suite passed twice consecutively at implementation SHA `2d0d5c34e279ba9617a504c75cbc0e266a86df53`: each 1,459 passed, 6 skipped, 1 deselected. Changed-file Ruff/format, targeted mypy and compileall passed; the broader initial mypy command also reported two untouched legacy errors in `calibration/marker_detection.py`.
 - R02 preserves `mm_unverified` as nominal-design units and `DEFERRED_OWNER_VALIDATION`; no M13 work began. Exact commands and remaining limitations are recorded in `PL-0283_CODEX_LOG_V02.md`.
 - PL-0284 V02 tube fitting implementation/evidence commit `4496d40fe0287724073a295a2c128be00d80784e` and separate child-log-only commit `30ea4631292abb0213dea3d35e1c890be378e73e` are remote-visible. Focused: 98 passed; exact locked full suite: 1,464 passed / 6 skipped / 1 deselected. Ruff, format, targeted mypy and compileall passed. Captured measurements are source-parent checked; reference and user-authored values remain separate; no hidden wall or material properties are inferred. See `PL-0284_CODEX_LOG_V02.md`.
-- Current published GitHub main: `30ea4631292abb0213dea3d35e1c890be378e73e`.
+- PL-0285 V02 implementation/evidence commit `7951022bec55f0027479fe41cf58653527b562a7` and child-log-only publication/correction commits `e76cf7e12cf82c730a02e2cf94bdcc7117bb2daf` and `889d94dd6b6ab7e8242ef17aa7f3781c4fdbfc92` are remote-visible; both log commits contain only `PL-0285_CODEX_LOG_V02.md`. Focused: 7 passed; exact locked full suite: 1,471 passed / 6 skipped / 1 deselected. Ruff, format, scoped mypy and compileall passed. The pouch is standalone visualization/design geometry with nominal dimensions, four seal zones and stable front/back artwork references; no captured or physical authority is claimed. See `PL-0285_CODEX_LOG_V02.md`.
+- Current published GitHub main after PL-0285 log publication: `889d94dd6b6ab7e8242ef17aa7f3781c4fdbfc92`.
 
-Current batch frontier: **PL-0285 V02** under M12-C001-R02.
+Current batch frontier: **PL-0286 V02** under M12-C001-R02.
 
 IN_PROGRESS

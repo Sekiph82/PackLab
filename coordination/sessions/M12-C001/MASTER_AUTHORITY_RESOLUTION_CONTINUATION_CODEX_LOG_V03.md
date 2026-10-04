@@ -30,7 +30,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 |---|---|---|---|---|---|---|
 | PL-0283 V02 | READY_FOR_INDEPENDENT_AUDIT | `2d0d5c34e279ba9617a504c75cbc0e266a86df53` | `8ef61fba9b41a1a533b2e52ae607238f23294375` | 70 passed | 1,459 passed twice / 6 skipped / 1 deselected | No physical/mold/CAD authority; PL-0220 through PL-0224 remain deferred |
 | PL-0284 V02 | READY_FOR_INDEPENDENT_AUDIT | `4496d40fe0287724073a295a2c128be00d80784e` | `30ea4631292abb0213dea3d35e1c890be378e73e` | 98 passed | 1,464 passed / 6 skipped / 1 deselected | Captured, reference and user dimensions remain distinct; hidden wall/material/physical claims deferred |
-| PL-0285 V02 | PENDING | | | | | |
+| PL-0285 V02 | READY_FOR_INDEPENDENT_AUDIT | `7951022bec55f0027479fe41cf58653527b562a7` | `889d94dd6b6ab7e8242ef17aa7f3781c4fdbfc92` | 7 passed | 1,471 passed / 6 skipped / 1 deselected | Standalone nominal pouch preview only; no captured, physical, mold, or manufacturing authority |
 | PL-0286 V02 | PENDING | | | | | |
 | PL-0287 V02 | PENDING | | | | | |
 | PL-0288 V02 | PENDING | | | | | |
@@ -43,6 +43,8 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 - Final GitHub SHA:
 - Worktree:
 - M13 started: NO
+
+PL-0285 V02 is published and ends `READY_FOR_INDEPENDENT_AUDIT`. The standalone sachet/pouch family has explicit nominal overall dimensions, seal-zone parameters, stable front/back artwork references, deterministic model serialization and a deterministic disposable preview. Only the standalone-root path is implemented. Physical validation remains deferred; no captured surface, mold/manufacturing or M13 authority is claimed. Exact commands, legacy mypy limitation, security review and warnings are in `PL-0285_CODEX_LOG_V02.md`.
 
 The final line must be exactly:
 
