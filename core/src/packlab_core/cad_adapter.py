@@ -200,6 +200,14 @@ class CadTessellationData:
     maximum_faces: int
 
 
+@dataclass(frozen=True, slots=True)
+class CadProjectedCurveData:
+    """Backend-neutral visible projected BREP edge represented by 2D points."""
+
+    curve_type: str
+    points: tuple[tuple[float, float], ...]
+
+
 _SHAPE_REGISTRY: dict[str, tuple[str, Any]] = {}
 _SHAPE_REGISTRY_LOCK = threading.RLock()
 
@@ -496,6 +504,105 @@ def cad_shape_bounds(handle: CadShapeHandle) -> tuple[float, float, float, float
     if len(bounds) != 6 or any(not math.isfinite(value) for value in bounds):
         raise CadAdapterError("cad_shape_bounds_invalid")
     return tuple(float(value) for value in bounds)  # type: ignore[return-value]
+
+
+def project_visible_cad_edges(
+    handle: CadShapeHandle,
+    *,
+    screen_right: tuple[float, float, float],
+    screen_up: tuple[float, float, float],
+) -> tuple[CadProjectedCurveData, ...]:
+    """Extract deterministic visible BREP edges through OCCT exact HLR."""
+    if not isinstance(handle, CadShapeHandle):
+        raise CadAdapterError("cad_shape_handle_required")
+    right = _drawing_unit_vector(screen_right, "cad_projection_screen_right_invalid")
+    up = _drawing_unit_vector(screen_up, "cad_projection_screen_up_invalid")
+    if abs(_drawing_dot(right, up)) > 1e-9:
+        raise CadAdapterError("cad_projection_axes_not_orthogonal")
+    normal = _drawing_unit_vector(_drawing_cross(right, up), "cad_projection_normal_invalid")
+    shape = _shape_for_handle(handle)
+    if shape.IsNull():
+        raise CadAdapterError("cad_projection_shape_null")
+    try:
+        hlr = importlib.import_module("OCP.HLRBRep")
+        hlr_algo = importlib.import_module("OCP.HLRAlgo")
+        gp = importlib.import_module("OCP.gp")
+        top_abs = importlib.import_module("OCP.TopAbs")
+        top_exp = importlib.import_module("OCP.TopExp")
+        topods = importlib.import_module("OCP.TopoDS")
+        adaptor_module = importlib.import_module("OCP.BRepAdaptor")
+        geom_abs = importlib.import_module("OCP.GeomAbs")
+        projector_axes = gp.gp_Ax2(gp.gp_Pnt(0.0, 0.0, 0.0), gp.gp_Dir(*normal), gp.gp_Dir(*right))
+        algorithm = hlr.HLRBRep_Algo()
+        algorithm.Add(shape)
+        algorithm.Projector(hlr_algo.HLRAlgo_Projector(projector_axes))
+        algorithm.Update()
+        algorithm.Hide()
+        visible_shape = hlr.HLRBRep_HLRToShape(algorithm).VCompound(shape)
+        edge_explorer = top_exp.TopExp_Explorer(visible_shape, top_abs.TopAbs_EDGE)
+        curves: list[CadProjectedCurveData] = []
+        while edge_explorer.More():
+            edge = topods.TopoDS.Edge_s(edge_explorer.Current())
+            curve = adaptor_module.BRepAdaptor_Curve(edge)
+            first = float(curve.FirstParameter())
+            last = float(curve.LastParameter())
+            if math.isfinite(first) and math.isfinite(last) and last > first:
+                kind = curve.GetType()
+                samples = 2 if kind == geom_abs.GeomAbs_Line else 48
+                points: list[tuple[float, float]] = []
+                for index in range(samples):
+                    parameter = first + (last - first) * index / (samples - 1)
+                    point = curve.Value(parameter)
+                    # OCCT HLR returns edges in the projector's local XY plane.
+                    # Applying the world basis again would collapse rotated views.
+                    projected = (float(point.X()), float(point.Y()))
+                    if all(math.isfinite(value) for value in projected):
+                        points.append(projected)
+                if len(points) >= 2:
+                    curves.append(CadProjectedCurveData(str(kind).split(".")[-1], tuple(points)))
+            edge_explorer.Next()
+    except CadAdapterError:
+        raise
+    except Exception as error:
+        raise CadAdapterError("cad_projection_hlr_failed") from error
+
+    if not curves:
+        raise CadAdapterError("cad_projection_visible_edges_missing")
+    return tuple(curves)
+
+
+def _drawing_unit_vector(
+    vector: tuple[float, float, float], error_code: str
+) -> tuple[float, float, float]:
+    if (
+        not isinstance(vector, tuple)
+        or len(vector) != 3
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in vector
+        )
+    ):
+        raise CadAdapterError(error_code)
+    magnitude = math.sqrt(sum(float(value) * float(value) for value in vector))
+    if magnitude <= 1e-12:
+        raise CadAdapterError(error_code)
+    return tuple(float(value) / magnitude for value in vector)  # type: ignore[return-value]
+
+
+def _drawing_dot(left: tuple[float, float, float], right: tuple[float, float, float]) -> float:
+    return sum(a * b for a, b in zip(left, right))
+
+
+def _drawing_cross(
+    left: tuple[float, float, float], right: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    return (
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    )
 
 
 def tessellate_cad_shape(
@@ -1291,6 +1398,7 @@ __all__ = [
     "CadPoint2",
     "CadProfileControlPoint",
     "CadProfileInput",
+    "CadProjectedCurveData",
     "CadRuntimeDiagnostics",
     "CadRuntimeStatus",
     "CadShapeBuild",
@@ -1305,6 +1413,7 @@ __all__ = [
     "inspect_shape_topology",
     "probe_cad_runtime",
     "profile_to_cad_input",
+    "project_visible_cad_edges",
     "shape_handle_for_model",
     "tessellate_cad_shape",
 ]
