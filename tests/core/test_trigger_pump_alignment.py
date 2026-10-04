@@ -27,7 +27,6 @@ from packlab_core.reconstruction import ScaleState
 from packlab_core.scan_master import mesh_sha256
 from packlab_core.trigger_pump_alignment import (
     TriggerPumpAlignmentError,
-    TriggerPumpAttachmentFrame,
     align_library_trigger_pump,
 )
 from packlab_core.trigger_pump_library import import_local_trigger_pump_component
@@ -123,18 +122,8 @@ def _setup(tmp_path: Path):
         reason="Build exact synthetic bottle/closure/pump/tube assembly graph.",
         created_at_utc=CREATED,
     )
-    library_fixture(tmp_path / "library")
+    library_fixture(tmp_path / "library", attachment_origin=mating.closure_plane.origin)
     library = import_local_trigger_pump_component(tmp_path / "library", "manifest.json")
-    attachment = TriggerPumpAttachmentFrame(
-        library.component_id,
-        library.import_id,
-        library.attachment_semantic_key,
-        library.coordinate_unit,
-        graph.scale_state,
-        mating.closure_plane.origin,
-        (0.0, 0.0, 1.0),
-        (0.0, 0.0, 1.0),
-    )
     kwargs = {
         "expected_body_model_revision_id": body_closure_model.revision_id,
         "expected_closure_model_revision_id": body_closure_model.revision_id,
@@ -150,7 +139,6 @@ def _setup(tmp_path: Path):
         graph,
         mating,
         library,
-        attachment,
         kwargs,
     )
 
@@ -167,14 +155,13 @@ def test_identity_and_known_rigid_alignment_are_deterministic_without_component_
         graph,
         mating,
         library,
-        attachment,
         kwargs,
     ) = _setup(tmp_path)
     scan_digest = mesh_sha256(scan.mesh)
     original_body = body_closure_model.as_dict()
 
-    identity = align_library_trigger_pump(library, attachment, graph, inputs, mating, **kwargs)
-    repeated = align_library_trigger_pump(library, attachment, graph, inputs, mating, **kwargs)
+    identity = align_library_trigger_pump(library, graph, inputs, mating, **kwargs)
+    repeated = align_library_trigger_pump(library, graph, inputs, mating, **kwargs)
     assert identity == repeated
     assert identity.revision_id == repeated.revision_id
     assert identity.placement_matrix == (
@@ -206,24 +193,22 @@ def test_identity_and_known_rigid_alignment_are_deterministic_without_component_
     assert mesh_sha256(scan.mesh) == scan_digest
 
     known = replace(
-        attachment,
-        origin=(0.0, 0.0, 0.0),
-        axis=(1.0, 0.0, 0.0),
-        plane_normal=(1.0, 0.0, 0.0),
+        library,
+        attachment_origin=(0.0, 0.0, 0.0),
+        attachment_axis=(1.0, 0.0, 0.0),
+        attachment_plane_normal=(1.0, 0.0, 0.0),
     )
-    rotated = align_library_trigger_pump(library, known, graph, inputs, mating, **kwargs)
+    rotated = align_library_trigger_pump(known, graph, inputs, mating, **kwargs)
     assert rotated.placement_matrix[:12] == pytest.approx(
         (0.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 15.5)
     )
 
 
 def test_axis_plane_and_mating_status_mismatches_reject(tmp_path: Path) -> None:
-    (_scan, _source, _body, _pump, inputs, graph, mating, library, attachment, kwargs) = _setup(
-        tmp_path
-    )
-    invalid_frame = replace(attachment, axis=(1.0, 0.0, 0.0))
+    (_scan, _source, _body, _pump, inputs, graph, mating, library, kwargs) = _setup(tmp_path)
+    invalid_frame = replace(library, attachment_axis=(1.0, 0.0, 0.0))
     with pytest.raises(TriggerPumpAlignmentError, match="axis_plane_mismatch"):
-        align_library_trigger_pump(library, invalid_frame, graph, inputs, mating, **kwargs)
+        align_library_trigger_pump(invalid_frame, graph, inputs, mating, **kwargs)
 
     unaligned = replace(
         mating,
@@ -231,39 +216,30 @@ def test_axis_plane_and_mating_status_mismatches_reject(tmp_path: Path) -> None:
         review_required=True,
     )
     with pytest.raises(TriggerPumpAlignmentError, match="mating_reference_stale_or_incompatible"):
-        align_library_trigger_pump(library, attachment, graph, inputs, unaligned, **kwargs)
+        align_library_trigger_pump(library, graph, inputs, unaligned, **kwargs)
 
 
 def test_stale_component_parent_and_unit_scale_mismatch_reject(tmp_path: Path) -> None:
-    (_scan, _source, _body, _pump, inputs, graph, mating, library, attachment, kwargs) = _setup(
-        tmp_path
-    )
+    (_scan, _source, _body, _pump, inputs, graph, mating, library, kwargs) = _setup(tmp_path)
     stale_inputs = (
         replace(inputs[0], expected_model_revision_id="design-model:stale"),
         *inputs[1:],
     )
     with pytest.raises(TriggerPumpAlignmentError, match="component_revision_stale"):
-        align_library_trigger_pump(library, attachment, graph, stale_inputs, mating, **kwargs)
+        align_library_trigger_pump(library, graph, stale_inputs, mating, **kwargs)
 
     with pytest.raises(TriggerPumpAlignmentError, match="unit_or_scale_mismatch"):
         align_library_trigger_pump(
-            library,
-            replace(attachment, coordinate_unit="reconstruction_units"),
+            replace(
+                library,
+                coordinate_unit="reconstruction_units",
+                scale_state=ScaleState.RELATIVE,
+            ),
             graph,
             inputs,
             mating,
             **kwargs,
         )
-    with pytest.raises(TriggerPumpAlignmentError, match="unit_or_scale_mismatch"):
-        align_library_trigger_pump(
-            library,
-            replace(attachment, scale_state=ScaleState.RELATIVE),
-            graph,
-            inputs,
-            mating,
-            **kwargs,
-        )
-
     stale_parent = replace(mating, source_model_revision_id="design-model:stale")
     with pytest.raises(TriggerPumpAlignmentError, match="mating_reference_stale_or_incompatible"):
-        align_library_trigger_pump(library, attachment, graph, inputs, stale_parent, **kwargs)
+        align_library_trigger_pump(library, graph, inputs, stale_parent, **kwargs)

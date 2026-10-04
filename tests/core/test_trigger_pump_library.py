@@ -13,17 +13,23 @@ from packlab_core.trigger_pump_library import (
 )
 
 
-def _fixture(root: Path) -> tuple[Path, dict[str, object]]:
+def _fixture(
+    root: Path, *, attachment_origin: tuple[float, float, float] = (0.0, 0.0, 0.0)
+) -> tuple[Path, dict[str, object]]:
     root.mkdir(parents=True, exist_ok=True)
     geometry = {
         "contract": "packlab.trigger-pump-geometry-reference.v1",
         "authority_class": "LIBRARY_DESIGN_COMPONENT",
         "component_id": "synthetic-trigger-pump",
+        "scale_state": "metric-unverified",
         "coordinate_unit": "mm_unverified",
         "parameters": {"overall_length": 72.0, "body_width": 24.0, "body_depth": 19.0},
         "attachment_reference": {
             "role": "closure_actuator_interface",
             "semantic_key": "actuator-mount-v1",
+            "origin": list(attachment_origin),
+            "axis": [0.0, 0.0, 1.0],
+            "plane_normal": [0.0, 0.0, 1.0],
         },
     }
     geometry_bytes = json.dumps(geometry, sort_keys=True, separators=(",", ":")).encode()

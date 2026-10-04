@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 from dataclasses import dataclass
 
 from .assembly_graph import (
@@ -28,25 +27,10 @@ from .trigger_pump_library import ImportedTriggerPumpComponent
 
 _TOLERANCE = 1e-8
 _DEFERRED = "DEFERRED_OWNER_VALIDATION"
-_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 
 
 class TriggerPumpAlignmentError(ValueError):
     """Raised when a library attachment cannot be aligned to exact mating references."""
-
-
-@dataclass(frozen=True, slots=True)
-class TriggerPumpAttachmentFrame:
-    """Explicit local attachment frame for the imported component's semantic interface."""
-
-    component_id: str
-    import_id: str
-    semantic_key: str
-    coordinate_unit: str
-    scale_state: ScaleState
-    origin: tuple[float, float, float]
-    axis: tuple[float, float, float]
-    plane_normal: tuple[float, float, float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +89,6 @@ class TriggerPumpAlignmentRevision:
 
 def align_library_trigger_pump(
     component: ImportedTriggerPumpComponent,
-    attachment: TriggerPumpAttachmentFrame,
     graph: ParametricAssemblyGraph,
     current_components: tuple[AssemblyComponentInput, ...],
     mating_references: MatingReferenceResult,
@@ -118,8 +101,6 @@ def align_library_trigger_pump(
     """Align one explicit library-local frame to the exact captured closure reference plane."""
     if not isinstance(component, ImportedTriggerPumpComponent):
         raise TriggerPumpAlignmentError("library_trigger_pump_component_required")
-    if not isinstance(attachment, TriggerPumpAttachmentFrame):
-        raise TriggerPumpAlignmentError("trigger_pump_attachment_frame_required")
     if not isinstance(mating_references, MatingReferenceResult):
         raise TriggerPumpAlignmentError("mating_reference_result_required")
     try:
@@ -145,12 +126,8 @@ def align_library_trigger_pump(
     if (
         component.component_id != pump.component_id
         or component.coordinate_unit != pump.coordinate_unit
-        or component.attachment_semantic_key != attachment.semantic_key
-        or attachment.component_id != component.component_id
-        or attachment.import_id != component.import_id
-        or attachment.coordinate_unit != component.coordinate_unit
-        or attachment.coordinate_unit != graph.coordinate_unit
-        or attachment.scale_state is not graph.scale_state
+        or component.coordinate_unit != graph.coordinate_unit
+        or component.scale_state is not graph.scale_state
         or pump.scale_state is not graph.scale_state
     ):
         raise TriggerPumpAlignmentError("trigger_pump_attachment_unit_or_scale_mismatch")
@@ -167,8 +144,8 @@ def align_library_trigger_pump(
         mating_references,
         expected_mating_source_model_revision_id,
     )
-    source_axis = _unit(attachment.axis, "attachment_axis")
-    source_normal = _unit(attachment.plane_normal, "attachment_plane_normal")
+    source_axis = _unit(component.attachment_axis, "attachment_axis")
+    source_normal = _unit(component.attachment_plane_normal, "attachment_plane_normal")
     target_axis = _unit(mating_references.canonical_axis_direction, "mating_axis")
     target_normal = _unit(mating_references.closure_plane.normal, "closure_plane_normal")
     if (
@@ -176,7 +153,7 @@ def align_library_trigger_pump(
         or _distance(target_axis, target_normal) > _TOLERANCE
     ):
         raise TriggerPumpAlignmentError("trigger_pump_attachment_axis_plane_mismatch")
-    source_origin = _point(attachment.origin, "attachment_origin")
+    source_origin = _point(component.attachment_origin, "attachment_origin")
     target_origin = _point(mating_references.closure_plane.origin, "closure_plane_origin")
     rotation = _rotation_between(source_axis, target_axis)
     rotated_origin = _rotate_point(rotation, source_origin)
@@ -383,6 +360,5 @@ def _distance(first: tuple[float, float, float], second: tuple[float, float, flo
 __all__ = [
     "TriggerPumpAlignmentError",
     "TriggerPumpAlignmentRevision",
-    "TriggerPumpAttachmentFrame",
     "align_library_trigger_pump",
 ]

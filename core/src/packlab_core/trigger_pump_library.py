@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import cast
 
+from .reconstruction import ScaleState
+
 _MANIFEST_CONTRACT = "packlab.trigger-pump-library-component.v1"
 _GEOMETRY_CONTRACT = "packlab.trigger-pump-geometry-reference.v1"
 _AUTHORITY = "LIBRARY_DESIGN_COMPONENT"
@@ -46,10 +48,14 @@ class ImportedTriggerPumpComponent:
     geometry_contract: str
     geometry_asset_sha256: str
     geometry_asset_path: str
+    scale_state: ScaleState
     coordinate_unit: str
     geometry_parameters: tuple[tuple[str, float], ...]
     attachment_role: str
     attachment_semantic_key: str
+    attachment_origin: tuple[float, float, float]
+    attachment_axis: tuple[float, float, float]
+    attachment_plane_normal: tuple[float, float, float]
 
     def __post_init__(self) -> None:
         for field, value in (
@@ -68,13 +74,21 @@ class ImportedTriggerPumpComponent:
             self.geometry_asset_sha256
         ):
             raise TriggerPumpLibraryError("library_integrity_digest_invalid")
-        if self.coordinate_unit not in {"mm_unverified", "reconstruction_units"}:
+        if self.scale_state not in {ScaleState.RELATIVE, ScaleState.METRIC_UNVERIFIED}:
+            raise TriggerPumpLibraryError("library_scale_state_invalid")
+        expected_unit = (
+            "reconstruction_units" if self.scale_state is ScaleState.RELATIVE else "mm_unverified"
+        )
+        if self.coordinate_unit != expected_unit:
             raise TriggerPumpLibraryError("library_coordinate_unit_invalid")
         if not self.geometry_parameters or any(
             not _ID.fullmatch(name) or not math.isfinite(value) or value <= 0.0
             for name, value in self.geometry_parameters
         ):
             raise TriggerPumpLibraryError("library_geometry_parameters_invalid")
+        _vector(self.attachment_origin, "attachment_origin", unit=False)
+        _vector(self.attachment_axis, "attachment_axis", unit=True)
+        _vector(self.attachment_plane_normal, "attachment_plane_normal", unit=True)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -82,6 +96,7 @@ class ImportedTriggerPumpComponent:
             "import_id": self.import_id,
             "component_id": self.component_id,
             "component_version": self.component_version,
+            "scale_state": self.scale_state.value,
             "source": {
                 "kind": self.source_kind,
                 "reference": self.source_reference,
@@ -102,6 +117,9 @@ class ImportedTriggerPumpComponent:
                 "attachment_reference": {
                     "role": self.attachment_role,
                     "semantic_key": self.attachment_semantic_key,
+                    "origin": list(self.attachment_origin),
+                    "axis": list(self.attachment_axis),
+                    "plane_normal": list(self.attachment_plane_normal),
                 },
             },
             "scan_master_revision_id": None,
@@ -198,6 +216,7 @@ def import_local_trigger_pump_component(
             "contract",
             "authority_class",
             "component_id",
+            "scale_state",
             "coordinate_unit",
             "parameters",
             "attachment_reference",
@@ -210,8 +229,18 @@ def import_local_trigger_pump_component(
         raise TriggerPumpLibraryError("library_geometry_authority_invalid")
     if geometry.get("component_id") != component_id:
         raise TriggerPumpLibraryError("library_geometry_component_mismatch")
+    raw_scale = _required_string(geometry, "scale_state")
+    try:
+        scale_state = ScaleState(raw_scale)
+    except ValueError as error:
+        raise TriggerPumpLibraryError("library_scale_state_invalid") from error
+    if scale_state not in {ScaleState.RELATIVE, ScaleState.METRIC_UNVERIFIED}:
+        raise TriggerPumpLibraryError("library_scale_state_invalid")
     unit = _required_string(geometry, "coordinate_unit")
-    if unit not in {"mm_unverified", "reconstruction_units"}:
+    expected_unit = (
+        "reconstruction_units" if scale_state is ScaleState.RELATIVE else "mm_unverified"
+    )
+    if unit != expected_unit:
         raise TriggerPumpLibraryError("library_coordinate_unit_invalid")
     parameters = _object_field(geometry, "parameters")
     if not parameters or len(parameters) > 32:
@@ -229,7 +258,14 @@ def import_local_trigger_pump_component(
             raise TriggerPumpLibraryError("library_geometry_parameters_invalid")
         normalized_parameters.append((name, float(value)))
     attachment = _object_field(geometry, "attachment_reference")
-    _keys(attachment, {"role", "semantic_key"}, "library_attachment_reference_invalid")
+    _keys(
+        attachment,
+        {"role", "semantic_key", "origin", "axis", "plane_normal"},
+        "library_attachment_reference_invalid",
+    )
+    origin = _vector_field(attachment, "origin", unit=False)
+    axis = _vector_field(attachment, "axis", unit=True)
+    plane_normal = _vector_field(attachment, "plane_normal", unit=True)
 
     identity = {
         "contract": _MANIFEST_CONTRACT,
@@ -241,9 +277,16 @@ def import_local_trigger_pump_component(
         "license_identifier": license_id,
         "license_evidence_sha256": license_digest,
         "geometry_asset_sha256": asset_digest,
+        "scale_state": scale_state.value,
         "coordinate_unit": unit,
         "parameters": normalized_parameters,
-        "attachment": attachment,
+        "attachment": {
+            "role": _required_string(attachment, "role"),
+            "semantic_key": _required_id(attachment, "semantic_key"),
+            "origin": origin,
+            "axis": axis,
+            "plane_normal": plane_normal,
+        },
     }
     import_id = (
         "trigger-pump-library:"
@@ -264,10 +307,14 @@ def import_local_trigger_pump_component(
         _GEOMETRY_CONTRACT,
         asset_digest,
         asset_path.relative_to(root).as_posix(),
+        scale_state,
         unit,
         tuple(normalized_parameters),
         _required_string(attachment, "role"),
         _required_id(attachment, "semantic_key"),
+        origin,
+        axis,
+        plane_normal,
     )
 
 
@@ -394,6 +441,35 @@ def _required_digest(value: dict[str, object], key: str) -> str:
     if not _SHA256.fullmatch(result):
         raise TriggerPumpLibraryError(f"library_{key}_invalid")
     return result
+
+
+def _vector_field(value: dict[str, object], key: str, *, unit: bool) -> tuple[float, float, float]:
+    raw = value.get(key)
+    if not isinstance(raw, list) or len(raw) != 3:
+        raise TriggerPumpLibraryError(f"library_attachment_{key}_invalid")
+    if any(
+        isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item)
+        for item in raw
+    ):
+        raise TriggerPumpLibraryError(f"library_attachment_{key}_invalid")
+    result = tuple(float(item) for item in raw)
+    if unit and abs(math.sqrt(math.fsum(item * item for item in result)) - 1.0) > 1e-8:
+        raise TriggerPumpLibraryError(f"library_attachment_{key}_not_unit_length")
+    return result  # type: ignore[return-value]
+
+
+def _vector(value: tuple[float, float, float], field: str, *, unit: bool) -> None:
+    if (
+        not isinstance(value, tuple)
+        or len(value) != 3
+        or any(
+            isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item)
+            for item in value
+        )
+    ):
+        raise TriggerPumpLibraryError(f"library_{field}_invalid")
+    if unit and abs(math.sqrt(math.fsum(item * item for item in value)) - 1.0) > 1e-8:
+        raise TriggerPumpLibraryError(f"library_{field}_not_unit_length")
 
 
 def _required_timestamp(value: dict[str, object], key: str) -> None:
