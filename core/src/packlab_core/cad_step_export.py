@@ -16,6 +16,11 @@ from .cad_adapter import _shape_for_handle, probe_cad_runtime
 from .cad_brep import CadBrepRepresentationRevision
 from .cad_export_manifest import build_cad_export_manifest
 from .cad_feature_map import map_design_model_features_to_brep
+from .cad_step_roundtrip import (
+    CadStepRoundTripError,
+    CadStepRoundTripReport,
+    validate_step_export_round_trip,
+)
 from .cad_validation import validate_cad_brep
 from .design_model import DesignModelRevision
 from .reconstruction import ScaleState
@@ -51,6 +56,7 @@ class CadStepExportRevision:
     kernel_version: str
     encoded_step_unit: str
     reopened_step_length_units: tuple[str, ...]
+    round_trip_validation: CadStepRoundTripReport
     feature_mapping: tuple[dict[str, object], ...]
     contract: str = CAD_STEP_EXPORT_CONTRACT
     authority_class: str = "DERIVED_ENGINEERING_EXPORT"
@@ -77,6 +83,7 @@ class CadStepExportRevision:
             "coordinate_unit": self.coordinate_unit,
             "encoded_step_unit": self.encoded_step_unit,
             "reopened_step_length_units": list(self.reopened_step_length_units),
+            "round_trip_validation": self.round_trip_validation.as_dict(),
             "physical_accuracy_validation_status": self.physical_accuracy_validation_status,
             "mold_use_authorized": self.mold_use_authorized,
             "physical_accuracy_inferred": False,
@@ -249,6 +256,15 @@ def export_design_model_step(
                     unit.lower() != "millimetre" for unit in reopened_units
                 ):
                     raise CadStepExportError("cad_step_reopened_unit_not_millimetre")
+                try:
+                    round_trip_validation = validate_step_export_round_trip(
+                        temporary_path,
+                        model,
+                        representation,
+                        expected_part_name=part_name,
+                    )
+                except CadStepRoundTripError as error:
+                    raise CadStepExportError(str(error)) from error
                 artifact_bytes = temporary_path.read_bytes()
             finally:
                 interface.SetCVal_s("write.step.unit", previous_unit)
@@ -299,6 +315,7 @@ def export_design_model_step(
             "physical_authority_upgraded": False,
         },
         tessellation=None,
+        round_trip_validation=round_trip_validation.as_dict(),
         limitations=(
             "mm_unit_is_numerically_encoded_from_mm_unverified_design_values",
             "step_round_trip_is_software_evidence_not_physical_accuracy_validation",
@@ -331,6 +348,7 @@ def export_design_model_step(
         kernel_version=diagnostics.kernel_version,
         encoded_step_unit="millimetre",
         reopened_step_length_units=reopened_units,
+        round_trip_validation=round_trip_validation,
         feature_mapping=tuple(reference.as_dict() for reference in feature_mapping.references),
     )
 

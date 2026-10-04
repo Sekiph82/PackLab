@@ -30,6 +30,16 @@ def test_step_export_is_deterministic_named_and_reopens_as_millimetres(tmp_path)
     assert first.export_id == second.export_id
     assert first.encoded_step_unit == "millimetre"
     assert first.reopened_step_length_units == ("millimetre",)
+    assert first.round_trip_validation == second.round_trip_validation
+    assert first.round_trip_validation.report_id.startswith("cad-step-roundtrip:")
+    assert first.round_trip_validation.numerical_tolerance > 0
+    assert first.round_trip_validation.as_dict()["numerical_fidelity_only"] is True
+    assert first.round_trip_validation.as_dict()["manufacturing_tolerance_inferred"] is False
+    assert first.as_dict()["round_trip_validation"]["physical_accuracy_inferred"] is False
+    assert (
+        Path(str(first_path) + ".json").read_bytes()
+        == Path(str(second_path) + ".json").read_bytes()
+    )
     assert "Bottle Body V1" in first_path.read_text(encoding="ascii")
     assert first.source_design_model_revision_id == model.revision_id
     assert first.source_brep_revision_id == representation.revision_id

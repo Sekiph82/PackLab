@@ -57,6 +57,7 @@ def build_cad_export_manifest(
     feature_mapping: tuple[dict[str, object], ...],
     coordinate_transform: dict[str, object],
     tessellation: dict[str, object] | None,
+    round_trip_validation: dict[str, object] | None = None,
     limitations: tuple[str, ...],
     packlab_commit: str | None = None,
 ) -> CadExportManifest:
@@ -110,6 +111,8 @@ def build_cad_export_manifest(
         raise CadExportManifestError("cad_export_manifest_transform_required")
     if tessellation is not None and not isinstance(tessellation, dict):
         raise CadExportManifestError("cad_export_manifest_tessellation_invalid")
+    if round_trip_validation is not None and not isinstance(round_trip_validation, dict):
+        raise CadExportManifestError("cad_export_manifest_round_trip_validation_invalid")
     if not isinstance(limitations, tuple) or any(
         not isinstance(item, str) or not item.strip() for item in limitations
     ):
@@ -203,6 +206,8 @@ def build_cad_export_manifest(
         body["production_ready_claimed"] = False
     if format == "step":
         body["encoded_step_unit"] = "millimetre"
+        if round_trip_validation is not None:
+            body["round_trip_validation"] = round_trip_validation
     manifest_id = "cad-export-manifest:" + hashlib.sha256(_canonical_json(body)).hexdigest()
     document = {"contract": CAD_EXPORT_MANIFEST_CONTRACT, "manifest_id": manifest_id, **body}
     canonical_json = _canonical_json(document) + b"\n"
