@@ -1,6 +1,6 @@
 # M12-C001-R02 — Authority Resolution Continuation Codex Log V03
 
-Status: **IN_PROGRESS**
+Status: **BATCH_COMPLETED**
 
 Prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_AUTHORITY_RESOLUTION_CONTINUATION_CODEX_PROMPT_V03.md
@@ -33,15 +33,15 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | PL-0285 V02 | READY_FOR_INDEPENDENT_AUDIT | `7951022bec55f0027479fe41cf58653527b562a7` | `889d94dd6b6ab7e8242ef17aa7f3781c4fdbfc92` | 7 passed | 1,471 passed / 6 skipped / 1 deselected | Standalone nominal pouch preview only; no captured, physical, mold, or manufacturing authority |
 | PL-0286 V02 | READY_FOR_INDEPENDENT_AUDIT | `ae8ef830df7bbd30ec9e32258c63a1d59587d897` | `b932d88499c9f45205a8fabceb7731a9fcd33bdf` | 12 passed | 1,476 passed / 6 skipped / 1 deselected | Bounded flexible-surface design preview; no measured film deformation or manufacturing authority |
 | PL-0287 V02 | READY_FOR_INDEPENDENT_AUDIT | `a89565a54440d389d134f0271c8610293bcbcf4c` | `4b00d0c283c8d7d89f4d3590d3f3ce0fe785f4d9` | 42 passed | 1,486 passed / 6 skipped / 1 deselected | Reports, previews and metadata handoffs preserve parent authority; all promotions are blocked |
-| PL-0288 V02 | PENDING | | | | | |
+| PL-0288 V02 | READY_FOR_INDEPENDENT_AUDIT | `2eb5c549d474b038c0045c4b0923a93b367cecc5` | `bed8fbf907c80ec8ec567fb4e161e2d3da876c6d` | 4 conversion tests; 28 focused predecessor tests | 1,490 passed / 6 skipped / 1 deselected | Deterministic conversion; source retained; exact parent authority preserved; unsupported items explicitly reported |
 
 ## Final handoff
 
-- Batch status:
-- Final local SHA:
-- Final origin/main SHA:
-- Final GitHub SHA:
-- Worktree:
+- Batch status: `BATCH_COMPLETED`
+- Final child-publication local SHA: `bed8fbf907c80ec8ec567fb4e161e2d3da876c6d`
+- Final child-publication origin/main SHA: `bed8fbf907c80ec8ec567fb4e161e2d3da876c6d`
+- Final child-publication GitHub SHA: `bed8fbf907c80ec8ec567fb4e161e2d3da876c6d`
+- Worktree: clean at the child-publication parity checkpoint; terminal progress-log commit is metadata-only.
 - M13 started: NO
 
 PL-0285 V02 is published and ends `READY_FOR_INDEPENDENT_AUDIT`. The standalone sachet/pouch family has explicit nominal overall dimensions, seal-zone parameters, stable front/back artwork references, deterministic model serialization and a deterministic disposable preview. Only the standalone-root path is implemented. Physical validation remains deferred; no captured surface, mold/manufacturing or M13 authority is claimed. Exact commands, legacy mypy limitation, security review and warnings are in `PL-0285_CODEX_LOG_V02.md`.
@@ -50,6 +50,6 @@ PL-0286 V02 is published and ends `READY_FOR_INDEPENDENT_AUDIT`. Immutable front
 
 PL-0287 V02 is published and ends `READY_FOR_INDEPENDENT_AUDIT`. Flexible-pack authority metadata identifies exact captured or standalone ancestry in report, preview and metadata handoff contexts and blocks Scan Master/captured, mold/manufacturing, certified-volume and physical-tolerance promotion. Physical validation remains deferred. Exact commands and limitations are in `PL-0287_CODEX_LOG_V02.md`.
 
-The final line must be exactly:
+PL-0288 V02 is published and ends `READY_FOR_INDEPENDENT_AUDIT`. Family conversion is immutable and requires explicit semantic mappings or explicit unsupported-item lists. Same-family conversion is a no-op; cross-family revisions preserve the exact captured or standalone parent and cannot silently rebind authority. Focused and full validation passed. M13 was not started; physical validation remains deferred. Exact commands and limitations are in `PL-0288_CODEX_LOG_V02.md`.
 
-`AWAITING_MILESTONE_AUDIT`
+AWAITING_MILESTONE_AUDIT
