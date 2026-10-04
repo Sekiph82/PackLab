@@ -2,7 +2,7 @@
 
 Milestone: **M12 - Advanced Packaging Geometry**
 Ordered batch: **PL-0268 through PL-0288**
-Status: **BATCH_STOPPED at PL-0283**
+Status: **R02 IN_PROGRESS at PL-0284; V01 PL-0283 blocker resolved by ADR-0005**
 
 Master prompt:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MASTER_CODEX_PROMPT_V01.md
@@ -39,7 +39,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | PL-0280 | READY_FOR_INDEPENDENT_AUDIT | PL-0280_CODEX_PROMPT_V01.md | PL-0280_CHATGPT_AUDIT_CRITERIA_V01.md | `07a0a0fb202b39221f5a250bb79738f408f2ae44` | `a8c792c64d6fe2104f7093a2ec3783904b640675` | 23 passed | 1,446 passed / 6 skipped / 1 deselected | PREVIEW_PROXY AABB candidates only; no certified fit or manufacturing interference analysis |
 | PL-0281 | READY_FOR_INDEPENDENT_AUDIT | PL-0281_CODEX_PROMPT_V01.md | PL-0281_CHATGPT_AUDIT_CRITERIA_V01.md | `fa24e5cd76db1e5b3ba633f94ff1dbe7739e9c17` | `7baac3dc78e4262afb0cb07af3646c5707736ad5` | 23 passed | 1,449 passed / 6 skipped / 1 deselected | New exact pump and tube revisions with immutable graph history; body/closure unchanged; no physical compatibility claim |
 | PL-0282 | READY_FOR_INDEPENDENT_AUDIT | PL-0282_CODEX_PROMPT_V01.md | PL-0282_CHATGPT_AUDIT_CRITERIA_V01.md | `d54bffd673c68f041ac5c39990dbb5a91225b310` | `dcb8993fab2790af7aa1364299f9d0c7da67c9b2` | 41 passed | 1,452 passed / 6 skipped / 1 deselected | Deterministic hierarchy metadata only; `mm_unverified`/physical accuracy remain deferred; no CAD/STEP/geometry export |
-| PL-0283 | BATCH_STOPPED | PL-0283_CODEX_PROMPT_V01.md | PL-0283_CHATGPT_AUDIT_CRITERIA_V01.md | none | `b404ece7f1c9e149946ad2ca89b60e6c232e45ca` | not run | not run | Prompt requires model-only Design Model authority; accepted M11 and shared parent-binding contract require exact Scan Master ancestry |
+| PL-0283 | READY_FOR_INDEPENDENT_AUDIT V02 (R02) | PL-0283_CODEX_PROMPT_V02.md | PL-0283_CHATGPT_AUDIT_CRITERIA_V02.md | `2d0d5c34e279ba9617a504c75cbc0e266a86df53` | V02 `PL-0283_CODEX_LOG_V02.md`, `8ef61fba9b41a1a533b2e52ae607238f23294375` | 70 passed | 1,459 passed twice consecutively / 6 skipped / 1 deselected | ADR-0005 standalone authority and tube Design Model/preview only; physical validation remains deferred |
 | PL-0284 | PENDING | PL-0284_CODEX_PROMPT_V01.md | PL-0284_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0285 | PENDING | PL-0285_CODEX_PROMPT_V01.md | PL-0285_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0286 | PENDING | PL-0286_CODEX_PROMPT_V01.md | PL-0286_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
@@ -76,9 +76,12 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 - PL-0281 variant-swap implementation commit `fa24e5cd76db1e5b3ba633f94ff1dbe7739e9c17` and separate child-log-only commit `7baac3dc78e4262afb0cb07af3646c5707736ad5` are remotely visible. Focused: 23 passed; locked full suite: 1,449 passed / 6 skipped / 1 deselected. Body/closure and captured body parent remain unchanged; dip tube is explicitly re-pinned to the candidate pump; immutable snapshot undo/redo is preserved.
 - PL-0282 assembly hierarchy handoff implementation/evidence commit `d54bffd673c68f041ac5c39990dbb5a91225b310` and child-log-only publication (commits `c3af7e1` and whitespace correction `dcb8993fab2790af7aa1364299f9d0c7da67c9b2`) are remotely visible. Focused: 41 passed; locked full suite: 1,452 passed / 6 skipped / 1 deselected. Canonical hierarchy/revision/placement/provenance metadata only; no geometry, CAD/STEP export, or physical-fit claim.
 - M13 was not started. Physical validation remains deferred.
-- PL-0283 stopped before implementation after the prompt/criteria conflict with the accepted Design Model parent authority was confirmed; blocker details are in `PL-0283_CODEX_LOG_V01.md`. PL-0284 through PL-0288 were not started.
-- Current published GitHub main before this master-log update: `b404ece7f1c9e149946ad2ca89b60e6c232e45ca`.
+- The earlier PL-0283 V01 stop remains preserved in `PL-0283_CODEX_LOG_V01.md`. R02 resolved the authority question through accepted ADR-0005; PL-0283 V02 is published for independent audit.
+- PL-0283 V02 implementation/evidence commit `2d0d5c34e279ba9617a504c75cbc0e266a86df53` and separate child-log-only publications `6b25c7fc2e06bf5d5be72d1d4cb2091208b368a4` and whitespace-correction log-only commit `8ef61fba9b41a1a533b2e52ae607238f23294375` are remote-visible. The latter commits contain only `PL-0283_CODEX_LOG_V02.md`.
+- PL-0283 V02 focused: 70 passed. The exact locked full suite passed twice consecutively at implementation SHA `2d0d5c34e279ba9617a504c75cbc0e266a86df53`: each 1,459 passed, 6 skipped, 1 deselected. Changed-file Ruff/format, targeted mypy and compileall passed; the broader initial mypy command also reported two untouched legacy errors in `calibration/marker_detection.py`.
+- R02 preserves `mm_unverified` as nominal-design units and `DEFERRED_OWNER_VALIDATION`; no M13 work began. Exact commands and remaining limitations are recorded in `PL-0283_CODEX_LOG_V02.md`.
+- Current published GitHub main: `8ef61fba9b41a1a533b2e52ae607238f23294375`.
 
-Current batch frontier: **PL-0283** (`BATCH_STOPPED: DESIGN_MODEL_AUTHORITY_CONFLICT`).
+Current batch frontier: **PL-0284 V02** under M12-C001-R02.
 
-AWAITING_MILESTONE_AUDIT
+IN_PROGRESS
