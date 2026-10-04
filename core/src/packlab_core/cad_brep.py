@@ -185,6 +185,23 @@ def _representation_from_build(
     *,
     profile_sample_count: int | None = None,
 ) -> CadBrepRepresentationRevision:
+    return _representation_from_lineage(
+        model,
+        operation.operation_id,
+        operation.input_ids,
+        shape_build,
+        profile_sample_count=profile_sample_count,
+    )
+
+
+def _representation_from_lineage(
+    model: DesignModelRevision,
+    operation_id: str,
+    input_ids: tuple[str, ...],
+    shape_build: CadShapeBuild,
+    *,
+    profile_sample_count: int | None = None,
+) -> CadBrepRepresentationRevision:
     if not isinstance(shape_build, CadShapeBuild):
         raise CadBrepError("cad_brep_shape_build_invalid")
     parent_authority_revision_id = (
@@ -200,8 +217,8 @@ def _representation_from_build(
         ("representation_type", "BREP_SOLID"),
         ("geometry_sha256", shape_build.geometry_sha256),
         ("source_design_model_revision_id", model.revision_id),
-        ("source_operation_id", operation.operation_id),
-        ("source_input_ids", operation.input_ids),
+        ("source_operation_id", operation_id),
+        ("source_input_ids", input_ids),
         ("shape_handle", shape_build.shape_handle),
         ("parent_kind", model.parent_kind),
         ("parent_authority_revision_id", parent_authority_revision_id),
@@ -218,8 +235,8 @@ def _representation_from_build(
         revision_id=_revision_id(provisional),
         geometry_sha256=shape_build.geometry_sha256,
         source_design_model_revision_id=model.revision_id,
-        source_operation_id=operation.operation_id,
-        source_input_ids=operation.input_ids,
+        source_operation_id=operation_id,
+        source_input_ids=input_ids,
         shape_handle=shape_build.shape_handle,
         parent_kind=model.parent_kind,
         parent_authority_revision_id=parent_authority_revision_id,

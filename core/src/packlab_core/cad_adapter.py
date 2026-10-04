@@ -164,6 +164,15 @@ class CadShapeBuild:
     solid_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class CadBooleanBuild:
+    """PackLab-owned result of one validated CAD cut."""
+
+    shape_build: CadShapeBuild
+    topology_valid: bool
+    kernel_operation_done: bool
+
+
 _SHAPE_REGISTRY: dict[str, tuple[str, Any]] = {}
 _SHAPE_REGISTRY_LOCK = threading.RLock()
 
@@ -333,9 +342,150 @@ def build_lofted_shape(
     return _shape_build_result(model, operation, shape, solid_count)
 
 
+def build_polygon_prism_cut(
+    model: DesignModelRevision,
+    parent_handle: CadShapeHandle,
+    *,
+    operation_id: str,
+    input_ids: tuple[str, ...],
+    profile: tuple[tuple[float, float, float], ...],
+    extrusion: tuple[float, float, float],
+) -> CadBooleanBuild:
+    """Cut an explicit planar polygon prism from one registered Design Model BREP."""
+    if not isinstance(model, DesignModelRevision):
+        raise CadAdapterError("design_model_revision_required")
+    if not isinstance(parent_handle, CadShapeHandle):
+        raise CadAdapterError("cad_parent_shape_handle_required")
+    if (
+        parent_handle.parent_kind is not model.parent_kind
+        or parent_handle.parent_authority_revision_id
+        != (
+            model.standalone_root.revision_id
+            if model.standalone_root
+            else model.parent_binding_revision_id
+        )
+        or parent_handle.scale_state is not model.scale_state
+        or parent_handle.coordinate_unit != model.coordinate_unit
+    ):
+        raise CadAdapterError("cad_parent_shape_authority_mismatch")
+    if (
+        not isinstance(operation_id, str)
+        or not operation_id
+        or not isinstance(input_ids, tuple)
+        or not input_ids
+    ):
+        raise CadAdapterError("cad_boolean_provenance_invalid")
+    if (
+        not isinstance(profile, tuple)
+        or len(profile) < 3
+        or any(
+            not isinstance(point, tuple)
+            or len(point) != 3
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                for value in point
+            )
+            for point in profile
+        )
+        or not isinstance(extrusion, tuple)
+        or len(extrusion) != 3
+        or any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            for value in extrusion
+        )
+        or sum(value * value for value in extrusion) <= 0.0
+    ):
+        raise CadAdapterError("cad_boolean_tool_invalid")
+    parent_shape = _shape_for_handle(parent_handle)
+    check = importlib.import_module("OCP.BRepCheck")
+    top_abs = importlib.import_module("OCP.TopAbs")
+    top_exp = importlib.import_module("OCP.TopExp")
+    if parent_shape.IsNull() or not check.BRepCheck_Analyzer(parent_shape).IsValid():
+        raise CadAdapterError("cad_boolean_parent_topology_invalid")
+    parent_solids = top_exp.TopExp_Explorer(parent_shape, top_abs.TopAbs_SOLID)
+    if not parent_solids.More():
+        raise CadAdapterError("cad_boolean_parent_solid_missing")
+
+    gp = importlib.import_module("OCP.gp")
+    builder = importlib.import_module("OCP.BRepBuilderAPI")
+    primitive = importlib.import_module("OCP.BRepPrimAPI")
+    points = tuple(gp.gp_Pnt(*point) for point in profile)
+    wire_builder = builder.BRepBuilderAPI_MakePolygon()
+    for point in points:
+        wire_builder.Add(point)
+    wire_builder.Close()
+    if not wire_builder.IsDone():
+        raise CadAdapterError("cad_boolean_tool_wire_invalid")
+    face_builder = builder.BRepBuilderAPI_MakeFace(wire_builder.Wire())
+    if not face_builder.IsDone():
+        raise CadAdapterError("cad_boolean_tool_face_invalid")
+    tool_builder = primitive.BRepPrimAPI_MakePrism(face_builder.Face(), gp.gp_Vec(*extrusion), True)
+    tool_builder.Build()
+    if not tool_builder.IsDone() or tool_builder.Shape().IsNull():
+        raise CadAdapterError("cad_boolean_tool_prism_invalid")
+
+    common = importlib.import_module("OCP.BRepAlgoAPI").BRepAlgoAPI_Common(
+        parent_shape, tool_builder.Shape()
+    )
+    common.Build()
+    if not common.IsDone() or common.Shape().IsNull():
+        raise CadAdapterError("cad_boolean_intersection_check_failed")
+    common_solids = top_exp.TopExp_Explorer(common.Shape(), top_abs.TopAbs_SOLID)
+    if not common_solids.More():
+        raise CadAdapterError("cad_boolean_tool_does_not_intersect_body")
+
+    boolean = importlib.import_module("OCP.BRepAlgoAPI").BRepAlgoAPI_Cut(
+        parent_shape, tool_builder.Shape()
+    )
+    boolean.Build()
+    if not boolean.IsDone():
+        raise CadAdapterError("cad_boolean_kernel_cut_failed")
+    result = boolean.Shape()
+    if result.IsNull():
+        raise CadAdapterError("cad_boolean_result_empty")
+    if not check.BRepCheck_Analyzer(result).IsValid():
+        raise CadAdapterError("cad_boolean_result_topology_invalid")
+    explorer = top_exp.TopExp_Explorer(result, top_abs.TopAbs_SOLID)
+    solid_count = 0
+    while explorer.More():
+        solid_count += 1
+        explorer.Next()
+    if solid_count != 1:
+        raise CadAdapterError("cad_boolean_result_single_solid_required")
+    shape_build = _registered_shape_build(model, operation_id, input_ids, result, solid_count)
+    return CadBooleanBuild(shape_build, True, True)
+
+
+def cad_shape_bounds(handle: CadShapeHandle) -> tuple[float, float, float, float, float, float]:
+    """Return deterministic axis-aligned bounds for one opaque registered shape."""
+    shape = _shape_for_handle(handle)
+    box = importlib.import_module("OCP.Bnd").Bnd_Box()
+    importlib.import_module("OCP.BRepBndLib").BRepBndLib.Add_s(shape, box)
+    bounds = box.Get()
+    if len(bounds) != 6 or any(not math.isfinite(value) for value in bounds):
+        raise CadAdapterError("cad_shape_bounds_invalid")
+    return tuple(float(value) for value in bounds)  # type: ignore[return-value]
+
+
 def _shape_build_result(
     model: DesignModelRevision,
     operation: DesignOperation,
+    shape: Any,
+    solid_count: int,
+) -> CadShapeBuild:
+    return _registered_shape_build(
+        model, operation.operation_id, operation.input_ids, shape, solid_count
+    )
+
+
+def _registered_shape_build(
+    model: DesignModelRevision,
+    operation_id: str,
+    input_ids: tuple[str, ...],
     shape: Any,
     solid_count: int,
 ) -> CadShapeBuild:
@@ -345,9 +495,7 @@ def _shape_build_result(
         if not brep_tools.BRepTools.Write_s(shape, str(brep_path)):
             raise CadAdapterError("cad_brep_serialization_failed")
         geometry_digest = hashlib.sha256(brep_path.read_bytes()).hexdigest()
-    handle_seed = "|".join(
-        (model.revision_id, operation.operation_id, *operation.input_ids, geometry_digest)
-    )
+    handle_seed = "|".join((model.revision_id, operation_id, *input_ids, geometry_digest))
     handle_id = "cad-shape:" + hashlib.sha256(handle_seed.encode("utf-8")).hexdigest()
     parent_revision = (
         model.standalone_root.revision_id
@@ -921,6 +1069,7 @@ __all__ = [
     "CAD_RUNTIME_VERSION_STATUS_UNAVAILABLE",
     "PHYSICAL_VALIDATION_DEFERRED",
     "CadAdapterError",
+    "CadBooleanBuild",
     "CadCapability",
     "CadCapabilityStatus",
     "CadCrossSectionInput",
@@ -932,7 +1081,9 @@ __all__ = [
     "CadShapeBuild",
     "CadShapeHandle",
     "build_lofted_shape",
+    "build_polygon_prism_cut",
     "build_revolved_shape",
+    "cad_shape_bounds",
     "cross_section_to_cad_input",
     "probe_cad_runtime",
     "profile_to_cad_input",
