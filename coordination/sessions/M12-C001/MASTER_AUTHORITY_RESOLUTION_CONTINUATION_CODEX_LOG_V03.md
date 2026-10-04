@@ -32,7 +32,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 | PL-0284 V02 | READY_FOR_INDEPENDENT_AUDIT | `4496d40fe0287724073a295a2c128be00d80784e` | `30ea4631292abb0213dea3d35e1c890be378e73e` | 98 passed | 1,464 passed / 6 skipped / 1 deselected | Captured, reference and user dimensions remain distinct; hidden wall/material/physical claims deferred |
 | PL-0285 V02 | READY_FOR_INDEPENDENT_AUDIT | `7951022bec55f0027479fe41cf58653527b562a7` | `889d94dd6b6ab7e8242ef17aa7f3781c4fdbfc92` | 7 passed | 1,471 passed / 6 skipped / 1 deselected | Standalone nominal pouch preview only; no captured, physical, mold, or manufacturing authority |
 | PL-0286 V02 | READY_FOR_INDEPENDENT_AUDIT | `ae8ef830df7bbd30ec9e32258c63a1d59587d897` | `b932d88499c9f45205a8fabceb7731a9fcd33bdf` | 12 passed | 1,476 passed / 6 skipped / 1 deselected | Bounded flexible-surface design preview; no measured film deformation or manufacturing authority |
-| PL-0287 V02 | PENDING | | | | | |
+| PL-0287 V02 | READY_FOR_INDEPENDENT_AUDIT | `a89565a54440d389d134f0271c8610293bcbcf4c` | `4b00d0c283c8d7d89f4d3590d3f3ce0fe785f4d9` | 42 passed | 1,486 passed / 6 skipped / 1 deselected | Reports, previews and metadata handoffs preserve parent authority; all promotions are blocked |
 | PL-0288 V02 | PENDING | | | | | |
 
 ## Final handoff
@@ -47,6 +47,8 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M12-C001/MAS
 PL-0285 V02 is published and ends `READY_FOR_INDEPENDENT_AUDIT`. The standalone sachet/pouch family has explicit nominal overall dimensions, seal-zone parameters, stable front/back artwork references, deterministic model serialization and a deterministic disposable preview. Only the standalone-root path is implemented. Physical validation remains deferred; no captured surface, mold/manufacturing or M13 authority is claimed. Exact commands, legacy mypy limitation, security review and warnings are in `PL-0285_CODEX_LOG_V02.md`.
 
 PL-0286 V02 is published and ends `READY_FOR_INDEPENDENT_AUDIT`. Immutable front/back surface edits preserve standalone-root authority, semantic features and normalized artwork coordinates; bounded bulges are design proxies with flat perimeter/seal regions. No measured film deformation or manufacturing authority is claimed. Exact commands and limitations are in `PL-0286_CODEX_LOG_V02.md`.
+
+PL-0287 V02 is published and ends `READY_FOR_INDEPENDENT_AUDIT`. Flexible-pack authority metadata identifies exact captured or standalone ancestry in report, preview and metadata handoff contexts and blocks Scan Master/captured, mold/manufacturing, certified-volume and physical-tolerance promotion. Physical validation remains deferred. Exact commands and limitations are in `PL-0287_CODEX_LOG_V02.md`.
 
 The final line must be exactly:
 
