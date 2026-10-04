@@ -209,6 +209,28 @@ class CadProjectedCurveData:
 
 
 @dataclass(frozen=True, slots=True)
+class CadSurfaceDifferentialPoint:
+    """Exact point/normal/principal curvature values from one CAD surface."""
+
+    point: tuple[float, float, float]
+    normal: tuple[float, float, float]
+    minimum_curvature: float
+    maximum_curvature: float
+
+
+@dataclass(frozen=True, slots=True)
+class CadSurfaceRegionSample:
+    """One parameter-cell observation; no face or traversal identifier escapes."""
+
+    surface_type: str
+    center: CadSurfaceDifferentialPoint
+    support_points: tuple[CadSurfaceDifferentialPoint, ...]
+    trimmed_or_boundary: bool
+    periodic_seam_boundary: bool
+    supported_surface_type: bool
+
+
+@dataclass(frozen=True, slots=True)
 class CadSectionResultData:
     """Sampled section curves plus conservative bounds from the CAD cut shape."""
 
@@ -1007,6 +1029,169 @@ def inspect_shape_topology(handle: CadShapeHandle) -> CadTopologySnapshot:
     )
 
 
+def sample_cad_surface_regions(
+    handle: CadShapeHandle,
+    *,
+    samples_per_axis: int = 6,
+    maximum_faces: int = 128,
+    maximum_regions: int = 8_192,
+    maximum_differential_samples: int = 40_960,
+) -> tuple[CadSurfaceRegionSample, ...]:
+    """Sample bounded CAD parameter cells using exact BREP differential geometry.
+
+    Face traversal is internal work scheduling only. Results contain no native
+    face, topology, mesh, or traversal index and are canonicalized by callers.
+    A cell is conservative: all four corners and its center must classify inside
+    the trimmed face for it to avoid a boundary limitation.
+    """
+    for value, maximum, minimum, code in (
+        (samples_per_axis, 32, 2, "cad_surface_samples_per_axis_invalid"),
+        (maximum_faces, 1_024, 1, "cad_surface_maximum_faces_invalid"),
+        (maximum_regions, 100_000, 1, "cad_surface_maximum_regions_invalid"),
+        (
+            maximum_differential_samples,
+            500_000,
+            1,
+            "cad_surface_maximum_differential_samples_invalid",
+        ),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+            raise CadAdapterError(code)
+    maximum_work_regions = maximum_faces * (samples_per_axis - 1) ** 2
+    if maximum_work_regions > maximum_regions:
+        raise CadAdapterError("cad_surface_region_work_bound_exceeded")
+    if maximum_work_regions * 5 > maximum_differential_samples:
+        raise CadAdapterError("cad_surface_differential_work_bound_exceeded")
+
+    shape = _shape_for_handle(handle)
+    if shape.IsNull():
+        raise CadAdapterError("cad_surface_shape_null")
+    top_abs = importlib.import_module("OCP.TopAbs")
+    top_exp = importlib.import_module("OCP.TopExp")
+    topods = importlib.import_module("OCP.TopoDS")
+    adaptor_module = importlib.import_module("OCP.BRepAdaptor")
+    props_module = importlib.import_module("OCP.BRepLProp")
+    classifier_module = importlib.import_module("OCP.BRepClass")
+    gp_module = importlib.import_module("OCP.gp")
+
+    faces: list[Any] = []
+    explorer = top_exp.TopExp_Explorer(shape, top_abs.TopAbs_FACE)
+    while explorer.More():
+        if len(faces) >= maximum_faces:
+            raise CadAdapterError("cad_surface_face_work_bound_exceeded")
+        faces.append(topods.TopoDS.Face_s(explorer.Current()))
+        explorer.Next()
+    if not faces:
+        raise CadAdapterError("cad_surface_faces_required")
+
+    supported_types = {
+        "GeomAbs_Plane",
+        "GeomAbs_Cylinder",
+        "GeomAbs_Cone",
+        "GeomAbs_Sphere",
+        "GeomAbs_Torus",
+        "GeomAbs_BezierSurface",
+        "GeomAbs_BSplineSurface",
+        "GeomAbs_SurfaceOfRevolution",
+        "GeomAbs_SurfaceOfExtrusion",
+        "GeomAbs_OffsetSurface",
+    }
+    regions: list[CadSurfaceRegionSample] = []
+    differential_count = 0
+
+    def classify(face: Any, u: float, v: float) -> Any:
+        classifier = classifier_module.BRepClass_FaceClassifier()
+        classifier.Perform(face, gp_module.gp_Pnt2d(u, v), 1e-8)
+        return classifier.State()
+
+    def differential(
+        surface: Any, face: Any, u: float, v: float
+    ) -> CadSurfaceDifferentialPoint | None:
+        nonlocal differential_count
+        differential_count += 1
+        if differential_count > maximum_differential_samples:
+            raise CadAdapterError("cad_surface_differential_work_bound_exceeded")
+        props = props_module.BRepLProp_SLProps(surface, u, v, 2, 1e-9)
+        if not props.IsNormalDefined() or not props.IsCurvatureDefined():
+            return None
+        point = surface.Value(u, v)
+        normal = props.Normal()
+        direction: tuple[float, float, float] = (
+            float(normal.X()),
+            float(normal.Y()),
+            float(normal.Z()),
+        )
+        if face.Orientation() == top_abs.TopAbs_REVERSED:
+            direction = (-direction[0], -direction[1], -direction[2])
+        elif face.Orientation() != top_abs.TopAbs_FORWARD:
+            raise CadAdapterError("cad_surface_face_orientation_unsupported")
+        curvature = (float(props.MinCurvature()), float(props.MaxCurvature()))
+        coordinates = (float(point.X()), float(point.Y()), float(point.Z()))
+        if not all(math.isfinite(value) for value in (*coordinates, *direction, *curvature)):
+            return None
+        return CadSurfaceDifferentialPoint(coordinates, direction, *curvature)
+
+    for face in faces:
+        surface = adaptor_module.BRepAdaptor_Surface(face, True)
+        u_min, u_max = float(surface.FirstUParameter()), float(surface.LastUParameter())
+        v_min, v_max = float(surface.FirstVParameter()), float(surface.LastVParameter())
+        if not all(math.isfinite(value) for value in (u_min, u_max, v_min, v_max)):
+            raise CadAdapterError("cad_surface_parameter_bounds_unbounded")
+        if u_max <= u_min or v_max <= v_min:
+            continue
+        type_value = surface.GetType()
+        surface_type = getattr(type_value, "name", str(type_value).split(".")[-1])
+        periodic_u = bool(surface.IsUPeriodic())
+        periodic_v = bool(surface.IsVPeriodic())
+        du = (u_max - u_min) / (samples_per_axis - 1)
+        dv = (v_max - v_min) / (samples_per_axis - 1)
+        for u_index in range(samples_per_axis - 1):
+            u0 = u_min + u_index * du
+            u1 = u_min + (u_index + 1) * du
+            for v_index in range(samples_per_axis - 1):
+                v0 = v_min + v_index * dv
+                v1 = v_min + (v_index + 1) * dv
+                coordinates = (
+                    (u0, v0),
+                    (u0, v1),
+                    (u1, v0),
+                    (u1, v1),
+                    ((u0 + u1) / 2.0, (v0 + v1) / 2.0),
+                )
+                states = tuple(classify(face, u, v) for u, v in coordinates)
+                inside = tuple(state in {top_abs.TopAbs_IN, top_abs.TopAbs_ON} for state in states)
+                if not inside[-1]:
+                    continue
+                support: list[CadSurfaceDifferentialPoint] = []
+                for (u, v), is_inside in zip(coordinates, inside, strict=True):
+                    if not is_inside or (u, v) == coordinates[-1]:
+                        continue
+                    point = differential(surface, face, u, v)
+                    if point is not None:
+                        support.append(point)
+                center = differential(surface, face, *coordinates[-1])
+                if center is None:
+                    continue
+                support.append(center)
+                on_boundary = any(state == top_abs.TopAbs_ON for state in states)
+                at_periodic_seam = (
+                    periodic_u and (u_index == 0 or u_index == samples_per_axis - 2)
+                ) or (periodic_v and (v_index == 0 or v_index == samples_per_axis - 2))
+                regions.append(
+                    CadSurfaceRegionSample(
+                        surface_type,
+                        center,
+                        tuple(support),
+                        not all(inside) or on_boundary,
+                        at_periodic_seam,
+                        surface_type in supported_types,
+                    )
+                )
+                if len(regions) > maximum_regions:
+                    raise CadAdapterError("cad_surface_region_work_bound_exceeded")
+    return tuple(regions)
+
+
 def _shape_build_result(
     model: DesignModelRevision,
     operation: DesignOperation,
@@ -1138,6 +1323,17 @@ def _shape_for_handle(handle: CadShapeHandle) -> Any:
     if registered is None:
         raise CadAdapterError("cad_shape_handle_unavailable_in_runtime")
     return registered[1]
+
+
+def cad_shape_geometry_digest(handle: CadShapeHandle) -> str:
+    """Return the registered exact BREP byte digest pinned by an opaque handle."""
+    if not isinstance(handle, CadShapeHandle):
+        raise CadAdapterError("cad_shape_handle_required")
+    with _SHAPE_REGISTRY_LOCK:
+        registered = _SHAPE_REGISTRY.get(handle.handle_id)
+    if registered is None:
+        raise CadAdapterError("cad_shape_handle_unavailable_in_runtime")
+    return registered[0]
 
 
 def _validate_revolve_inputs(
