@@ -27,7 +27,7 @@ Master audit criteria: https://github.com/Sekiph82/PackLab/blob/main/coordinatio
 |---|---|---|---|---|---|---|---|---|
 | PL-0310 | READY_FOR_INDEPENDENT_AUDIT | PL-0310_CODEX_PROMPT_V01.md | PL-0310_CHATGPT_AUDIT_CRITERIA_V01.md | `5f2f6216168516c9205d6fdfba719ba1a46fff28` | `f98b5b6454832b34d99e88030c2bf20b5e97ad44` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0310_CODEX_LOG_V01.md)) | 50 label-zone/model/BREP/feature-map tests PASS | 1,634 passed, 6 skipped, 1 deselected | Normalized feature-local UV is design intent only; no artwork, physical-fit, print, or manufacturing claim. Physical validation deferral and OCP/OCCT redistribution gate persist. |
 | PL-0311 | READY_FOR_INDEPENDENT_AUDIT | PL-0311_CODEX_PROMPT_V01.md | PL-0311_CHATGPT_AUDIT_CRITERIA_V01.md | `1eb43d6a7e217a10363668288dca646c88fe7a3e` | `d97c571d771d5c5b5f01d0077985d17c0772907f` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0311_CODEX_LOG_V01.md)) | 61 Label Zone/placement/model/CAD predecessor tests PASS | 1,645 passed, 6 skipped, 1 deselected | Canonical orientation plus finite normalized [0,1] placement domain and deterministic edit revisions; M13 feature map does not expose stable native face IDs, so physical face fit is not claimed. RELATIVE/mm_unverified and deferred physical authority remain explicit. |
-| PL-0312 | BLOCKED_AUTHORITY_AMBIGUITY | PL-0312_CODEX_PROMPT_V01.md | PL-0312_CHATGPT_AUDIT_CRITERIA_V01.md | No implementation commit; stopped before product edits | `1011195103701a2af65b47874b27fa304ad8579f` ([blocker log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0312_CODEX_LOG_V01.md)) | Not run: authority stop before implementation | Not run: authority stop before implementation | Accepted M13 feature mapping reports profile/axis contributors as AMBIGUOUS on the shared output solid and provides no stable face selector; region-level feature provenance cannot be asserted. Exact blocker and probe are in PL-0312 log. |
+| PL-0312 | READY_FOR_INDEPENDENT_AUDIT (V02) | PL-0312_CODEX_PROMPT_V02.md | PL-0312_CHATGPT_AUDIT_CRITERIA_V02.md | `7576279cf4f8fd7e7c101e8a5e6a63ffcd8708c8` | `585566b70ff3acab40025928fee7f800e2a61873` ([V02 log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0312_CODEX_LOG_V02.md)) | 76 surface/Label Zone/Design Model/CAD predecessor tests PASS | 1,660 passed, 6 skipped, 1 deselected | Analysis regions are exact-BREP-scoped evidence; feature ownership remains AMBIGUOUS or UNRESOLVED without a region selector. Finite sample results are advisory only; no fit, print, physical, mold or manufacturing claim. |
 | PL-0313 | PENDING | PL-0313_CODEX_PROMPT_V01.md | PL-0313_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0314 | PENDING | PL-0314_CODEX_PROMPT_V01.md | PL-0314_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0315 | PENDING | PL-0315_CODEX_PROMPT_V01.md | PL-0315_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
@@ -50,11 +50,11 @@ Master audit criteria: https://github.com/Sekiph82/PackLab/blob/main/coordinatio
 
 ## Batch status and final handoff
 
-- Batch status: `BATCH_STOPPED`.
-- Completed implementation frontier: PL-0311 (`READY_FOR_INDEPENDENT_AUDIT`); PL-0310 and PL-0311 builder evidence is awaiting independent child audits.
-- Stopped child: PL-0312 before implementation on the feature-to-surface authority ambiguity recorded in its child log. PL-0313 through PL-0331 were not started.
+- Batch status: `BATCH_IN_PROGRESS` under M14-C001-R01.
+- Independently accepted frontier: PL-0310 and PL-0311 (`AUDITED_PASS`); PL-0312 V02 builder evidence is `READY_FOR_INDEPENDENT_AUDIT`.
+- The PL-0312 V01 authority stop remains preserved in its V01 log and was resolved by the V02 attribution contract without changing M13 mapping behavior. PL-0313 through PL-0331 are authorized only under the R01 continuation prompt and remain to be executed in order.
 - M14 stop conditions and PL-0324 real Blender capability gate remain active.
 - M15 started: NO.
-- Final child blocker-log publication parity: local `HEAD`, `origin/main`, and GitHub `main` verified equal at `1011195103701a2af65b47874b27fa304ad8579f`; master-log update was the only pending local change at that checkpoint.
+- PL-0312 V02 child-log publication parity: local `HEAD`, `origin/main`, and GitHub `main` verified equal at `585566b70ff3acab40025928fee7f800e2a61873`; R01 continuation index updates are pending separately.
 
-AWAITING_MILESTONE_AUDIT
+BATCH_IN_PROGRESS
