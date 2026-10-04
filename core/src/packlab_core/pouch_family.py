@@ -18,6 +18,7 @@ from .design_model import (
 )
 from .design_model_binding import StandaloneDesignGeometryRoot
 from .design_preview import PREVIEW_AUTHORITY, PREVIEW_CONTRACT, DesignPreview
+from .flexible_pack_authority import flexible_pack_authority_handoff
 from .geometry_adapter import TriangleMeshData
 
 _MAX_DIMENSION = 1e7
@@ -152,6 +153,7 @@ class PouchFamilyRevision:
                 "root_revision_id": self.model.standalone_root.revision_id,
             },
             "model": self.model.as_dict(),
+            "authority_and_limitations": flexible_pack_authority_handoff(self.model),
             "component_id": self.component_id,
             "dimensions": self.dimensions.as_dict(self.model.coordinate_unit),
             "artwork_surfaces": {
@@ -378,6 +380,7 @@ def _preview(
         authority_class=PREVIEW_AUTHORITY,
         contract=PREVIEW_CONTRACT,
         standalone_root_revision_id=root.revision_id,
+        flexible_pack_design_only=True,
     )
 
 

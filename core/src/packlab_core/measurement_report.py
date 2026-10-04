@@ -18,6 +18,11 @@ from .design_model import (
     FeatureKind,
     ParameterType,
 )
+from .flexible_pack_authority import (
+    FlexiblePackAuthorityError,
+    flexible_pack_authority_handoff,
+    is_flexible_pack_model,
+)
 from .horizontal_section import HorizontalSection
 from .measurement_uncertainty import MeasurementUncertaintyReport
 from .neck_finish_candidates import NeckFinishCandidateSet
@@ -91,9 +96,10 @@ class MeasurementReport:
     artifacts: tuple[dict[str, object], ...]
     report_version: str = MEASUREMENT_REPORT_VERSION
     modeled_closure_dimensions: tuple[dict[str, object], ...] = ()
+    flexible_pack_authority: dict[str, object] | None = None
 
     def as_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "contract": "packlab.measurement-report.v1",
             "report_version": self.report_version,
             "project": {
@@ -122,6 +128,9 @@ class MeasurementReport:
                 "ambient_identity_included": False,
             },
         }
+        if self.flexible_pack_authority is not None:
+            payload["flexible_pack_authority"] = dict(self.flexible_pack_authority)
+        return payload
 
 
 def build_measurement_report(
@@ -132,6 +141,8 @@ def build_measurement_report(
     design_model: DesignModelRevision | None = None,
     expected_scan_master_revision_id: str | None = None,
     expected_design_model_revision_id: str | None = None,
+    flexible_pack_model: DesignModelRevision | None = None,
+    expected_flexible_pack_model_revision_id: str | None = None,
 ) -> MeasurementReport:
     """Build a deterministic report from captured measurements and optional modeled closure dimensions."""
 
@@ -151,9 +162,19 @@ def build_measurement_report(
         expected_scan_master_revision_id=expected_scan_master_revision_id,
         expected_design_model_revision_id=expected_design_model_revision_id,
     )
-    if not ordered and not closure_dimensions:
+    flexible_authority = _summarize_flexible_pack_authority(
+        context,
+        flexible_pack_model,
+        expected_flexible_pack_model_revision_id=expected_flexible_pack_model_revision_id,
+    )
+    if not ordered and not closure_dimensions and flexible_authority is None:
         raise MeasurementReportError("report_requires_captured_or_modeled_dimensions")
-    return MeasurementReport(context, ordered, modeled_closure_dimensions=closure_dimensions)
+    return MeasurementReport(
+        context,
+        ordered,
+        modeled_closure_dimensions=closure_dimensions,
+        flexible_pack_authority=flexible_authority,
+    )
 
 
 def serialize_measurement_report(report: MeasurementReport) -> bytes:
@@ -205,6 +226,22 @@ def render_measurement_report_markdown(report: MeasurementReport) -> str:
             lines.append(
                 f"- **{item['closure_kind']}** `{item['feature_id']}` from Design Model `{item['design_model_revision_id']}` ({item['coordinate_unit']}) — dimensions: {dimensions}; captured fit support: {fit_support}; uncertainty: {uncertainty}; certified: no; mold-ready: no."
             )
+    if report.flexible_pack_authority is not None:
+        authority = json.dumps(
+            report.flexible_pack_authority,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        )
+        lines.extend(
+            [
+                "",
+                "## Flexible-pack design authority",
+                "",
+                f"- Metadata-only design/preview handoff: `{authority}`",
+                "- Flexible-pack geometry is not certified volume, physical tolerance, mold readiness, or manufacturing authority.",
+            ]
+        )
     lines.extend(
         [
             "",
@@ -412,6 +449,33 @@ def _summarize_artifact(
     }
 
 
+def _summarize_flexible_pack_authority(
+    context: MeasurementReportContext,
+    model: DesignModelRevision | None,
+    *,
+    expected_flexible_pack_model_revision_id: str | None,
+) -> dict[str, object] | None:
+    if model is None and expected_flexible_pack_model_revision_id is None:
+        return None
+    if not isinstance(model, DesignModelRevision) or not isinstance(
+        expected_flexible_pack_model_revision_id, str
+    ):
+        raise MeasurementReportError("flexible_pack_model_arguments_incomplete")
+    if not is_flexible_pack_model(model):
+        raise MeasurementReportError("flexible_pack_design_model_required")
+    if (
+        model.revision_id != expected_flexible_pack_model_revision_id
+        or model.project_id != context.project_id
+        or model.scale_state is not context.scale_state
+        or model.coordinate_unit != context.coordinate_unit
+    ):
+        raise MeasurementReportError("flexible_pack_report_model_or_context_mismatch")
+    try:
+        return flexible_pack_authority_handoff(model)
+    except FlexiblePackAuthorityError as error:
+        raise MeasurementReportError("flexible_pack_authority_invalid") from error
+
+
 def _summarize_modeled_closure_dimensions(
     context: MeasurementReportContext,
     scan_master: ScanMasterRevision | None,
@@ -435,6 +499,8 @@ def _summarize_modeled_closure_dimensions(
         or not isinstance(expected_design_model_revision_id, str)
     ):
         raise MeasurementReportError("modeled_closure_parent_arguments_incomplete")
+    if is_flexible_pack_model(design_model):
+        raise MeasurementReportError("flexible_pack_not_a_closure_measurement")
     digest = mesh_sha256(scan_master.mesh)
     manifest = scan_master.manifest
     if (

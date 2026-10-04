@@ -23,6 +23,7 @@ from .design_model_binding import (
 )
 from .design_operations import DesignOperation, LoftSectionInput, create_loft_operation
 from .design_preview import DesignPreview, tessellate_design_preview
+from .flexible_pack_authority import flexible_pack_authority_handoff
 from .reconstruction import ScaleState
 
 _DEFERRED = "DEFERRED_OWNER_VALIDATION"
@@ -123,6 +124,7 @@ class TubeFamilyRevision:
             "contract": "packlab.tube-family.v1",
             "authority_class": "DESIGN_MODEL_WITH_PREVIEW_PROXY",
             "model": self.model.as_dict(),
+            "authority_and_limitations": flexible_pack_authority_handoff(self.model),
             "component_id": self.component_id,
             "dimensions": self.dimensions.as_dict(self.model.coordinate_unit),
             "sections": [section.as_dict() for section in self.sections],

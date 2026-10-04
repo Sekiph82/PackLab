@@ -9,6 +9,7 @@ from .cross_section import CrossSection
 from .design_model import DesignModelRevision
 from .design_operations import DesignOperation, OperationKind
 from .design_profile import DesignProfile
+from .flexible_pack_authority import is_flexible_pack_model
 from .geometry_adapter import TriangleMeshData
 from .reconstruction import ScaleState
 
@@ -44,10 +45,13 @@ class DesignPreview:
     authority_class: str = PREVIEW_AUTHORITY
     contract: str = PREVIEW_CONTRACT
     standalone_root_revision_id: str | None = None
+    flexible_pack_design_only: bool = False
 
     def __post_init__(self) -> None:
         if self.authority_class != PREVIEW_AUTHORITY or self.contract != PREVIEW_CONTRACT:
             raise DesignPreviewError("preview_authority_invalid")
+        if not isinstance(self.flexible_pack_design_only, bool):
+            raise DesignPreviewError("preview_flexible_pack_flag_invalid")
         if (
             self.physical_accuracy_validation_status != "DEFERRED_OWNER_VALIDATION"
             or self.mold_use_authorized is not False
@@ -71,7 +75,7 @@ class DesignPreview:
     def as_dict(self) -> dict[str, object]:
         """Return metadata only; geometry remains a disposable derived payload."""
         if self.standalone_root_revision_id is not None:
-            return {
+            payload: dict[str, object] = {
                 "contract": self.contract,
                 "authority_class": self.authority_class,
                 "model_revision_id": self.model_revision_id,
@@ -92,26 +96,40 @@ class DesignPreview:
                 "disposable": True,
                 "scan_master_promoted": False,
             }
-        return {
-            "contract": self.contract,
-            "authority_class": self.authority_class,
-            "model_revision_id": self.model_revision_id,
-            "scan_master_revision_id": self.scan_master_revision_id,
-            "scan_master_geometry_sha256": self.scan_master_geometry_sha256,
-            "parent_binding_revision_id": self.parent_binding_revision_id,
-            "scale_state": self.scale_state.value,
-            "coordinate_unit": self.coordinate_unit,
-            "physical_accuracy_validation_status": self.physical_accuracy_validation_status,
-            "mold_use_authorized": self.mold_use_authorized,
-            "vertex_count": len(self.mesh.vertices),
-            "triangle_count": len(self.mesh.triangles),
-            "feature_vertex_indices": [
-                {"feature_id": feature_id, "indices": list(indices)}
-                for feature_id, indices in self.feature_vertex_indices
-            ],
-            "disposable": True,
-            "scan_master_promoted": False,
-        }
+        else:
+            payload = {
+                "contract": self.contract,
+                "authority_class": self.authority_class,
+                "model_revision_id": self.model_revision_id,
+                "scan_master_revision_id": self.scan_master_revision_id,
+                "scan_master_geometry_sha256": self.scan_master_geometry_sha256,
+                "parent_binding_revision_id": self.parent_binding_revision_id,
+                "scale_state": self.scale_state.value,
+                "coordinate_unit": self.coordinate_unit,
+                "physical_accuracy_validation_status": self.physical_accuracy_validation_status,
+                "mold_use_authorized": self.mold_use_authorized,
+                "vertex_count": len(self.mesh.vertices),
+                "triangle_count": len(self.mesh.triangles),
+                "feature_vertex_indices": [
+                    {"feature_id": feature_id, "indices": list(indices)}
+                    for feature_id, indices in self.feature_vertex_indices
+                ],
+                "disposable": True,
+                "scan_master_promoted": False,
+            }
+        if self.flexible_pack_design_only:
+            payload["authority_and_limitations"] = {
+                "flexible_pack_design_only": True,
+                "captured_geometry_authority": False,
+                "scan_master_promotion_allowed": False,
+                "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
+                "mold_use_authorized": False,
+                "manufacturing_authority": False,
+                "certified_volume_claimed": False,
+                "physical_tolerance_claimed": False,
+                "measured_film_deformation_claimed": False,
+            }
+        return payload
 
 
 def tessellate_design_preview(
@@ -223,6 +241,7 @@ def _tessellate_operation(
         standalone_root_revision_id=(
             model.standalone_root.revision_id if model.standalone_root is not None else None
         ),
+        flexible_pack_design_only=is_flexible_pack_model(model),
     )
 
 
