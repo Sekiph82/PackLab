@@ -19,7 +19,8 @@ Master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sess
 | PL-0310 V01 | AUDITED_PASS | Existing accepted implementation | Existing V01 log | Independently accepted | No changes in R01. |
 | PL-0311 V01 | AUDITED_PASS | Existing accepted implementation | Existing V01 log | Independently accepted | No changes in R01. |
 | PL-0312 V02 | READY_FOR_INDEPENDENT_AUDIT | `7576279cf4f8fd7e7c101e8a5e6a63ffcd8708c8` | `585566b70ff3acab40025928fee7f800e2a61873` | 76 focused; 1,660 passed, 6 skipped, 1 deselected full | Ambiguous/unresolved feature ownership retained; advisory finite-grid analysis only. |
-| PL-0313 through PL-0331 V01 | PENDING | Not started | Pending | Pending | PL-0313 is next under exact ordered R01 scope. |
+| PL-0313 V01 | BLOCKED_AUTHORITY_AMBIGUITY | No implementation commit; stopped before product edits | `808102f22bf73b3d57fbf57692da58a471ded8ae` | Not run: authority stop before implementation | Normalized feature-local UV has no accepted mapping to mm on the exact BREP surface; wrap flattening/seam policy is undefined. See PL-0313 blocker log. |
+| PL-0314 through PL-0331 V01 | PENDING | Not started | Pending | Pending | Not started; continuation halted at PL-0313. |
 
 ## PL-0312 V02 authority resolution
 
@@ -37,9 +38,9 @@ Master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sess
 
 ## Batch status and handoff
 
-- Batch status: `BATCH_IN_PROGRESS`.
-- PL-0312 V02 is builder-green and awaiting independent child audit. Current active child: PL-0313 V01.
-- Stop at any real validation, authority, scope, dependency, licensing, privacy/security, sync, owner, or Blender gate failure. On stop, record the exact frontier/blocker and end this log exactly `AWAITING_MILESTONE_AUDIT`.
+- Batch status: `BATCH_STOPPED`.
+- PL-0312 V02 is builder-green and awaiting independent child audit. PL-0313 stopped before implementation on the missing normalized-UV-to-millimetre surface mapping. PL-0314 through PL-0331 remain unstarted.
+- Stop at any real validation, authority, scope, dependency, licensing, privacy/security, sync, owner, or Blender gate failure. This log ends exactly `AWAITING_MILESTONE_AUDIT`.
 - If PL-0312 V02 and all remaining children close green, record each child’s separate implementation/evidence and log-only commits, Blender facts, final parity, `BATCH_COMPLETED`, M15-not-started state, and end exactly `AWAITING_MILESTONE_AUDIT`.
 
-BATCH_IN_PROGRESS
+AWAITING_MILESTONE_AUDIT
