@@ -16,7 +16,7 @@ Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M1
 
 ## Implementation
 
-- Implementation/evidence commit: `ff3f141`.
+- Implementation/evidence commit: `ff3f141dfac35be8287cb4417b0816e94458069b`.
 - Added the Studio Exports route and an explicit source selector for `Scan Mesh / Scan Master` versus `Editable Design Model / CAD`. The UI presents exact selected authority/revision, unit and scale state, CAD/BREP revision where applicable, available formats and the deferred physical-validation disclaimer before export.
 - Scan Mesh reads only the active persisted Scan Master and delegates to `ProjectManager.export_selected_scan_master`, which rechecks selected-revision authority and invokes the accepted Scan Master export service. Scan formats are limited to PLY/OBJ/GLB.
 - Design Model exports require an injected exact current Design Model/BREP/preview source. The view verifies source/parent/revision/unit lineage and delegates STEP, STL and OBJ+GLB to the corresponding M13 domain exporters, preserving their validation and manifest gates. STEP/STL are omitted for RELATIVE/reconstruction-unit sources; OBJ+GLB remains available with explicit source units.
@@ -38,7 +38,7 @@ Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M1
 | `git diff --check` and staged `git diff --cached --check` | No whitespace errors. | PASS. |
 | Changed-file credential/privacy scan for tokens, private keys, AWS keys, and local absolute paths | No credential or private path data is present. | PASS: no matches in changed source/tests. |
 | Scope/generated/binary/license review | Only the frozen Windows Studio export workflow and directly related tests change; no generated/binary/private evidence, tracker, prompt, criteria, audit or dependency files are changed. | PASS. Existing OCP/OCCT per-DLL license and NOTICE inventory remains a release gate for installer/binary redistribution. |
-| Remote boundary | Push only to `origin/main`; verify local/origin/GitHub equality. | Implementation commit `ff3f141` pushed to `origin/main`; final child-log and index commits will be separately verified. |
+| Remote boundary | Push only to `origin/main`; verify local/origin/GitHub equality. | Implementation commit `ff3f141dfac35be8287cb4417b0816e94458069b` pushed to `origin/main`; final child-log and index commits will be separately verified. |
 
 The source selector, formats, authority summary, cancellation/error status and no-mutation behavior are covered in UI tests. Domain exporters remain responsible for CAD validation, RELATIVE-to-mm rejection and mandatory manifest creation. PL-0220 through PL-0224 remain deferred; M14+ remains unstarted.
 
