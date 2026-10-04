@@ -32,7 +32,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 | PL-0301 | READY_FOR_INDEPENDENT_AUDIT | `c897e602d3b00c01bd330d8d2c6e78c5adb88bc3` | `ff90d6a01ef4a93f9b0110045031b6b45c179018` | 49 focused/predecessor regressions PASS | 1,569 passed, 6 skipped, 1 deselected | Deterministic STEP read-back validates mm units, solid topology, PRODUCT name and numeric bounds before publication; no physical accuracy claim. OCP/OCCT redistribution license gate remains. |
 | PL-0302 | READY_FOR_INDEPENDENT_AUDIT | `ff3f141dfac35be8287cb4417b0816e94458069b` | `bf93ba0fc97ad0b78eae21dc33a080d97ba06a7f` | 74 focused Studio/project/CAD regressions PASS | 1,574 passed, 6 skipped, 1 deselected | Source-explicit Scan Mesh/Design Model UI delegates through domain exporters and carries disclaimers; active Design Model selection is not persisted in current Studio. OCP/OCCT redistribution license gate remains. |
 | PL-0303 | READY_FOR_INDEPENDENT_AUDIT | `d0aa9231cc1a25ba341b6ba897d173d7e88cc849` | `2d0334ae69528b4178bc06b24a0f89cf3ff4befd` | 44 focused drawing/CAD/BREP/validation/feature-map/preview regressions PASS | 1,579 passed, 6 skipped, 1 deselected | Deterministic canonical orthographic HLR polylines preserve exact source/parent and feature-map references; nonlinear edges are sampled, coincident lines may remain, edge-to-feature association is unresolved, and physical accuracy stays deferred. OCP/OCCT redistribution license gate persists. |
-| PL-0304 | PENDING | | | | | |
+| PL-0304 | READY_FOR_INDEPENDENT_AUDIT | `8f7913188627cb79a6dbba7bd59007305f9ed8a0` | `c7c67576cdc5feaa23274f1bf5f6df4c067600ff` | 53 focused drawing/section/CAD/BREP/validation/feature-map/preview regressions PASS | 1,588 passed, 6 skipped, 1 deselected | Deterministic bounded CAD-plane sections preserve exact source/parent/feature mapping and explicit component placements. Hatching and edge-to-feature associations remain unavailable; placement references are caller-provided rather than independent assembly authority. OCP/OCCT redistribution license gate persists. |
 | PL-0305 | PENDING | | | | | |
 | PL-0306 | PENDING | | | | | |
 | PL-0307 | PENDING | | | | | |
@@ -43,6 +43,7 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MAS
 
 - PL-0302 implementation/evidence commit: `ff3f141dfac35be8287cb4417b0816e94458069b`; V01 child log publication commit: `bf93ba0fc97ad0b78eae21dc33a080d97ba06a7f`.
 - PL-0303 implementation/evidence commit: `d0aa9231cc1a25ba341b6ba897d173d7e88cc849`; V01 child log publication commit: `2d0334ae69528b4178bc06b24a0f89cf3ff4befd`.
+- PL-0304 implementation/evidence commit: `8f7913188627cb79a6dbba7bd59007305f9ed8a0`; V01 child log publication commit: `c7c67576cdc5feaa23274f1bf5f6df4c067600ff`.
 - PL-0301 implementation/evidence commit: `c897e602d3b00c01bd330d8d2c6e78c5adb88bc3`; V01 child log publication commit: `ff90d6a01ef4a93f9b0110045031b6b45c179018`.
 - Batch status:
 - Final local SHA:
