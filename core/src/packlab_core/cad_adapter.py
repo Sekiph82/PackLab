@@ -25,6 +25,7 @@ from .design_operations import (
     OperationKind,
 )
 from .design_profile import DesignProfile
+from .geometry_adapter import TriangleMeshData
 from .reconstruction import ScaleState
 
 CAD_BINDING_PACKAGE = "cadquery-ocp-novtk"
@@ -184,6 +185,19 @@ class CadTopologySnapshot:
     open_edge_count: int
     nonmanifold_edge_count: int
     invalid_statuses: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class CadTessellationData:
+    """Bounded backend-neutral tessellation extracted from a copied CAD shape."""
+
+    mesh: TriangleMeshData
+    face_count: int
+    linear_deflection: float
+    angular_deflection: float
+    maximum_vertices: int
+    maximum_triangles: int
+    maximum_faces: int
 
 
 _SHAPE_REGISTRY: dict[str, tuple[str, Any]] = {}
@@ -482,6 +496,130 @@ def cad_shape_bounds(handle: CadShapeHandle) -> tuple[float, float, float, float
     if len(bounds) != 6 or any(not math.isfinite(value) for value in bounds):
         raise CadAdapterError("cad_shape_bounds_invalid")
     return tuple(float(value) for value in bounds)  # type: ignore[return-value]
+
+
+def tessellate_cad_shape(
+    handle: CadShapeHandle,
+    *,
+    linear_deflection: float,
+    angular_deflection: float,
+    maximum_vertices: int,
+    maximum_triangles: int,
+    maximum_faces: int,
+) -> CadTessellationData:
+    """Mesh a copy of one registered shape with explicit tolerances and work bounds."""
+    if not isinstance(handle, CadShapeHandle):
+        raise CadAdapterError("cad_shape_handle_required")
+    for value, code in (
+        (linear_deflection, "cad_tessellation_linear_deflection_invalid"),
+        (angular_deflection, "cad_tessellation_angular_deflection_invalid"),
+    ):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise CadAdapterError(code)
+    if not 1e-5 <= float(linear_deflection) <= 10.0:
+        raise CadAdapterError("cad_tessellation_linear_deflection_out_of_bounds")
+    if not 1e-4 <= float(angular_deflection) <= math.pi / 2.0:
+        raise CadAdapterError("cad_tessellation_angular_deflection_out_of_bounds")
+    from .design_preview import MAX_PREVIEW_TRIANGLES, MAX_PREVIEW_VERTICES
+
+    limits = (
+        (maximum_vertices, MAX_PREVIEW_VERTICES, "cad_tessellation_vertex_limit_invalid"),
+        (maximum_triangles, MAX_PREVIEW_TRIANGLES, "cad_tessellation_triangle_limit_invalid"),
+        (maximum_faces, 10_000, "cad_tessellation_face_limit_invalid"),
+    )
+    for value, maximum, code in limits:
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+            raise CadAdapterError(code)
+
+    shape = _shape_for_handle(handle)
+    if shape.IsNull():
+        raise CadAdapterError("cad_tessellation_shape_null")
+    builder = importlib.import_module("OCP.BRepBuilderAPI")
+    top_abs = importlib.import_module("OCP.TopAbs")
+    top_exp = importlib.import_module("OCP.TopExp")
+    topods = importlib.import_module("OCP.TopoDS")
+    face_explorer = top_exp.TopExp_Explorer(shape, top_abs.TopAbs_FACE)
+    faces = []
+    while face_explorer.More():
+        faces.append(topods.TopoDS.Face_s(face_explorer.Current()))
+        if len(faces) > maximum_faces:
+            raise CadAdapterError("cad_tessellation_face_work_bound_exceeded")
+        face_explorer.Next()
+    if not faces:
+        raise CadAdapterError("cad_tessellation_faces_required")
+
+    # copyMesh=False prevents reuse of or attachment to source triangulations.
+    copied_shape = builder.BRepBuilderAPI_Copy(shape, True, False).Shape()
+    mesher_module = importlib.import_module("OCP.BRepMesh")
+    mesher = mesher_module.BRepMesh_IncrementalMesh(
+        copied_shape,
+        float(linear_deflection),
+        False,
+        float(angular_deflection),
+        False,
+    )
+    mesher.Perform()
+    if not mesher.IsDone():
+        raise CadAdapterError("cad_tessellation_kernel_failed")
+
+    brep_tool = importlib.import_module("OCP.BRep").BRep_Tool
+    top_loc = importlib.import_module("OCP.TopLoc")
+    vertices: list[tuple[float, float, float]] = []
+    triangles: list[tuple[int, int, int]] = []
+    vertex_indices: dict[tuple[float, float, float], int] = {}
+    explorer = top_exp.TopExp_Explorer(copied_shape, top_abs.TopAbs_FACE)
+    while explorer.More():
+        face = topods.TopoDS.Face_s(explorer.Current())
+        location = top_loc.TopLoc_Location()
+        triangulation = brep_tool.Triangulation_s(face, location)
+        if triangulation is None:
+            raise CadAdapterError("cad_tessellation_face_triangulation_missing")
+        transform = location.Transformation()
+        local_indices: dict[int, int] = {}
+        for node_index in range(1, triangulation.NbNodes() + 1):
+            point = triangulation.Node(node_index).Transformed(transform)
+            vertex = (float(point.X()), float(point.Y()), float(point.Z()))
+            index = vertex_indices.get(vertex)
+            if index is None:
+                if len(vertices) >= maximum_vertices:
+                    raise CadAdapterError("cad_tessellation_vertex_work_bound_exceeded")
+                index = len(vertices)
+                vertex_indices[vertex] = index
+                vertices.append(vertex)
+            local_indices[node_index] = index
+        reversed_face = face.Orientation() == top_abs.TopAbs_REVERSED
+        for triangle_index in range(1, triangulation.NbTriangles() + 1):
+            if len(triangles) >= maximum_triangles:
+                raise CadAdapterError("cad_tessellation_triangle_work_bound_exceeded")
+            n1, n2, n3 = triangulation.Triangle(triangle_index).Get()
+            triangle = (
+                local_indices[n1],
+                local_indices[n3 if reversed_face else n2],
+                local_indices[n2 if reversed_face else n3],
+            )
+            if len(set(triangle)) != 3:
+                raise CadAdapterError("cad_tessellation_degenerate_triangle")
+            triangles.append(triangle)
+        explorer.Next()
+    if not vertices or not triangles:
+        raise CadAdapterError("cad_tessellation_mesh_empty")
+    try:
+        mesh = TriangleMeshData(tuple(vertices), tuple(triangles))
+    except ValueError as error:
+        raise CadAdapterError("cad_tessellation_mesh_invalid") from error
+    return CadTessellationData(
+        mesh,
+        len(faces),
+        float(linear_deflection),
+        float(angular_deflection),
+        maximum_vertices,
+        maximum_triangles,
+        maximum_faces,
+    )
 
 
 def inspect_shape_topology(handle: CadShapeHandle) -> CadTopologySnapshot:
@@ -1157,6 +1295,7 @@ __all__ = [
     "CadRuntimeStatus",
     "CadShapeBuild",
     "CadShapeHandle",
+    "CadTessellationData",
     "CadTopologySnapshot",
     "build_lofted_shape",
     "build_polygon_prism_cut",
@@ -1167,4 +1306,5 @@ __all__ = [
     "probe_cad_runtime",
     "profile_to_cad_input",
     "shape_handle_for_model",
+    "tessellate_cad_shape",
 ]
