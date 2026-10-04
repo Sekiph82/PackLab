@@ -7,9 +7,15 @@ import json
 import re
 from dataclasses import dataclass
 
-from .cad_adapter import CadAdapterError, CadShapeHandle, build_revolved_shape
+from .cad_adapter import (
+    CadAdapterError,
+    CadShapeBuild,
+    CadShapeHandle,
+    build_lofted_shape,
+    build_revolved_shape,
+)
 from .design_model import DesignModelParentKind, DesignModelRevision
-from .design_operations import DesignOperation
+from .design_operations import DesignOperation, LoftSectionInput
 from .design_profile import DesignProfile
 from .reconstruction import ScaleState
 
@@ -27,6 +33,7 @@ class CadBrepRepresentationRevision:
     geometry_sha256: str
     source_design_model_revision_id: str
     source_operation_id: str
+    source_input_ids: tuple[str, ...]
     shape_handle: CadShapeHandle
     parent_kind: DesignModelParentKind
     parent_authority_revision_id: str
@@ -35,7 +42,7 @@ class CadBrepRepresentationRevision:
     physical_accuracy_validation_status: str
     mold_use_authorized: bool
     solid_count: int
-    profile_sample_count: int
+    profile_sample_count: int | None
     contract: str = CAD_BREP_CONTRACT
     representation_type: str = "BREP_SOLID"
 
@@ -44,6 +51,10 @@ class CadBrepRepresentationRevision:
             raise CadBrepError("cad_brep_contract_invalid")
         if not _DIGEST_PATTERN.fullmatch(self.geometry_sha256):
             raise CadBrepError("cad_brep_geometry_digest_invalid")
+        if not self.source_input_ids or any(
+            not isinstance(item, str) or not item for item in self.source_input_ids
+        ):
+            raise CadBrepError("cad_brep_source_input_ids_invalid")
         if not isinstance(self.shape_handle, CadShapeHandle):
             raise CadBrepError("cad_brep_shape_handle_invalid")
         if self.parent_kind is not self.shape_handle.parent_kind:
@@ -71,7 +82,7 @@ class CadBrepRepresentationRevision:
             raise CadBrepError("cad_brep_mold_use_forbidden")
         if self.solid_count != 1:
             raise CadBrepError("cad_brep_single_solid_required")
-        if (
+        if self.profile_sample_count is not None and (
             not isinstance(self.profile_sample_count, int)
             or isinstance(self.profile_sample_count, bool)
             or not 3 <= self.profile_sample_count <= 2048
@@ -101,16 +112,21 @@ class CadBrepRepresentationRevision:
             "shape_handle_id": self.shape_handle.handle_id,
             "source_design_model_revision_id": self.source_design_model_revision_id,
             "source_operation_id": self.source_operation_id,
+            "source_input_ids": list(self.source_input_ids),
             "parent_authority": parent_authority,
             "scale_state": self.scale_state.value,
             "coordinate_unit": self.coordinate_unit,
             "physical_accuracy_validation_status": self.physical_accuracy_validation_status,
             "mold_use_authorized": self.mold_use_authorized,
             "solid_count": self.solid_count,
-            "profile_sampling": {
-                "method": "uniform_axial_samples_closed_to_revolve_axis",
-                "sample_count": self.profile_sample_count,
-            },
+            "profile_sampling": (
+                {
+                    "method": "uniform_axial_samples_closed_to_revolve_axis",
+                    "sample_count": self.profile_sample_count,
+                }
+                if self.profile_sample_count is not None
+                else None
+            ),
             "scan_master_promoted": False,
             "design_model_replaced": False,
         }
@@ -138,6 +154,39 @@ def revolve_design_model_to_brep(
         raise CadBrepError(str(error)) from error
     except Exception as error:
         raise CadBrepError("cad_brep_backend_operation_failed") from error
+    return _representation_from_build(
+        model, operation, shape_build, profile_sample_count=profile_sample_count
+    )
+
+
+def loft_design_model_to_brep(
+    model: DesignModelRevision,
+    sections: tuple[LoftSectionInput, ...],
+    operation: DesignOperation,
+) -> CadBrepRepresentationRevision:
+    """Derive a solid loft from exact ordered cross-section and operation inputs."""
+    if not isinstance(model, DesignModelRevision):
+        raise CadBrepError("design_model_revision_required")
+    if not isinstance(operation, DesignOperation):
+        raise CadBrepError("design_model_loft_operation_required")
+    try:
+        shape_build = build_lofted_shape(model, sections, operation)
+    except CadAdapterError as error:
+        raise CadBrepError(str(error)) from error
+    except Exception as error:
+        raise CadBrepError("cad_brep_backend_operation_failed") from error
+    return _representation_from_build(model, operation, shape_build)
+
+
+def _representation_from_build(
+    model: DesignModelRevision,
+    operation: DesignOperation,
+    shape_build: CadShapeBuild,
+    *,
+    profile_sample_count: int | None = None,
+) -> CadBrepRepresentationRevision:
+    if not isinstance(shape_build, CadShapeBuild):
+        raise CadBrepError("cad_brep_shape_build_invalid")
     parent_authority_revision_id = (
         model.standalone_root.revision_id
         if model.standalone_root is not None
@@ -152,6 +201,7 @@ def revolve_design_model_to_brep(
         ("geometry_sha256", shape_build.geometry_sha256),
         ("source_design_model_revision_id", model.revision_id),
         ("source_operation_id", operation.operation_id),
+        ("source_input_ids", operation.input_ids),
         ("shape_handle", shape_build.shape_handle),
         ("parent_kind", model.parent_kind),
         ("parent_authority_revision_id", parent_authority_revision_id),
@@ -169,6 +219,7 @@ def revolve_design_model_to_brep(
         geometry_sha256=shape_build.geometry_sha256,
         source_design_model_revision_id=model.revision_id,
         source_operation_id=operation.operation_id,
+        source_input_ids=operation.input_ids,
         shape_handle=shape_build.shape_handle,
         parent_kind=model.parent_kind,
         parent_authority_revision_id=parent_authority_revision_id,
@@ -187,6 +238,7 @@ def _revision_id(revision: CadBrepRepresentationRevision) -> str:
         "geometry_sha256": revision.geometry_sha256,
         "source_design_model_revision_id": revision.source_design_model_revision_id,
         "source_operation_id": revision.source_operation_id,
+        "source_input_ids": list(revision.source_input_ids),
         "shape_handle_id": revision.shape_handle.handle_id,
         "parent_kind": revision.parent_kind.value,
         "parent_authority_revision_id": revision.parent_authority_revision_id,
@@ -207,5 +259,6 @@ __all__ = [
     "CAD_BREP_CONTRACT",
     "CadBrepError",
     "CadBrepRepresentationRevision",
+    "loft_design_model_to_brep",
     "revolve_design_model_to_brep",
 ]

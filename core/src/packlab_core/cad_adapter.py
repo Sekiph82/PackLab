@@ -18,7 +18,12 @@ from typing import Any
 
 from .cross_section import CrossSection
 from .design_model import DesignModelParentKind, DesignModelRevision
-from .design_operations import DesignOperation, OperationKind
+from .design_operations import (
+    MAX_LOFT_SECTIONS,
+    DesignOperation,
+    LoftSectionInput,
+    OperationKind,
+)
 from .design_profile import DesignProfile
 from .reconstruction import ScaleState
 
@@ -233,7 +238,6 @@ def build_revolved_shape(
     module_check = importlib.import_module("OCP.BRepCheck")
     module_top_exp = importlib.import_module("OCP.TopExp")
     module_top_abs = importlib.import_module("OCP.TopAbs")
-    module_brep_tools = importlib.import_module("OCP.BRepTools")
 
     axis = operation.axis_direction
     origin = operation.axis_origin
@@ -275,13 +279,74 @@ def build_revolved_shape(
     if solid_count != 1:
         raise CadAdapterError("revolve_brep_single_solid_required")
 
+    return _shape_build_result(model, operation, shape, solid_count)
+
+
+def build_lofted_shape(
+    model: DesignModelRevision,
+    sections: tuple[LoftSectionInput, ...],
+    operation: DesignOperation,
+) -> CadShapeBuild:
+    """Build a loft from exact ordered section wires without reordering or gap healing."""
+    _validate_loft_inputs(model, sections, operation)
+    gp = importlib.import_module("OCP.gp")
+    builder = importlib.import_module("OCP.BRepBuilderAPI")
+    loft_module = importlib.import_module("OCP.BRepOffsetAPI")
+    check_module = importlib.import_module("OCP.BRepCheck")
+    top_exp = importlib.import_module("OCP.TopExp")
+    top_abs = importlib.import_module("OCP.TopAbs")
+    brep_tool = importlib.import_module("OCP.BRep")
+    loft = loft_module.BRepOffsetAPI_ThruSections(True, False, 1e-6)
+    loft.CheckCompatibility(False)
+
+    for section_input in sections:
+        points = tuple(
+            gp.gp_Pnt(point.x, point.y, section_input.axial_position)
+            for point in section_input.section.points
+        )
+        wire_builder = builder.BRepBuilderAPI_MakeWire()
+        for left, right in zip(points, (*points[1:], points[0])):
+            edge = builder.BRepBuilderAPI_MakeEdge(left, right)
+            if not edge.IsDone():
+                raise CadAdapterError("loft_section_edge_build_failed")
+            wire_builder.Add(edge.Edge())
+        if not wire_builder.IsDone():
+            raise CadAdapterError("loft_section_wire_build_failed")
+        wire = wire_builder.Wire()
+        if not brep_tool.BRep_Tool.IsClosed_s(wire):
+            raise CadAdapterError("loft_section_wire_not_closed")
+        loft.AddWire(wire)
+
+    loft.Build()
+    if not loft.IsDone():
+        raise CadAdapterError("loft_brep_build_failed")
+    shape = loft.Shape()
+    if shape.IsNull() or not check_module.BRepCheck_Analyzer(shape).IsValid():
+        raise CadAdapterError("loft_brep_topology_invalid")
+    explorer = top_exp.TopExp_Explorer(shape, top_abs.TopAbs_SOLID)
+    solid_count = 0
+    while explorer.More():
+        solid_count += 1
+        explorer.Next()
+    if solid_count != 1:
+        raise CadAdapterError("loft_brep_single_solid_required")
+    return _shape_build_result(model, operation, shape, solid_count)
+
+
+def _shape_build_result(
+    model: DesignModelRevision,
+    operation: DesignOperation,
+    shape: Any,
+    solid_count: int,
+) -> CadShapeBuild:
+    brep_tools = importlib.import_module("OCP.BRepTools")
     with tempfile.TemporaryDirectory(prefix="packlab-brep-digest-") as directory:
         brep_path = Path(directory) / "shape.brep"
-        if not module_brep_tools.BRepTools.Write_s(shape, str(brep_path)):
-            raise CadAdapterError("revolve_brep_serialization_failed")
+        if not brep_tools.BRepTools.Write_s(shape, str(brep_path)):
+            raise CadAdapterError("cad_brep_serialization_failed")
         geometry_digest = hashlib.sha256(brep_path.read_bytes()).hexdigest()
     handle_seed = "|".join(
-        (model.revision_id, operation.operation_id, profile.profile_id, geometry_digest)
+        (model.revision_id, operation.operation_id, *operation.input_ids, geometry_digest)
     )
     handle_id = "cad-shape:" + hashlib.sha256(handle_seed.encode("utf-8")).hexdigest()
     parent_revision = (
@@ -307,6 +372,77 @@ def build_revolved_shape(
             raise CadAdapterError("cad_shape_handle_collision")
         _SHAPE_REGISTRY[handle_id] = (geometry_digest, shape)
     return CadShapeBuild(handle, geometry_digest, solid_count)
+
+
+def _validate_loft_inputs(
+    model: DesignModelRevision,
+    sections: tuple[LoftSectionInput, ...],
+    operation: DesignOperation,
+) -> None:
+    if not isinstance(model, DesignModelRevision):
+        raise CadAdapterError("design_model_revision_required")
+    if not isinstance(operation, DesignOperation) or operation.kind is not OperationKind.LOFT:
+        raise CadAdapterError("loft_operation_required")
+    if not isinstance(sections, tuple) or not 2 <= len(sections) <= MAX_LOFT_SECTIONS:
+        raise CadAdapterError("loft_requires_ordered_sections")
+    if any(not isinstance(item, LoftSectionInput) for item in sections):
+        raise CadAdapterError("loft_section_input_invalid")
+    if (
+        operation.model_revision_id != model.revision_id
+        or operation.scale_state is not model.scale_state
+        or operation.coordinate_unit != model.coordinate_unit
+        or operation.physical_accuracy_validation_status
+        != model.physical_accuracy_validation_status
+        or operation.physical_accuracy_validation_status != PHYSICAL_VALIDATION_DEFERRED
+        or operation.mold_use_authorized is not False
+        or model.mold_use_authorized is not False
+        or operation.axis_origin is not None
+        or operation.axis_direction is not None
+        or operation.angle_degrees is not None
+    ):
+        raise CadAdapterError("loft_model_or_authority_mismatch")
+    sections_by_id = tuple(item.section.section_id for item in sections)
+    feature_ids = tuple(item.feature_id for item in sections)
+    positions = tuple(item.axial_position for item in sections)
+    if (
+        operation.input_ids != sections_by_id
+        or operation.section_positions != positions
+        or operation.parent_feature_ids[: len(feature_ids)] != feature_ids
+        or len(operation.parent_feature_ids) not in {len(feature_ids), len(feature_ids) + 1}
+        or any(
+            feature_id not in {feature.feature_id for feature in model.features}
+            for feature_id in operation.parent_feature_ids
+        )
+    ):
+        raise CadAdapterError("loft_operation_inputs_stale_or_reordered")
+    if any(right <= left for left, right in zip(positions, positions[1:])):
+        raise CadAdapterError("loft_sections_must_be_strictly_ordered")
+    first = sections[0].section
+    first_orientation = _cross_section_orientation(first)
+    for item in sections:
+        section = item.section
+        if (
+            section.component_id != first.component_id
+            or section.coordinate_unit != model.coordinate_unit
+            or section.scale_state is not model.scale_state
+            or len(section.points) != len(first.points)
+            or _cross_section_orientation(section) != first_orientation
+        ):
+            raise CadAdapterError("loft_section_topology_orientation_or_unit_mismatch")
+
+
+def _cross_section_orientation(section: CrossSection) -> int:
+    if not isinstance(section, CrossSection):
+        raise CadAdapterError("loft_cross_section_required")
+    points = section.points
+    if len(points) < 3:
+        raise CadAdapterError("loft_section_point_count_invalid")
+    area_twice = sum(
+        left.x * right.y - right.x * left.y for left, right in zip(points, (*points[1:], points[0]))
+    )
+    if not math.isfinite(area_twice) or area_twice == 0.0:
+        raise CadAdapterError("loft_section_area_degenerate")
+    return 1 if area_twice > 0.0 else -1
 
 
 def _shape_for_handle(handle: CadShapeHandle) -> Any:
@@ -795,6 +931,7 @@ __all__ = [
     "CadRuntimeStatus",
     "CadShapeBuild",
     "CadShapeHandle",
+    "build_lofted_shape",
     "build_revolved_shape",
     "cross_section_to_cad_input",
     "probe_cad_runtime",
