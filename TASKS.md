@@ -6,11 +6,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M14
 - Current Sprint: M14-C001 — Labels, Materials & Rendering
-- Current Task: M14-C001 — ordered batch PL-0310 through PL-0331
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Run PL-0310 through PL-0331 in exact order while green; stop truthfully on a real blocker. PL-0324 is the real Blender capability gate; do not auto-download Blender and do not start M15.
+- Current Task: M14-C001-R01 — PL-0312 authority resolution + continuation PL-0313 through PL-0331
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md. Close PL-0312 V02 using component/whole-BREP provenance with truthful ambiguous/unresolved feature attribution, then continue PL-0313 through PL-0331 automatically while green. Preserve the PL-0324 real Blender capability gate. Do not start M15.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; M13-C001 and M13 complete, 21/21 children accepted.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_PARTIAL_AUDIT_V01.md — AUDITED_PARTIAL_CHANGES_REQUIRED; PL-0310 and PL-0311 accepted, PL-0312 V01 authority stop accepted, resume at PL-0312 V02.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -34,7 +34,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - M13 R01 Continuation: completed; PL-0299 V02 through PL-0309 implementations are independently accepted. Original continuation prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CODEX_PROMPT_V02.md
 - Latest M13 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; F01 closed, 21/21 M13 children accepted, M13 complete.
 - M13 R02 Evidence Closure: completed and independently accepted.
-- Active M14 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0310 through PL-0331; master criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
+- M14 Original Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CODEX_PROMPT_V01.md — stopped correctly at PL-0312 V01 authority ambiguity.
+- Latest M14 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_PARTIAL_AUDIT_V01.md — PL-0310/PL-0311 AUDITED_PASS; PL-0312 V01 blocker accepted.
+- Active M14 R01 Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CODEX_PROMPT_V02.md — PL-0312 V02 then PL-0313 through PL-0331; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -586,9 +588,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M14-S01 - Label zones and dielines
 
-- [ ] **PL-0310** Define Label Zone entity independent of artwork image.
-- [ ] **PL-0311** Implement manual front/back/wrap Label Zone placement on Design Model.
-- [ ] **PL-0312** Implement curvature/slope analysis to suggest label-safe regions.
+- [x] **PL-0310** Define Label Zone entity independent of artwork image. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0310_CHATGPT_AUDIT_V01.md
+- [x] **PL-0311** Implement manual front/back/wrap Label Zone placement on Design Model. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0311_CHATGPT_AUDIT_V01.md
+- [ ] **PL-0312** Implement curvature/slope analysis to suggest label-safe regions. **V02 ACTIVE:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0312_CODEX_PROMPT_V02.md
 - [ ] **PL-0313** Generate 2D label boundary/dieline in millimetres.
 - [ ] **PL-0314** Add safe-margin/bleed metadata.
 - [ ] **PL-0315** Import SVG/PNG artwork and map it non-destructively to a Label Zone.
