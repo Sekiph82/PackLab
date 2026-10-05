@@ -9,6 +9,7 @@ from packlab_core.packaging_asset import (
     AssetStatus,
     BaseMaterial,
     ClosureType,
+    DesignModelLink,
     FieldProvenance,
     MeasurementUnit,
     PackagingAsset,
@@ -16,7 +17,10 @@ from packlab_core.packaging_asset import (
     PackagingFamily,
     PackagingMeasurement,
     ProvenanceClass,
+    RawScanLink,
+    ScanMasterLink,
 )
+from packlab_core.reconstruction import ScaleState
 
 
 def _asset(**overrides: object) -> PackagingAsset:
@@ -310,6 +314,102 @@ def test_provenance_rejects_bad_authority_combinations_and_invalid_edits() -> No
             "nominal_volume",
             PackagingMeasurement(750, MeasurementUnit.MILLILITER),
             FieldProvenance("empty_package_weight", ProvenanceClass.USER_DECLARED),
+        )
+
+
+def test_source_links_are_exact_deterministic_references_and_successor_revision() -> None:
+    project_a = "a1111111-1111-4111-8111-111111111111"
+    project_b = "b2222222-2222-4222-8222-222222222222"
+    raw_a = RawScanLink(project_a, "capture-a", "a" * 64)
+    raw_b = RawScanLink(project_b, "capture-b", "b" * 64)
+    scan_master = ScanMasterLink(
+        project_a,
+        "scan-master-1",
+        "c" * 64,
+        ScaleState.METRIC_UNVERIFIED,
+        "scale-provenance-1",
+    )
+    design_model = DesignModelLink(
+        project_id=project_a,
+        revision_id="design-model-1",
+        content_sha256="d" * 64,
+        parent_authority_kind="CAPTURED_SCAN_MASTER",
+        parent_authority_revision_id="scan-master-1",
+        scan_master_revision_id="scan-master-1",
+        scan_master_geometry_sha256="c" * 64,
+        scale_state=ScaleState.METRIC_UNVERIFIED,
+    )
+    standalone_model = DesignModelLink(
+        project_id=project_b,
+        revision_id="design-model-2",
+        content_sha256="e" * 64,
+        parent_authority_kind="STANDALONE_DESIGN_GEOMETRY",
+        parent_authority_revision_id="standalone-root-2",
+        scale_state=ScaleState.RELATIVE,
+    )
+    original = _asset()
+    linked = original.with_source_links(
+        raw_scan_links=(raw_b, raw_a),
+        scan_master_link=scan_master,
+        design_model_links=(design_model, standalone_model),
+        preferred_design_model_revision_id="design-model-2",
+    )
+    reverse_raw = original.with_source_links(
+        raw_scan_links=(raw_a, raw_b),
+        scan_master_link=scan_master,
+        design_model_links=(design_model, standalone_model),
+        preferred_design_model_revision_id="design-model-2",
+    )
+
+    assert linked.revision_id != original.revision_id
+    assert linked.revision_id == reverse_raw.revision_id
+    assert linked.raw_scan_links == (raw_a, raw_b)
+    assert linked.design_model_links == (design_model, standalone_model)
+    assert linked.preferred_design_model_revision_id == "design-model-2"
+    assert linked.as_dict()["source_links"]["scan_master"]["mold_use_authorized"] is False
+    assert "project_root" not in linked.canonical_json
+    assert "vertices" not in linked.canonical_json
+    assert original.raw_scan_links == ()
+
+
+def test_source_links_reject_duplicate_malformed_and_stale_identities() -> None:
+    project = "a1111111-1111-4111-8111-111111111111"
+    raw = RawScanLink(project, "capture-1", "a" * 64)
+    model = DesignModelLink(
+        project_id=project,
+        revision_id="design-model-1",
+        content_sha256="b" * 64,
+        parent_authority_kind="STANDALONE_DESIGN_GEOMETRY",
+        parent_authority_revision_id="standalone-root-1",
+        scale_state=ScaleState.METRIC_UNVERIFIED,
+    )
+
+    with pytest.raises(PackagingAssetError, match="raw_scan_link_duplicate"):
+        _asset(raw_scan_links=(raw, raw))
+    with pytest.raises(PackagingAssetError, match="design_model_link_duplicate"):
+        _asset(design_model_links=(model, model))
+    with pytest.raises(PackagingAssetError, match="preferred_design_model_missing"):
+        _asset(design_model_links=(model,), preferred_design_model_revision_id="missing-model")
+    with pytest.raises(PackagingAssetError, match="raw_scan_digest_invalid"):
+        RawScanLink(project, "capture-1", "not-a-digest")
+    with pytest.raises(PackagingAssetError, match="scan_master_authority_invalid"):
+        ScanMasterLink(
+            project,
+            "scan-master-1",
+            "c" * 64,
+            ScaleState.METRIC_UNVERIFIED,
+            "scale-provenance-1",
+            mold_use_authorized=True,
+        )
+    with pytest.raises(PackagingAssetError, match="standalone_model_has_scan_master"):
+        DesignModelLink(
+            project_id=project,
+            revision_id="design-model-standalone",
+            content_sha256="d" * 64,
+            parent_authority_kind="STANDALONE_DESIGN_GEOMETRY",
+            parent_authority_revision_id="standalone-root-1",
+            scale_state=ScaleState.RELATIVE,
+            scan_master_revision_id="invented-scan",
         )
 
 

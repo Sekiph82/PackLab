@@ -10,8 +10,11 @@ from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any, cast
 
+from .reconstruction import ScaleState
+
 PACKAGING_ASSET_CONTRACT = "packlab.packaging-asset.v1"
 _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _ABSOLUTE_PATH_OR_URI = re.compile(
     r"^(?:[A-Za-z]:[\\/]|[\\/]{1,2}|[A-Za-z][A-Za-z0-9+.-]*://|file:)", re.IGNORECASE
 )
@@ -178,6 +181,145 @@ class FieldProvenance:
 
 
 @dataclass(frozen=True, slots=True)
+class RawScanLink:
+    """Exact path-free reference to one immutable raw capture in a PackLab project."""
+
+    project_id: str
+    revision_id: str
+    artifact_sha256: str
+    authority_class: str = "RAW_CAPTURE"
+    immutable: bool = True
+
+    def __post_init__(self) -> None:
+        _identifier(self.project_id, "raw_scan_project_id")
+        _identifier(self.revision_id, "raw_scan_revision_id")
+        if not isinstance(self.artifact_sha256, str) or not _SHA256.fullmatch(self.artifact_sha256):
+            raise PackagingAssetError("packaging_asset_raw_scan_digest_invalid")
+        if self.authority_class != "RAW_CAPTURE" or self.immutable is not True:
+            raise PackagingAssetError("packaging_asset_raw_scan_authority_invalid")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "project_id": self.project_id,
+            "revision_id": self.revision_id,
+            "artifact_sha256": self.artifact_sha256,
+            "authority_class": self.authority_class,
+            "immutable": self.immutable,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ScanMasterLink:
+    """Exact reference to a promoted Scan Master, retaining its deferred limits."""
+
+    project_id: str
+    revision_id: str
+    geometry_sha256: str
+    scale_state: ScaleState
+    scale_provenance_id: str
+    physical_accuracy_validation_status: str = "DEFERRED_OWNER_VALIDATION"
+    mold_use_authorized: bool = False
+    authority_class: str = "SCAN_MASTER"
+
+    def __post_init__(self) -> None:
+        _identifier(self.project_id, "scan_master_project_id")
+        _identifier(self.revision_id, "scan_master_revision_id")
+        if not isinstance(self.geometry_sha256, str) or not _SHA256.fullmatch(self.geometry_sha256):
+            raise PackagingAssetError("packaging_asset_scan_master_digest_invalid")
+        if not isinstance(self.scale_state, ScaleState) or self.scale_state not in {
+            ScaleState.RELATIVE,
+            ScaleState.METRIC_UNVERIFIED,
+        }:
+            raise PackagingAssetError("packaging_asset_scan_master_scale_state_invalid")
+        _identifier(self.scale_provenance_id, "scan_master_scale_provenance_id")
+        if (
+            self.physical_accuracy_validation_status != "DEFERRED_OWNER_VALIDATION"
+            or self.mold_use_authorized is not False
+            or self.authority_class != "SCAN_MASTER"
+        ):
+            raise PackagingAssetError("packaging_asset_scan_master_authority_invalid")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "project_id": self.project_id,
+            "revision_id": self.revision_id,
+            "geometry_sha256": self.geometry_sha256,
+            "authority_class": self.authority_class,
+            "scale_state": self.scale_state.value,
+            "scale_provenance_id": self.scale_provenance_id,
+            "physical_accuracy_validation_status": self.physical_accuracy_validation_status,
+            "mold_use_authorized": self.mold_use_authorized,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DesignModelLink:
+    """Exact reference to an immutable captured or standalone Design Model revision."""
+
+    project_id: str
+    revision_id: str
+    content_sha256: str
+    parent_authority_kind: str
+    parent_authority_revision_id: str
+    scale_state: ScaleState
+    scan_master_revision_id: str | None = None
+    scan_master_geometry_sha256: str | None = None
+    physical_accuracy_validation_status: str = "DEFERRED_OWNER_VALIDATION"
+    mold_use_authorized: bool = False
+    authority_class: str = "DESIGN_MODEL_REVISION"
+
+    def __post_init__(self) -> None:
+        _identifier(self.project_id, "design_model_project_id")
+        _identifier(self.revision_id, "design_model_revision_id")
+        if not isinstance(self.content_sha256, str) or not _SHA256.fullmatch(self.content_sha256):
+            raise PackagingAssetError("packaging_asset_design_model_digest_invalid")
+        if not isinstance(self.parent_authority_kind, str) or self.parent_authority_kind not in {
+            "CAPTURED_SCAN_MASTER",
+            "STANDALONE_DESIGN_GEOMETRY",
+        }:
+            raise PackagingAssetError("packaging_asset_design_model_parent_kind_invalid")
+        _identifier(self.parent_authority_revision_id, "design_model_parent_authority_revision_id")
+        if not isinstance(self.scale_state, ScaleState) or self.scale_state not in {
+            ScaleState.RELATIVE,
+            ScaleState.METRIC_UNVERIFIED,
+        }:
+            raise PackagingAssetError("packaging_asset_design_model_scale_state_invalid")
+        if self.parent_authority_kind == "CAPTURED_SCAN_MASTER":
+            _identifier(self.scan_master_revision_id, "design_model_scan_master_revision_id")
+            if (
+                not isinstance(self.scan_master_geometry_sha256, str)
+                or not _SHA256.fullmatch(self.scan_master_geometry_sha256)
+                or self.parent_authority_revision_id != self.scan_master_revision_id
+            ):
+                raise PackagingAssetError("packaging_asset_design_model_parent_digest_invalid")
+        elif (
+            self.scan_master_revision_id is not None or self.scan_master_geometry_sha256 is not None
+        ):
+            raise PackagingAssetError("packaging_asset_standalone_model_has_scan_master")
+        if (
+            self.physical_accuracy_validation_status != "DEFERRED_OWNER_VALIDATION"
+            or self.mold_use_authorized is not False
+            or self.authority_class != "DESIGN_MODEL_REVISION"
+        ):
+            raise PackagingAssetError("packaging_asset_design_model_authority_invalid")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "project_id": self.project_id,
+            "revision_id": self.revision_id,
+            "content_sha256": self.content_sha256,
+            "authority_class": self.authority_class,
+            "parent_authority_kind": self.parent_authority_kind,
+            "parent_authority_revision_id": self.parent_authority_revision_id,
+            "scan_master_revision_id": self.scan_master_revision_id,
+            "scan_master_geometry_sha256": self.scan_master_geometry_sha256,
+            "scale_state": self.scale_state.value,
+            "physical_accuracy_validation_status": self.physical_accuracy_validation_status,
+            "mold_use_authorized": self.mold_use_authorized,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class PackagingMeasurement:
     """A bounded value with an explicit unit; absent measurements use ``None``."""
 
@@ -223,6 +365,10 @@ class PackagingAsset:
     closure_description: str | None = None
     status: AssetStatus = AssetStatus.UNKNOWN
     field_provenance: tuple[FieldProvenance, ...] = ()
+    raw_scan_links: tuple[RawScanLink, ...] = ()
+    scan_master_link: ScanMasterLink | None = None
+    design_model_links: tuple[DesignModelLink, ...] = ()
+    preferred_design_model_revision_id: str | None = None
     contract: str = PACKAGING_ASSET_CONTRACT
 
     def __post_init__(self) -> None:
@@ -262,6 +408,40 @@ class PackagingAsset:
                 raise PackagingAssetError(
                     f"packaging_asset_{field_name}_unknown_provenance_required"
                 )
+        if not isinstance(self.raw_scan_links, tuple) or any(
+            not isinstance(item, RawScanLink) for item in self.raw_scan_links
+        ):
+            raise PackagingAssetError("packaging_asset_raw_scan_links_invalid")
+        raw_ids = tuple((item.project_id, item.revision_id) for item in self.raw_scan_links)
+        if len(raw_ids) != len(set(raw_ids)):
+            raise PackagingAssetError("packaging_asset_raw_scan_link_duplicate")
+        canonical_raw_links = tuple(
+            sorted(self.raw_scan_links, key=lambda item: (item.project_id, item.revision_id))
+        )
+        if canonical_raw_links != self.raw_scan_links:
+            object.__setattr__(self, "raw_scan_links", canonical_raw_links)
+        if self.scan_master_link is not None and not isinstance(
+            self.scan_master_link, ScanMasterLink
+        ):
+            raise PackagingAssetError("packaging_asset_scan_master_link_invalid")
+        if not isinstance(self.design_model_links, tuple) or any(
+            not isinstance(item, DesignModelLink) for item in self.design_model_links
+        ):
+            raise PackagingAssetError("packaging_asset_design_model_links_invalid")
+        design_ids = tuple((item.project_id, item.revision_id) for item in self.design_model_links)
+        if len(design_ids) != len(set(design_ids)):
+            raise PackagingAssetError("packaging_asset_design_model_link_duplicate")
+        if self.preferred_design_model_revision_id is not None:
+            _identifier(
+                self.preferred_design_model_revision_id, "preferred_design_model_revision_id"
+            )
+            preferred_matches = tuple(
+                item
+                for item in self.design_model_links
+                if item.revision_id == self.preferred_design_model_revision_id
+            )
+            if len(preferred_matches) != 1:
+                raise PackagingAssetError("packaging_asset_preferred_design_model_missing")
         if self.family is PackagingFamily.OTHER:
             _bounded_text(self.other_family_label, "other_family_label", 80)
         elif self.other_family_label is not None:
@@ -349,6 +529,14 @@ class PackagingAsset:
                 "closure_description": self.closure_description,
             },
             "field_provenance": [item.as_dict() for item in self.field_provenance],
+            "source_links": {
+                "raw_scans": [item.as_dict() for item in self.raw_scan_links],
+                "scan_master": (
+                    self.scan_master_link.as_dict() if self.scan_master_link is not None else None
+                ),
+                "design_models": [item.as_dict() for item in self.design_model_links],
+                "preferred_design_model_revision_id": self.preferred_design_model_revision_id,
+            },
             "status": self.status.value,
             "authority_semantics": "PACKAGING_METADATA_ONLY",
             "supplier_certification_inferred": False,
@@ -377,6 +565,23 @@ class PackagingAsset:
                     ),
                 },
             ),
+        )
+
+    def with_source_links(
+        self,
+        *,
+        raw_scan_links: tuple[RawScanLink, ...],
+        scan_master_link: ScanMasterLink | None,
+        design_model_links: tuple[DesignModelLink, ...],
+        preferred_design_model_revision_id: str | None = None,
+    ) -> PackagingAsset:
+        """Return a new revision with validated immutable source references."""
+        return replace(
+            self,
+            raw_scan_links=raw_scan_links,
+            scan_master_link=scan_master_link,
+            design_model_links=design_model_links,
+            preferred_design_model_revision_id=preferred_design_model_revision_id,
         )
 
 
@@ -408,6 +613,7 @@ __all__ = [
     "AssetStatus",
     "BaseMaterial",
     "ClosureType",
+    "DesignModelLink",
     "FieldProvenance",
     "MeasurementUnit",
     "PackagingAsset",
@@ -416,4 +622,6 @@ __all__ = [
     "PackagingMeasurement",
     "PACKAGING_ASSET_CONTRACT",
     "ProvenanceClass",
+    "RawScanLink",
+    "ScanMasterLink",
 ]
