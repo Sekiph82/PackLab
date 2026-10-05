@@ -4,13 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M15
-- Current Sprint: M15-C001 — Kenya Packaging Library
-- Current Task: M15-C001 — ordered batch PL-0332 through PL-0346
+- Current Milestone: M16
+- Current Sprint: M16-C001 — CI/CD, Signing & Distribution
+- Current Task: M16-C001 — executable batch PL-0347 through PL-0367; PL-0368 DEFERRED_POST_M17
 - Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Run PL-0332 through PL-0346 in exact order while green; preserve supplier-vs-estimate provenance, path-free portable library authority, local-only attachment storage, and existing PackLab project/revision authority. Stop truthfully on any real blocker. Do not start M16.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Run PL-0347 through PL-0367 in exact order while green. Treat Windows redistribution inventory as a hard gate, keep default iOS CI unsigned/secret-free, and do not create any V0.1 tag/release. PL-0368 remains DEFERRED_POST_M17. Do not start M17.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; M14-C001 and M14 complete, 22/22 children accepted.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/M15-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; M15-C001 and M15 complete, 15/15 children accepted.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -37,7 +37,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - M14 Original Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CODEX_PROMPT_V01.md — historical; authority stops/remediations preserved.
 - M14 R01/R02/R03 continuations: completed. PL-0310 through PL-0331 are independently accepted.
 - Latest M14 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 22/22 children accepted, M14 complete.
-- Active M15 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0332 through PL-0346; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
+- Latest M15 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/M15-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0332 through PL-0346 accepted, 15/15, M15 complete.
+- Active M16 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_CODEX_PROMPT_V01.md — executable PL-0347 through PL-0367; PL-0368 is DEFERRED_POST_M17; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -624,24 +625,24 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M15-S01 - Digital-twin metadata
 
-- [ ] **PL-0332** Define Packaging Asset schema with internal ID, family, nominal volume, supplier, material, weight and neck/closure metadata.
-- [ ] **PL-0333** Separate factual supplier fields from PackLab-estimated fields and label provenance.
-- [ ] **PL-0334** Link one Packaging Asset to raw Scan(s), one promoted Scan Master and multiple Design Model revisions.
-- [ ] **PL-0335** Link compatible caps/triggers/pumps as reusable components.
-- [ ] **PL-0336** Link multiple POVU artworks/SKUs to one physical geometry.
-- [ ] **PL-0337** Add attachments for supplier drawings, quotations and notes without forcing them into Git.
-- [ ] **PL-0338** Add audit trail for asset-metadata edits.
+- [x] **PL-0332** Define Packaging Asset schema with internal ID, family, nominal volume, supplier, material, weight and neck/closure metadata. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0332_CHATGPT_AUDIT_V01.md
+- [x] **PL-0333** Separate factual supplier fields from PackLab-estimated fields and label provenance. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0333_CHATGPT_AUDIT_V01.md
+- [x] **PL-0334** Link one Packaging Asset to raw Scan(s), one promoted Scan Master and multiple Design Model revisions. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0334_CHATGPT_AUDIT_V01.md
+- [x] **PL-0335** Link compatible caps/triggers/pumps as reusable components. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0335_CHATGPT_AUDIT_V01.md
+- [x] **PL-0336** Link multiple POVU artworks/SKUs to one physical geometry. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0336_CHATGPT_AUDIT_V01.md
+- [x] **PL-0337** Add attachments for supplier drawings, quotations and notes without forcing them into Git. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0337_CHATGPT_AUDIT_V01.md
+- [x] **PL-0338** Add audit trail for asset-metadata edits. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0338_CHATGPT_AUDIT_V01.md
 
 ## Sprint M15-S02 - Library UI
 
-- [ ] **PL-0339** Implement grid/list library browser with thumbnail.
-- [ ] **PL-0340** Implement search by ID/name/supplier/package family.
-- [ ] **PL-0341** Implement filters for volume, material, closure and status.
-- [ ] **PL-0342** Implement asset-detail page with 3D preview, dimensions, revisions and linked artwork.
-- [ ] **PL-0343** Implement duplicate/variant relationship display.
-- [ ] **PL-0344** Add Create new SKU from existing geometry workflow.
-- [ ] **PL-0345** Add library backup/export and restore validation.
-- [ ] **PL-0346** Add thumbnails/contact-sheet export for supplier discussions.
+- [x] **PL-0339** Implement grid/list library browser with thumbnail. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0339_CHATGPT_AUDIT_V01.md
+- [x] **PL-0340** Implement search by ID/name/supplier/package family. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0340_CHATGPT_AUDIT_V01.md
+- [x] **PL-0341** Implement filters for volume, material, closure and status. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0341_CHATGPT_AUDIT_V01.md
+- [x] **PL-0342** Implement asset-detail page with 3D preview, dimensions, revisions and linked artwork. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0342_CHATGPT_AUDIT_V01.md
+- [x] **PL-0343** Implement duplicate/variant relationship display. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0343_CHATGPT_AUDIT_V01.md
+- [x] **PL-0344** Add Create new SKU from existing geometry workflow. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0344_CHATGPT_AUDIT_V01.md
+- [x] **PL-0345** Add library backup/export and restore validation. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0345_CHATGPT_AUDIT_V01.md
+- [x] **PL-0346** Add thumbnails/contact-sheet export for supplier discussions. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0346_CHATGPT_AUDIT_V01.md
 
 ---
 
@@ -676,7 +677,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0365** Add changelog-generation rules tied to task IDs.
 - [ ] **PL-0366** Create release checklist requiring both Windows and iOS audit passes.
 - [ ] **PL-0367** Add rollback instructions for incompatible Capture/Studio versions.
-- [ ] **PL-0368** Create first internal V0.1 release only after acceptance gates in M17 are satisfied.
+- [ ] **PL-0368** Create first internal V0.1 release only after acceptance gates in M17 are satisfied. **DEFERRED_POST_M17:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0368_CODEX_PROMPT_V01.md
 
 ---
 
