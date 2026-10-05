@@ -17,7 +17,8 @@
 | PL-0313 V02 | READY_FOR_INDEPENDENT_AUDIT | `ac286de71e16372f6eddc8289460c905cfa1f355` | `f4ded8e` and line-ending correction `cfaff39` | 55 focused/predecessor passed; full 1,669 passed, 6 skipped, 1 deselected |
 | PL-0314 | READY_FOR_INDEPENDENT_AUDIT | `2878bf1edb1a29aaaba85c9bfb3e1b97081342bd` | `ca6185b` and SHA correction `b541c0e` | 56 focused passed; full 1,685 passed, 6 skipped, 1 deselected |
 | PL-0315 | READY_FOR_INDEPENDENT_AUDIT | `d79186126a233b37c3ec898daa87ae72a7141a49` | `c7cf6e8287b3f5e4ac2f99ba3d1fe3b96a24c61b` | 47 focused; full 1,701 passed, 6 skipped, 1 deselected |
-| PL-0316–PL-0331 | NOT_STARTED | pending | pending | pending |
+| PL-0316 | READY_FOR_INDEPENDENT_AUDIT | `937f353b2b1ea549fc06e02eabe5b983da295120` | `f84e1dd92efbe63ef895b3782fcbdae3373cabfb` | 58 focused; full 1,712 passed, 6 skipped, 1 deselected |
+| PL-0317–PL-0331 | NOT_STARTED | pending | pending | pending |
 
 ## PL-0313 V02 resolution
 
@@ -29,7 +30,7 @@ Focused command: `uv run --locked pytest -q tests/core/test_label_metric_surface
 
 ## Continuation status
 
-PL-0313 V02 through PL-0315 V01 are builder-green and awaiting independent child audit. PL-0315 implementation, child log, and M14 indexes have been published with remote parity verified. Continue in exact frozen order at PL-0316. PL-0316 through PL-0331 have not started. PL-0324 remains a real Blender capability gate. No M15+ work has started.
+PL-0313 V02 through PL-0316 V01 are builder-green and awaiting independent child audit. PL-0316 implementation, child log, and M14 indexes have been published with remote parity verified. Continue in exact frozen order at PL-0317. PL-0317 through PL-0331 have not started. PL-0324 remains a real Blender capability gate. No M15+ work has started.
 
 ## PL-0314 V01 execution
 
@@ -46,3 +47,12 @@ Starting child SHA: `0af845af237cea62a7287010435620693294fcdd`. Implementation/e
 Focused command `uv run --locked pytest -q tests/core/test_label_artwork.py tests/core/test_label_zone.py tests/core/test_label_zone_placement.py`: 47 passed. Full locked suite `uv run --locked pytest -q`: 1,701 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected tracker/dependency checks, privacy/scope review and whitespace checks passed.
 
 PL-0315 adds bounded offline SVG/PNG validation and immutable digest/media metadata, with deterministic normalized CONTAIN/COVER/STRETCH mapping bound to the exact Label Zone and placement revision. Local source path/name is not persisted; unsafe SVG, malformed/oversized PNG and unsupported inputs fail closed. This remains presentation metadata and claims no geometry, rendering, print-fit or physical authority. PL-0316 is next after index publication and remote parity; PL-0316 through PL-0331 remain unstarted.
+
+
+## PL-0316 V01 execution
+
+Starting child SHA: `7d694bb86553fd71ed259e25e90c614df73860ae`. Implementation/evidence commit: `937f353b2b1ea549fc06e02eabe5b983da295120`. Child log commit: `f84e1dd92efbe63ef895b3782fcbdae3373cabfb`.
+
+Focused command `uv run --locked pytest -q tests/core/test_label_artwork.py tests/core/test_label_zone.py tests/core/test_label_zone_placement.py`: 58 passed. Full locked suite `uv run --locked pytest -q`: 1,712 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected tracker/dependency checks, privacy/scope review and whitespace checks passed.
+
+PL-0316 adds immutable deterministic assignments for explicit front/back/wrap variants, pinned to exact zone, placement, mapping and artwork revisions. Wrap assignments require normalized seam position and store canonical or reversed-U orientation; these are presentation metadata and no renderer or physical fit is claimed. Replacement and removal create immutable successors; source geometry and Label Zone are unchanged. PL-0317 is next after index publication and remote parity; PL-0317 through PL-0331 remain unstarted.
