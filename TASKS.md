@@ -6,11 +6,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M14
 - Current Sprint: M14-C001 — Labels, Materials & Rendering
-- Current Task: M14-C001-R01 — PL-0312 authority resolution + continuation PL-0313 through PL-0331
+- Current Task: M14-C001-R02 — PL-0313 metric surface binding + continuation PL-0314 through PL-0331
 - Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md. Close PL-0312 V02 using component/whole-BREP provenance with truthful ambiguous/unresolved feature attribution, then continue PL-0313 through PL-0331 automatically while green. Preserve the PL-0324 real Blender capability gate. Do not start M15.
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0313_CONTINUATION_CODEX_PROMPT_V03.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0313_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V03.md. Close PL-0313 V02 with explicit exact metric surface binding; RELATIVE must fail closed, FRONT/BACK are planar-rectangular only, WRAP is exact cylindrical-wrap only. Then continue PL-0314 through PL-0331 automatically while green. Preserve the PL-0324 real Blender capability gate. Do not start M15.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_PARTIAL_AUDIT_V01.md — AUDITED_PARTIAL_CHANGES_REQUIRED; PL-0310 and PL-0311 accepted, PL-0312 V01 authority stop accepted, resume at PL-0312 V02.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_PARTIAL_AUDIT_V02.md — AUDITED_PARTIAL_CHANGES_REQUIRED; PL-0310 through PL-0312 independently accepted, PL-0313 V01 authority stop accepted, resume at PL-0313 V02.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -35,8 +35,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Latest M13 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; F01 closed, 21/21 M13 children accepted, M13 complete.
 - M13 R02 Evidence Closure: completed and independently accepted.
 - M14 Original Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CODEX_PROMPT_V01.md — stopped correctly at PL-0312 V01 authority ambiguity.
-- Latest M14 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_PARTIAL_AUDIT_V01.md — PL-0310/PL-0311 AUDITED_PASS; PL-0312 V01 blocker accepted.
-- Active M14 R01 Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CODEX_PROMPT_V02.md — PL-0312 V02 then PL-0313 through PL-0331; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0312_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md
+- M14 R01 Continuation: stopped correctly at PL-0313 after PL-0312 V02 builder-green; PL-0312 V02 is now independently AUDITED_PASS.
+- Latest M14 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_PARTIAL_AUDIT_V02.md — PL-0310 through PL-0312 AUDITED_PASS; PL-0313 V01 blocker accepted.
+- Active M14 R02 Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0313_CONTINUATION_CODEX_PROMPT_V03.md — PL-0313 V02 then PL-0314 through PL-0331; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0313_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V03.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -590,8 +591,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - [x] **PL-0310** Define Label Zone entity independent of artwork image. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0310_CHATGPT_AUDIT_V01.md
 - [x] **PL-0311** Implement manual front/back/wrap Label Zone placement on Design Model. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0311_CHATGPT_AUDIT_V01.md
-- [ ] **PL-0312** Implement curvature/slope analysis to suggest label-safe regions. **V02 ACTIVE:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0312_CODEX_PROMPT_V02.md
-- [ ] **PL-0313** Generate 2D label boundary/dieline in millimetres.
+- [x] **PL-0312** Implement curvature/slope analysis to suggest label-safe regions. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0312_CHATGPT_AUDIT_V02.md
+- [ ] **PL-0313** Generate 2D label boundary/dieline in millimetres. **V02 ACTIVE:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0313_CODEX_PROMPT_V02.md
 - [ ] **PL-0314** Add safe-margin/bleed metadata.
 - [ ] **PL-0315** Import SVG/PNG artwork and map it non-destructively to a Label Zone.
 - [ ] **PL-0316** Support front/back artwork variants and wrap labels.
