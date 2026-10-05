@@ -20,7 +20,8 @@
 | PL-0316 | READY_FOR_INDEPENDENT_AUDIT | `937f353b2b1ea549fc06e02eabe5b983da295120` | `f84e1dd92efbe63ef895b3782fcbdae3373cabfb` | 58 focused; full 1,712 passed, 6 skipped, 1 deselected |
 | PL-0317 | READY_FOR_INDEPENDENT_AUDIT | `c929af191b98597e42e01b51422740b11c127884` | `7df23a5784fe729ee04d915134a9a920ddc9e5d1` | 30 focused; full 1,717 passed, 6 skipped, 1 deselected |
 | PL-0318 | READY_FOR_INDEPENDENT_AUDIT | `70951f533923c9ce3f049e42da53503220b9a807` | `2c8c58d91dd3aec3482da548e0d76be5c399f416` | 19 focused; full 1,736 passed, 6 skipped, 1 deselected |
-| PL-0319–PL-0331 | NOT_STARTED | pending | pending | pending |
+| PL-0319 | READY_FOR_INDEPENDENT_AUDIT | `3866e11b1d89e7191d176b98e64033efb3fae6d4` | `5fa1ca77e85c39188b4a11283d8ba0883adf8c24` | 25 focused; full 1,742 passed, 6 skipped, 1 deselected |
+| PL-0320–PL-0331 | NOT_STARTED | pending | pending | pending |
 
 ## PL-0313 V02 resolution
 
@@ -32,7 +33,7 @@ Focused command: `uv run --locked pytest -q tests/core/test_label_metric_surface
 
 ## Continuation status
 
-PL-0313 V02 through PL-0318 V01 are builder-green and awaiting independent child audit. PL-0318 implementation, child log, and M14 indexes have been published with remote parity verified. Continue in exact frozen order at PL-0319. PL-0319 through PL-0331 have not started. PL-0324 remains a real Blender capability gate. No M15+ work has started.
+PL-0313 V02 through PL-0319 V01 are builder-green and awaiting independent child audit. PL-0319 implementation, child log, and M14 indexes have been published with remote parity verified. Continue in exact frozen order at PL-0320. PL-0320 through PL-0331 have not started. PL-0324 remains a real Blender capability gate. No M15+ work has started.
 
 ## PL-0314 V01 execution
 
@@ -76,3 +77,12 @@ Starting child SHA: `c874a919fab1d29757725d16225b29dc6d68e26f`. Implementation/e
 Focused command `uv run --locked pytest -q tests/core/test_visual_material_library.py`: 19 passed. Full locked suite `uv run --locked pytest -q`: 1,736 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected tracker/dependency checks, privacy/scope review and whitespace checks passed.
 
 PL-0318 adds deterministic immutable material records and a canonical library revision with stable IDs, bounded display/PBR fields, HDPE/PET/PP/OTHER family coverage and extensible OTHER labels. Source class and optional paired Design Model/component IDs are preserved. Generic starter presets and optional PCR fraction remain `NON_CERTIFIED_VISUAL_REFERENCE`; certification, physical and regulatory claims serialize false. PL-0319 is next after index publication and remote parity; PL-0319 through PL-0331 remain unstarted.
+
+
+## PL-0319 V01 execution
+
+Starting child SHA: `c84ddb37b5f3da36a379976a90b9443ca79fbb32`. Implementation/evidence commit: `3866e11b1d89e7191d176b98e64033efb3fae6d4`. Child log commit: `5fa1ca77e85c39188b4a11283d8ba0883adf8c24`.
+
+Focused command `uv run --locked pytest -q tests/core/test_component_visual_assignments.py tests/core/test_visual_material_library.py`: 25 passed. Full locked suite `uv run --locked pytest -q`: 1,742 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected tracker/dependency checks, privacy/scope review and whitespace checks passed.
+
+PL-0319 adds distinct deterministic geometry-material and product-content appearance assignment contracts bound to exact Design Model revisions and existing component IDs. Replacement/removal creates channel-local immutable successors; the combined state rejects mismatched provenance and retains both assignments independently. Model geometry is unchanged. Content and state mark fill-volume and formulation inference false; material values retain non-certified visual semantics. PL-0320 is next after index publication and remote parity; PL-0320 through PL-0331 remain unstarted.
