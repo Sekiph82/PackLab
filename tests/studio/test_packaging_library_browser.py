@@ -9,7 +9,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage
 from tests.core.test_packaging_asset import _asset
 
-from packlab_core.packaging_asset import RawScanLink
+from packlab_core.packaging_asset import PackagingFamily, RawScanLink
 from packlab_studio.app import create_application
 from packlab_studio.navigation import Route
 from packlab_studio.packaging_library_audit import PackagingLibraryAuditStore
@@ -220,3 +220,71 @@ def test_project_thumbnail_requires_an_exact_asset_source_link(tmp_path: Path) -
         project_root_resolver=lambda _project_id: project_root,
     )
     assert stale_service.list_assets()[0].thumbnail_reference is None
+
+
+def test_search_matches_id_name_supplier_and_family_with_stable_unicode_order(
+    tmp_path: Path,
+) -> None:
+    library_root = tmp_path / "library"
+    assets = (
+        _asset(
+            asset_id="juice-carton",
+            display_name="Café Juice Carton",
+            family=PackagingFamily.CARTON,
+            supplier_id="sup-002",
+            supplier_name="Ｆｏｏ Packaging",
+        ),
+        _asset(
+            asset_id="water-bottle",
+            display_name="Aqua Bottle",
+            family=PackagingFamily.BOTTLE,
+            supplier_id="bottle-vendor",
+            supplier_name="Bottle Vendor",
+        ),
+    )
+    store = _library(library_root, assets=assets)
+    service = PackagingLibraryBrowserService(store, library_root)
+
+    ordered = service.search_assets("")
+    assert [item.asset_id for item in ordered] == ["water-bottle", "juice-carton"]
+    original_revisions = tuple(item.revision_id for item in store.snapshot().assets)
+    assert [item.asset_id for item in service.search_assets("WATER-BOTTLE")] == ["water-bottle"]
+    assert [item.asset_id for item in service.search_assets("aQuA")] == ["water-bottle"]
+    assert [item.asset_id for item in service.search_assets("vendor")] == ["water-bottle"]
+    assert [item.asset_id for item in service.search_assets("SUP-002")] == ["juice-carton"]
+    assert [item.asset_id for item in service.search_assets("carton")] == ["juice-carton"]
+    assert [item.asset_id for item in service.search_assets("cafe")] == []
+    assert [item.asset_id for item in service.search_assets("Café")] == ["juice-carton"]
+    assert [item.asset_id for item in service.search_assets("ＣＡＦÉ")] == ["juice-carton"]
+    assert [item.asset_id for item in service.search_assets("foo")] == ["juice-carton"]
+    assert len(service.search_assets("bottle")) == 1
+    with pytest.raises(PackagingLibraryBrowserError, match="too_long"):
+        service.search_assets("x" * 129)
+    assert tuple(item.revision_id for item in store.snapshot().assets) == original_revisions
+
+
+def test_search_field_updates_visible_results_and_clearing_restores_library(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = create_application(["packlab-library-browser-search-test"])
+    library_root = tmp_path / "library"
+    store = _library(
+        library_root,
+        assets=(
+            _asset(asset_id="water-one", display_name="Water Bottle"),
+            _asset(asset_id="juice-one", display_name="Juice Bottle"),
+        ),
+    )
+    service = PackagingLibraryBrowserService(store, library_root)
+    view = PackagingLibraryBrowserView(service)
+    before = tuple((item.asset_id, item.revision_id) for item in store.snapshot().assets)
+
+    view.search_field.setText("juice")
+    assert view.item_view.count() == 1
+    assert view.item_view.item(0).data(Qt.ItemDataRole.UserRole) == "juice-one"
+    view.search_field.clear()
+    assert view.item_view.count() == 2
+    assert tuple((item.asset_id, item.revision_id) for item in store.snapshot().assets) == before
+    view.close()
+    app.processEvents()

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -32,6 +34,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024
 _MAX_THUMBNAIL_DIMENSION = 4096
 _MAX_THUMBNAIL_PIXELS = 4_194_304
+_MAX_SEARCH_QUERY_LENGTH = 128
 
 
 class PackagingLibraryBrowserError(ValueError):
@@ -91,6 +94,8 @@ class PackagingLibraryAssetSummary:
     base_material: str
     nominal_volume: str
     status: str
+    supplier_id: str = ""
+    supplier_name: str = ""
     thumbnail_reference: LibraryThumbnailReference | None = None
     source_project_revisions: tuple[tuple[str, str], ...] = ()
 
@@ -165,6 +170,8 @@ class PackagingLibraryBrowserService:
                         base_material=_display_value(document.get("base_material")),
                         nominal_volume=nominal_volume,
                         status=_display_value(document.get("status")),
+                        supplier_id=_supplier_value(document.get("supplier"), "supplier_id"),
+                        supplier_name=_supplier_value(document.get("supplier"), "name"),
                         thumbnail_reference=thumbnail,
                         source_project_revisions=source_projects,
                     )
@@ -173,6 +180,30 @@ class PackagingLibraryBrowserService:
                 raise PackagingLibraryBrowserError("library_browser_asset_entry_invalid") from error
         return tuple(
             sorted(summaries, key=lambda item: (item.display_name.casefold(), item.asset_id))
+        )
+
+    def search_assets(self, query: str) -> tuple[PackagingLibraryAssetSummary, ...]:
+        """Search locally loaded metadata without reading attachments or changing state."""
+        if not isinstance(query, str) or len(query) > _MAX_SEARCH_QUERY_LENGTH:
+            raise PackagingLibraryBrowserError("library_search_query_invalid_or_too_long")
+        normalized_query = _normalize_search_text(query)
+        assets = self.list_assets()
+        if not normalized_query:
+            return assets
+        return tuple(
+            asset
+            for asset in assets
+            if any(
+                normalized_query in _normalize_search_text(value)
+                for value in (
+                    asset.asset_id,
+                    asset.display_name,
+                    asset.supplier_id,
+                    asset.supplier_name,
+                    asset.family,
+                )
+                if value
+            )
         )
 
     def resolve_thumbnail(self, asset: PackagingLibraryAssetSummary) -> Path | None:
@@ -274,6 +305,10 @@ class PackagingLibraryBrowserView(QWidget):
         self.mode_selector.setObjectName("packlab.library.mode")
         self.mode_selector.addItem("Grid", "grid")
         self.mode_selector.addItem("List", "list")
+        self.search_field = QLineEdit(self)
+        self.search_field.setObjectName("packlab.library.search")
+        self.search_field.setPlaceholderText("Search ID, name, supplier, or family")
+        self.search_field.setMaxLength(_MAX_SEARCH_QUERY_LENGTH)
         self.refresh_button = QPushButton("Refresh", self)
         self.refresh_button.setObjectName("packlab.library.refresh")
         self.selection_summary = QLabel("No asset selected.", self)
@@ -297,6 +332,7 @@ class PackagingLibraryBrowserView(QWidget):
 
         toolbar = QHBoxLayout()
         toolbar.addWidget(self.mode_selector)
+        toolbar.addWidget(self.search_field, 1)
         toolbar.addWidget(self.refresh_button)
         toolbar.addStretch(1)
         layout = QVBoxLayout(self)
@@ -305,6 +341,7 @@ class PackagingLibraryBrowserView(QWidget):
         layout.addWidget(self.selection_summary)
 
         self.mode_selector.currentIndexChanged.connect(self._set_mode)
+        self.search_field.textChanged.connect(self.refresh)
         self.refresh_button.clicked.connect(self.refresh)
         self.item_view.currentItemChanged.connect(self._selection_changed)
         self.refresh()
@@ -322,7 +359,11 @@ class PackagingLibraryBrowserView(QWidget):
         try:
             if self.service is None:
                 raise PackagingLibraryBrowserError("Packaging Library service is not configured.")
-            summaries = self.service.list_assets()
+            query = self.search_field.text()
+            if query and callable(getattr(self.service, "search_assets", None)):
+                summaries = self.service.search_assets(query)
+            else:
+                summaries = self.service.list_assets()
         except Exception as error:
             self._summaries = ()
             self._populate((), None)
@@ -499,6 +540,17 @@ def _source_project_revisions(source_links: object) -> tuple[tuple[str, str], ..
 
 def _display_value(value: object) -> str:
     return value if isinstance(value, str) and value else "UNKNOWN"
+
+
+def _supplier_value(value: object, key: str) -> str:
+    if not isinstance(value, dict):
+        return ""
+    candidate = value.get(key)
+    return candidate if isinstance(candidate, str) else ""
+
+
+def _normalize_search_text(value: str) -> str:
+    return unicodedata.normalize("NFKC", value).casefold().strip()
 
 
 def _identifier(value: object, kind: str) -> None:
