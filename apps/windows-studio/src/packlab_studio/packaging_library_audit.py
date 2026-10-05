@@ -326,7 +326,7 @@ class PackagingLibraryAuditStore:
         expected_asset_revisions: tuple[tuple[str, str], ...],
         actor_id: str,
         reason: str,
-        provenance_class: str = "USER_DECLARED",
+        provenance_class: str,
         source_reference_id: str | None = None,
     ) -> PackagingLibraryAuditSnapshot:
         """Create an explicit duplicate or directed parent-to-variant relationship."""

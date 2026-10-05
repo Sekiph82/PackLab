@@ -529,6 +529,7 @@ def test_relationship_badges_sections_and_navigation_keep_assets_separate(
         ),
         actor_id="operator-1",
         reason="Owner confirmed equivalent package metadata",
+        provenance_class="USER_DECLARED",
     )
     service = PackagingLibraryBrowserService(store, library_root)
     view = PackagingLibraryBrowserView(service)

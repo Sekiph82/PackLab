@@ -326,6 +326,7 @@ def test_duplicate_relationship_is_symmetric_stable_and_revisioned(tmp_path: Pat
             ),
             actor_id="operator-2",
             reason="Repeat duplicate relation",
+            provenance_class="USER_DECLARED",
         )
     removed = store.remove_relationship(
         relationship.relationship_id,
@@ -349,6 +350,7 @@ def test_duplicate_relationship_is_symmetric_stable_and_revisioned(tmp_path: Pat
         ),
         actor_id="operator-1",
         reason="Owner reconfirmed the duplicate declaration",
+        provenance_class="USER_DECLARED",
     )
     assert restored.relationships[0].relationship_id == relationship.relationship_id
     assert restored.relationships[0].revision_id != relationship.revision_id
@@ -377,6 +379,7 @@ def test_variant_relationships_reject_self_cycles_and_stale_asset_revisions(
             expected_asset_revisions=((parent, revisions[parent]), (child, revisions[child])),
             actor_id="operator-1",
             reason="Owner declared packaging variant relationship",
+            provenance_class="USER_DECLARED",
         )
 
     link("asset-a", "asset-b")
@@ -403,6 +406,7 @@ def test_variant_relationships_reject_self_cycles_and_stale_asset_revisions(
             ),
             actor_id="operator-1",
             reason="Try relation with an obsolete asset revision",
+            provenance_class="USER_DECLARED",
         )
     assert store.validate() == second
 
