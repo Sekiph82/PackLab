@@ -112,7 +112,13 @@ def test_export_invocation_handles_failure_timeout_and_missing_marker(tmp_path: 
 
     with pytest.raises(BlenderGlbExportError, match="blender_glb_export_timed_out"):
         run_blender_glb_export(
-            executable, runner_script, tmp_path, timeout_seconds=1, runner=timed_out
+            executable,
+            runner_script,
+            tmp_path,
+            packlab_commit="a" * 40,
+            packlab_version="0.1.0",
+            timeout_seconds=1,
+            runner=timed_out,
         )
 
     def failed(*_args, **_kwargs):
@@ -120,7 +126,13 @@ def test_export_invocation_handles_failure_timeout_and_missing_marker(tmp_path: 
 
     with pytest.raises(BlenderGlbExportError, match="blender_glb_export_process_failed") as failure:
         run_blender_glb_export(
-            executable, runner_script, tmp_path, timeout_seconds=1, runner=failed
+            executable,
+            runner_script,
+            tmp_path,
+            packlab_commit="a" * 40,
+            packlab_version="0.1.0",
+            timeout_seconds=1,
+            runner=failed,
         )
     assert "private path" not in str(failure.value)
 
@@ -131,7 +143,13 @@ def test_export_invocation_handles_failure_timeout_and_missing_marker(tmp_path: 
         BlenderGlbExportError, match="blender_glb_export_semantic_validation_failed"
     ):
         run_blender_glb_export(
-            executable, runner_script, tmp_path, timeout_seconds=1, runner=no_marker
+            executable,
+            runner_script,
+            tmp_path,
+            packlab_commit="a" * 40,
+            packlab_version="0.1.0",
+            timeout_seconds=1,
+            runner=no_marker,
         )
 
 
@@ -151,7 +169,16 @@ def test_real_blender_exports_glb_with_embedded_artwork_and_authority_sidecar(
     script_path = tmp_path / "glb_export_runner.py"
     script_path.write_bytes(script)
     assert compile(script, "packlab-glb-export-runner.py", "exec")
-    completed = run_blender_glb_export(executable, script_path, tmp_path)
+    completed = run_blender_glb_export(
+        executable,
+        script_path,
+        tmp_path,
+        sidecar_relative_path=request.sidecar_relative_path,
+        packlab_commit=subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=Path(__file__).parents[2], text=True
+        ).strip(),
+        packlab_version="0.1.0",
+    )
     assert "PACKLAB_BLENDER_GLB_EXPORT_VALID" in completed.stdout
     output_path = tmp_path / request.output_relative_path
     sidecar_path = tmp_path / request.sidecar_relative_path
@@ -179,6 +206,18 @@ def test_real_blender_exports_glb_with_embedded_artwork_and_authority_sidecar(
     assert sidecar["output"]["texture_count"] >= 3
     assert sidecar["output"]["image_count"] >= 1
     assert sidecar["output"]["material_count"] >= 4
+    provenance = sidecar["m14_render_provenance"]
+    assert provenance["contract"] == "packlab.m14-render-provenance.v1"
+    assert (
+        provenance["identity_payload"]["packlab"]["commit"]
+        == subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=Path(__file__).parents[2], text=True
+        ).strip()
+    )
+    assert provenance["identity_payload"]["render"]["device"] == "NOT_APPLICABLE_EXPORT_ONLY"
+    assert provenance["identity_payload"]["outputs"][0]["sha256"] == hashlib.sha256(glb).hexdigest()
+    assert provenance["limitations"]["cross_hardware_pixel_identity_guaranteed"] is False
+    assert str(tmp_path) not in json.dumps(provenance)
     assert any(name.startswith("PackLabComponent_") for name in parsed["node_names"])
     assert any(name.startswith("PackLabLabelOverlay_") for name in parsed["node_names"])
     assert sidecar["authority_limits"]["derived_presentation_only"] is True

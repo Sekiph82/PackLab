@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -11,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from . import blender_scene_package as scene_package_module
+from .blender_render_provenance import create_m14_render_provenance
 from .blender_scene_package import BlenderScenePackage
 
 BLENDER_GLB_EXPORT_CONTRACT = "packlab.blender-glb-export.v1"
@@ -78,6 +80,9 @@ def run_blender_glb_export(
     *,
     manifest_relative_path: str = "blender_scene_manifest.json",
     scene_result_relative_path: str = "scene_result_manifest.json",
+    sidecar_relative_path: str = "exports/packlab_scene.manifest.json",
+    packlab_commit: str | None = None,
+    packlab_version: str | None = None,
     timeout_seconds: float = 180.0,
     runner=subprocess.run,
 ) -> subprocess.CompletedProcess[str]:
@@ -88,9 +93,11 @@ def run_blender_glb_export(
         or not 1.0 <= timeout_seconds <= _MAX_TIMEOUT_SECONDS
     ):
         raise BlenderGlbExportError("glb_export_timeout_invalid")
-    for value in (manifest_relative_path, scene_result_relative_path):
+    if packlab_commit is None or packlab_version is None:
+        raise BlenderGlbExportError("glb_export_provenance_packlab_identity_missing")
+    for value in (manifest_relative_path, scene_result_relative_path, sidecar_relative_path):
         _safe_relative(value)
-    root = Path(project_root)
+    root = Path(project_root).resolve(strict=True)
     if not root.is_dir() or not Path(executable).is_file() or not Path(runner_script).is_file():
         raise BlenderGlbExportError("glb_export_input_path_unavailable")
     command = [
@@ -125,6 +132,53 @@ def run_blender_glb_export(
         raise BlenderGlbExportError("blender_glb_export_process_failed")
     if "PACKLAB_BLENDER_GLB_EXPORT_VALID " not in completed.stdout:
         raise BlenderGlbExportError("blender_glb_export_semantic_validation_failed")
+    sidecar_path = root.joinpath(*_safe_relative(sidecar_relative_path).parts).resolve(strict=True)
+    if not sidecar_path.is_relative_to(root):
+        raise BlenderGlbExportError("glb_export_path_outside_project")
+    try:
+        sidecar = json.loads(sidecar_path.read_text("utf-8"))
+        glb_path = root.joinpath(*_safe_relative(sidecar["output"]["relative_path"]).parts)
+        glb_path = glb_path.resolve(strict=True)
+        if not glb_path.is_relative_to(root):
+            raise BlenderGlbExportError("glb_export_path_outside_project")
+        glb_bytes = glb_path.read_bytes()
+        actual_glb_digest = hashlib.sha256(glb_bytes).hexdigest()
+        if sidecar["output"].get("sha256") != actual_glb_digest or sidecar["output"].get(
+            "byte_length"
+        ) != len(glb_bytes):
+            raise BlenderGlbExportError("glb_export_provenance_output_mismatch")
+        with Path(executable).open("rb") as executable_file:
+            executable_digest = hashlib.file_digest(executable_file, "sha256").hexdigest()
+        provenance = create_m14_render_provenance(
+            packlab_commit=packlab_commit,
+            packlab_version=packlab_version,
+            blender_executable_sha256=executable_digest,
+            blender_build=sidecar["blender"],
+            scene_package_revision_id=sidecar["scene_package_revision_id"],
+            scene_package_sha256=sidecar["scene_package_sha256"],
+            source_revisions_and_digests=sidecar["source_revisions_and_digests"],
+            render_engine="BLENDER_GLTF_EXPORTER",
+            render_device="NOT_APPLICABLE_EXPORT_ONLY",
+            render_settings=sidecar["export_settings"],
+            camera_light_preset_ids=[],
+            outputs=[
+                {
+                    "artifact_type": "GLB",
+                    "relative_path": sidecar["output"]["relative_path"],
+                    "sha256": actual_glb_digest,
+                    "byte_length": len(glb_bytes),
+                }
+            ],
+        )
+        sidecar["m14_render_provenance"] = provenance
+        sidecar_path.write_text(
+            json.dumps(sidecar, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        if isinstance(error, BlenderGlbExportError):
+            raise
+        raise BlenderGlbExportError("glb_export_provenance_invalid") from error
     return completed
 
 

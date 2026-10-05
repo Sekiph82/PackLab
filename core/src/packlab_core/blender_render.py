@@ -10,10 +10,11 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Literal, cast
 
 from . import blender_scene_package as scene_package_module
 from .blender_render_preset import BlenderRenderPreset
+from .blender_render_provenance import create_m14_render_provenance
 from .blender_scene_package import BlenderScenePackage
 
 BLENDER_RENDER_CONTRACT = "packlab.blender-render-job.v1"
@@ -175,6 +176,9 @@ def render_standard_views(
     output_directory: str = "renders/standard_views",
     manifest_relative_path: str = "renders/standard_views_manifest.json",
     timeout_seconds: float = 180.0,
+    packlab_commit: str | None = None,
+    packlab_version: str | None = None,
+    blender_executable_sha256: str | None = None,
     render_executor=run_blender_render,
 ) -> dict[str, object]:
     """Render FRONT, THREE_QUARTER and BACK in order with rollback on partial failure."""
@@ -182,6 +186,16 @@ def render_standard_views(
 
     if not isinstance(package, BlenderScenePackage):
         raise BlenderRenderError("render_scene_package_invalid")
+    if packlab_commit is None or packlab_version is None:
+        raise BlenderRenderError("render_provenance_packlab_identity_missing")
+    if blender_executable_sha256 is None:
+        try:
+            with Path(executable).open("rb") as executable_file:
+                executable_digest = hashlib.file_digest(executable_file, "sha256").hexdigest()
+        except OSError as error:
+            raise BlenderRenderError("render_provenance_blender_executable_unavailable") from error
+    else:
+        executable_digest = blender_executable_sha256
     root = Path(project_root).resolve(strict=True)
     if not root.is_dir():
         raise BlenderRenderError("render_project_root_invalid")
@@ -241,6 +255,7 @@ def render_standard_views(
 
     settings_by_view: list[dict[str, object]] = []
     view_records: list[dict[str, object]] = []
+    blender_builds: list[dict[str, object]] = []
     output_directory_abs = root.joinpath(*output_dir_path.parts)
     output_directory_abs.mkdir(parents=True, exist_ok=True)
     try:
@@ -298,8 +313,10 @@ def render_standard_views(
                 ):
                     raise BlenderRenderError("render_view_evidence_invalid")
                 settings = evidence.get("settings")
-                if not isinstance(settings, dict):
+                blender_build = evidence.get("blender")
+                if not isinstance(settings, dict) or not isinstance(blender_build, dict):
                     raise BlenderRenderError("render_settings_missing")
+                blender_builds.append(blender_build)
                 comparable_settings = {
                     key: value
                     for key, value in settings.items()
@@ -336,6 +353,42 @@ def render_standard_views(
                 }
             ) != len(views):
                 raise BlenderRenderError("render_camera_views_not_unique")
+            if any(build != blender_builds[0] for build in blender_builds[1:]):
+                raise BlenderRenderError("render_batch_blender_build_inconsistent")
+            provenance = create_m14_render_provenance(
+                packlab_commit=packlab_commit,
+                packlab_version=packlab_version,
+                blender_executable_sha256=executable_digest,
+                blender_build=blender_builds[0],
+                scene_package_revision_id=package.revision_id,
+                scene_package_sha256=cast(str, package.manifest()["content_sha256"]),
+                source_revisions_and_digests=scene_revision_ids,
+                render_engine=str(settings_by_view[0]["engine"]),
+                render_device=str(settings_by_view[0].get("device", "EEVEE_DEFAULT")),
+                render_settings=settings_by_view[0],
+                camera_light_preset_ids=[str(record["camera_id"]) for record in view_records],
+                outputs=[
+                    {
+                        "artifact_type": "STILL_PNG",
+                        "relative_path": str(record["output_relative_path"]),
+                        "sha256": str(record["output_sha256"]),
+                        "byte_length": cast(int, record["output_byte_length"]),
+                        "view": str(record["view"]),
+                        "camera_light_preset_id": str(record["camera_id"]),
+                        "width": cast(int, record["width"]),
+                        "height": cast(int, record["height"]),
+                    }
+                    for record in view_records
+                ],
+            )
+            for evidence_path in sidecars[::2]:
+                evidence = json.loads(evidence_path.read_text("utf-8"))
+                evidence["m14_render_provenance"] = provenance
+                evidence_path.write_text(
+                    json.dumps(evidence, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                    + "\n",
+                    encoding="utf-8",
+                )
             batch_identity = {
                 "contract": "packlab.blender-standard-view-batch.v1",
                 "scene_package_revision_id": package.revision_id,
@@ -368,6 +421,7 @@ def render_standard_views(
             result: dict[str, object] = {
                 **batch_identity,
                 "revision_id": batch_id,
+                "m14_render_provenance": provenance,
                 "views": view_records,
                 "view_order": list(views),
                 "output_sha256_by_view": {
@@ -535,7 +589,7 @@ _evidence={{
  'source_revisions_and_digests':_source_digest,
  'render_preset_revision_id':_preset['revision_id'],
  'blender':{{'version':list(bpy.app.version),'version_string':bpy.app.version_string,'build_hash':(bpy.app.build_hash.decode('utf-8','replace') if isinstance(bpy.app.build_hash,bytes) else str(bpy.app.build_hash)),'build_branch':(bpy.app.build_branch.decode('utf-8','replace') if isinstance(bpy.app.build_branch,bytes) else str(bpy.app.build_branch)),'build_date':(bpy.app.build_date.decode('utf-8','replace') if isinstance(bpy.app.build_date,bytes) else str(bpy.app.build_date))}},
- 'settings':{{'engine':_scene.render.engine,'width':_settings['width'],'height':_settings['height'],'samples':_settings['samples'],'image_format':'PNG','color_mode':'RGBA','color_depth':'8','transparent_background':_scene.render.film_transparent,'resolution_percentage':_scene.render.resolution_percentage,'view_transform':_scene.view_settings.view_transform,'camera_view':_preset['view'],'camera_location':list(_camera.location),'camera_target':list(_center),'camera_lens_mm':_camera_data.lens,'light_facts':_preset['lights']}},
+ 'settings':{{'engine':_scene.render.engine,'device':'EEVEE_DEFAULT','width':_settings['width'],'height':_settings['height'],'samples':_settings['samples'],'image_format':'PNG','color_mode':'RGBA','color_depth':'8','transparent_background':_scene.render.film_transparent,'resolution_percentage':_scene.render.resolution_percentage,'view_transform':_scene.view_settings.view_transform,'camera_view':_preset['view'],'camera_location':list(_camera.location),'camera_target':list(_center),'camera_lens_mm':_camera_data.lens,'light_facts':_preset['lights']}},
  'scene_mesh_bounds':{{'minimum':_bounds_min,'maximum':_bounds_max,'unit':'meters_from_mm_unverified_viewer_transform'}},
  'output':{{'media_type':'image/png','sha256':hashlib.sha256(_raw).hexdigest(),'byte_length':len(_raw),'width':_width,'height':_height,'png_color_type':_color_type,'alpha_channel':True,'transparent_pixel_count':_transparent,'visible_pixel_count':_visible,'all_mesh_bounds_inside_camera':_framed}},
  'authority_limits':{{'derived_presentation_only':True,'design_model_mutated':False,'cad_brep_mutated':False,'physical_accuracy_inferred':False,'physical_fit_verified':False,'material_certified':False,'manufacturing_approval_inferred':False,'regulatory_approval_inferred':False}},

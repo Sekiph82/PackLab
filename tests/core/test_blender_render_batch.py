@@ -57,8 +57,16 @@ def _write_fake_render(job: dict[str, object], root: Path, *, index: int) -> Non
         "scene_package_sha256": job["scene_package_sha256"],
         "render_preset_revision_id": preset["revision_id"],
         "source_revisions_and_digests": body_source,
+        "blender": {
+            "version": [5, 2, 2],
+            "version_string": "5.2.2 LTS",
+            "build_hash": "fixture-build",
+            "build_branch": "fixture-branch",
+            "build_date": "2026-09-15",
+        },
         "settings": {
             "engine": "BLENDER_EEVEE",
+            "device": "EEVEE_DEFAULT",
             "width": settings["width"],
             "height": settings["height"],
             "samples": settings["samples"],
@@ -106,6 +114,9 @@ def test_three_view_batch_is_ordered_shared_and_digest_bound(tmp_path: Path) -> 
         (0.1, 0.0, 0.06),
         source_revisions,
         tmp_path,
+        packlab_commit="a" * 40,
+        packlab_version="0.1.0",
+        blender_executable_sha256="b" * 64,
         width=128,
         height=128,
         samples=4,
@@ -115,6 +126,14 @@ def test_three_view_batch_is_ordered_shared_and_digest_bound(tmp_path: Path) -> 
     assert result["view_order"] == calls
     assert result["scene_package_revision_id"] == package.revision_id
     assert result["scene_package_sha256"] == package.manifest()["content_sha256"]
+    provenance = result["m14_render_provenance"]
+    assert provenance["identity"].startswith("m14-render-provenance:")
+    assert provenance["identity_payload"]["packlab"] == {
+        "commit": "a" * 40,
+        "version": "0.1.0",
+    }
+    assert len(provenance["outputs"]) == 3
+    assert provenance["limitations"]["cross_hardware_pixel_identity_guaranteed"] is False
     records = result["views"]
     assert [record["order"] for record in records] == [1, 2, 3]
     assert len({record["camera_id"] for record in records}) == 3
@@ -125,6 +144,9 @@ def test_three_view_batch_is_ordered_shared_and_digest_bound(tmp_path: Path) -> 
     manifest_path = tmp_path / "renders/standard_views_manifest.json"
     assert json.loads(manifest_path.read_bytes()) == result
     assert str(tmp_path) not in manifest_path.read_text("utf-8")
+    for view in ("front", "three_quarter", "back"):
+        evidence = json.loads((tmp_path / f"renders/standard_views/{view}.render.json").read_text())
+        assert evidence["m14_render_provenance"] == provenance
     assert not list((tmp_path / "renders/standard_views").glob("*.scene.json"))
 
 
@@ -150,6 +172,9 @@ def test_partial_failure_removes_only_created_batch_outputs(tmp_path: Path) -> N
             (0.1, 0.0, 0.06),
             source_revisions,
             tmp_path,
+            packlab_commit="a" * 40,
+            packlab_version="0.1.0",
+            blender_executable_sha256="b" * 64,
             width=128,
             height=128,
             render_executor=fail_second,
@@ -176,6 +201,10 @@ def test_real_blender_renders_all_three_ordered_views(tmp_path: Path) -> None:
         (0.1, 0.0, 0.06),
         source_revisions,
         tmp_path,
+        packlab_commit=subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=Path(__file__).parents[2], text=True
+        ).strip(),
+        packlab_version="0.1.0",
         width=256,
         height=256,
         samples=8,
