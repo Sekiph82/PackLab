@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 from . import blender_scene_package as scene_package_module
 from .blender_render_preset import BlenderRenderPreset
@@ -156,6 +159,246 @@ def run_blender_render(
     if "PACKLAB_BLENDER_RENDER_VALID " not in completed.stdout:
         raise BlenderRenderError("blender_render_semantic_validation_failed")
     return completed
+
+
+def render_standard_views(
+    executable: str | Path,
+    package: BlenderScenePackage,
+    bounds_min: tuple[float, float, float],
+    bounds_max: tuple[float, float, float],
+    source_revisions: tuple[tuple[str, str], ...],
+    project_root: str | Path,
+    *,
+    width: int = 512,
+    height: int = 512,
+    samples: int = 16,
+    output_directory: str = "renders/standard_views",
+    manifest_relative_path: str = "renders/standard_views_manifest.json",
+    timeout_seconds: float = 180.0,
+    render_executor=run_blender_render,
+) -> dict[str, object]:
+    """Render FRONT, THREE_QUARTER and BACK in order with rollback on partial failure."""
+    from .blender_render_preset import create_blender_render_preset
+
+    if not isinstance(package, BlenderScenePackage):
+        raise BlenderRenderError("render_scene_package_invalid")
+    root = Path(project_root).resolve(strict=True)
+    if not root.is_dir():
+        raise BlenderRenderError("render_project_root_invalid")
+    package_manifest = _safe_relative("blender_scene_manifest.json")
+    manifest_path = root.joinpath(*package_manifest.parts).resolve(strict=True)
+    if (
+        not manifest_path.is_relative_to(root)
+        or manifest_path.read_bytes() != package.manifest_bytes
+    ):
+        raise BlenderRenderError("render_scene_package_manifest_mismatch")
+    output_dir_path = _safe_relative(output_directory)
+    batch_manifest_path = _safe_relative(manifest_relative_path)
+    if output_dir_path == batch_manifest_path or batch_manifest_path in output_dir_path.parents:
+        raise BlenderRenderError("render_output_paths_overlap")
+
+    views: tuple[Literal["FRONT", "THREE_QUARTER", "BACK"], ...] = (
+        "FRONT",
+        "THREE_QUARTER",
+        "BACK",
+    )
+    package_body = package.manifest().get("body")
+    if not isinstance(package_body, dict) or not isinstance(package_body.get("source"), dict):
+        raise BlenderRenderError("render_scene_package_source_invalid")
+    scene_revision_ids = package_body["source"]
+    revisions = tuple(sorted(source_revisions))
+    expected_revision_ids = tuple(
+        sorted(
+            (key.removesuffix("_revision_id"), value)
+            for key, value in scene_revision_ids.items()
+            if key.endswith("_revision_id")
+        )
+    )
+    if revisions != expected_revision_ids:
+        raise BlenderRenderError("render_source_revisions_mismatch")
+    expected_source_provenance = {
+        key: value
+        for key, value in scene_revision_ids.items()
+        if key.endswith("_revision_id") or key.endswith("_sha256")
+    }
+
+    batch_manifest_abs = root.joinpath(*batch_manifest_path.parts)
+    outputs: list[Path] = []
+    sidecars: list[Path] = []
+    for view in views:
+        name = view.lower()
+        outputs.append(root.joinpath(*output_dir_path.parts, f"{name}.png"))
+        sidecars.extend(
+            (
+                root.joinpath(*output_dir_path.parts, f"{name}.render.json"),
+                root.joinpath(*output_dir_path.parts, f"{name}.scene.json"),
+            )
+        )
+    for destination in [*outputs, *sidecars, batch_manifest_abs]:
+        resolved = destination.resolve()
+        if not resolved.is_relative_to(root) or destination.exists():
+            raise BlenderRenderError("render_output_path_unavailable")
+
+    settings_by_view: list[dict[str, object]] = []
+    view_records: list[dict[str, object]] = []
+    output_directory_abs = root.joinpath(*output_dir_path.parts)
+    output_directory_abs.mkdir(parents=True, exist_ok=True)
+    try:
+        with tempfile.TemporaryDirectory(prefix="packlab-render-runner-") as runner_temp:
+            runner_directory = Path(runner_temp)
+            for index, view in enumerate(views):
+                name = view.lower()
+                preset = create_blender_render_preset(
+                    bounds_min,
+                    bounds_max,
+                    view,
+                    revisions,
+                )
+                request = BlenderRenderRequest(
+                    width=width,
+                    height=height,
+                    samples=samples,
+                    timeout_seconds=timeout_seconds,
+                    output_relative_path=f"{output_directory}/{name}.png",
+                    evidence_relative_path=f"{output_directory}/{name}.render.json",
+                )
+                scene_result_relative_path = f"{output_directory}/{name}.scene.json"
+                script_path = runner_directory / f"{name}_render_runner.py"
+                script_path.write_bytes(build_blender_render_runner(package, preset, request))
+                render_executor(
+                    executable,
+                    script_path,
+                    root,
+                    manifest_relative_path="blender_scene_manifest.json",
+                    scene_result_relative_path=scene_result_relative_path,
+                    timeout_seconds=timeout_seconds,
+                )
+                output_path = outputs[index]
+                evidence_path = sidecars[index * 2]
+                if not output_path.is_file() or not evidence_path.is_file():
+                    raise BlenderRenderError("render_output_missing")
+                evidence = json.loads(evidence_path.read_text("utf-8"))
+                image_bytes = output_path.read_bytes()
+                digest = hashlib.sha256(image_bytes).hexdigest()
+                output_facts = evidence.get("output")
+                if (
+                    evidence.get("scene_package_revision_id") != package.revision_id
+                    or evidence.get("scene_package_sha256") != package.manifest()["content_sha256"]
+                    or evidence.get("render_preset_revision_id") != preset.revision_id
+                    or evidence.get("source_revisions_and_digests") != expected_source_provenance
+                    or not isinstance(output_facts, dict)
+                    or output_facts.get("sha256") != digest
+                    or output_facts.get("byte_length") != len(image_bytes)
+                    or output_facts.get("width") != width
+                    or output_facts.get("height") != height
+                    or output_facts.get("alpha_channel") is not True
+                    or output_facts.get("all_mesh_bounds_inside_camera") is not True
+                    or output_facts.get("visible_pixel_count", 0) <= 0
+                    or output_facts.get("transparent_pixel_count", 0) <= 0
+                ):
+                    raise BlenderRenderError("render_view_evidence_invalid")
+                settings = evidence.get("settings")
+                if not isinstance(settings, dict):
+                    raise BlenderRenderError("render_settings_missing")
+                comparable_settings = {
+                    key: value
+                    for key, value in settings.items()
+                    if key not in {"camera_view", "camera_location", "camera_target"}
+                }
+                if settings_by_view and comparable_settings != settings_by_view[0]:
+                    raise BlenderRenderError("render_batch_settings_inconsistent")
+                settings_by_view.append(comparable_settings)
+                view_records.append(
+                    {
+                        "order": index + 1,
+                        "view": view,
+                        "camera_id": preset.revision_id,
+                        "camera_location": settings["camera_location"],
+                        "camera_target": settings["camera_target"],
+                        "output_relative_path": request.output_relative_path,
+                        "output_sha256": digest,
+                        "output_byte_length": len(image_bytes),
+                        "width": width,
+                        "height": height,
+                        "alpha_channel": output_facts["alpha_channel"],
+                        "visible_pixel_count": output_facts["visible_pixel_count"],
+                        "transparent_pixel_count": output_facts["transparent_pixel_count"],
+                        "render_preset_revision_id": preset.revision_id,
+                    }
+                )
+                scene_result_path = sidecars[index * 2 + 1]
+                if scene_result_path.is_file():
+                    scene_result_path.unlink()
+            if len({record["camera_id"] for record in view_records}) != len(views) or len(
+                {
+                    json.dumps(record["camera_location"], separators=(",", ":"))
+                    for record in view_records
+                }
+            ) != len(views):
+                raise BlenderRenderError("render_camera_views_not_unique")
+            batch_identity = {
+                "contract": "packlab.blender-standard-view-batch.v1",
+                "scene_package_revision_id": package.revision_id,
+                "scene_package_sha256": package.manifest()["content_sha256"],
+                "source_revisions_and_digests": scene_revision_ids,
+                "settings": settings_by_view[0],
+                "ordered_views": [
+                    {
+                        key: value
+                        for key, value in record.items()
+                        if key
+                        not in {
+                            "output_sha256",
+                            "output_byte_length",
+                            "visible_pixel_count",
+                            "transparent_pixel_count",
+                        }
+                    }
+                    for record in view_records
+                ],
+            }
+            batch_id = (
+                "blender-standard-view-batch:"
+                + hashlib.sha256(
+                    json.dumps(
+                        batch_identity, sort_keys=True, separators=(",", ":"), allow_nan=False
+                    ).encode()
+                ).hexdigest()
+            )
+            result: dict[str, object] = {
+                **batch_identity,
+                "revision_id": batch_id,
+                "views": view_records,
+                "view_order": list(views),
+                "output_sha256_by_view": {
+                    record["view"]: record["output_sha256"] for record in view_records
+                },
+                "authority_limits": {
+                    "derived_presentation_only": True,
+                    "physical_accuracy_inferred": False,
+                    "physical_fit_verified": False,
+                    "material_certified": False,
+                    "manufacturing_approval_inferred": False,
+                    "regulatory_approval_inferred": False,
+                },
+                "network_access": "NONE",
+                "automatic_downloads": False,
+            }
+            encoded = (
+                json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+                + b"\n"
+            )
+            batch_manifest_abs.parent.mkdir(parents=True, exist_ok=True)
+            batch_manifest_abs.write_bytes(encoded)
+            return result
+    except BaseException:
+        for path in [*outputs, *sidecars, batch_manifest_abs]:
+            resolved = path.resolve()
+            if resolved.is_relative_to(root) and path.is_file():
+                path.unlink()
+        if output_directory_abs.is_dir() and not any(output_directory_abs.iterdir()):
+            output_directory_abs.rmdir()
+        raise
 
 
 def _safe_relative(value: str) -> PurePosixPath:
@@ -314,4 +557,5 @@ __all__ = [
     "BlenderRenderRequest",
     "build_blender_render_runner",
     "run_blender_render",
+    "render_standard_views",
 ]
