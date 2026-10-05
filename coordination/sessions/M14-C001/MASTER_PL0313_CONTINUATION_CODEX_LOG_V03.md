@@ -21,7 +21,8 @@
 | PL-0317 | READY_FOR_INDEPENDENT_AUDIT | `c929af191b98597e42e01b51422740b11c127884` | `7df23a5784fe729ee04d915134a9a920ddc9e5d1` | 30 focused; full 1,717 passed, 6 skipped, 1 deselected |
 | PL-0318 | READY_FOR_INDEPENDENT_AUDIT | `70951f533923c9ce3f049e42da53503220b9a807` | `2c8c58d91dd3aec3482da548e0d76be5c399f416` | 19 focused; full 1,736 passed, 6 skipped, 1 deselected |
 | PL-0319 | READY_FOR_INDEPENDENT_AUDIT | `3866e11b1d89e7191d176b98e64033efb3fae6d4` | `5fa1ca77e85c39188b4a11283d8ba0883adf8c24` | 25 focused; full 1,742 passed, 6 skipped, 1 deselected |
-| PL-0320–PL-0331 | NOT_STARTED | pending | pending | pending |
+| PL-0320 | READY_FOR_INDEPENDENT_AUDIT | `e8c458b24f08cf47e8e15ea9bbeaa82153fcd184` | `2dbea6dff7bea1babaf70ddc3c2faa8cbd3c66db` | 53 focused; full 1,770 passed, 6 skipped, 1 deselected |
+| PL-0321–PL-0331 | NOT_STARTED | pending | pending | pending |
 
 ## PL-0313 V02 resolution
 
@@ -33,7 +34,7 @@ Focused command: `uv run --locked pytest -q tests/core/test_label_metric_surface
 
 ## Continuation status
 
-PL-0313 V02 through PL-0319 V01 are builder-green and awaiting independent child audit. PL-0319 implementation, child log, and M14 indexes have been published with remote parity verified. Continue in exact frozen order at PL-0320. PL-0320 through PL-0331 have not started. PL-0324 remains a real Blender capability gate. No M15+ work has started.
+PL-0313 V02 through PL-0320 V01 are builder-green and awaiting independent child audit. PL-0320 implementation, child log, and M14 indexes have been published with remote parity verified. Continue in exact frozen order at PL-0321. PL-0321 through PL-0331 have not started. PL-0324 remains a real Blender capability gate. No M15+ work has started.
 
 ## PL-0314 V01 execution
 
@@ -86,3 +87,12 @@ Starting child SHA: `c84ddb37b5f3da36a379976a90b9443ca79fbb32`. Implementation/e
 Focused command `uv run --locked pytest -q tests/core/test_component_visual_assignments.py tests/core/test_visual_material_library.py`: 25 passed. Full locked suite `uv run --locked pytest -q`: 1,742 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected tracker/dependency checks, privacy/scope review and whitespace checks passed.
 
 PL-0319 adds distinct deterministic geometry-material and product-content appearance assignment contracts bound to exact Design Model revisions and existing component IDs. Replacement/removal creates channel-local immutable successors; the combined state rejects mismatched provenance and retains both assignments independently. Model geometry is unchanged. Content and state mark fill-volume and formulation inference false; material values retain non-certified visual semantics. PL-0320 is next after index publication and remote parity; PL-0320 through PL-0331 remain unstarted.
+
+
+## PL-0320 V01 execution
+
+Starting child SHA: `e3111ca89ee05e6aa45a0c03be424a5cd212219b`. Implementation/evidence commit: `e8c458b24f08cf47e8e15ea9bbeaa82153fcd184`. Child log commit: `2dbea6dff7bea1babaf70ddc3c2faa8cbd3c66db`.
+
+Focused command `uv run --locked pytest -q tests/core/test_pbr_visual_parameters.py tests/core/test_component_visual_assignments.py tests/core/test_visual_material_library.py`: 53 passed. Full locked suite `uv run --locked pytest -q`: 1,770 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected tracker/dependency checks, privacy/scope review and whitespace checks passed.
+
+PL-0320 adds bounded render-only PBR revisions pinned to active geometry-material assignment, source library/material, exact Design Model revision and component. Opacity/transmission coherence is explicit; IOR and unit-factor ranges are bounded; optional normal detail pins only a texture revision/digest and coordinate frame. Serialization disclaims measured material/optical properties, certification, and geometry mutation. PL-0321 is next after index publication and remote parity; PL-0321 through PL-0331 remain unstarted.
