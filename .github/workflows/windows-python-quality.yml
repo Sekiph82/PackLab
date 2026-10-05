@@ -1,0 +1,104 @@
+name: PackLab Windows Python Quality
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "apps/windows-studio/**"
+      - "core/**"
+      - "pyproject.toml"
+      - "tests/**"
+      - "tools/**"
+      - "uv.lock"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+      - "apps/windows-studio/**"
+      - "core/**"
+      - "pyproject.toml"
+      - "tests/**"
+      - "tools/**"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-python-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Locked Python quality
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      UV_NO_PROGRESS: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.26"
+          enable-cache: false
+
+      - name: Validate lock and install locked dependencies
+        id: locked-env
+        shell: pwsh
+        run: |
+          uv lock --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv sync --locked --all-groups
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Ruff lint
+        if: ${{ always() && steps.locked-env.outcome == 'success' }}
+        run: uv run --locked ruff check core apps tools tests
+
+      - name: Ruff format changed Python files
+        if: ${{ always() && steps.locked-env.outcome == 'success' }}
+        shell: pwsh
+        env:
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if ($env:EVENT_NAME -eq "pull_request") {
+            $base = $env:PULL_REQUEST_BASE_SHA
+          } elseif ($env:EVENT_NAME -eq "push") {
+            $base = $env:PUSH_BEFORE_SHA
+          } else {
+            $base = git rev-parse HEAD^
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if ([string]::IsNullOrWhiteSpace($base) -or $base -match "^0+$") {
+            throw "Unable to identify the comparison commit for changed-file formatting."
+          }
+          $changedPython = @(git diff --name-only --diff-filter=ACMR "$base...HEAD" -- "*.py")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($changedPython.Count -gt 0) {
+            uv run --locked ruff format --check -- $changedPython
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Mypy
+        if: ${{ always() && steps.locked-env.outcome == 'success' }}
+        run: uv run --locked mypy core apps tools
+
+      - name: Unit and repository tests
+        if: ${{ always() && steps.locked-env.outcome == 'success' }}
+        run: uv run --locked pytest -q
