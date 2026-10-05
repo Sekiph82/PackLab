@@ -15,7 +15,8 @@
 | Child | Status | Implementation/evidence commit | Child-log commit | Validation |
 |---|---|---|---|---|
 | PL-0313 V02 | READY_FOR_INDEPENDENT_AUDIT | `ac286de71e16372f6eddc8289460c905cfa1f355` | `f4ded8e` and line-ending correction `cfaff39` | 55 focused/predecessor passed; full 1,669 passed, 6 skipped, 1 deselected |
-| PL-0314–PL-0331 | NOT_STARTED | pending | pending | pending |
+| PL-0314 | READY_FOR_INDEPENDENT_AUDIT | `2878bf1edb1a29aaaba85c9bfb3e1b97081342bd` | `ca6185b` and SHA correction `b541c0e` | 56 focused passed; full 1,685 passed, 6 skipped, 1 deselected |
+| PL-0315–PL-0331 | NOT_STARTED | pending | pending | pending |
 
 ## PL-0313 V02 resolution
 
@@ -27,4 +28,12 @@ Focused command: `uv run --locked pytest -q tests/core/test_label_metric_surface
 
 ## Continuation status
 
-PL-0313 V02 is builder-green and awaiting independent child audit. Continue in exact frozen order at PL-0314 only after the PL-0313 child log and both indexes are published and remote parity is verified. PL-0314 through PL-0331 have not started. PL-0324 remains a real Blender capability gate. No M15+ work has started.
+PL-0313 V02 and PL-0314 V01 are builder-green and awaiting independent child audit. PL-0314 child log and M14 indexes are prepared for publication before the next child. Continue in exact frozen order at PL-0315 after remote parity is verified. PL-0315 through PL-0331 have not started. PL-0324 remains a real Blender capability gate. No M15+ work has started.
+
+## PL-0314 V01 execution
+
+Starting child SHA: `e13976cab8208f0e7cad7d17fa08c6ecdbc4ea9d`. Implementation/evidence commit: `2878bf1edb1a29aaaba85c9bfb3e1b97081342bd`. Child log commit `ca6185b36160c4433bfac4ce044fcb9a3f4fb07b`, followed by full-SHA correction log commit `b541c0e`.
+
+Focused command `uv run --locked pytest -q tests/core/test_label_dieline_print_intent.py tests/core/test_label_metric_surface_binding.py tests/core/test_label_zone.py tests/core/test_label_zone_placement.py`: 56 passed. Full locked suite `uv run --locked pytest -q`: 1,685 passed, 6 skipped, 1 deselected, 2 duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, tracker/dependency protection and scope/privacy review passed.
+
+PL-0314 preserves the source dieline geometry and ID as `source_dieline_revision_id`; a separate immutable print-intent revision contains finite nonnegative `mm_unverified` safe margin/bleed values and distinct inner/outer boundaries. It claims no printer certification or print fit. PL-0315 is next; PL-0315 through PL-0331 remain unstarted.
