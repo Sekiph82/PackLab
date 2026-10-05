@@ -22,6 +22,7 @@ MAX_PNG_DIMENSION = 16_384
 MAX_PNG_PIXELS = 32_000_000
 MAX_PNG_DECODED_BYTES = 64 * 1024 * 1024
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_VARIANT_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _LENGTH = re.compile(r"^\s*([0-9]+(?:\.[0-9]+)?)(?:px)?\s*$", re.IGNORECASE)
 
 
@@ -139,6 +140,194 @@ class LabelArtworkMappingRevision:
             "geometry_authority_created": False,
             "physical_fit_verified": False,
         }
+
+
+LABEL_ARTWORK_ASSIGNMENT_CONTRACT = "packlab.label-artwork-assignment.v1"
+
+
+@dataclass(frozen=True, slots=True)
+class LabelArtworkAssignmentRevision:
+    """Immutable, reversible presentation assignment for one exact zone variant."""
+
+    revision_id: str
+    variant_id: str
+    zone_id: str
+    zone_kind: str
+    placement_revision_id: str
+    mapping_revision_id: str | None
+    artwork_revision_id: str | None
+    status: str
+    wrap_seam_u_normalized: float | None
+    orientation: str
+    previous_revision_id: str | None
+    contract: str = LABEL_ARTWORK_ASSIGNMENT_CONTRACT
+
+    def __post_init__(self) -> None:
+        if (
+            self.contract != LABEL_ARTWORK_ASSIGNMENT_CONTRACT
+            or not isinstance(self.variant_id, str)
+            or not _VARIANT_ID.fullmatch(self.variant_id)
+            or self.zone_kind not in {"front", "back", "wrap"}
+            or not isinstance(self.zone_id, str)
+            or not self.zone_id
+            or not isinstance(self.placement_revision_id, str)
+            or not self.placement_revision_id
+            or self.status not in {"ASSIGNED", "REMOVED"}
+            or self.orientation not in {"CANONICAL_UV", "REVERSED_U"}
+            or (
+                self.previous_revision_id is not None
+                and (
+                    not isinstance(self.previous_revision_id, str) or not self.previous_revision_id
+                )
+            )
+            or (
+                self.status == "ASSIGNED"
+                and (not self.mapping_revision_id or not self.artwork_revision_id)
+            )
+            or (
+                self.status == "REMOVED"
+                and (self.mapping_revision_id is not None or self.artwork_revision_id is not None)
+            )
+            or (
+                self.zone_kind == "wrap"
+                and (
+                    self.wrap_seam_u_normalized is None
+                    or isinstance(self.wrap_seam_u_normalized, bool)
+                    or not isinstance(self.wrap_seam_u_normalized, (int, float))
+                    or not math.isfinite(self.wrap_seam_u_normalized)
+                    or not 0.0 <= self.wrap_seam_u_normalized < 1.0
+                )
+            )
+            or (self.zone_kind != "wrap" and self.wrap_seam_u_normalized is not None)
+            or self.revision_id != "label-artwork-assignment:" + _assignment_digest(self)
+        ):
+            raise LabelArtworkError("label_artwork_assignment_invalid")
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "contract": self.contract,
+            "authority_class": "REVERSIBLE_LABEL_ZONE_PRESENTATION_ASSIGNMENT",
+            "revision_id": self.revision_id,
+            "variant_id": self.variant_id,
+            "zone_id": self.zone_id,
+            "zone_kind": self.zone_kind,
+            "placement_revision_id": self.placement_revision_id,
+            "mapping_revision_id": self.mapping_revision_id,
+            "artwork_revision_id": self.artwork_revision_id,
+            "status": self.status,
+            "wrap_seam_u_normalized": self.wrap_seam_u_normalized,
+            "orientation": self.orientation,
+            "previous_revision_id": self.previous_revision_id,
+            "coordinate_unit": "unitless_normalized",
+            "mutates_source_geometry": False,
+            "changes_label_zone": False,
+            "physical_fit_verified": False,
+        }
+
+
+def create_label_artwork_assignment(
+    mapping: LabelArtworkMappingRevision,
+    placement: LabelZonePlacementRevision,
+    *,
+    variant_id: str,
+    wrap_seam_u_normalized: float | None = None,
+    orientation: str = "CANONICAL_UV",
+    previous: LabelArtworkAssignmentRevision | None = None,
+) -> LabelArtworkAssignmentRevision:
+    """Bind one mapping to an exact front, back, or wrap placement variant."""
+    if not isinstance(mapping, LabelArtworkMappingRevision):
+        raise LabelArtworkError("label_artwork_mapping_required")
+    if not isinstance(placement, LabelZonePlacementRevision):
+        raise LabelArtworkError("label_artwork_zone_placement_required")
+    zone = placement.label_zone
+    if (
+        mapping.zone_id != placement.zone_id
+        or mapping.placement_revision_id != placement.revision_id
+    ):
+        raise LabelArtworkError("label_artwork_assignment_stale_or_wrong_zone")
+    if not isinstance(variant_id, str) or not _VARIANT_ID.fullmatch(variant_id):
+        raise LabelArtworkError("label_artwork_variant_id_invalid")
+    if previous is not None:
+        if not isinstance(previous, LabelArtworkAssignmentRevision):
+            raise LabelArtworkError("label_artwork_previous_assignment_invalid")
+        if previous.status != "ASSIGNED" or (
+            previous.variant_id,
+            previous.zone_id,
+            previous.zone_kind,
+        ) != (variant_id, placement.zone_id, zone.zone_kind.value):
+            raise LabelArtworkError("label_artwork_previous_assignment_mismatch")
+    if zone.zone_kind.value == "wrap":
+        if (
+            isinstance(wrap_seam_u_normalized, bool)
+            or not isinstance(wrap_seam_u_normalized, (int, float))
+            or not math.isfinite(wrap_seam_u_normalized)
+            or not 0.0 <= wrap_seam_u_normalized < 1.0
+        ):
+            raise LabelArtworkError("label_artwork_wrap_seam_required_or_invalid")
+    elif wrap_seam_u_normalized is not None:
+        raise LabelArtworkError("label_artwork_wrap_seam_wrong_zone_kind")
+    if not isinstance(orientation, str) or orientation not in {"CANONICAL_UV", "REVERSED_U"}:
+        raise LabelArtworkError("label_artwork_orientation_invalid")
+    values: dict[str, object] = {
+        "contract": LABEL_ARTWORK_ASSIGNMENT_CONTRACT,
+        "variant_id": variant_id,
+        "zone_id": placement.zone_id,
+        "zone_kind": zone.zone_kind.value,
+        "placement_revision_id": placement.revision_id,
+        "mapping_revision_id": mapping.revision_id,
+        "artwork_revision_id": mapping.source_artwork_revision_id,
+        "status": "ASSIGNED",
+        "wrap_seam_u_normalized": wrap_seam_u_normalized,
+        "orientation": orientation,
+        "previous_revision_id": previous.revision_id if previous is not None else None,
+    }
+    return LabelArtworkAssignmentRevision(
+        revision_id="label-artwork-assignment:" + _digest(values),
+        variant_id=variant_id,
+        zone_id=placement.zone_id,
+        zone_kind=zone.zone_kind.value,
+        placement_revision_id=placement.revision_id,
+        mapping_revision_id=mapping.revision_id,
+        artwork_revision_id=mapping.source_artwork_revision_id,
+        status="ASSIGNED",
+        wrap_seam_u_normalized=wrap_seam_u_normalized,
+        orientation=orientation,
+        previous_revision_id=previous.revision_id if previous is not None else None,
+    )
+
+
+def remove_label_artwork_assignment(
+    previous: LabelArtworkAssignmentRevision,
+) -> LabelArtworkAssignmentRevision:
+    """Create an immutable removal revision; earlier assignment remains addressable."""
+    if not isinstance(previous, LabelArtworkAssignmentRevision) or previous.status != "ASSIGNED":
+        raise LabelArtworkError("label_artwork_active_assignment_required")
+    values: dict[str, object] = {
+        "contract": LABEL_ARTWORK_ASSIGNMENT_CONTRACT,
+        "variant_id": previous.variant_id,
+        "zone_id": previous.zone_id,
+        "zone_kind": previous.zone_kind,
+        "placement_revision_id": previous.placement_revision_id,
+        "mapping_revision_id": None,
+        "artwork_revision_id": None,
+        "status": "REMOVED",
+        "wrap_seam_u_normalized": previous.wrap_seam_u_normalized,
+        "orientation": previous.orientation,
+        "previous_revision_id": previous.revision_id,
+    }
+    return LabelArtworkAssignmentRevision(
+        revision_id="label-artwork-assignment:" + _digest(values),
+        variant_id=previous.variant_id,
+        zone_id=previous.zone_id,
+        zone_kind=previous.zone_kind,
+        placement_revision_id=previous.placement_revision_id,
+        mapping_revision_id=None,
+        artwork_revision_id=None,
+        status="REMOVED",
+        wrap_seam_u_normalized=previous.wrap_seam_u_normalized,
+        orientation=previous.orientation,
+        previous_revision_id=previous.revision_id,
+    )
 
 
 def ingest_label_artwork(
@@ -467,6 +656,24 @@ def _mapping_digest(mapping: LabelArtworkMappingRevision) -> str:
     )
 
 
+def _assignment_digest(assignment: LabelArtworkAssignmentRevision) -> str:
+    return _digest(
+        {
+            "contract": LABEL_ARTWORK_ASSIGNMENT_CONTRACT,
+            "variant_id": assignment.variant_id,
+            "zone_id": assignment.zone_id,
+            "zone_kind": assignment.zone_kind,
+            "placement_revision_id": assignment.placement_revision_id,
+            "mapping_revision_id": assignment.mapping_revision_id,
+            "artwork_revision_id": assignment.artwork_revision_id,
+            "status": assignment.status,
+            "wrap_seam_u_normalized": assignment.wrap_seam_u_normalized,
+            "orientation": assignment.orientation,
+            "previous_revision_id": assignment.previous_revision_id,
+        }
+    )
+
+
 def _digest(value: dict[str, object]) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -475,10 +682,14 @@ def _digest(value: dict[str, object]) -> str:
 
 __all__ = [
     "LABEL_ARTWORK_ASSET_CONTRACT",
+    "LABEL_ARTWORK_ASSIGNMENT_CONTRACT",
     "LABEL_ARTWORK_MAPPING_CONTRACT",
     "LabelArtworkAssetRevision",
+    "LabelArtworkAssignmentRevision",
     "LabelArtworkError",
     "LabelArtworkMappingRevision",
+    "create_label_artwork_assignment",
     "ingest_label_artwork",
     "map_label_artwork_to_zone",
+    "remove_label_artwork_assignment",
 ]

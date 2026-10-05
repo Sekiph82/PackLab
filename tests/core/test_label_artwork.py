@@ -10,8 +10,10 @@ from tests.core.test_label_zone_placement import _zone
 
 from packlab_core.label_artwork import (
     LabelArtworkError,
+    create_label_artwork_assignment,
     ingest_label_artwork,
     map_label_artwork_to_zone,
+    remove_label_artwork_assignment,
 )
 from packlab_core.label_zone import LabelZoneKind
 from packlab_core.label_zone_placement import create_label_zone_placement_revision
@@ -40,8 +42,8 @@ def _png() -> bytes:
     )
 
 
-def _placement():
-    _, _, zone = _zone(LabelZoneKind.FRONT)
+def _placement(kind: LabelZoneKind = LabelZoneKind.FRONT):
+    _, _, zone = _zone(kind)
     return create_label_zone_placement_revision(
         zone,
         zone.boundary,
@@ -173,3 +175,128 @@ def test_unsupported_fit_and_path_like_source_types_reject() -> None:
         map_label_artwork_to_zone(artwork, placement, fit_mode="tile")
     with pytest.raises(LabelArtworkError, match="source_type_invalid"):
         ingest_label_artwork(object())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("kind", [LabelZoneKind.FRONT, LabelZoneKind.BACK])
+def test_front_and_back_variants_bind_independently_to_exact_zone_revisions(
+    kind: LabelZoneKind,
+) -> None:
+    placement = _placement(kind)
+    artwork = ingest_label_artwork(_svg(kind.value))
+    mapping = map_label_artwork_to_zone(artwork, placement)
+    before_zone = placement.label_zone.as_dict()
+    before_placement = placement.as_dict()
+
+    first = create_label_artwork_assignment(mapping, placement, variant_id=f"{kind.value}-primary")
+    repeated = create_label_artwork_assignment(
+        mapping, placement, variant_id=f"{kind.value}-primary"
+    )
+
+    assert first == repeated
+    assert first.zone_kind == kind.value
+    assert first.zone_id == placement.zone_id
+    assert first.placement_revision_id == placement.revision_id
+    assert first.artwork_revision_id == artwork.revision_id
+    assert first.as_dict()["mutates_source_geometry"] is False
+    assert placement.label_zone.as_dict() == before_zone
+    assert placement.as_dict() == before_placement
+
+
+def test_front_and_back_variants_can_coexist_for_distinct_zone_ids() -> None:
+    artwork = ingest_label_artwork(_svg())
+    front = _placement(LabelZoneKind.FRONT)
+    back = _placement(LabelZoneKind.BACK)
+    front_assignment = create_label_artwork_assignment(
+        map_label_artwork_to_zone(artwork, front), front, variant_id="campaign-front"
+    )
+    back_assignment = create_label_artwork_assignment(
+        map_label_artwork_to_zone(artwork, back), back, variant_id="campaign-back"
+    )
+
+    assert front_assignment.zone_id != back_assignment.zone_id
+    assert front_assignment.variant_id != back_assignment.variant_id
+    assert front_assignment.revision_id != back_assignment.revision_id
+
+
+def test_wrap_assignment_requires_normalized_seam_and_persists_orientation() -> None:
+    placement = _placement(LabelZoneKind.WRAP)
+    artwork = ingest_label_artwork(_svg())
+    mapping = map_label_artwork_to_zone(artwork, placement)
+
+    with pytest.raises(LabelArtworkError, match="wrap_seam_required_or_invalid"):
+        create_label_artwork_assignment(mapping, placement, variant_id="wrap-primary")
+    assignment = create_label_artwork_assignment(
+        mapping,
+        placement,
+        variant_id="wrap-primary",
+        wrap_seam_u_normalized=0.875,
+        orientation="REVERSED_U",
+    )
+
+    assert assignment.zone_kind == "wrap"
+    assert assignment.wrap_seam_u_normalized == 0.875
+    assert assignment.orientation == "REVERSED_U"
+    assert assignment.as_dict()["coordinate_unit"] == "unitless_normalized"
+    assert assignment.as_dict()["physical_fit_verified"] is False
+
+
+@pytest.mark.parametrize("seam", [-0.01, 1.0, float("nan"), True])
+def test_wrap_assignment_rejects_invalid_seam(seam: float) -> None:
+    placement = _placement(LabelZoneKind.WRAP)
+    mapping = map_label_artwork_to_zone(ingest_label_artwork(_svg()), placement)
+    with pytest.raises(LabelArtworkError, match="wrap_seam_required_or_invalid"):
+        create_label_artwork_assignment(
+            mapping, placement, variant_id="wrap-primary", wrap_seam_u_normalized=seam
+        )
+
+
+def test_assignment_rejects_stale_mapping_wrong_zone_kind_and_invalid_orientation() -> None:
+    artwork = ingest_label_artwork(_svg())
+    front = _placement(LabelZoneKind.FRONT)
+    back = _placement(LabelZoneKind.BACK)
+    stale = map_label_artwork_to_zone(artwork, front)
+    with pytest.raises(LabelArtworkError, match="stale_or_wrong_zone"):
+        create_label_artwork_assignment(stale, back, variant_id="back-primary")
+    back_mapping = map_label_artwork_to_zone(artwork, back)
+    with pytest.raises(LabelArtworkError, match="wrap_seam_wrong_zone_kind"):
+        create_label_artwork_assignment(
+            back_mapping, back, variant_id="back-primary", wrap_seam_u_normalized=0.25
+        )
+    with pytest.raises(LabelArtworkError, match="orientation_invalid"):
+        create_label_artwork_assignment(
+            back_mapping, back, variant_id="back-primary", orientation="SIDEWAYS"
+        )
+
+
+def test_variant_replacement_and_removal_create_reversible_successors() -> None:
+    placement = _placement()
+    zone_before = placement.label_zone.as_dict()
+    original_mapping = map_label_artwork_to_zone(ingest_label_artwork(_svg("red")), placement)
+    replacement_mapping = map_label_artwork_to_zone(ingest_label_artwork(_svg("blue")), placement)
+    original = create_label_artwork_assignment(
+        original_mapping, placement, variant_id="campaign-front"
+    )
+    replacement = create_label_artwork_assignment(
+        replacement_mapping,
+        placement,
+        variant_id="campaign-front",
+        previous=original,
+    )
+    removed = remove_label_artwork_assignment(replacement)
+
+    assert replacement.previous_revision_id == original.revision_id
+    assert replacement.artwork_revision_id != original.artwork_revision_id
+    assert removed.status == "REMOVED"
+    assert removed.mapping_revision_id is None
+    assert removed.artwork_revision_id is None
+    assert removed.previous_revision_id == replacement.revision_id
+    assert original.status == replacement.status == "ASSIGNED"
+    assert placement.label_zone.as_dict() == zone_before
+
+
+def test_assignment_replacement_cannot_retarget_another_variant_or_zone() -> None:
+    placement = _placement()
+    mapping = map_label_artwork_to_zone(ingest_label_artwork(_svg()), placement)
+    original = create_label_artwork_assignment(mapping, placement, variant_id="front-a")
+    with pytest.raises(LabelArtworkError, match="previous_assignment_mismatch"):
+        create_label_artwork_assignment(mapping, placement, variant_id="front-b", previous=original)
