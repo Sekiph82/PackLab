@@ -23,11 +23,14 @@ from packlab_studio.navigation import Route
 from packlab_studio.packaging_library_audit import PackagingLibraryAuditStore
 from packlab_studio.packaging_library_browser import (
     BrowserDisplayState,
+    LibraryRelatedRecord,
     LibraryThumbnailReference,
     PackagingLibraryBrowserError,
     PackagingLibraryBrowserService,
     PackagingLibraryBrowserView,
     PackagingLibraryFilters,
+    PreviewState,
+    ProjectPreviewResolution,
     ThumbnailSource,
 )
 from packlab_studio.shell import StudioMainWindow
@@ -426,3 +429,75 @@ def test_filter_controls_compose_with_search_and_clear_to_search_only(
     ] == ["water-pet", "water-glass"]
     view.close()
     app.processEvents()
+
+
+def test_detail_view_renders_verified_linked_preview_and_related_records(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = create_application(["packlab-library-browser-detail-test"])
+    project_root = tmp_path / "project"
+    mesh_path = project_root / "meshes" / "water.obj"
+    mesh_path.parent.mkdir(parents=True)
+    mesh_bytes = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
+    mesh_path.write_bytes(mesh_bytes)
+    mesh_digest = hashlib.sha256(mesh_bytes).hexdigest()
+    linked_asset = _asset().with_source_links(
+        raw_scan_links=(RawScanLink("project-detail", "scan-revision-1", mesh_digest),),
+        scan_master_link=None,
+        design_model_links=(),
+    )
+    library_root = tmp_path / "library"
+    store = _library(library_root, assets=(linked_asset,))
+    related_records = (
+        LibraryRelatedRecord("COMPONENT", "cap-28mm", "28 mm Cap", "cap-rev-1"),
+        LibraryRelatedRecord("ARTWORK", "artwork-water", "Water Label", "art-rev-2"),
+        LibraryRelatedRecord("SKU", "sku-water-500", "Water 500 mL", "sku-rev-4"),
+    )
+    resolutions: list[tuple[str, str, str]] = []
+
+    def resolve(reference):
+        resolutions.append((reference.project_id, reference.revision_id, reference.sha256))
+        return ProjectPreviewResolution(project_root, "meshes/water.obj", mesh_digest)
+
+    service = PackagingLibraryBrowserService(
+        store,
+        library_root,
+        preview_resolver=resolve,
+        related_records_resolver=lambda _asset_id: related_records,
+    )
+    view = PackagingLibraryBrowserView(service)
+    view.item_view.setCurrentRow(0)
+
+    assert resolutions == [("project-detail", "scan-revision-1", mesh_digest)]
+    assert "scan-revision-1" in view.detail_text.toPlainText()
+    assert "USER_DECLARED" in view.detail_text.toPlainText()
+    assert "28 mm Cap" in view.detail_text.toPlainText()
+    assert "Water Label" in view.detail_text.toPlainText()
+    assert "Water 500 mL" in view.detail_text.toPlainText()
+    assert view.preview_label.pixmap() is not None
+    assert not view.preview_label.pixmap().isNull()
+    before_revision = store.snapshot().assets[0].revision_id
+    assert mesh_path.read_bytes() == mesh_bytes
+
+    mesh_path.write_bytes(b"stale geometry")
+    detail = service.asset_detail(service.list_assets()[0])
+    stale = service.render_preview(detail)
+    assert stale.state is PreviewState.STALE
+    assert store.snapshot().assets[0].revision_id == before_revision
+    view.close()
+    app.processEvents()
+
+
+def test_detail_without_runtime_project_resolver_shows_unavailable_state(tmp_path: Path) -> None:
+    library_root = tmp_path / "library"
+    asset = _asset().with_source_links(
+        raw_scan_links=(RawScanLink("offline-project", "scan-revision-9", "c" * 64),),
+        scan_master_link=None,
+        design_model_links=(),
+    )
+    service = PackagingLibraryBrowserService(_library(library_root, assets=(asset,)), library_root)
+    detail = service.asset_detail(service.list_assets()[0])
+    preview = service.render_preview(detail)
+    assert preview.state is PreviewState.UNAVAILABLE
+    assert detail.raw_scans[0].revision_id == "scan-revision-9"

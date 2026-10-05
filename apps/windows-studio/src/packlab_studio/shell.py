@@ -22,7 +22,12 @@ from .navigation import (
     ScanMasterEditorView,
 )
 from .packaging_library_audit import PackagingLibraryAuditStore
-from .packaging_library_browser import PackagingLibraryBrowserService
+from .packaging_library_browser import (
+    LibraryRelatedRecord,
+    LinkedProjectRevision,
+    PackagingLibraryBrowserService,
+    ProjectPreviewResolution,
+)
 from .preferences import PreferencesStore, WindowPreferences
 from .project import ProjectManager
 from .recovery import RecoveryManager
@@ -52,6 +57,14 @@ class StudioMainWindow(QMainWindow):
         export_destination_provider: DestinationProvider | None = None,
         packaging_library_service: PackagingLibraryBrowserService | None = None,
         packaging_library_root: str | Path | None = None,
+        packaging_library_preview_resolver: Callable[
+            [LinkedProjectRevision], ProjectPreviewResolution | None
+        ]
+        | None = None,
+        packaging_library_related_records_resolver: Callable[
+            [str], tuple[LibraryRelatedRecord, ...]
+        ]
+        | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName(self.WINDOW_OBJECT_NAME)
@@ -79,6 +92,8 @@ class StudioMainWindow(QMainWindow):
             packaging_library_service = PackagingLibraryBrowserService(
                 self.packaging_library_audit_store,
                 configured_root,
+                preview_resolver=packaging_library_preview_resolver,
+                related_records_resolver=packaging_library_related_records_resolver,
             )
         else:
             self.packaging_library_audit_store = getattr(

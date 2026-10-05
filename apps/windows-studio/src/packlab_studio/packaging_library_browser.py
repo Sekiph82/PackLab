@@ -8,6 +8,7 @@ import math
 import os
 import re
 import stat
+import tempfile
 import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,10 +26,14 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSplitter,
     QStackedWidget,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
+
+from .viewport import QtRasterViewportAdapter, SceneObjectKind, ViewportService
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -36,6 +41,7 @@ _MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024
 _MAX_THUMBNAIL_DIMENSION = 4096
 _MAX_THUMBNAIL_PIXELS = 4_194_304
 _MAX_SEARCH_QUERY_LENGTH = 128
+_MAX_PREVIEW_BYTES = 64 * 1024 * 1024
 
 
 class PackagingLibraryBrowserError(ValueError):
@@ -51,6 +57,13 @@ class BrowserDisplayState(StrEnum):
     LOADING = "LOADING"
     READY = "READY"
     EMPTY = "EMPTY"
+    ERROR = "ERROR"
+
+
+class PreviewState(StrEnum):
+    AVAILABLE = "AVAILABLE"
+    UNAVAILABLE = "UNAVAILABLE"
+    STALE = "STALE"
     ERROR = "ERROR"
 
 
@@ -79,6 +92,62 @@ class PackagingLibraryFilters:
             raise PackagingLibraryBrowserError(
                 "library_filter_volume_requires_explicit_value_and_unit"
             )
+
+
+@dataclass(frozen=True, slots=True)
+class LinkedProjectRevision:
+    role: str
+    project_id: str
+    revision_id: str
+    sha256: str
+    authority_class: str
+
+
+@dataclass(frozen=True, slots=True)
+class LibraryRelatedRecord:
+    record_type: str
+    record_id: str
+    display_name: str
+    revision_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.record_type not in {"COMPONENT", "ARTWORK", "SKU"}:
+            raise PackagingLibraryBrowserError("library_related_record_type_invalid")
+        if not _ID.fullmatch(self.record_id) or (
+            self.revision_id is not None and not _ID.fullmatch(self.revision_id)
+        ):
+            raise PackagingLibraryBrowserError("library_related_record_id_invalid")
+        if not isinstance(self.display_name, str) or not self.display_name.strip():
+            raise PackagingLibraryBrowserError("library_related_record_name_invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class PackagingLibraryAssetDetail:
+    summary: PackagingLibraryAssetSummary
+    dimensions: tuple[tuple[str, str], ...]
+    raw_scans: tuple[LinkedProjectRevision, ...]
+    scan_master: LinkedProjectRevision | None
+    design_models: tuple[LinkedProjectRevision, ...]
+    preview_candidates: tuple[LinkedProjectRevision, ...]
+    preferred_design_model_revision_id: str | None
+    related_records: tuple[LibraryRelatedRecord, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PreviewResult:
+    state: PreviewState
+    image: Any | None = None
+    revision_label: str = ""
+    message: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectPreviewResolution:
+    """Transient local root/path result from an injected project authority resolver."""
+
+    project_root: Path
+    relative_path: str
+    sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +217,10 @@ class PackagingLibraryBrowserService:
         thumbnail_reference_provider: Callable[[str], LibraryThumbnailReference | None]
         | None = None,
         project_root_resolver: Callable[[str], Path | None] | None = None,
+        preview_resolver: Callable[[LinkedProjectRevision], ProjectPreviewResolution | None]
+        | None = None,
+        related_records_resolver: Callable[[str], tuple[LibraryRelatedRecord, ...]] | None = None,
+        preview_adapter: QtRasterViewportAdapter | None = None,
     ) -> None:
         if audit_store is None or not callable(getattr(audit_store, "snapshot", None)):
             raise PackagingLibraryBrowserError("library_browser_audit_store_required")
@@ -161,6 +234,9 @@ class PackagingLibraryBrowserService:
         self.library_root = root
         self.thumbnail_reference_provider = thumbnail_reference_provider
         self.project_root_resolver = project_root_resolver
+        self.preview_resolver = preview_resolver
+        self.related_records_resolver = related_records_resolver
+        self.preview_adapter = preview_adapter or QtRasterViewportAdapter()
 
     def list_assets(self) -> tuple[PackagingLibraryAssetSummary, ...]:
         snapshot = self.audit_store.snapshot()
@@ -286,6 +362,154 @@ class PackagingLibraryBrowserService:
                 key=lambda item: (item.display_name.casefold(), item.asset_id),
             )
         )
+
+    def asset_detail(self, summary: PackagingLibraryAssetSummary) -> PackagingLibraryAssetDetail:
+        """Resolve one unchanged canonical metadata revision and its path-free relationships."""
+        if not isinstance(summary, PackagingLibraryAssetSummary):
+            raise PackagingLibraryBrowserError("library_asset_summary_required")
+        snapshot = self.audit_store.snapshot()
+        entry = next((item for item in snapshot.assets if item.asset_id == summary.asset_id), None)
+        if entry is None or entry.revision_id != summary.revision_id:
+            raise PackagingLibraryBrowserError("library_asset_detail_revision_stale")
+        try:
+            document = json.loads(entry.canonical_json)
+            dimensions_doc = document.get("dimensions", {})
+            closure_doc = document.get("neck_closure", {})
+            source_links = document.get("source_links", {})
+            dimensions = (
+                ("Overall height", _measurement_label(dimensions_doc.get("overall_height"))),
+                ("Body diameter", _measurement_label(dimensions_doc.get("body_diameter"))),
+                (
+                    "Neck finish diameter",
+                    _measurement_label(closure_doc.get("neck_finish_diameter")),
+                ),
+                ("Neck finish", _display_value(closure_doc.get("neck_finish"))),
+                ("Closure description", _display_value(closure_doc.get("closure_description"))),
+                (
+                    "Empty package weight",
+                    _measurement_label(document.get("empty_package_weight")),
+                ),
+            )
+            raw_scans = _linked_revision_list(source_links.get("raw_scans"), "RAW_SCAN")
+            scan_master_value = source_links.get("scan_master")
+            scan_master = (
+                _linked_revision(scan_master_value, "SCAN_MASTER", "geometry_sha256")
+                if isinstance(scan_master_value, dict)
+                else None
+            )
+            design_models = _linked_revision_list(
+                source_links.get("design_models"), "DESIGN_MODEL", digest_key="content_sha256"
+            )
+            preferred = source_links.get("preferred_design_model_revision_id")
+            if not isinstance(preferred, str):
+                preferred = None
+            ordered_models = sorted(
+                design_models,
+                key=lambda item: (item.revision_id != preferred, item.revision_id),
+            )
+            preview_candidates = tuple(
+                [*ordered_models, *([scan_master] if scan_master is not None else []), *raw_scans]
+            )
+            related = (
+                self.related_records_resolver(summary.asset_id)
+                if self.related_records_resolver is not None
+                else ()
+            )
+            if not isinstance(related, tuple) or any(
+                not isinstance(item, LibraryRelatedRecord) for item in related
+            ):
+                raise PackagingLibraryBrowserError("library_related_records_invalid")
+            return PackagingLibraryAssetDetail(
+                summary=summary,
+                dimensions=dimensions,
+                raw_scans=raw_scans,
+                scan_master=scan_master,
+                design_models=design_models,
+                preview_candidates=preview_candidates,
+                preferred_design_model_revision_id=preferred,
+                related_records=tuple(
+                    sorted(
+                        related,
+                        key=lambda item: (item.record_type, item.display_name, item.record_id),
+                    )
+                ),
+            )
+        except (ValueError, KeyError, TypeError) as error:
+            if isinstance(error, PackagingLibraryBrowserError):
+                raise
+            raise PackagingLibraryBrowserError("library_asset_detail_document_invalid") from error
+
+    def render_preview(self, detail: PackagingLibraryAssetDetail) -> PreviewResult:
+        """Load one exact linked project revision through the existing raster viewport path."""
+        if not isinstance(detail, PackagingLibraryAssetDetail):
+            raise PackagingLibraryBrowserError("library_asset_detail_required")
+        if not detail.preview_candidates or self.preview_resolver is None:
+            return PreviewResult(
+                PreviewState.UNAVAILABLE,
+                message="No locally resolved linked project geometry is available.",
+            )
+        reference = detail.preview_candidates[0]
+        label = f"{reference.project_id} · {reference.revision_id}"
+        try:
+            resolution = self.preview_resolver(reference)
+        except Exception as error:
+            return PreviewResult(
+                PreviewState.ERROR,
+                revision_label=label,
+                message=f"The linked project resolver failed: {error}",
+            )
+        if resolution is None:
+            return PreviewResult(
+                PreviewState.UNAVAILABLE,
+                revision_label=label,
+                message="The linked project revision is unavailable locally.",
+            )
+        if not isinstance(resolution, ProjectPreviewResolution):
+            return PreviewResult(
+                PreviewState.ERROR,
+                revision_label=label,
+                message="The project preview resolver returned an invalid result.",
+            )
+        try:
+            if resolution.sha256 != reference.sha256 or not _SHA256.fullmatch(resolution.sha256):
+                return PreviewResult(
+                    PreviewState.STALE,
+                    revision_label=label,
+                    message="Resolved geometry digest does not match the linked revision.",
+                )
+            suffix = PurePosixPath(resolution.relative_path).suffix.lower()
+            if suffix not in {".obj", ".ply", ".xyz", ".pts", ".pcd"}:
+                return PreviewResult(
+                    PreviewState.ERROR,
+                    revision_label=label,
+                    message="The linked geometry format cannot be previewed.",
+                )
+            payload = _read_verified_project_artifact(resolution)
+            if payload is None:
+                return PreviewResult(
+                    PreviewState.STALE,
+                    revision_label=label,
+                    message="The linked project artifact is missing, unsafe, oversized, or stale.",
+                )
+            with tempfile.TemporaryDirectory(prefix="packlab-library-preview-") as directory:
+                preview_path = Path(directory) / ("verified-preview" + suffix)
+                preview_path.write_bytes(payload)
+                viewport = ViewportService(self.preview_adapter)
+                geometry = self.preview_adapter.load(preview_path)
+                viewport.add_geometry(
+                    "packaging-library-preview", SceneObjectKind.REFERENCE_GEOMETRY, geometry
+                )
+                viewport.fit_to_view()
+                image = viewport.render(QSize(480, 320))
+            if image.isNull():
+                raise PackagingLibraryBrowserError("library_preview_render_empty")
+            return PreviewResult(PreviewState.AVAILABLE, image, label, "Verified linked revision.")
+        except Exception as error:
+            return PreviewResult(
+                PreviewState.ERROR,
+                revision_label=label,
+                message=f"Linked geometry could not be previewed: {error}",
+            )
 
     def resolve_thumbnail(self, asset: PackagingLibraryAssetSummary) -> Path | None:
         resolved = self._thumbnail_location(asset)
@@ -414,8 +638,26 @@ class PackagingLibraryBrowserView(QWidget):
         self.state_message = QLabel("Loading Packaging Library…", self)
         self.state_message.setObjectName("packlab.library.state-message")
         self.state_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.state_view.addWidget(self.item_view)
         self.state_view.addWidget(self.state_message)
+
+        self.preview_label = QLabel("No 3D preview selected.", self)
+        self.preview_label.setObjectName("packlab.library.detail.preview")
+        self.preview_label.setMinimumSize(QSize(320, 220))
+        self.preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.detail_text = QTextBrowser(self)
+        self.detail_text.setObjectName("packlab.library.detail.metadata")
+        self.detail_text.setOpenExternalLinks(False)
+        self.detail_text.setReadOnly(True)
+        detail_panel = QWidget(self)
+        detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.addWidget(self.preview_label)
+        detail_layout.addWidget(self.detail_text, 1)
+        self.results_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.results_splitter.addWidget(self.item_view)
+        self.results_splitter.addWidget(detail_panel)
+        self.results_splitter.setStretchFactor(0, 2)
+        self.results_splitter.setStretchFactor(1, 1)
+        self.state_view.insertWidget(0, self.results_splitter)
 
         toolbar = QHBoxLayout()
         toolbar.addWidget(self.mode_selector)
@@ -571,7 +813,7 @@ class PackagingLibraryBrowserView(QWidget):
             preserved_selection = None
         self._populate(summaries, preserved_selection)
         self.display_state = BrowserDisplayState.READY
-        self.state_view.setCurrentWidget(self.item_view)
+        self.state_view.setCurrentWidget(self.results_splitter)
 
     def _populate(
         self,
@@ -605,6 +847,81 @@ class PackagingLibraryBrowserView(QWidget):
             self.item_view.setCurrentRow(-1)
             self.selection_summary.setText("No asset selected.")
         self.item_view.blockSignals(False)
+        self._show_details(self.selected_asset_id)
+
+    def _show_details(self, asset_id: str | None) -> None:
+        if asset_id is None:
+            self.preview_label.setPixmap(QPixmap())
+            self.preview_label.setText("No 3D preview selected.")
+            self.detail_text.setPlainText(
+                "Select a packaging asset to inspect its metadata and links."
+            )
+            return
+        summary = next((item for item in self._summaries if item.asset_id == asset_id), None)
+        if summary is None or self.service is None:
+            self.preview_label.setPixmap(QPixmap())
+            self.preview_label.setText("Preview unavailable.")
+            self.detail_text.setPlainText("The selected asset is no longer available.")
+            return
+        try:
+            detail = self.service.asset_detail(summary)
+            preview = self.service.render_preview(detail)
+        except Exception as error:
+            self.preview_label.setPixmap(QPixmap())
+            self.preview_label.setText("Preview unavailable.")
+            self.detail_text.setPlainText(f"Asset details are unavailable: {error}")
+            return
+        if preview.state is PreviewState.AVAILABLE and preview.image is not None:
+            self.preview_label.setPixmap(
+                QPixmap.fromImage(preview.image).scaled(
+                    QSize(480, 320),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            self.preview_label.setText("")
+        else:
+            self.preview_label.setPixmap(QPixmap())
+            self.preview_label.setText(
+                f"3D preview {preview.state.value.lower()}: {preview.message}"
+            )
+        lines = [
+            f"Asset ID: {summary.asset_id}",
+            f"Asset revision: {summary.revision_id}",
+            f"Name: {summary.display_name}",
+            f"Family: {summary.family}",
+            f"Material: {summary.base_material}",
+            f"Other material label: {summary.material_other_label}",
+            f"Closure type: {summary.closure}",
+            f"Nominal volume: {summary.nominal_volume}",
+            f"Status: {summary.status}",
+            f"Supplier: {summary.supplier_name or 'Unknown'} ({summary.supplier_id or 'Unknown'})",
+            "",
+            "Dimensions and finish:",
+            *(f"  {label}: {value}" for label, value in detail.dimensions),
+            "",
+            "Field provenance:",
+            *(f"  {field}: {classification}" for field, classification in summary.field_provenance),
+            "",
+            "Raw scan revisions:",
+            *(_linked_revision_label(item) for item in detail.raw_scans),
+            "Scan Master revision:",
+            *([_linked_revision_label(detail.scan_master)] if detail.scan_master else ["  None"]),
+            "Design Model revisions:",
+            *(_linked_revision_label(item) for item in detail.design_models),
+            f"Preferred Design Model revision: {detail.preferred_design_model_revision_id or 'None'}",
+            "",
+            "Reusable components:",
+            *_related_record_labels(detail.related_records, "COMPONENT"),
+            "Linked artworks:",
+            *_related_record_labels(detail.related_records, "ARTWORK"),
+            "Linked SKUs:",
+            *_related_record_labels(detail.related_records, "SKU"),
+            "",
+            f"Preview source: {preview.revision_label or 'No linked revision'}",
+            f"Preview state: {preview.state.value}",
+        ]
+        self.detail_text.setPlainText("\n".join(lines))
 
     def _thumbnail(self, summary: PackagingLibraryAssetSummary):
         if self.service is not None:
@@ -665,6 +982,7 @@ class PackagingLibraryBrowserView(QWidget):
         self._selected_asset_id = asset_id
         self.selection_summary.setText(f"Selected {current.text().splitlines()[0]} · {asset_id}")
         self.selection_changed.emit(asset_id)
+        self._show_details(asset_id)
 
 
 def _safe_relative_path(value: object) -> PurePosixPath:
@@ -750,6 +1068,103 @@ def _field_provenance(value: object) -> tuple[tuple[str, str], ...]:
     return tuple(sorted(pairs))
 
 
+def _linked_revision_list(
+    value: object,
+    role: str,
+    *,
+    digest_key: str = "artifact_sha256",
+) -> tuple[LinkedProjectRevision, ...]:
+    if not isinstance(value, list):
+        return ()
+    references = tuple(
+        _linked_revision(item, role, digest_key) for item in value if isinstance(item, dict)
+    )
+    return tuple(sorted(references, key=lambda item: (item.project_id, item.revision_id)))
+
+
+def _linked_revision(value: dict[str, Any], role: str, digest_key: str) -> LinkedProjectRevision:
+    project_id = value.get("project_id")
+    revision_id = value.get("revision_id")
+    digest = value.get(digest_key)
+    authority = value.get("authority_class", role)
+    if (
+        not isinstance(project_id, str)
+        or not isinstance(revision_id, str)
+        or not isinstance(digest, str)
+        or not _SHA256.fullmatch(digest)
+        or not isinstance(authority, str)
+    ):
+        raise PackagingLibraryBrowserError("library_project_revision_link_invalid")
+    return LinkedProjectRevision(role, project_id, revision_id, digest, authority)
+
+
+def _measurement_label(value: object) -> str:
+    if (
+        isinstance(value, dict)
+        and isinstance(value.get("value"), (int, float))
+        and not isinstance(value.get("value"), bool)
+        and isinstance(value.get("unit"), str)
+    ):
+        return f"{value['value']:g} {value['unit']}"
+    return "Unknown"
+
+
+def _linked_revision_label(reference: LinkedProjectRevision) -> str:
+    return (
+        f"  {reference.project_id} / {reference.revision_id} · "
+        f"{reference.authority_class} · SHA-256 {reference.sha256}"
+    )
+
+
+def _related_record_labels(
+    records: tuple[LibraryRelatedRecord, ...], record_type: str
+) -> list[str]:
+    matches = [
+        f"  {item.display_name} · {item.record_id}"
+        + (f" · {item.revision_id}" if item.revision_id else "")
+        for item in records
+        if item.record_type == record_type
+    ]
+    return matches or ["  No linked records"]
+
+
+def _read_verified_project_artifact(resolution: ProjectPreviewResolution) -> bytes | None:
+    try:
+        root = Path(resolution.project_root).expanduser().absolute()
+        if root.is_symlink() or not root.is_dir():
+            return None
+        relative = _safe_relative_path(resolution.relative_path)
+        candidate = root.joinpath(*relative.parts)
+        metadata = _ensure_safe_local_file(root, candidate)
+        if metadata.st_size < 1 or metadata.st_size > _MAX_PREVIEW_BYTES:
+            return None
+        no_follow = getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(candidate, os.O_RDONLY | no_follow)
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or (opened.st_dev, opened.st_ino) != (
+                metadata.st_dev,
+                metadata.st_ino,
+            ):
+                return None
+            chunks: list[bytes] = []
+            size = 0
+            digest = hashlib.sha256()
+            while chunk := os.read(descriptor, min(1024 * 1024, _MAX_PREVIEW_BYTES + 1 - size)):
+                size += len(chunk)
+                if size > _MAX_PREVIEW_BYTES:
+                    return None
+                digest.update(chunk)
+                chunks.append(chunk)
+            if size != metadata.st_size or digest.hexdigest() != resolution.sha256:
+                return None
+            return b"".join(chunks)
+        finally:
+            os.close(descriptor)
+    except (OSError, ValueError, PackagingLibraryBrowserError):
+        return None
+
+
 def _matches_library_filters(
     asset: PackagingLibraryAssetSummary, filters: PackagingLibraryFilters
 ) -> bool:
@@ -797,10 +1212,16 @@ def _identifier(value: object, kind: str) -> None:
 __all__ = [
     "BrowserDisplayState",
     "LibraryThumbnailReference",
+    "LibraryRelatedRecord",
+    "LinkedProjectRevision",
     "PackagingLibraryAssetSummary",
+    "PackagingLibraryAssetDetail",
     "PackagingLibraryFilters",
     "PackagingLibraryBrowserError",
     "PackagingLibraryBrowserService",
     "PackagingLibraryBrowserView",
+    "PreviewResult",
+    "PreviewState",
+    "ProjectPreviewResolution",
     "ThumbnailSource",
 ]
