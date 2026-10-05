@@ -1,7 +1,7 @@
 # PL-0346 - Codex Log V01
 
-Task: **Thumbnail and supplier contact-sheet export**  
-Milestone: **M15 - Kenya Packaging Library**  
+Task: **Thumbnail and supplier contact-sheet export**
+Milestone: **M15 - Kenya Packaging Library**
 Cycle: **M15-C001**
 
 ## Starting state and authorization
