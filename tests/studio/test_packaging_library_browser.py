@@ -9,7 +9,15 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage
 from tests.core.test_packaging_asset import _asset
 
-from packlab_core.packaging_asset import PackagingFamily, RawScanLink
+from packlab_core.packaging_asset import (
+    AssetStatus,
+    BaseMaterial,
+    ClosureType,
+    MeasurementUnit,
+    PackagingFamily,
+    PackagingMeasurement,
+    RawScanLink,
+)
 from packlab_studio.app import create_application
 from packlab_studio.navigation import Route
 from packlab_studio.packaging_library_audit import PackagingLibraryAuditStore
@@ -19,6 +27,7 @@ from packlab_studio.packaging_library_browser import (
     PackagingLibraryBrowserError,
     PackagingLibraryBrowserService,
     PackagingLibraryBrowserView,
+    PackagingLibraryFilters,
     ThumbnailSource,
 )
 from packlab_studio.shell import StudioMainWindow
@@ -286,5 +295,134 @@ def test_search_field_updates_visible_results_and_clearing_restores_library(
     view.search_field.clear()
     assert view.item_view.count() == 2
     assert tuple((item.asset_id, item.revision_id) for item in store.snapshot().assets) == before
+    view.close()
+    app.processEvents()
+
+
+def test_composable_filters_keep_explicit_units_unknowns_and_provenance(
+    tmp_path: Path,
+) -> None:
+    library_root = tmp_path / "library"
+    assets = (
+        _asset(
+            asset_id="water-500ml",
+            display_name="Water bottle",
+            nominal_volume=PackagingMeasurement(500, MeasurementUnit.MILLILITER),
+            base_material=BaseMaterial.PET,
+            closure_type=ClosureType.SCREW_CAP,
+            status=AssetStatus.ACTIVE,
+        ),
+        _asset(
+            asset_id="water-half-liter",
+            display_name="Water bottle liter",
+            nominal_volume=PackagingMeasurement(0.5, MeasurementUnit.LITER),
+            base_material=BaseMaterial.PET,
+            closure_type=ClosureType.FLIP_TOP,
+            status=AssetStatus.ACTIVE,
+        ),
+        _asset(
+            asset_id="mystery-pack",
+            display_name="Mystery package",
+            nominal_volume=None,
+            base_material=BaseMaterial.UNKNOWN,
+            closure_type=ClosureType.UNKNOWN,
+            status=AssetStatus.UNKNOWN,
+        ),
+    )
+    store = _library(library_root, assets=assets)
+    service = PackagingLibraryBrowserService(store, library_root)
+    all_assets = service.list_assets()
+    original_revisions = tuple(item.revision_id for item in store.snapshot().assets)
+    assert [item.asset_id for item in service.filter_assets(tuple(reversed(all_assets)))] == [
+        "mystery-pack",
+        "water-500ml",
+        "water-half-liter",
+    ]
+
+    combined = service.filter_assets(
+        all_assets,
+        query="water",
+        filters=PackagingLibraryFilters(
+            nominal_volume=(500, "mL"),
+            material="PET",
+            closure="SCREW_CAP",
+            status="ACTIVE",
+        ),
+    )
+    assert [item.asset_id for item in combined] == ["water-500ml"]
+    assert dict(combined[0].field_provenance)["nominal_volume"] == "USER_DECLARED"
+    assert [
+        item.asset_id
+        for item in service.filter_assets(
+            all_assets,
+            filters=PackagingLibraryFilters(nominal_volume=(0.5, "L")),
+        )
+    ] == ["water-half-liter"]
+    assert [
+        item.asset_id
+        for item in service.filter_assets(
+            all_assets,
+            filters=PackagingLibraryFilters(nominal_volume="UNKNOWN"),
+        )
+    ] == ["mystery-pack"]
+    unknown = service.filter_assets(
+        all_assets,
+        filters=PackagingLibraryFilters(
+            nominal_volume="UNKNOWN",
+            material="UNKNOWN",
+            closure="UNKNOWN",
+            status="UNKNOWN",
+        ),
+    )
+    assert [item.asset_id for item in unknown] == ["mystery-pack"]
+    assert "nominal_volume" not in dict(unknown[0].field_provenance)
+    assert [
+        item.asset_id
+        for item in service.filter_assets(
+            all_assets,
+            filters=PackagingLibraryFilters(material="PET", status="UNKNOWN"),
+        )
+    ] == []
+    with pytest.raises(PackagingLibraryBrowserError, match="explicit_value_and_unit"):
+        PackagingLibraryFilters(nominal_volume=(500, ""))
+    assert tuple(item.revision_id for item in store.snapshot().assets) == original_revisions
+
+
+def test_filter_controls_compose_with_search_and_clear_to_search_only(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = create_application(["packlab-library-browser-filter-test"])
+    library_root = tmp_path / "library"
+    store = _library(
+        library_root,
+        assets=(
+            _asset(
+                asset_id="water-pet", display_name="Water bottle", base_material=BaseMaterial.PET
+            ),
+            _asset(
+                asset_id="water-glass", display_name="Water jar", base_material=BaseMaterial.GLASS
+            ),
+            _asset(
+                asset_id="juice-pet", display_name="Juice bottle", base_material=BaseMaterial.PET
+            ),
+        ),
+    )
+    service = PackagingLibraryBrowserService(store, library_root)
+    view = PackagingLibraryBrowserView(service)
+    view.search_field.setText("water")
+    pet_index = view.material_filter.findData("PET")
+    assert pet_index >= 0
+    view.material_filter.setCurrentIndex(pet_index)
+    assert view.item_view.count() == 1
+    assert view.item_view.item(0).data(Qt.ItemDataRole.UserRole) == "water-pet"
+
+    view.clear_filters_button.click()
+    assert view.search_field.text() == "water"
+    assert view.item_view.count() == 2
+    assert [
+        view.item_view.item(index).data(Qt.ItemDataRole.UserRole)
+        for index in range(view.item_view.count())
+    ] == ["water-pet", "water-glass"]
     view.close()
     app.processEvents()

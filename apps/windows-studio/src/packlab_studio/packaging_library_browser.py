@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -54,6 +55,33 @@ class BrowserDisplayState(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class PackagingLibraryFilters:
+    """Single-select filter values; UNKNOWN is distinct from an inactive filter."""
+
+    nominal_volume: tuple[float, str] | str | None = None
+    material: str | None = None
+    closure: str | None = None
+    status: str | None = None
+
+    def __post_init__(self) -> None:
+        volume = self.nominal_volume
+        if volume is None or volume == "UNKNOWN":
+            return
+        if (
+            not isinstance(volume, tuple)
+            or len(volume) != 2
+            or isinstance(volume[0], bool)
+            or not isinstance(volume[0], (int, float))
+            or not math.isfinite(float(volume[0]))
+            or float(volume[0]) <= 0
+            or volume[1] not in {"mL", "L"}
+        ):
+            raise PackagingLibraryBrowserError(
+                "library_filter_volume_requires_explicit_value_and_unit"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class LibraryThumbnailReference:
     """Digest-bound local image reference; never a URL or absolute path."""
 
@@ -93,9 +121,14 @@ class PackagingLibraryAssetSummary:
     family: str
     base_material: str
     nominal_volume: str
+    nominal_volume_value: float | None
+    nominal_volume_unit: str | None
     status: str
     supplier_id: str = ""
     supplier_name: str = ""
+    material_other_label: str = ""
+    closure: str = "UNKNOWN"
+    field_provenance: tuple[tuple[str, str], ...] = ()
     thumbnail_reference: LibraryThumbnailReference | None = None
     source_project_revisions: tuple[tuple[str, str], ...] = ()
 
@@ -142,6 +175,18 @@ class PackagingLibraryBrowserService:
                 ):
                     raise PackagingLibraryBrowserError("library_browser_asset_document_invalid")
                 nominal = document.get("nominal_volume")
+                volume_value = (
+                    float(nominal["value"])
+                    if isinstance(nominal, dict)
+                    and isinstance(nominal.get("value"), (int, float))
+                    and not isinstance(nominal.get("value"), bool)
+                    else None
+                )
+                volume_unit = (
+                    nominal.get("unit")
+                    if isinstance(nominal, dict) and isinstance(nominal.get("unit"), str)
+                    else None
+                )
                 nominal_volume = (
                     f"{nominal['value']:g} {nominal['unit']}"
                     if isinstance(nominal, dict)
@@ -150,6 +195,8 @@ class PackagingLibraryBrowserService:
                     else "Unknown volume"
                 )
                 source_projects = _source_project_revisions(document.get("source_links"))
+                neck_closure = document.get("neck_closure")
+                field_provenance = _field_provenance(document.get("field_provenance"))
                 thumbnail: LibraryThumbnailReference | None = None
                 if self.thumbnail_reference_provider is not None:
                     try:
@@ -169,9 +216,18 @@ class PackagingLibraryBrowserService:
                         family=_display_value(document.get("family")),
                         base_material=_display_value(document.get("base_material")),
                         nominal_volume=nominal_volume,
+                        nominal_volume_value=volume_value,
+                        nominal_volume_unit=volume_unit,
                         status=_display_value(document.get("status")),
                         supplier_id=_supplier_value(document.get("supplier"), "supplier_id"),
                         supplier_name=_supplier_value(document.get("supplier"), "name"),
+                        material_other_label=_display_value(document.get("other_material_label")),
+                        closure=(
+                            _display_value(neck_closure.get("closure_type"))
+                            if isinstance(neck_closure, dict)
+                            else "UNKNOWN"
+                        ),
+                        field_provenance=field_provenance,
                         thumbnail_reference=thumbnail,
                         source_project_revisions=source_projects,
                     )
@@ -184,25 +240,50 @@ class PackagingLibraryBrowserService:
 
     def search_assets(self, query: str) -> tuple[PackagingLibraryAssetSummary, ...]:
         """Search locally loaded metadata without reading attachments or changing state."""
+        return self.filter_assets(self.list_assets(), query=query)
+
+    def filter_assets(
+        self,
+        assets: tuple[PackagingLibraryAssetSummary, ...],
+        *,
+        query: str = "",
+        filters: PackagingLibraryFilters | None = None,
+    ) -> tuple[PackagingLibraryAssetSummary, ...]:
+        """Apply normalized search and composable, exact metadata filters."""
         if not isinstance(query, str) or len(query) > _MAX_SEARCH_QUERY_LENGTH:
             raise PackagingLibraryBrowserError("library_search_query_invalid_or_too_long")
+        if not isinstance(assets, tuple) or any(
+            not isinstance(asset, PackagingLibraryAssetSummary) for asset in assets
+        ):
+            raise PackagingLibraryBrowserError("library_filter_asset_records_invalid")
+        active_filters = filters or PackagingLibraryFilters()
+        if not isinstance(active_filters, PackagingLibraryFilters):
+            raise PackagingLibraryBrowserError("library_filter_selection_invalid")
         normalized_query = _normalize_search_text(query)
-        assets = self.list_assets()
-        if not normalized_query:
-            return assets
         return tuple(
-            asset
-            for asset in assets
-            if any(
-                normalized_query in _normalize_search_text(value)
-                for value in (
-                    asset.asset_id,
-                    asset.display_name,
-                    asset.supplier_id,
-                    asset.supplier_name,
-                    asset.family,
-                )
-                if value
+            sorted(
+                (
+                    asset
+                    for asset in assets
+                    if (
+                        (
+                            not normalized_query
+                            or any(
+                                normalized_query in _normalize_search_text(value)
+                                for value in (
+                                    asset.asset_id,
+                                    asset.display_name,
+                                    asset.supplier_id,
+                                    asset.supplier_name,
+                                    asset.family,
+                                )
+                                if value
+                            )
+                        )
+                        and _matches_library_filters(asset, active_filters)
+                    )
+                ),
+                key=lambda item: (item.display_name.casefold(), item.asset_id),
             )
         )
 
@@ -309,6 +390,12 @@ class PackagingLibraryBrowserView(QWidget):
         self.search_field.setObjectName("packlab.library.search")
         self.search_field.setPlaceholderText("Search ID, name, supplier, or family")
         self.search_field.setMaxLength(_MAX_SEARCH_QUERY_LENGTH)
+        self.volume_filter = _filter_combo(self, "volume", "Any volume")
+        self.material_filter = _filter_combo(self, "material", "Any material")
+        self.closure_filter = _filter_combo(self, "closure", "Any closure")
+        self.status_filter = _filter_combo(self, "status", "Any status")
+        self.clear_filters_button = QPushButton("Clear filters", self)
+        self.clear_filters_button.setObjectName("packlab.library.clear-filters")
         self.refresh_button = QPushButton("Refresh", self)
         self.refresh_button.setObjectName("packlab.library.refresh")
         self.selection_summary = QLabel("No asset selected.", self)
@@ -335,13 +422,31 @@ class PackagingLibraryBrowserView(QWidget):
         toolbar.addWidget(self.search_field, 1)
         toolbar.addWidget(self.refresh_button)
         toolbar.addStretch(1)
+        filter_toolbar = QHBoxLayout()
+        for combo in (
+            self.volume_filter,
+            self.material_filter,
+            self.closure_filter,
+            self.status_filter,
+        ):
+            filter_toolbar.addWidget(combo)
+        filter_toolbar.addWidget(self.clear_filters_button)
         layout = QVBoxLayout(self)
         layout.addLayout(toolbar)
+        layout.addLayout(filter_toolbar)
         layout.addWidget(self.state_view, 1)
         layout.addWidget(self.selection_summary)
 
         self.mode_selector.currentIndexChanged.connect(self._set_mode)
         self.search_field.textChanged.connect(self.refresh)
+        for combo in (
+            self.volume_filter,
+            self.material_filter,
+            self.closure_filter,
+            self.status_filter,
+        ):
+            combo.currentIndexChanged.connect(self.refresh)
+        self.clear_filters_button.clicked.connect(self._clear_filters)
         self.refresh_button.clicked.connect(self.refresh)
         self.item_view.currentItemChanged.connect(self._selection_changed)
         self.refresh()
@@ -351,6 +456,76 @@ class PackagingLibraryBrowserView(QWidget):
         item = self.item_view.currentItem()
         return str(item.data(Qt.ItemDataRole.UserRole)) if item is not None else None
 
+    def _replace_filter_options(
+        self,
+        combo: QComboBox,
+        any_label: str,
+        values: tuple[object, ...],
+        label_for: Callable[[object], str],
+    ) -> None:
+        selected = combo.currentData()
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(any_label, None)
+        for value in values:
+            combo.addItem(label_for(value), value)
+        for index in range(combo.count()):
+            if combo.itemData(index) == selected:
+                combo.setCurrentIndex(index)
+                break
+        combo.blockSignals(False)
+
+    def _sync_filter_options(self, assets: tuple[PackagingLibraryAssetSummary, ...]) -> None:
+        volumes = sorted(
+            {
+                (asset.nominal_volume_value, asset.nominal_volume_unit)
+                for asset in assets
+                if asset.nominal_volume_value is not None and asset.nominal_volume_unit is not None
+            },
+            key=lambda item: (item[1], item[0]),
+        )
+        volume_options: tuple[object, ...] = ("UNKNOWN", *volumes)
+        self._replace_filter_options(
+            self.volume_filter,
+            "Any volume",
+            volume_options,
+            _volume_filter_label,
+        )
+        for combo, label, field in (
+            (self.material_filter, "Any material", "base_material"),
+            (self.closure_filter, "Any closure", "closure"),
+            (self.status_filter, "Any status", "status"),
+        ):
+            options = {getattr(asset, field) for asset in assets}
+            options.add("UNKNOWN")
+            values = tuple(sorted(options))
+            self._replace_filter_options(
+                combo,
+                label,
+                values,
+                lambda value: "Unknown" if value == "UNKNOWN" else str(value),
+            )
+
+    def _selected_filters(self) -> PackagingLibraryFilters:
+        return PackagingLibraryFilters(
+            nominal_volume=self.volume_filter.currentData(),
+            material=self.material_filter.currentData(),
+            closure=self.closure_filter.currentData(),
+            status=self.status_filter.currentData(),
+        )
+
+    def _clear_filters(self) -> None:
+        for combo in (
+            self.volume_filter,
+            self.material_filter,
+            self.closure_filter,
+            self.status_filter,
+        ):
+            combo.blockSignals(True)
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+        self.refresh()
+
     def refresh(self, *_args: object) -> None:
         preserved_selection = self.selected_asset_id or self._selected_asset_id
         self.display_state = BrowserDisplayState.LOADING
@@ -359,11 +534,20 @@ class PackagingLibraryBrowserView(QWidget):
         try:
             if self.service is None:
                 raise PackagingLibraryBrowserError("Packaging Library service is not configured.")
+            all_summaries = self.service.list_assets()
+            self._sync_filter_options(all_summaries)
+            filters = self._selected_filters()
             query = self.search_field.text()
-            if query and callable(getattr(self.service, "search_assets", None)):
-                summaries = self.service.search_assets(query)
+            if query or filters != PackagingLibraryFilters():
+                filter_assets = getattr(self.service, "filter_assets", None)
+                if callable(filter_assets):
+                    summaries = filter_assets(all_summaries, query=query, filters=filters)
+                elif query and callable(getattr(self.service, "search_assets", None)):
+                    summaries = self.service.search_assets(query)
+                else:
+                    summaries = all_summaries
             else:
-                summaries = self.service.list_assets()
+                summaries = all_summaries
         except Exception as error:
             self._summaries = ()
             self._populate((), None)
@@ -553,6 +737,58 @@ def _normalize_search_text(value: str) -> str:
     return unicodedata.normalize("NFKC", value).casefold().strip()
 
 
+def _field_provenance(value: object) -> tuple[tuple[str, str], ...]:
+    if not isinstance(value, list):
+        return ()
+    pairs = {
+        (item["field_name"], item["classification"])
+        for item in value
+        if isinstance(item, dict)
+        and isinstance(item.get("field_name"), str)
+        and isinstance(item.get("classification"), str)
+    }
+    return tuple(sorted(pairs))
+
+
+def _matches_library_filters(
+    asset: PackagingLibraryAssetSummary, filters: PackagingLibraryFilters
+) -> bool:
+    volume_filter = filters.nominal_volume
+    if volume_filter == "UNKNOWN":
+        if asset.nominal_volume_value is not None or asset.nominal_volume_unit is not None:
+            return False
+    elif isinstance(volume_filter, tuple) and (
+        asset.nominal_volume_value != float(volume_filter[0])
+        or asset.nominal_volume_unit != volume_filter[1]
+    ):
+        return False
+    return (
+        (filters.material is None or asset.base_material == filters.material)
+        and (filters.closure is None or asset.closure == filters.closure)
+        and (filters.status is None or asset.status == filters.status)
+    )
+
+
+def _volume_filter_label(value: object) -> str:
+    if value == "UNKNOWN":
+        return "Unknown volume"
+    if (
+        isinstance(value, tuple)
+        and len(value) == 2
+        and isinstance(value[0], (int, float))
+        and isinstance(value[1], str)
+    ):
+        return f"{value[0]:g} {value[1]}"
+    return "Invalid volume"
+
+
+def _filter_combo(parent: QWidget, name: str, label: str) -> QComboBox:
+    combo = QComboBox(parent)
+    combo.setObjectName(f"packlab.library.filter.{name}")
+    combo.addItem(label, None)
+    return combo
+
+
 def _identifier(value: object, kind: str) -> None:
     if not isinstance(value, str) or not _ID.fullmatch(value):
         raise PackagingLibraryBrowserError(f"library_thumbnail_{kind}_id_invalid")
@@ -562,6 +798,7 @@ __all__ = [
     "BrowserDisplayState",
     "LibraryThumbnailReference",
     "PackagingLibraryAssetSummary",
+    "PackagingLibraryFilters",
     "PackagingLibraryBrowserError",
     "PackagingLibraryBrowserService",
     "PackagingLibraryBrowserView",
