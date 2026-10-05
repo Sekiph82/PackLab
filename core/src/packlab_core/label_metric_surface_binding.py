@@ -6,7 +6,7 @@ import hashlib
 import importlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .cad_adapter import CadAdapterError, cad_shape_geometry_digest, sample_cad_surface_regions
@@ -105,6 +105,11 @@ class LabelDielineRevision:
     height: float
     extents: tuple[float, float, float, float]
     limitations: tuple[str, ...]
+    source_dieline_revision_id: str | None = None
+    safe_margin_mm_unverified: float = 0.0
+    bleed_mm_unverified: float = 0.0
+    safe_boundary_vertices: tuple[tuple[float, float], ...] = ()
+    bleed_boundary_vertices: tuple[tuple[float, float], ...] = ()
 
     def __post_init__(self) -> None:
         if (
@@ -120,9 +125,50 @@ class LabelDielineRevision:
             or self.height <= 0.0
             or self.winding
             != ("COUNTERCLOCKWISE" if _signed_area(self.boundary_vertices) > 0 else "CLOCKWISE")
-            or self.revision_id != "label-dieline:" + _digest(_dieline_identity(self))
+            or not math.isfinite(self.safe_margin_mm_unverified)
+            or not math.isfinite(self.bleed_mm_unverified)
+            or self.safe_margin_mm_unverified < 0.0
+            or self.bleed_mm_unverified < 0.0
         ):
             raise LabelMetricSurfaceBindingError("label_dieline_identity_or_geometry_invalid")
+        if self.source_dieline_revision_id is None:
+            if (
+                self.safe_margin_mm_unverified != 0.0
+                or self.bleed_mm_unverified != 0.0
+                or self.safe_boundary_vertices
+                or self.bleed_boundary_vertices
+                or self.revision_id != "label-dieline:" + _digest(_dieline_identity(self))
+            ):
+                raise LabelMetricSurfaceBindingError("label_dieline_source_identity_invalid")
+        elif (
+            not self.source_dieline_revision_id
+            or len(self.safe_boundary_vertices) != 4
+            or len(self.bleed_boundary_vertices) != 4
+            or not all(
+                math.isfinite(value)
+                for polygon in (self.safe_boundary_vertices, self.bleed_boundary_vertices)
+                for point in polygon
+                for value in point
+            )
+            or self.safe_margin_mm_unverified * 2.0 >= min(self.width, self.height)
+            or self.safe_boundary_vertices
+            != _rectangle_boundary(
+                self.extents[0] + self.safe_margin_mm_unverified,
+                self.extents[1] + self.safe_margin_mm_unverified,
+                self.extents[2] - self.safe_margin_mm_unverified,
+                self.extents[3] - self.safe_margin_mm_unverified,
+            )
+            or self.bleed_boundary_vertices
+            != _rectangle_boundary(
+                self.extents[0] - self.bleed_mm_unverified,
+                self.extents[1] - self.bleed_mm_unverified,
+                self.extents[2] + self.bleed_mm_unverified,
+                self.extents[3] + self.bleed_mm_unverified,
+            )
+            or self.revision_id
+            != "label-dieline-print-intent:" + _digest(_print_intent_identity(self))
+        ):
+            raise LabelMetricSurfaceBindingError("label_dieline_print_intent_identity_invalid")
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -146,6 +192,22 @@ class LabelDielineRevision:
             "scale_state": ScaleState.METRIC_UNVERIFIED.value,
             "coordinate_unit": self.coordinate_unit,
             "boundary_vertices": [list(point) for point in self.boundary_vertices],
+            "source_dieline_revision_id": self.source_dieline_revision_id or self.revision_id,
+            "print_intent": {
+                "safe_margin": {
+                    "value": self.safe_margin_mm_unverified,
+                    "coordinate_unit": "mm_unverified",
+                    "boundary_vertices": [list(point) for point in self.safe_boundary_vertices],
+                },
+                "bleed": {
+                    "value": self.bleed_mm_unverified,
+                    "coordinate_unit": "mm_unverified",
+                    "boundary_vertices": [list(point) for point in self.bleed_boundary_vertices],
+                },
+                "authority": "USER_DESIGN_PRINT_INTENT_ONLY",
+                "printer_certified": False,
+                "print_fit_verified": False,
+            },
             "winding": self.winding,
             "width": self.width,
             "height": self.height,
@@ -344,6 +406,63 @@ def create_label_dieline(
         height,
         extents,
         limitations,
+    )
+
+
+def create_label_dieline_print_intent(
+    dieline: LabelDielineRevision,
+    *,
+    safe_margin_mm_unverified: float,
+    bleed_mm_unverified: float,
+) -> LabelDielineRevision:
+    """Create a non-destructive successor with explicit print-intent boundaries."""
+    if not isinstance(dieline, LabelDielineRevision):
+        raise LabelMetricSurfaceBindingError("label_dieline_source_required")
+    if dieline.source_dieline_revision_id is not None:
+        raise LabelMetricSurfaceBindingError("label_dieline_print_intent_already_attached")
+    safe_margin = _nonnegative_mm(safe_margin_mm_unverified, "safe_margin")
+    bleed = _nonnegative_mm(bleed_mm_unverified, "bleed")
+    if safe_margin * 2.0 >= min(dieline.width, dieline.height):
+        raise LabelMetricSurfaceBindingError("label_dieline_safe_margin_consumes_boundary")
+    x_min, y_min, x_max, y_max = dieline.extents
+    safe = _rectangle_boundary(
+        x_min + safe_margin,
+        y_min + safe_margin,
+        x_max - safe_margin,
+        y_max - safe_margin,
+    )
+    outer = _rectangle_boundary(
+        x_min - bleed,
+        y_min - bleed,
+        x_max + bleed,
+        y_max + bleed,
+    )
+    limitations = tuple(
+        item for item in dieline.limitations if item != "No bleed or safe margin is included."
+    ) + (
+        "Safe margin and bleed values are user design/print intent only.",
+        "Printer requirements, print fit, and printer/manufacturer certification are not verified.",
+    )
+    revision_id = "label-dieline-print-intent:" + _digest(
+        _print_intent_identity_values(
+            dieline.revision_id,
+            safe_margin,
+            bleed,
+            safe,
+            outer,
+            dieline.coordinate_unit,
+            limitations,
+        )
+    )
+    return replace(
+        dieline,
+        revision_id=revision_id,
+        source_dieline_revision_id=dieline.revision_id,
+        safe_margin_mm_unverified=safe_margin,
+        bleed_mm_unverified=bleed,
+        safe_boundary_vertices=safe,
+        bleed_boundary_vertices=outer,
+        limitations=limitations,
     )
 
 
@@ -602,6 +721,66 @@ def _dieline_identity(dieline: LabelDielineRevision) -> dict[str, object]:
     }
 
 
+def _print_intent_identity(dieline: LabelDielineRevision) -> dict[str, object]:
+    return _print_intent_identity_values(
+        dieline.source_dieline_revision_id,
+        dieline.safe_margin_mm_unverified,
+        dieline.bleed_mm_unverified,
+        dieline.safe_boundary_vertices,
+        dieline.bleed_boundary_vertices,
+        dieline.coordinate_unit,
+        dieline.limitations,
+    )
+
+
+def _print_intent_identity_values(
+    source_dieline_revision_id: str | None,
+    safe_margin_mm_unverified: float,
+    bleed_mm_unverified: float,
+    safe_boundary_vertices: tuple[tuple[float, float], ...],
+    bleed_boundary_vertices: tuple[tuple[float, float], ...],
+    coordinate_unit: str,
+    limitations: tuple[str, ...],
+) -> dict[str, object]:
+    return {
+        "contract": "packlab.label-dieline-print-intent.v1",
+        "source_dieline_revision_id": source_dieline_revision_id,
+        "safe_margin_mm_unverified": safe_margin_mm_unverified,
+        "bleed_mm_unverified": bleed_mm_unverified,
+        "safe_boundary_vertices": [list(point) for point in safe_boundary_vertices],
+        "bleed_boundary_vertices": [list(point) for point in bleed_boundary_vertices],
+        "coordinate_unit": coordinate_unit,
+        "limitations": list(limitations),
+    }
+
+
+def _nonnegative_mm(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise LabelMetricSurfaceBindingError(f"label_dieline_{name}_must_be_finite_nonnegative_mm")
+    try:
+        result = float(value)
+    except OverflowError as error:
+        raise LabelMetricSurfaceBindingError(
+            f"label_dieline_{name}_must_be_finite_nonnegative_mm"
+        ) from error
+    if not math.isfinite(result) or not 0.0 <= result <= 1_000_000.0:
+        raise LabelMetricSurfaceBindingError(f"label_dieline_{name}_must_be_finite_nonnegative_mm")
+    return result
+
+
+def _rectangle_boundary(
+    x_min: float, y_min: float, x_max: float, y_max: float
+) -> tuple[tuple[float, float], ...]:
+    points = ((x_min, y_min), (x_max, y_min), (x_max, y_max), (x_min, y_max))
+    if (
+        x_max <= x_min
+        or y_max <= y_min
+        or not all(math.isfinite(value) for point in points for value in point)
+    ):
+        raise LabelMetricSurfaceBindingError("label_dieline_print_boundary_invalid")
+    return points
+
+
 def _digest(value: dict[str, object]) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -615,5 +794,6 @@ __all__ = [
     "LabelMetricSurfaceBinding",
     "LabelMetricSurfaceBindingError",
     "create_label_dieline",
+    "create_label_dieline_print_intent",
     "create_label_metric_surface_binding",
 ]
