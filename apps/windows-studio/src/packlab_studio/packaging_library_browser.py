@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .packaging_library_audit import PackagingAssetRelationship
 from .viewport import QtRasterViewportAdapter, SceneObjectKind, ViewportService
 
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
@@ -130,6 +131,7 @@ class PackagingLibraryAssetDetail:
     design_models: tuple[LinkedProjectRevision, ...]
     preview_candidates: tuple[LinkedProjectRevision, ...]
     preferred_design_model_revision_id: str | None
+    asset_relationships: tuple[PackagingAssetRelationship, ...]
     related_records: tuple[LibraryRelatedRecord, ...]
 
 
@@ -193,6 +195,7 @@ class PackagingLibraryAssetSummary:
     nominal_volume_value: float | None
     nominal_volume_unit: str | None
     status: str
+    relationship_badges: tuple[str, ...] = ()
     supplier_id: str = ""
     supplier_name: str = ""
     material_other_label: str = ""
@@ -271,6 +274,15 @@ class PackagingLibraryBrowserService:
                     else "Unknown volume"
                 )
                 source_projects = _source_project_revisions(document.get("source_links"))
+                relationship_badges = tuple(
+                    sorted(
+                        {
+                            relation.relationship_type
+                            for relation in snapshot.relationships
+                            if entry.asset_id in {relation.asset_a_id, relation.asset_b_id}
+                        }
+                    )
+                )
                 neck_closure = document.get("neck_closure")
                 field_provenance = _field_provenance(document.get("field_provenance"))
                 thumbnail: LibraryThumbnailReference | None = None
@@ -295,6 +307,7 @@ class PackagingLibraryBrowserService:
                         nominal_volume_value=volume_value,
                         nominal_volume_unit=volume_unit,
                         status=_display_value(document.get("status")),
+                        relationship_badges=relationship_badges,
                         supplier_id=_supplier_value(document.get("supplier"), "supplier_id"),
                         supplier_name=_supplier_value(document.get("supplier"), "name"),
                         material_other_label=_display_value(document.get("other_material_label")),
@@ -427,6 +440,20 @@ class PackagingLibraryBrowserService:
                 design_models=design_models,
                 preview_candidates=preview_candidates,
                 preferred_design_model_revision_id=preferred,
+                asset_relationships=tuple(
+                    sorted(
+                        (
+                            item
+                            for item in snapshot.relationships
+                            if summary.asset_id in {item.asset_a_id, item.asset_b_id}
+                        ),
+                        key=lambda item: (
+                            item.relationship_type,
+                            item.asset_a_id,
+                            item.asset_b_id,
+                        ),
+                    )
+                ),
                 related_records=tuple(
                     sorted(
                         related,
@@ -648,9 +675,14 @@ class PackagingLibraryBrowserView(QWidget):
         self.detail_text.setObjectName("packlab.library.detail.metadata")
         self.detail_text.setOpenExternalLinks(False)
         self.detail_text.setReadOnly(True)
+        self.related_asset_view = QListWidget(self)
+        self.related_asset_view.setObjectName("packlab.library.detail.related-assets")
+        self.related_asset_view.setMaximumHeight(110)
         detail_panel = QWidget(self)
         detail_layout = QVBoxLayout(detail_panel)
         detail_layout.addWidget(self.preview_label)
+        detail_layout.addWidget(QLabel("Related Packaging Assets", detail_panel))
+        detail_layout.addWidget(self.related_asset_view)
         detail_layout.addWidget(self.detail_text, 1)
         self.results_splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self.results_splitter.addWidget(self.item_view)
@@ -691,6 +723,7 @@ class PackagingLibraryBrowserView(QWidget):
         self.clear_filters_button.clicked.connect(self._clear_filters)
         self.refresh_button.clicked.connect(self.refresh)
         self.item_view.currentItemChanged.connect(self._selection_changed)
+        self.related_asset_view.itemClicked.connect(self._navigate_related_asset)
         self.refresh()
 
     @property
@@ -830,7 +863,14 @@ class PackagingLibraryBrowserView(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, summary.asset_id)
             item.setData(Qt.ItemDataRole.UserRole + 1, summary.revision_id)
             item.setIcon(image)
-            item.setText(f"{summary.display_name}\nID: {summary.asset_id}\n{summary.core_metadata}")
+            badges = (
+                f" · {' / '.join(summary.relationship_badges)}"
+                if summary.relationship_badges
+                else ""
+            )
+            item.setText(
+                f"{summary.display_name}\nID: {summary.asset_id}\n{summary.core_metadata}{badges}"
+            )
             item.setToolTip(f"{summary.display_name}\n{summary.asset_id}\n{summary.revision_id}")
             item.setSizeHint(
                 QSize(216, 180) if self.mode_selector.currentData() == "grid" else QSize(0, 112)
@@ -851,6 +891,7 @@ class PackagingLibraryBrowserView(QWidget):
 
     def _show_details(self, asset_id: str | None) -> None:
         if asset_id is None:
+            self.related_asset_view.clear()
             self.preview_label.setPixmap(QPixmap())
             self.preview_label.setText("No 3D preview selected.")
             self.detail_text.setPlainText(
@@ -859,6 +900,7 @@ class PackagingLibraryBrowserView(QWidget):
             return
         summary = next((item for item in self._summaries if item.asset_id == asset_id), None)
         if summary is None or self.service is None:
+            self.related_asset_view.clear()
             self.preview_label.setPixmap(QPixmap())
             self.preview_label.setText("Preview unavailable.")
             self.detail_text.setPlainText("The selected asset is no longer available.")
@@ -867,6 +909,7 @@ class PackagingLibraryBrowserView(QWidget):
             detail = self.service.asset_detail(summary)
             preview = self.service.render_preview(detail)
         except Exception as error:
+            self.related_asset_view.clear()
             self.preview_label.setPixmap(QPixmap())
             self.preview_label.setText("Preview unavailable.")
             self.detail_text.setPlainText(f"Asset details are unavailable: {error}")
@@ -885,6 +928,26 @@ class PackagingLibraryBrowserView(QWidget):
             self.preview_label.setText(
                 f"3D preview {preview.state.value.lower()}: {preview.message}"
             )
+        self.related_asset_view.clear()
+        for relationship in detail.asset_relationships:
+            if relationship.relationship_type == "DUPLICATE":
+                other_asset_id = (
+                    relationship.asset_b_id
+                    if relationship.asset_a_id == asset_id
+                    else relationship.asset_a_id
+                )
+                relationship_label = f"DUPLICATE · {other_asset_id}"
+            elif relationship.asset_a_id == asset_id:
+                other_asset_id = relationship.asset_b_id
+                relationship_label = f"VARIANT BASE → {other_asset_id}"
+            else:
+                other_asset_id = relationship.asset_a_id
+                relationship_label = f"VARIANT OF {other_asset_id}"
+            link_item = QListWidgetItem(relationship_label)
+            link_item.setData(Qt.ItemDataRole.UserRole, other_asset_id)
+            self.related_asset_view.addItem(link_item)
+        if not detail.asset_relationships:
+            self.related_asset_view.addItem("No duplicate or variant relationships.")
         lines = [
             f"Asset ID: {summary.asset_id}",
             f"Asset revision: {summary.revision_id}",
@@ -918,10 +981,45 @@ class PackagingLibraryBrowserView(QWidget):
             "Linked SKUs:",
             *_related_record_labels(detail.related_records, "SKU"),
             "",
+            "Duplicate and variant relationship revisions:",
+            *(
+                f"  {item.relationship_type} · {item.relationship_id} · {item.revision_id}\n"
+                f"    provenance={item.provenance_class}; actor={item.actor_id}; reason={item.reason}"
+                for item in detail.asset_relationships
+            ),
+            "",
             f"Preview source: {preview.revision_label or 'No linked revision'}",
             f"Preview state: {preview.state.value}",
         ]
         self.detail_text.setPlainText("\n".join(lines))
+
+    def _navigate_related_asset(self, item: QListWidgetItem) -> None:
+        target_asset_id = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(target_asset_id, str):
+            return
+        visible = next(
+            (
+                row
+                for row in range(self.item_view.count())
+                if self.item_view.item(row).data(Qt.ItemDataRole.UserRole) == target_asset_id
+            ),
+            None,
+        )
+        if visible is None:
+            self.search_field.blockSignals(True)
+            self.search_field.clear()
+            self.search_field.blockSignals(False)
+            self._clear_filters()
+            visible = next(
+                (
+                    row
+                    for row in range(self.item_view.count())
+                    if self.item_view.item(row).data(Qt.ItemDataRole.UserRole) == target_asset_id
+                ),
+                None,
+            )
+        if visible is not None:
+            self.item_view.setCurrentRow(visible)
 
     def _thumbnail(self, summary: PackagingLibraryAssetSummary):
         if self.service is not None:

@@ -21,10 +21,25 @@ _LOCK_FILE = ".packaging-library-state.lock"
 _STATE_REVISION_PREFIX = "packaging-library-state:"
 _EVENT_ID_PREFIX = "packaging-library-event:"
 _ASSET_REVISION_PREFIX = "packaging-asset:"
+_RELATIONSHIP_ID_PREFIX = "packaging-relationship:"
+_RELATIONSHIP_REVISION_PREFIX = "packaging-relationship-revision:"
+_RELATIONSHIP_ID = re.compile(r"^packaging-relationship:[0-9a-f]{64}$")
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MAX_EVENTS = 100_000
 _MAX_CHANGED_FIELDS = 32
+_RELATIONSHIP_FIELDS = frozenset(
+    {
+        "actor_id",
+        "asset_a_id",
+        "asset_b_id",
+        "provenance_class",
+        "reason",
+        "relationship_type",
+        "source_reference_id",
+        "timestamp_utc",
+    }
+)
 _SAFE_ASSET_FIELDS = frozenset(
     {
         "asset_id",
@@ -100,11 +115,97 @@ class PackagingLibraryAssetEntry:
 
 
 @dataclass(frozen=True, slots=True)
+class PackagingAssetRelationship:
+    relationship_type: str
+    asset_a_id: str
+    asset_b_id: str
+    provenance_class: str
+    actor_id: str
+    reason: str
+    timestamp_utc: str
+    source_reference_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.relationship_type, str) or self.relationship_type not in {
+            "DUPLICATE",
+            "VARIANT",
+        }:
+            raise PackagingLibraryAuditError("packaging_library_relationship_type_invalid")
+        _validate_id(self.asset_a_id, "relationship_asset")
+        _validate_id(self.asset_b_id, "relationship_asset")
+        if self.asset_a_id == self.asset_b_id:
+            raise PackagingLibraryAuditError("packaging_library_relationship_self_link_invalid")
+        if self.relationship_type == "DUPLICATE" and self.asset_a_id > self.asset_b_id:
+            raise PackagingLibraryAuditError("packaging_library_duplicate_order_invalid")
+        if not isinstance(self.provenance_class, str) or self.provenance_class not in {
+            "SUPPLIER_FACT",
+            "USER_DECLARED",
+            "PACKLAB_ESTIMATE",
+        }:
+            raise PackagingLibraryAuditError("packaging_library_relationship_provenance_invalid")
+        _validate_actor(self.actor_id)
+        _validate_reason(self.reason)
+        _validate_timestamp(self.timestamp_utc)
+        if self.source_reference_id is not None:
+            _validate_id(self.source_reference_id, "relationship_source")
+
+    @property
+    def relationship_id(self) -> str:
+        identity = {
+            "relationship_type": self.relationship_type,
+            "asset_a_id": self.asset_a_id,
+            "asset_b_id": self.asset_b_id,
+        }
+        return (
+            _RELATIONSHIP_ID_PREFIX
+            + hashlib.sha256(_canonical_json(identity).encode("utf-8")).hexdigest()
+        )
+
+    @property
+    def revision_id(self) -> str:
+        return (
+            _RELATIONSHIP_REVISION_PREFIX
+            + hashlib.sha256(self.canonical_json.encode("utf-8")).hexdigest()
+        )
+
+    @property
+    def canonical_json(self) -> str:
+        return _canonical_json(
+            {
+                "relationship_id": self.relationship_id,
+                "relationship_type": self.relationship_type,
+                "asset_a_id": self.asset_a_id,
+                "asset_b_id": self.asset_b_id,
+                "provenance_class": self.provenance_class,
+                "source_reference_id": self.source_reference_id,
+                "actor_id": self.actor_id,
+                "reason": self.reason,
+                "timestamp_utc": self.timestamp_utc,
+            }
+        )
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "relationship_id": self.relationship_id,
+            "relationship_type": self.relationship_type,
+            "asset_a_id": self.asset_a_id,
+            "asset_b_id": self.asset_b_id,
+            "provenance_class": self.provenance_class,
+            "source_reference_id": self.source_reference_id,
+            "actor_id": self.actor_id,
+            "reason": self.reason,
+            "timestamp_utc": self.timestamp_utc,
+            "revision_id": self.revision_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class PackagingLibraryAuditSnapshot:
     state_revision: str
     audit_head_digest: str
     assets: tuple[PackagingLibraryAssetEntry, ...]
     events: tuple[PackagingLibraryAuditEvent, ...]
+    relationships: tuple[PackagingAssetRelationship, ...] = ()
 
 
 class PackagingLibraryAuditStore:
@@ -215,6 +316,196 @@ class PackagingLibraryAuditStore:
             reason=reason,
         )
 
+    def create_relationship(
+        self,
+        relationship_type: str,
+        asset_a_id: str,
+        asset_b_id: str,
+        *,
+        expected_state_revision: str,
+        expected_asset_revisions: tuple[tuple[str, str], ...],
+        actor_id: str,
+        reason: str,
+        provenance_class: str = "USER_DECLARED",
+        source_reference_id: str | None = None,
+    ) -> PackagingLibraryAuditSnapshot:
+        """Create an explicit duplicate or directed parent-to-variant relationship."""
+        _validate_id(asset_a_id, "relationship_asset")
+        _validate_id(asset_b_id, "relationship_asset")
+        if not isinstance(relationship_type, str) or relationship_type not in {
+            "DUPLICATE",
+            "VARIANT",
+        }:
+            raise PackagingLibraryAuditError("packaging_library_relationship_type_invalid")
+        if relationship_type == "DUPLICATE" and asset_b_id < asset_a_id:
+            asset_a_id, asset_b_id = asset_b_id, asset_a_id
+        _validate_actor(actor_id)
+        _validate_reason(reason)
+        _validate_revision(expected_state_revision, _STATE_REVISION_PREFIX, "expected_state")
+        if asset_a_id == asset_b_id:
+            raise PackagingLibraryAuditError("packaging_library_relationship_self_link_invalid")
+        if not isinstance(expected_asset_revisions, tuple):
+            raise PackagingLibraryAuditError(
+                "packaging_library_relationship_expected_assets_invalid"
+            )
+        expected = dict(expected_asset_revisions)
+        if len(expected) != len(expected_asset_revisions) or set(expected) != {
+            asset_a_id,
+            asset_b_id,
+        }:
+            raise PackagingLibraryAuditError(
+                "packaging_library_relationship_expected_assets_invalid"
+            )
+        for revision in expected.values():
+            _validate_revision(revision, _ASSET_REVISION_PREFIX, "expected_asset")
+        with self._exclusive_lock():
+            current = self._load()
+            if expected_state_revision != current.state_revision:
+                raise StalePackagingLibraryState("packaging_library_state_revision_stale")
+            assets = {item.asset_id: item for item in current.assets}
+            for asset_id in (asset_a_id, asset_b_id):
+                entry = assets.get(asset_id)
+                if entry is None:
+                    raise PackagingLibraryAuditError("packaging_library_relationship_asset_missing")
+                if expected[asset_id] != entry.revision_id:
+                    raise StalePackagingLibraryState(
+                        "packaging_library_relationship_asset_revision_stale"
+                    )
+            timestamp = _timestamp(self._clock())
+            relationship = PackagingAssetRelationship(
+                relationship_type=relationship_type,
+                asset_a_id=asset_a_id,
+                asset_b_id=asset_b_id,
+                provenance_class=provenance_class,
+                source_reference_id=source_reference_id,
+                actor_id=actor_id,
+                reason=reason,
+                timestamp_utc=timestamp,
+            )
+            if any(
+                item.relationship_id == relationship.relationship_id
+                for item in current.relationships
+            ):
+                raise PackagingLibraryAuditError("packaging_library_relationship_already_exists")
+            if relationship_type == "VARIANT" and _would_create_variant_cycle(
+                current.relationships, asset_a_id, asset_b_id
+            ):
+                raise PackagingLibraryAuditError("packaging_library_variant_cycle_invalid")
+            previous_relationship_event = next(
+                (
+                    event
+                    for event in reversed(current.events)
+                    if event.operation_type in {"RELATE", "UNRELATE"}
+                    and event.target_entity_ids[0] == relationship.relationship_id
+                ),
+                None,
+            )
+            before_revision_id = (
+                previous_relationship_event.after_revision_id
+                if previous_relationship_event is not None
+                else None
+            )
+            event = _new_event(
+                current,
+                actor_id=actor_id,
+                timestamp_utc=timestamp,
+                reason=reason,
+                operation_type="RELATE",
+                target_entity_ids=(relationship.relationship_id, asset_a_id, asset_b_id),
+                before_revision_id=before_revision_id,
+                after_revision_id=relationship.revision_id,
+                changed_field_names=tuple(sorted(_RELATIONSHIP_FIELDS)),
+            )
+            updated = PackagingLibraryAuditSnapshot(
+                state_revision=event.state_revision,
+                audit_head_digest=event.event_digest,
+                assets=current.assets,
+                events=(*current.events, event),
+                relationships=tuple(
+                    sorted(
+                        (*current.relationships, relationship),
+                        key=lambda item: item.relationship_id,
+                    )
+                ),
+            )
+            self._publish(updated)
+            return updated
+
+    def remove_relationship(
+        self,
+        relationship_id: str,
+        *,
+        expected_state_revision: str,
+        expected_relationship_revision_id: str,
+        actor_id: str,
+        reason: str,
+    ) -> PackagingLibraryAuditSnapshot:
+        _validate_id(relationship_id, "relationship")
+        _validate_revision(expected_state_revision, _STATE_REVISION_PREFIX, "expected_state")
+        _validate_revision(
+            expected_relationship_revision_id,
+            _RELATIONSHIP_REVISION_PREFIX,
+            "expected_relationship",
+        )
+        _validate_actor(actor_id)
+        _validate_reason(reason)
+        with self._exclusive_lock():
+            current = self._load()
+            if expected_state_revision != current.state_revision:
+                raise StalePackagingLibraryState("packaging_library_state_revision_stale")
+            relationship = next(
+                (item for item in current.relationships if item.relationship_id == relationship_id),
+                None,
+            )
+            if relationship is None:
+                raise PackagingLibraryAuditError("packaging_library_relationship_missing")
+            if relationship.revision_id != expected_relationship_revision_id:
+                raise StalePackagingLibraryState("packaging_library_relationship_revision_stale")
+            timestamp = _timestamp(self._clock())
+            tombstone_revision_id = (
+                _RELATIONSHIP_REVISION_PREFIX
+                + hashlib.sha256(
+                    _canonical_json(
+                        {
+                            "relationship_id": relationship_id,
+                            "prior_revision_id": relationship.revision_id,
+                            "actor_id": actor_id,
+                            "reason": reason,
+                            "timestamp_utc": timestamp,
+                            "active": False,
+                        }
+                    ).encode("utf-8")
+                ).hexdigest()
+            )
+            event = _new_event(
+                current,
+                actor_id=actor_id,
+                timestamp_utc=timestamp,
+                reason=reason,
+                operation_type="UNRELATE",
+                target_entity_ids=(
+                    relationship_id,
+                    relationship.asset_a_id,
+                    relationship.asset_b_id,
+                ),
+                before_revision_id=relationship.revision_id,
+                after_revision_id=tombstone_revision_id,
+                changed_field_names=("active",),
+            )
+            updated = PackagingLibraryAuditSnapshot(
+                state_revision=event.state_revision,
+                audit_head_digest=event.event_digest,
+                assets=current.assets,
+                events=(*current.events, event),
+                relationships=tuple(
+                    item
+                    for item in current.relationships
+                    if item.relationship_id != relationship_id
+                ),
+            )
+            self._publish(updated)
+            return updated
+
     def _mutate(
         self,
         asset: PackagingAsset,
@@ -306,23 +597,32 @@ class PackagingLibraryAuditStore:
             raise PackagingLibraryAuditError("packaging_library_state_file_unsafe")
         try:
             value = json.loads(self.state_path.read_text(encoding="utf-8"))
-            if not isinstance(value, dict) or value.get("schema_version") != 1:
+            if not isinstance(value, dict) or value.get("schema_version") not in {1, 2}:
                 raise PackagingLibraryAuditError("packaging_library_state_schema_invalid")
             raw_assets = value.get("assets")
             raw_events = value.get("events")
-            if not isinstance(raw_assets, list) or not isinstance(raw_events, list):
+            raw_relationships = value.get("relationships", [])
+            if (
+                not isinstance(raw_assets, list)
+                or not isinstance(raw_events, list)
+                or not isinstance(raw_relationships, list)
+            ):
                 raise PackagingLibraryAuditError("packaging_library_state_shape_invalid")
             if len(raw_events) > _MAX_EVENTS:
                 raise PackagingLibraryAuditError("packaging_library_event_limit_exceeded")
             assets = tuple(_parse_asset_entry(item) for item in raw_assets)
             events = tuple(_parse_event(item) for item in raw_events)
+            relationships = tuple(_parse_relationship(item) for item in raw_relationships)
             if len({item.asset_id for item in assets}) != len(assets):
                 raise PackagingLibraryAuditError("packaging_library_asset_duplicate")
+            if len({item.relationship_id for item in relationships}) != len(relationships):
+                raise PackagingLibraryAuditError("packaging_library_relationship_duplicate")
             snapshot = PackagingLibraryAuditSnapshot(
                 state_revision=value["state_revision"],
                 audit_head_digest=value["audit_head_digest"],
                 assets=tuple(sorted(assets, key=lambda item: item.asset_id)),
                 events=events,
+                relationships=tuple(sorted(relationships, key=lambda item: item.relationship_id)),
             )
             _validate_snapshot(snapshot)
             return snapshot
@@ -334,7 +634,7 @@ class PackagingLibraryAuditStore:
     def _publish(self, snapshot: PackagingLibraryAuditSnapshot) -> None:
         _validate_snapshot(snapshot)
         value = {
-            "schema_version": 1,
+            "schema_version": 2,
             "state_revision": snapshot.state_revision,
             "audit_head_digest": snapshot.audit_head_digest,
             "assets": [
@@ -346,6 +646,7 @@ class PackagingLibraryAuditStore:
                 for item in snapshot.assets
             ],
             "events": [item.as_dict() for item in snapshot.events],
+            "relationships": [item.as_dict() for item in snapshot.relationships],
         }
         _atomic_json(self.state_path, value)
 
@@ -472,11 +773,36 @@ def _parse_asset_entry(value: object) -> PackagingLibraryAssetEntry:
     return PackagingLibraryAssetEntry(asset_id, revision_id, canonical)
 
 
+def _parse_relationship(value: object) -> PackagingAssetRelationship:
+    if not isinstance(value, dict):
+        raise PackagingLibraryAuditError("packaging_library_relationship_invalid")
+    try:
+        relationship = PackagingAssetRelationship(
+            relationship_type=value["relationship_type"],
+            asset_a_id=value["asset_a_id"],
+            asset_b_id=value["asset_b_id"],
+            provenance_class=value["provenance_class"],
+            source_reference_id=value["source_reference_id"],
+            actor_id=value["actor_id"],
+            reason=value["reason"],
+            timestamp_utc=value["timestamp_utc"],
+        )
+    except (KeyError, TypeError) as error:
+        raise PackagingLibraryAuditError("packaging_library_relationship_invalid") from error
+    if (
+        value.get("relationship_id") != relationship.relationship_id
+        or value.get("revision_id") != relationship.revision_id
+    ):
+        raise PackagingLibraryAuditError("packaging_library_relationship_revision_invalid")
+    return relationship
+
+
 def _validate_snapshot(snapshot: PackagingLibraryAuditSnapshot) -> None:
     state_revision = _genesis_state_revision()
     event_digest = ""
     seen_event_ids: set[str] = set()
     replayed_assets: dict[str, str] = {}
+    replayed_relationships: dict[str, tuple[str, bool, tuple[str, ...]]] = {}
     for event in snapshot.events:
         _validate_event_shape(event)
         if event.event_id in seen_event_ids:
@@ -504,19 +830,75 @@ def _validate_snapshot(snapshot: PackagingLibraryAuditSnapshot) -> None:
             expected.event_id,
         ):
             raise PackagingLibraryAuditError("packaging_library_event_digest_invalid")
-        asset_id = event.target_entity_ids[0]
-        current_revision = replayed_assets.get(asset_id)
-        if event.operation_type == "CREATE":
-            if current_revision is not None or event.before_revision_id is not None:
-                raise PackagingLibraryAuditError("packaging_library_event_create_invalid")
-        elif current_revision != event.before_revision_id:
-            raise PackagingLibraryAuditError("packaging_library_event_before_revision_invalid")
-        replayed_assets[asset_id] = event.after_revision_id
+        if event.operation_type in {"RELATE", "UNRELATE"}:
+            relationship_id = event.target_entity_ids[0]
+            current = replayed_relationships.get(relationship_id)
+            if any(asset_id not in replayed_assets for asset_id in event.target_entity_ids[1:]):
+                raise PackagingLibraryAuditError(
+                    "packaging_library_relationship_event_asset_missing"
+                )
+            if event.operation_type == "RELATE":
+                expected_before = current[0] if current is not None else None
+                if (
+                    current is not None and current[1]
+                ) or event.before_revision_id != expected_before:
+                    raise PackagingLibraryAuditError(
+                        "packaging_library_relationship_event_before_revision_invalid"
+                    )
+                replayed_relationships[relationship_id] = (
+                    event.after_revision_id,
+                    True,
+                    event.target_entity_ids,
+                )
+            else:
+                if (
+                    current is None
+                    or not current[1]
+                    or current[0] != event.before_revision_id
+                    or current[2] != event.target_entity_ids
+                ):
+                    raise PackagingLibraryAuditError(
+                        "packaging_library_relationship_event_remove_invalid"
+                    )
+                replayed_relationships[relationship_id] = (
+                    event.after_revision_id,
+                    False,
+                    event.target_entity_ids,
+                )
+        else:
+            asset_id = event.target_entity_ids[0]
+            current_revision = replayed_assets.get(asset_id)
+            if event.operation_type == "CREATE":
+                if current_revision is not None or event.before_revision_id is not None:
+                    raise PackagingLibraryAuditError("packaging_library_event_create_invalid")
+            elif current_revision != event.before_revision_id:
+                raise PackagingLibraryAuditError("packaging_library_event_before_revision_invalid")
+            replayed_assets[asset_id] = event.after_revision_id
         event_digest = event.event_digest
         state_revision = event.state_revision
     current_assets = {item.asset_id: item.revision_id for item in snapshot.assets}
     if current_assets != replayed_assets:
         raise PackagingLibraryAuditError("packaging_library_audit_state_mismatch")
+    current_relationships = {item.relationship_id: item for item in snapshot.relationships}
+    replayed_active = {
+        relationship_id: (revision_id, targets)
+        for relationship_id, (revision_id, active, targets) in replayed_relationships.items()
+        if active
+    }
+    if set(current_relationships) != set(replayed_active):
+        raise PackagingLibraryAuditError("packaging_library_relationship_state_mismatch")
+    asset_ids = set(current_assets)
+    for relationship_id, relationship in current_relationships.items():
+        replayed_revision, targets = replayed_active[relationship_id]
+        if (
+            relationship.revision_id != replayed_revision
+            or targets != (relationship_id, relationship.asset_a_id, relationship.asset_b_id)
+            or relationship.asset_a_id not in asset_ids
+            or relationship.asset_b_id not in asset_ids
+        ):
+            raise PackagingLibraryAuditError("packaging_library_relationship_state_mismatch")
+    if _has_variant_cycle(snapshot.relationships):
+        raise PackagingLibraryAuditError("packaging_library_variant_cycle_invalid")
     if (snapshot.state_revision, snapshot.audit_head_digest) != (state_revision, event_digest):
         raise PackagingLibraryAuditError("packaging_library_audit_head_mismatch")
 
@@ -534,7 +916,14 @@ def _validate_event_shape(event: PackagingLibraryAuditEvent) -> None:
     _validate_actor(event.actor_id)
     _validate_timestamp(event.timestamp_utc)
     _validate_reason(event.reason)
-    if event.operation_type not in {"CREATE", "UPDATE", "LINK", "UNLINK"}:
+    if event.operation_type not in {
+        "CREATE",
+        "UPDATE",
+        "LINK",
+        "UNLINK",
+        "RELATE",
+        "UNRELATE",
+    }:
         raise PackagingLibraryAuditError("packaging_library_operation_type_invalid")
     if (
         not isinstance(event.target_entity_ids, tuple)
@@ -544,17 +933,42 @@ def _validate_event_shape(event: PackagingLibraryAuditEvent) -> None:
         raise PackagingLibraryAuditError("packaging_library_event_targets_invalid")
     for target in event.target_entity_ids:
         _validate_id(target, "target")
+    relationship_event = event.operation_type in {"RELATE", "UNRELATE"}
+    if relationship_event:
+        if (
+            len(event.target_entity_ids) != 3
+            or not _RELATIONSHIP_ID.fullmatch(event.target_entity_ids[0])
+            or event.target_entity_ids[1] == event.target_entity_ids[2]
+        ):
+            raise PackagingLibraryAuditError("packaging_library_relationship_event_targets_invalid")
+        revision_prefix = _RELATIONSHIP_REVISION_PREFIX
+        allowed_fields = _RELATIONSHIP_FIELDS | {"active"}
+    else:
+        revision_prefix = _ASSET_REVISION_PREFIX
+        allowed_fields = _SAFE_ASSET_FIELDS
     if event.before_revision_id is not None:
-        _validate_revision(event.before_revision_id, _ASSET_REVISION_PREFIX, "before_asset")
-    _validate_revision(event.after_revision_id, _ASSET_REVISION_PREFIX, "after_asset")
+        _validate_revision(event.before_revision_id, revision_prefix, "before_entity")
+    _validate_revision(event.after_revision_id, revision_prefix, "after_entity")
     if (
         not isinstance(event.changed_field_names, tuple)
         or not 1 <= len(event.changed_field_names) <= _MAX_CHANGED_FIELDS
         or len(set(event.changed_field_names)) != len(event.changed_field_names)
         or tuple(sorted(event.changed_field_names)) != event.changed_field_names
-        or any(name not in _SAFE_ASSET_FIELDS for name in event.changed_field_names)
+        or any(name not in allowed_fields for name in event.changed_field_names)
     ):
         raise PackagingLibraryAuditError("packaging_library_changed_fields_invalid")
+    if relationship_event:
+        if event.operation_type == "RELATE" and event.changed_field_names != tuple(
+            sorted(_RELATIONSHIP_FIELDS)
+        ):
+            raise PackagingLibraryAuditError("packaging_library_relationship_create_fields_invalid")
+        if event.operation_type == "UNRELATE" and (
+            event.changed_field_names != ("active",) or event.before_revision_id is None
+        ):
+            raise PackagingLibraryAuditError("packaging_library_relationship_remove_fields_invalid")
+        if event.before_revision_id == event.after_revision_id:
+            raise PackagingLibraryAuditError("packaging_library_noop_event_invalid")
+        return
     if event.operation_type == "CREATE" and event.before_revision_id is not None:
         raise PackagingLibraryAuditError("packaging_library_event_create_invalid")
     if event.operation_type != "CREATE" and event.before_revision_id is None:
@@ -600,6 +1014,58 @@ def _valid_link_delta(before: object, after: object, operation_type: str) -> boo
     if old_scan is not None and new_scan is None:
         changed = True
     return changed
+
+
+def _would_create_variant_cycle(
+    relationships: tuple[PackagingAssetRelationship, ...],
+    parent_asset_id: str,
+    variant_asset_id: str,
+) -> bool:
+    edges: dict[str, set[str]] = {}
+    for relationship in relationships:
+        if relationship.relationship_type == "VARIANT":
+            edges.setdefault(relationship.asset_a_id, set()).add(relationship.asset_b_id)
+    pending = [variant_asset_id]
+    visited: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current == parent_asset_id:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        pending.extend(edges.get(current, ()))
+    return False
+
+
+def _has_variant_cycle(relationships: tuple[PackagingAssetRelationship, ...]) -> bool:
+    edges: dict[str, set[str]] = {}
+    for relationship in relationships:
+        if relationship.relationship_type == "VARIANT":
+            edges.setdefault(relationship.asset_a_id, set()).add(relationship.asset_b_id)
+    state: dict[str, int] = {}
+    for root in edges:
+        if state.get(root) == 2:
+            continue
+        pending: list[tuple[str, bool]] = [(root, False)]
+        while pending:
+            asset_id, exiting = pending.pop()
+            if exiting:
+                state[asset_id] = 2
+                continue
+            status = state.get(asset_id, 0)
+            if status == 1:
+                return True
+            if status == 2:
+                continue
+            state[asset_id] = 1
+            pending.append((asset_id, True))
+            for child in edges.get(asset_id, ()):
+                if state.get(child) == 1:
+                    return True
+                if state.get(child, 0) == 0:
+                    pending.append((child, False))
+    return False
 
 
 def _target_ids(

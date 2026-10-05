@@ -501,3 +501,52 @@ def test_detail_without_runtime_project_resolver_shows_unavailable_state(tmp_pat
     preview = service.render_preview(detail)
     assert preview.state is PreviewState.UNAVAILABLE
     assert detail.raw_scans[0].revision_id == "scan-revision-9"
+
+
+def test_relationship_badges_sections_and_navigation_keep_assets_separate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = create_application(["packlab-library-browser-relationships-test"])
+    library_root = tmp_path / "library"
+    store = _library(
+        library_root,
+        assets=(
+            _asset(asset_id="asset-alpha", display_name="Alpha package"),
+            _asset(asset_id="asset-beta", display_name="Beta package"),
+        ),
+    )
+    revisions = {item.asset_id: item.revision_id for item in store.snapshot().assets}
+    snapshot = store.snapshot()
+    store.create_relationship(
+        "DUPLICATE",
+        "asset-alpha",
+        "asset-beta",
+        expected_state_revision=snapshot.state_revision,
+        expected_asset_revisions=(
+            ("asset-alpha", revisions["asset-alpha"]),
+            ("asset-beta", revisions["asset-beta"]),
+        ),
+        actor_id="operator-1",
+        reason="Owner confirmed equivalent package metadata",
+    )
+    service = PackagingLibraryBrowserService(store, library_root)
+    view = PackagingLibraryBrowserView(service)
+    alpha_row = next(
+        row
+        for row in range(view.item_view.count())
+        if view.item_view.item(row).data(Qt.ItemDataRole.UserRole) == "asset-alpha"
+    )
+    view.item_view.setCurrentRow(alpha_row)
+    assert "DUPLICATE" in view.item_view.item(alpha_row).text()
+    assert view.related_asset_view.count() == 1
+    assert "asset-beta" in view.related_asset_view.item(0).text()
+    assert "USER_DECLARED" in view.detail_text.toPlainText()
+
+    view.search_field.setText("asset-alpha")
+    view.related_asset_view.itemClicked.emit(view.related_asset_view.item(0))
+    assert view.search_field.text() == ""
+    assert view.selected_asset_id == "asset-beta"
+    assert {item.asset_id: item.revision_id for item in store.snapshot().assets} == revisions
+    view.close()
+    app.processEvents()

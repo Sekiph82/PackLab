@@ -14,6 +14,7 @@ from packlab_core.packaging_asset import (
 )
 from packlab_studio import packaging_library_audit as audit
 from packlab_studio.packaging_library_audit import (
+    PackagingAssetRelationship,
     PackagingLibraryAuditError,
     PackagingLibraryAuditStore,
     StalePackagingLibraryState,
@@ -35,6 +36,18 @@ def _created(store: PackagingLibraryAuditStore):
         reason="Record the supplier package metadata",
     )
     return initial, created
+
+
+def _relationship_assets(store: PackagingLibraryAuditStore) -> dict[str, str]:
+    for asset_id in ("asset-a", "asset-b", "asset-c"):
+        current = store.snapshot()
+        store.create_asset(
+            _asset(asset_id=asset_id, display_name=f"Package {asset_id}"),
+            expected_state_revision=current.state_revision,
+            actor_id="operator-1",
+            reason="Add separate package asset metadata",
+        )
+    return {entry.asset_id: entry.revision_id for entry in store.snapshot().assets}
 
 
 def test_create_update_and_replay_bind_exact_asset_revisions(tmp_path: Path) -> None:
@@ -272,3 +285,137 @@ def test_unicode_asset_metadata_replays_using_its_canonical_revision(tmp_path: P
 
     assert created.assets[0].revision_id == asset.revision_id
     assert store.validate() == created
+
+
+def test_duplicate_relationship_is_symmetric_stable_and_revisioned(tmp_path: Path) -> None:
+    store = _store(tmp_path / "library")
+    revisions = _relationship_assets(store)
+    state = store.snapshot()
+    created = store.create_relationship(
+        "DUPLICATE",
+        "asset-b",
+        "asset-a",
+        expected_state_revision=state.state_revision,
+        expected_asset_revisions=(
+            ("asset-a", revisions["asset-a"]),
+            ("asset-b", revisions["asset-b"]),
+        ),
+        actor_id="operator-1",
+        reason="Owner confirmed the packages are duplicates",
+        provenance_class="USER_DECLARED",
+        source_reference_id="owner-decision-1",
+    )
+    relationship = created.relationships[0]
+    assert isinstance(relationship, PackagingAssetRelationship)
+    assert (relationship.asset_a_id, relationship.asset_b_id) == ("asset-a", "asset-b")
+    assert relationship.relationship_id.startswith("packaging-relationship:")
+    assert relationship.revision_id.startswith("packaging-relationship-revision:")
+    assert relationship.provenance_class == "USER_DECLARED"
+    assert created.events[-1].operation_type == "RELATE"
+    assert store.validate() == created
+
+    with pytest.raises(PackagingLibraryAuditError, match="already_exists"):
+        store.create_relationship(
+            "DUPLICATE",
+            "asset-a",
+            "asset-b",
+            expected_state_revision=created.state_revision,
+            expected_asset_revisions=(
+                ("asset-a", revisions["asset-a"]),
+                ("asset-b", revisions["asset-b"]),
+            ),
+            actor_id="operator-2",
+            reason="Repeat duplicate relation",
+        )
+    removed = store.remove_relationship(
+        relationship.relationship_id,
+        expected_state_revision=created.state_revision,
+        expected_relationship_revision_id=relationship.revision_id,
+        actor_id="operator-1",
+        reason="Owner withdrew the duplicate declaration",
+    )
+    assert removed.relationships == ()
+    assert removed.events[-1].operation_type == "UNRELATE"
+    assert store.validate() == removed
+
+    restored = store.create_relationship(
+        "DUPLICATE",
+        "asset-a",
+        "asset-b",
+        expected_state_revision=removed.state_revision,
+        expected_asset_revisions=(
+            ("asset-a", revisions["asset-a"]),
+            ("asset-b", revisions["asset-b"]),
+        ),
+        actor_id="operator-1",
+        reason="Owner reconfirmed the duplicate declaration",
+    )
+    assert restored.relationships[0].relationship_id == relationship.relationship_id
+    assert restored.relationships[0].revision_id != relationship.revision_id
+    assert store.validate() == restored
+
+    state_value = json.loads(store.state_path.read_text(encoding="utf-8"))
+    state_value["relationships"][0]["provenance_class"] = "PACKLAB_ESTIMATE"
+    store.state_path.write_text(json.dumps(state_value), encoding="utf-8")
+    with pytest.raises(PackagingLibraryAuditError, match="relationship_revision_invalid"):
+        store.snapshot()
+
+
+def test_variant_relationships_reject_self_cycles_and_stale_asset_revisions(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path / "library")
+    revisions = _relationship_assets(store)
+
+    def link(parent: str, child: str):
+        snapshot = store.snapshot()
+        return store.create_relationship(
+            "VARIANT",
+            parent,
+            child,
+            expected_state_revision=snapshot.state_revision,
+            expected_asset_revisions=((parent, revisions[parent]), (child, revisions[child])),
+            actor_id="operator-1",
+            reason="Owner declared packaging variant relationship",
+        )
+
+    link("asset-a", "asset-b")
+    second = link("asset-b", "asset-c")
+    assert sorted((item.asset_a_id, item.asset_b_id) for item in second.relationships) == [
+        ("asset-a", "asset-b"),
+        ("asset-b", "asset-c"),
+    ]
+    with pytest.raises(PackagingLibraryAuditError, match="self_link"):
+        link("asset-a", "asset-a")
+    with pytest.raises(PackagingLibraryAuditError, match="cycle_invalid"):
+        link("asset-c", "asset-a")
+
+    snapshot = store.snapshot()
+    with pytest.raises(StalePackagingLibraryState, match="asset_revision_stale"):
+        store.create_relationship(
+            "DUPLICATE",
+            "asset-a",
+            "asset-c",
+            expected_state_revision=snapshot.state_revision,
+            expected_asset_revisions=(
+                ("asset-a", "packaging-asset:" + "0" * 64),
+                ("asset-c", revisions["asset-c"]),
+            ),
+            actor_id="operator-1",
+            reason="Try relation with an obsolete asset revision",
+        )
+    assert store.validate() == second
+
+
+def test_schema_one_state_without_relationships_remains_readable(tmp_path: Path) -> None:
+    store = _store(tmp_path / "library")
+    _, created = _created(store)
+    state_value = json.loads(store.state_path.read_text(encoding="utf-8"))
+    state_value["schema_version"] = 1
+    state_value.pop("relationships", None)
+    store.state_path.write_text(json.dumps(state_value), encoding="utf-8")
+
+    migrated = store.snapshot()
+    assert migrated.relationships == ()
+    assert migrated.state_revision == created.state_revision
+    assert migrated.assets == created.assets
