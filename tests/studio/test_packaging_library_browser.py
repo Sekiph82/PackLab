@@ -7,22 +7,30 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage
+from PySide6.QtWidgets import QPushButton
 from tests.core.test_packaging_asset import _asset
 
 from packlab_core.packaging_asset import (
     AssetStatus,
     BaseMaterial,
     ClosureType,
+    DesignModelLink,
     MeasurementUnit,
     PackagingFamily,
     PackagingMeasurement,
     RawScanLink,
+    ScaleState,
+)
+from packlab_core.packaging_sku_library import (
+    PackagingSkuStatus,
+    SkuArtworkPresentationReference,
 )
 from packlab_studio.app import create_application
 from packlab_studio.navigation import Route
 from packlab_studio.packaging_library_audit import PackagingLibraryAuditStore
 from packlab_studio.packaging_library_browser import (
     BrowserDisplayState,
+    CreatePackagingSkuDialog,
     LibraryRelatedRecord,
     LibraryThumbnailReference,
     PackagingLibraryBrowserError,
@@ -551,3 +559,199 @@ def test_relationship_badges_sections_and_navigation_keep_assets_separate(
     assert {item.asset_id: item.revision_id for item in store.snapshot().assets} == revisions
     view.close()
     app.processEvents()
+
+
+def test_create_sku_reuses_exact_geometry_and_keeps_artwork_separate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = create_application(["packlab-library-create-sku-test"])
+    library_root = tmp_path / "library"
+    design_model = DesignModelLink(
+        project_id="water-project",
+        revision_id="design-model-rev-1",
+        content_sha256="c" * 64,
+        parent_authority_kind="STANDALONE_DESIGN_GEOMETRY",
+        parent_authority_revision_id="standalone-root-1",
+        scale_state=ScaleState.METRIC_UNVERIFIED,
+    )
+    asset = _asset(asset_id="water-geometry", display_name="Water bottle").with_source_links(
+        raw_scan_links=(),
+        scan_master_link=None,
+        design_model_links=(design_model,),
+        preferred_design_model_revision_id=design_model.revision_id,
+    )
+    store = _library(library_root, assets=(asset,))
+    artwork = SkuArtworkPresentationReference(
+        label_zone_id="zone-water-front",
+        label_zone_design_model_revision_id="design-model-rev-1",
+        label_zone_brep_revision_id="brep-rev-1",
+        label_zone_brep_geometry_sha256="a" * 64,
+        artwork_revision_id="art-rev-1",
+        artwork_content_sha256="b" * 64,
+        mapping_revision_id="mapping-rev-1",
+        assignment_revision_id="assignment-rev-1",
+        variant_id="front-primary",
+    )
+    requested_revisions: list[tuple[str, str]] = []
+
+    def accepted_artwork(asset_id: str, revision_id: str):
+        requested_revisions.append((asset_id, revision_id))
+        return (artwork,)
+
+    service = PackagingLibraryBrowserService(
+        store,
+        library_root,
+        sku_artwork_references_provider=accepted_artwork,
+    )
+    summary = service.list_assets()[0]
+    before = store.snapshot()
+    asset_revision = before.assets[0].revision_id
+    created = service.create_sku_from_asset(
+        summary,
+        sku_id="water-500-red",
+        display_name="Water 500 mL · Red Label",
+        status=PackagingSkuStatus.ACTIVE,
+        artwork_references=(artwork,),
+        expected_state_revision=before.state_revision,
+        actor_id="operator-1",
+        reason="Create a red label SKU from the shared geometry",
+    )
+
+    sku = created.skus[0]
+    assert sku.packaging_asset_id == asset.asset_id
+    assert sku.packaging_asset_revision_id == asset_revision
+    assert sku.preferred_design_model_link == design_model
+    assert sku.artwork_references == (artwork,)
+    assert not {"supplier", "base_material", "nominal_volume"}.intersection(sku.as_dict())
+    assert created.assets == before.assets
+    assert requested_revisions == [(asset.asset_id, asset_revision)]
+    assert store.validate() == created
+    shared = service.create_sku_from_asset(
+        summary,
+        sku_id="water-500-blue",
+        display_name="Water 500 mL · Blue Label",
+        status=PackagingSkuStatus.DRAFT,
+        artwork_references=(),
+        expected_state_revision=created.state_revision,
+        actor_id="operator-1",
+        reason="Create a second SKU sharing the same geometry",
+    )
+    assert {item.packaging_asset_id for item in shared.skus} == {asset.asset_id}
+    assert {item.packaging_asset_revision_id for item in shared.skus} == {asset_revision}
+    assert shared.assets == before.assets
+    assert requested_revisions == [(asset.asset_id, asset_revision)] * 2
+    assert any(
+        item.record_type == "SKU" and item.record_id == "water-500-red"
+        for item in service.asset_detail(service.list_assets()[0]).related_records
+    )
+    view = PackagingLibraryBrowserView(service)
+    view.item_view.setCurrentRow(0)
+    assert "Water 500 mL · Red Label" in view.detail_text.toPlainText()
+    view.close()
+    app.processEvents()
+
+
+def test_create_sku_dialog_cancel_is_noop_and_save_validates_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = create_application(["packlab-library-create-sku-dialog-test"])
+    library_root = tmp_path / "library"
+    store = _library(library_root)
+    service = PackagingLibraryBrowserService(store, library_root)
+    summary = service.list_assets()[0]
+    before = store.snapshot()
+    dialog = CreatePackagingSkuDialog(
+        service,
+        summary,
+        expected_state_revision=before.state_revision,
+        preview=service.render_preview(service.asset_detail(summary)),
+    )
+    assert summary.asset_id in dialog.source_identity.text()
+    assert summary.revision_id in dialog.source_identity.text()
+    assert "Source field provenance stays with the Packaging Asset" in dialog.source_identity.text()
+    assert all(
+        f"{field}: {classification}" in dialog.source_identity.text()
+        for field, classification in summary.field_provenance
+    )
+    dialog.reject()
+    assert store.snapshot() == before
+
+    dialog = CreatePackagingSkuDialog(
+        service,
+        summary,
+        expected_state_revision=before.state_revision,
+        preview=service.render_preview(service.asset_detail(summary)),
+    )
+    dialog.sku_id_field.setText("water-500-blue")
+    dialog.display_name_field.setText("Water 500 mL Blue")
+    dialog.findChild(QPushButton, "packlab.library.create-sku.save").click()
+    assert dialog.created_sku is not None, dialog.error_label.text()
+    assert dialog.created_sku.sku_id == "water-500-blue"
+    assert store.snapshot().events[-1].operation_type == "SKU_CREATE"
+    assert store.snapshot().assets == before.assets
+    dialog.close()
+
+    duplicate_dialog = CreatePackagingSkuDialog(
+        service,
+        summary,
+        expected_state_revision=store.snapshot().state_revision,
+        preview=service.render_preview(service.asset_detail(summary)),
+    )
+    duplicate_dialog.sku_id_field.setText("water-500-blue")
+    duplicate_dialog.display_name_field.setText("Duplicate SKU identity")
+    duplicate_dialog.findChild(QPushButton, "packlab.library.create-sku.save").click()
+    assert duplicate_dialog.created_sku is None
+    assert "sku_id_already_exists" in duplicate_dialog.error_label.text()
+    assert len(store.snapshot().skus) == 1
+    duplicate_dialog.close()
+    app.processEvents()
+
+
+def test_create_sku_rejects_stale_accepted_artwork_before_audit_commit(
+    tmp_path: Path,
+) -> None:
+    library_root = tmp_path / "library"
+    store = _library(library_root)
+    accepted = SkuArtworkPresentationReference(
+        label_zone_id="zone-water-front",
+        label_zone_design_model_revision_id="model-rev-1",
+        label_zone_brep_revision_id="brep-rev-1",
+        label_zone_brep_geometry_sha256="a" * 64,
+        artwork_revision_id="art-rev-current",
+        artwork_content_sha256="b" * 64,
+        mapping_revision_id="mapping-rev-current",
+        assignment_revision_id="assignment-rev-current",
+        variant_id="front-primary",
+    )
+    stale = SkuArtworkPresentationReference(
+        label_zone_id="zone-water-front",
+        label_zone_design_model_revision_id="model-rev-1",
+        label_zone_brep_revision_id="brep-rev-1",
+        label_zone_brep_geometry_sha256="a" * 64,
+        artwork_revision_id="art-rev-old",
+        artwork_content_sha256="c" * 64,
+        mapping_revision_id="mapping-rev-old",
+        assignment_revision_id="assignment-rev-old",
+        variant_id="front-primary",
+    )
+    service = PackagingLibraryBrowserService(
+        store,
+        library_root,
+        sku_artwork_references_provider=lambda _asset_id, _revision_id: (accepted,),
+    )
+    summary = service.list_assets()[0]
+    before = store.snapshot()
+    with pytest.raises(PackagingLibraryBrowserError, match="artwork_reference_stale"):
+        service.create_sku_from_asset(
+            summary,
+            sku_id="water-500-stale-art",
+            display_name="Water with stale artwork",
+            status=PackagingSkuStatus.ACTIVE,
+            artwork_references=(stale,),
+            expected_state_revision=before.state_revision,
+            actor_id="operator-1",
+            reason="Reject stale artwork assignment",
+        )
+    assert store.snapshot() == before

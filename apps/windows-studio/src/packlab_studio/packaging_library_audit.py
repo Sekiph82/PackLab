@@ -14,7 +14,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from packlab_core.packaging_asset import PackagingAsset
+from packlab_core.packaging_asset import DesignModelLink, PackagingAsset, ScaleState
+from packlab_core.packaging_sku_library import (
+    PackagingSkuRevision,
+    PackagingSkuStatus,
+    SkuArtworkPresentationReference,
+)
 
 _STATE_FILE = "packaging-library-state.json"
 _LOCK_FILE = ".packaging-library-state.lock"
@@ -23,6 +28,8 @@ _EVENT_ID_PREFIX = "packaging-library-event:"
 _ASSET_REVISION_PREFIX = "packaging-asset:"
 _RELATIONSHIP_ID_PREFIX = "packaging-relationship:"
 _RELATIONSHIP_REVISION_PREFIX = "packaging-relationship-revision:"
+_SKU_REVISION_PREFIX = "packaging-sku:"
+_SKU_TARGET_PREFIX = "packaging-sku-id:"
 _RELATIONSHIP_ID = re.compile(r"^packaging-relationship:[0-9a-f]{64}$")
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -39,6 +46,14 @@ _RELATIONSHIP_FIELDS = frozenset(
         "source_reference_id",
         "timestamp_utc",
     }
+)
+_SKU_FIELDS = (
+    "artwork_presentations",
+    "display_name",
+    "geometry_reference",
+    "preferred_design_model",
+    "sku_id",
+    "status",
 )
 _SAFE_ASSET_FIELDS = frozenset(
     {
@@ -206,6 +221,7 @@ class PackagingLibraryAuditSnapshot:
     assets: tuple[PackagingLibraryAssetEntry, ...]
     events: tuple[PackagingLibraryAuditEvent, ...]
     relationships: tuple[PackagingAssetRelationship, ...] = ()
+    skus: tuple[PackagingSkuRevision, ...] = ()
 
 
 class PackagingLibraryAuditStore:
@@ -427,6 +443,7 @@ class PackagingLibraryAuditStore:
                         key=lambda item: item.relationship_id,
                     )
                 ),
+                skus=current.skus,
             )
             self._publish(updated)
             return updated
@@ -502,6 +519,78 @@ class PackagingLibraryAuditStore:
                     for item in current.relationships
                     if item.relationship_id != relationship_id
                 ),
+                skus=current.skus,
+            )
+            self._publish(updated)
+            return updated
+
+    def create_sku(
+        self,
+        sku: PackagingSkuRevision,
+        *,
+        expected_state_revision: str,
+        expected_asset_revision_id: str,
+        current_artwork_references: tuple[SkuArtworkPresentationReference, ...] = (),
+        actor_id: str,
+        reason: str,
+    ) -> PackagingLibraryAuditSnapshot:
+        """Atomically add a unique SKU pinned to one current asset and accepted artwork set."""
+        if not isinstance(sku, PackagingSkuRevision):
+            raise PackagingLibraryAuditError("packaging_library_sku_required")
+        if not isinstance(current_artwork_references, tuple) or any(
+            not isinstance(item, SkuArtworkPresentationReference)
+            for item in current_artwork_references
+        ):
+            raise PackagingLibraryAuditError("packaging_library_sku_artwork_registry_invalid")
+        _validate_actor(actor_id)
+        _validate_reason(reason)
+        _validate_revision(expected_state_revision, _STATE_REVISION_PREFIX, "expected_state")
+        _validate_revision(expected_asset_revision_id, _ASSET_REVISION_PREFIX, "expected_asset")
+        with self._exclusive_lock():
+            current = self._load()
+            if expected_state_revision != current.state_revision:
+                raise StalePackagingLibraryState("packaging_library_state_revision_stale")
+            asset_entry = next(
+                (item for item in current.assets if item.asset_id == sku.packaging_asset_id), None
+            )
+            if asset_entry is None:
+                raise PackagingLibraryAuditError("packaging_library_sku_asset_missing")
+            if asset_entry.revision_id != expected_asset_revision_id or (
+                sku.packaging_asset_revision_id != expected_asset_revision_id
+            ):
+                raise StalePackagingLibraryState("packaging_library_sku_asset_revision_stale")
+            asset_document = json.loads(asset_entry.canonical_json)
+            linked_models = asset_document.get("source_links", {}).get("design_models", [])
+            if sku.preferred_design_model_link is not None and (
+                sku.preferred_design_model_link.as_dict() not in linked_models
+            ):
+                raise PackagingLibraryAuditError("packaging_library_sku_design_model_stale")
+            if any(item.sku_id == sku.sku_id for item in current.skus):
+                raise PackagingLibraryAuditError("packaging_library_sku_id_already_exists")
+            if any(item not in current_artwork_references for item in sku.artwork_references):
+                raise PackagingLibraryAuditError("packaging_library_sku_artwork_stale")
+            event = _new_event(
+                current,
+                actor_id=actor_id,
+                timestamp_utc=_timestamp(self._clock()),
+                reason=reason,
+                operation_type="SKU_CREATE",
+                target_entity_ids=(
+                    _SKU_TARGET_PREFIX + sku.sku_id,
+                    sku.packaging_asset_id,
+                    sku.packaging_asset_revision_id,
+                ),
+                before_revision_id=None,
+                after_revision_id=sku.revision_id,
+                changed_field_names=_SKU_FIELDS,
+            )
+            updated = PackagingLibraryAuditSnapshot(
+                state_revision=event.state_revision,
+                audit_head_digest=event.event_digest,
+                assets=current.assets,
+                events=(*current.events, event),
+                relationships=current.relationships,
+                skus=tuple(sorted((*current.skus, sku), key=lambda item: item.sku_id)),
             )
             self._publish(updated)
             return updated
@@ -584,6 +673,8 @@ class PackagingLibraryAuditStore:
                 audit_head_digest=event.event_digest,
                 assets=tuple(sorted(entries.values(), key=lambda item: item.asset_id)),
                 events=(*current.events, event),
+                relationships=current.relationships,
+                skus=current.skus,
             )
             self._publish(updated)
             return updated
@@ -597,15 +688,17 @@ class PackagingLibraryAuditStore:
             raise PackagingLibraryAuditError("packaging_library_state_file_unsafe")
         try:
             value = json.loads(self.state_path.read_text(encoding="utf-8"))
-            if not isinstance(value, dict) or value.get("schema_version") not in {1, 2}:
+            if not isinstance(value, dict) or value.get("schema_version") not in {1, 2, 3}:
                 raise PackagingLibraryAuditError("packaging_library_state_schema_invalid")
             raw_assets = value.get("assets")
             raw_events = value.get("events")
             raw_relationships = value.get("relationships", [])
+            raw_skus = value.get("skus", [])
             if (
                 not isinstance(raw_assets, list)
                 or not isinstance(raw_events, list)
                 or not isinstance(raw_relationships, list)
+                or not isinstance(raw_skus, list)
             ):
                 raise PackagingLibraryAuditError("packaging_library_state_shape_invalid")
             if len(raw_events) > _MAX_EVENTS:
@@ -613,16 +706,20 @@ class PackagingLibraryAuditStore:
             assets = tuple(_parse_asset_entry(item) for item in raw_assets)
             events = tuple(_parse_event(item) for item in raw_events)
             relationships = tuple(_parse_relationship(item) for item in raw_relationships)
+            skus = tuple(_parse_sku(item) for item in raw_skus)
             if len({item.asset_id for item in assets}) != len(assets):
                 raise PackagingLibraryAuditError("packaging_library_asset_duplicate")
             if len({item.relationship_id for item in relationships}) != len(relationships):
                 raise PackagingLibraryAuditError("packaging_library_relationship_duplicate")
+            if len({item.sku_id for item in skus}) != len(skus):
+                raise PackagingLibraryAuditError("packaging_library_sku_duplicate")
             snapshot = PackagingLibraryAuditSnapshot(
                 state_revision=value["state_revision"],
                 audit_head_digest=value["audit_head_digest"],
                 assets=tuple(sorted(assets, key=lambda item: item.asset_id)),
                 events=events,
                 relationships=tuple(sorted(relationships, key=lambda item: item.relationship_id)),
+                skus=tuple(sorted(skus, key=lambda item: item.sku_id)),
             )
             _validate_snapshot(snapshot)
             return snapshot
@@ -634,7 +731,7 @@ class PackagingLibraryAuditStore:
     def _publish(self, snapshot: PackagingLibraryAuditSnapshot) -> None:
         _validate_snapshot(snapshot)
         value = {
-            "schema_version": 2,
+            "schema_version": 3,
             "state_revision": snapshot.state_revision,
             "audit_head_digest": snapshot.audit_head_digest,
             "assets": [
@@ -647,6 +744,14 @@ class PackagingLibraryAuditStore:
             ],
             "events": [item.as_dict() for item in snapshot.events],
             "relationships": [item.as_dict() for item in snapshot.relationships],
+            "skus": [
+                {
+                    "sku_id": item.sku_id,
+                    "revision_id": item.revision_id,
+                    "document": item.as_dict(),
+                }
+                for item in snapshot.skus
+            ],
         }
         _atomic_json(self.state_path, value)
 
@@ -797,12 +902,80 @@ def _parse_relationship(value: object) -> PackagingAssetRelationship:
     return relationship
 
 
+def _parse_sku(value: object) -> PackagingSkuRevision:
+    if not isinstance(value, dict) or not isinstance(value.get("document"), dict):
+        raise PackagingLibraryAuditError("packaging_library_sku_invalid")
+    document = value["document"]
+    try:
+        geometry = document["geometry_reference"]
+        preferred = document.get("preferred_design_model")
+        design_model = (
+            DesignModelLink(
+                project_id=preferred["project_id"],
+                revision_id=preferred["revision_id"],
+                content_sha256=preferred["content_sha256"],
+                parent_authority_kind=preferred["parent_authority_kind"],
+                parent_authority_revision_id=preferred["parent_authority_revision_id"],
+                scale_state=ScaleState(preferred["scale_state"]),
+                scan_master_revision_id=preferred["scan_master_revision_id"],
+                scan_master_geometry_sha256=preferred["scan_master_geometry_sha256"],
+                physical_accuracy_validation_status=preferred[
+                    "physical_accuracy_validation_status"
+                ],
+                mold_use_authorized=preferred["mold_use_authorized"],
+                authority_class=preferred["authority_class"],
+            )
+            if isinstance(preferred, dict)
+            else None
+        )
+        artwork: list[SkuArtworkPresentationReference] = []
+        raw_artwork = document["artwork_presentations"]
+        if not isinstance(raw_artwork, list):
+            raise TypeError("artwork references must be a list")
+        for item in raw_artwork:
+            brep = item["label_zone_brep"]
+            artwork.append(
+                SkuArtworkPresentationReference(
+                    label_zone_id=item["label_zone_id"],
+                    label_zone_design_model_revision_id=item["label_zone_design_model_revision_id"],
+                    label_zone_brep_revision_id=brep["revision_id"],
+                    label_zone_brep_geometry_sha256=brep["geometry_sha256"],
+                    artwork_revision_id=item["artwork_revision_id"],
+                    artwork_content_sha256=item["artwork_content_sha256"],
+                    mapping_revision_id=item["mapping_revision_id"],
+                    assignment_revision_id=item["assignment_revision_id"],
+                    variant_id=item["variant_id"],
+                )
+            )
+        sku = PackagingSkuRevision(
+            sku_id=document["sku_id"],
+            display_name=document["display_name"],
+            status=PackagingSkuStatus(document["status"]),
+            packaging_asset_id=geometry["packaging_asset_id"],
+            packaging_asset_revision_id=geometry["revision_id"],
+            preferred_design_model_link=design_model,
+            artwork_references=tuple(artwork),
+            contract=document["contract"],
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise PackagingLibraryAuditError("packaging_library_sku_invalid") from error
+    if (
+        value.get("sku_id") != sku.sku_id
+        or value.get("revision_id") != sku.revision_id
+        or document != sku.as_dict()
+    ):
+        raise PackagingLibraryAuditError("packaging_library_sku_revision_invalid")
+    return sku
+
+
 def _validate_snapshot(snapshot: PackagingLibraryAuditSnapshot) -> None:
     state_revision = _genesis_state_revision()
     event_digest = ""
     seen_event_ids: set[str] = set()
     replayed_assets: dict[str, str] = {}
+    seen_asset_revisions: dict[str, set[str]] = {}
     replayed_relationships: dict[str, tuple[str, bool, tuple[str, ...]]] = {}
+    replayed_skus: dict[str, tuple[str, str, str]] = {}
     for event in snapshot.events:
         _validate_event_shape(event)
         if event.event_id in seen_event_ids:
@@ -865,6 +1038,19 @@ def _validate_snapshot(snapshot: PackagingLibraryAuditSnapshot) -> None:
                     False,
                     event.target_entity_ids,
                 )
+        elif event.operation_type == "SKU_CREATE":
+            sku_target, asset_id, asset_revision_id = event.target_entity_ids
+            if not sku_target.startswith(_SKU_TARGET_PREFIX):
+                raise PackagingLibraryAuditError("packaging_library_sku_event_invalid")
+            sku_id = sku_target[len(_SKU_TARGET_PREFIX) :]
+            _validate_id(sku_id, "sku")
+            if (
+                sku_id in replayed_skus
+                or replayed_assets.get(asset_id) != asset_revision_id
+                or event.before_revision_id is not None
+            ):
+                raise PackagingLibraryAuditError("packaging_library_sku_event_invalid")
+            replayed_skus[sku_id] = (event.after_revision_id, asset_id, asset_revision_id)
         else:
             asset_id = event.target_entity_ids[0]
             current_revision = replayed_assets.get(asset_id)
@@ -874,6 +1060,7 @@ def _validate_snapshot(snapshot: PackagingLibraryAuditSnapshot) -> None:
             elif current_revision != event.before_revision_id:
                 raise PackagingLibraryAuditError("packaging_library_event_before_revision_invalid")
             replayed_assets[asset_id] = event.after_revision_id
+            seen_asset_revisions.setdefault(asset_id, set()).add(event.after_revision_id)
         event_digest = event.event_digest
         state_revision = event.state_revision
     current_assets = {item.asset_id: item.revision_id for item in snapshot.assets}
@@ -901,6 +1088,21 @@ def _validate_snapshot(snapshot: PackagingLibraryAuditSnapshot) -> None:
         raise PackagingLibraryAuditError("packaging_library_variant_cycle_invalid")
     if (snapshot.state_revision, snapshot.audit_head_digest) != (state_revision, event_digest):
         raise PackagingLibraryAuditError("packaging_library_audit_head_mismatch")
+    current_skus = {
+        item.sku_id: (
+            item.revision_id,
+            item.packaging_asset_id,
+            item.packaging_asset_revision_id,
+        )
+        for item in snapshot.skus
+    }
+    if current_skus != replayed_skus:
+        raise PackagingLibraryAuditError("packaging_library_sku_state_mismatch")
+    for sku in snapshot.skus:
+        if sku.packaging_asset_revision_id not in seen_asset_revisions.get(
+            sku.packaging_asset_id, set()
+        ):
+            raise PackagingLibraryAuditError("packaging_library_sku_asset_revision_invalid")
 
 
 def _validate_event_shape(event: PackagingLibraryAuditEvent) -> None:
@@ -923,6 +1125,7 @@ def _validate_event_shape(event: PackagingLibraryAuditEvent) -> None:
         "UNLINK",
         "RELATE",
         "UNRELATE",
+        "SKU_CREATE",
     }:
         raise PackagingLibraryAuditError("packaging_library_operation_type_invalid")
     if (
@@ -931,8 +1134,16 @@ def _validate_event_shape(event: PackagingLibraryAuditEvent) -> None:
         or len(set(event.target_entity_ids)) != len(event.target_entity_ids)
     ):
         raise PackagingLibraryAuditError("packaging_library_event_targets_invalid")
-    for target in event.target_entity_ids:
-        _validate_id(target, "target")
+    sku_event = event.operation_type == "SKU_CREATE"
+    for index, target in enumerate(event.target_entity_ids):
+        if sku_event and index == 0:
+            if not target.startswith(_SKU_TARGET_PREFIX):
+                raise PackagingLibraryAuditError("packaging_library_sku_event_targets_invalid")
+            _validate_id(target[len(_SKU_TARGET_PREFIX) :], "sku")
+        elif sku_event and index == 2:
+            _validate_revision(target, _ASSET_REVISION_PREFIX, "sku_asset")
+        else:
+            _validate_id(target, "target")
     relationship_event = event.operation_type in {"RELATE", "UNRELATE"}
     if relationship_event:
         if (
@@ -943,6 +1154,13 @@ def _validate_event_shape(event: PackagingLibraryAuditEvent) -> None:
             raise PackagingLibraryAuditError("packaging_library_relationship_event_targets_invalid")
         revision_prefix = _RELATIONSHIP_REVISION_PREFIX
         allowed_fields = _RELATIONSHIP_FIELDS | {"active"}
+    elif sku_event:
+        if len(event.target_entity_ids) != 3 or not event.target_entity_ids[0].startswith(
+            _SKU_TARGET_PREFIX
+        ):
+            raise PackagingLibraryAuditError("packaging_library_sku_event_targets_invalid")
+        revision_prefix = _SKU_REVISION_PREFIX
+        allowed_fields = frozenset(_SKU_FIELDS)
     else:
         revision_prefix = _ASSET_REVISION_PREFIX
         allowed_fields = _SAFE_ASSET_FIELDS
@@ -968,6 +1186,11 @@ def _validate_event_shape(event: PackagingLibraryAuditEvent) -> None:
             raise PackagingLibraryAuditError("packaging_library_relationship_remove_fields_invalid")
         if event.before_revision_id == event.after_revision_id:
             raise PackagingLibraryAuditError("packaging_library_noop_event_invalid")
+    if sku_event and (
+        event.before_revision_id is not None or event.changed_field_names != _SKU_FIELDS
+    ):
+        raise PackagingLibraryAuditError("packaging_library_sku_event_shape_invalid")
+    if relationship_event or sku_event:
         return
     if event.operation_type == "CREATE" and event.before_revision_id is not None:
         raise PackagingLibraryAuditError("packaging_library_event_create_invalid")

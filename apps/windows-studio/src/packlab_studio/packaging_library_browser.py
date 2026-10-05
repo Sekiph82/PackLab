@@ -20,6 +20,9 @@ from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QSize, Qt, Signal
 from PySide6.QtGui import QImageReader, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -31,6 +34,13 @@ from PySide6.QtWidgets import (
     QTextBrowser,
     QVBoxLayout,
     QWidget,
+)
+
+from packlab_core.packaging_asset import DesignModelLink, ScaleState
+from packlab_core.packaging_sku_library import (
+    PackagingSkuRevision,
+    PackagingSkuStatus,
+    SkuArtworkPresentationReference,
 )
 
 from .packaging_library_audit import PackagingAssetRelationship
@@ -223,6 +233,10 @@ class PackagingLibraryBrowserService:
         preview_resolver: Callable[[LinkedProjectRevision], ProjectPreviewResolution | None]
         | None = None,
         related_records_resolver: Callable[[str], tuple[LibraryRelatedRecord, ...]] | None = None,
+        sku_artwork_references_provider: Callable[
+            [str, str], tuple[SkuArtworkPresentationReference, ...]
+        ]
+        | None = None,
         preview_adapter: QtRasterViewportAdapter | None = None,
     ) -> None:
         if audit_store is None or not callable(getattr(audit_store, "snapshot", None)):
@@ -239,7 +253,86 @@ class PackagingLibraryBrowserService:
         self.project_root_resolver = project_root_resolver
         self.preview_resolver = preview_resolver
         self.related_records_resolver = related_records_resolver
+        self.sku_artwork_references_provider = sku_artwork_references_provider
         self.preview_adapter = preview_adapter or QtRasterViewportAdapter()
+
+    def available_sku_artwork_references(
+        self, asset_id: str, asset_revision_id: str
+    ) -> tuple[SkuArtworkPresentationReference, ...]:
+        if self.sku_artwork_references_provider is None:
+            return ()
+        references = self.sku_artwork_references_provider(asset_id, asset_revision_id)
+        if not isinstance(references, tuple) or any(
+            not isinstance(item, SkuArtworkPresentationReference) for item in references
+        ):
+            raise PackagingLibraryBrowserError("library_sku_artwork_references_invalid")
+        return references
+
+    def create_sku_from_asset(
+        self,
+        summary: PackagingLibraryAssetSummary,
+        *,
+        sku_id: str,
+        display_name: str,
+        status: PackagingSkuStatus,
+        artwork_references: tuple[SkuArtworkPresentationReference, ...],
+        expected_state_revision: str,
+        actor_id: str,
+        reason: str,
+    ):
+        if not isinstance(summary, PackagingLibraryAssetSummary):
+            raise PackagingLibraryBrowserError("library_asset_summary_required")
+        snapshot = self.audit_store.snapshot()
+        entry = next((item for item in snapshot.assets if item.asset_id == summary.asset_id), None)
+        if entry is None or entry.revision_id != summary.revision_id:
+            raise PackagingLibraryBrowserError("library_asset_detail_revision_stale")
+        document = json.loads(entry.canonical_json)
+        source_links = document.get("source_links", {})
+        preferred_revision = source_links.get("preferred_design_model_revision_id")
+        linked_models = source_links.get("design_models", [])
+        preferred_document = next(
+            (
+                item
+                for item in linked_models
+                if isinstance(item, dict) and item.get("revision_id") == preferred_revision
+            ),
+            None,
+        )
+        preferred_link = (
+            _design_model_link_from_dict(preferred_document)
+            if preferred_document is not None
+            else None
+        )
+        sku = PackagingSkuRevision(
+            sku_id=sku_id,
+            display_name=display_name,
+            status=status,
+            packaging_asset_id=entry.asset_id,
+            packaging_asset_revision_id=entry.revision_id,
+            preferred_design_model_link=preferred_link,
+            artwork_references=artwork_references,
+        )
+        current_artwork = self.available_sku_artwork_references(entry.asset_id, entry.revision_id)
+        if not set(sku.artwork_references).issubset(current_artwork):
+            raise PackagingLibraryBrowserError("library_sku_artwork_reference_stale")
+        design_model_revision_ids = {
+            item.get("revision_id")
+            for item in linked_models
+            if isinstance(item, dict) and isinstance(item.get("revision_id"), str)
+        }
+        if any(
+            item.label_zone_design_model_revision_id not in design_model_revision_ids
+            for item in sku.artwork_references
+        ):
+            raise PackagingLibraryBrowserError("library_sku_artwork_design_model_mismatch")
+        return self.audit_store.create_sku(
+            sku,
+            expected_state_revision=expected_state_revision,
+            expected_asset_revision_id=entry.revision_id,
+            current_artwork_references=current_artwork,
+            actor_id=actor_id,
+            reason=reason,
+        )
 
     def list_assets(self) -> tuple[PackagingLibraryAssetSummary, ...]:
         snapshot = self.audit_store.snapshot()
@@ -432,6 +525,20 @@ class PackagingLibraryBrowserService:
                 not isinstance(item, LibraryRelatedRecord) for item in related
             ):
                 raise PackagingLibraryBrowserError("library_related_records_invalid")
+            persisted_skus = tuple(
+                LibraryRelatedRecord("SKU", item.sku_id, item.display_name, item.revision_id)
+                for item in getattr(snapshot, "skus", ())
+                if item.packaging_asset_id == summary.asset_id
+            )
+            persisted_sku_ids = {item.record_id for item in persisted_skus}
+            related = (
+                tuple(
+                    item
+                    for item in related
+                    if item.record_type != "SKU" or item.record_id not in persisted_sku_ids
+                )
+                + persisted_skus
+            )
             return PackagingLibraryAssetDetail(
                 summary=summary,
                 dimensions=dimensions,
@@ -616,6 +723,146 @@ class PackagingLibraryBrowserService:
             return None
 
 
+class CreatePackagingSkuDialog(QDialog):
+    """Create an immutable SKU while retaining the selected asset's exact identity."""
+
+    def __init__(
+        self,
+        service: PackagingLibraryBrowserService,
+        summary: PackagingLibraryAssetSummary,
+        *,
+        expected_state_revision: str,
+        preview: PreviewResult,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("packlab.library.create-sku-dialog")
+        self.setWindowTitle("Create SKU from Existing Geometry")
+        self.service = service
+        self.summary = summary
+        self.expected_state_revision = expected_state_revision
+        self.created_sku: PackagingSkuRevision | None = None
+
+        layout = QVBoxLayout(self)
+        self.source_preview = QLabel(self)
+        self.source_preview.setObjectName("packlab.library.create-sku.preview")
+        self.source_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.source_preview.setMinimumSize(QSize(320, 180))
+        if preview.state is PreviewState.AVAILABLE and preview.image is not None:
+            self.source_preview.setPixmap(
+                QPixmap.fromImage(preview.image).scaled(
+                    QSize(400, 260),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        else:
+            self.source_preview.setText(
+                f"Geometry preview {preview.state.value.lower()}: {preview.message}"
+            )
+        layout.addWidget(self.source_preview)
+        self.source_identity = QLabel(
+            f"Reusing {summary.display_name}\n"
+            f"Asset: {summary.asset_id}\nAsset revision: {summary.revision_id}\n"
+            f"Supplier: {summary.supplier_name or 'Unknown'} "
+            f"({summary.supplier_id or 'Unknown'})\n"
+            "Source field provenance stays with the Packaging Asset:\n"
+            + "\n".join(f"{field}: {kind}" for field, kind in summary.field_provenance)
+            + "\nGeometry remains linked and unchanged.",
+            self,
+        )
+        self.source_identity.setObjectName("packlab.library.create-sku.source")
+        layout.addWidget(self.source_identity)
+
+        form = QFormLayout()
+        self.sku_id_field = QLineEdit(self)
+        self.sku_id_field.setObjectName("packlab.library.create-sku.id")
+        self.sku_id_field.setMaxLength(128)
+        self.display_name_field = QLineEdit(self)
+        self.display_name_field.setObjectName("packlab.library.create-sku.name")
+        self.display_name_field.setMaxLength(120)
+        self.status_selector = QComboBox(self)
+        self.status_selector.setObjectName("packlab.library.create-sku.status")
+        for status in PackagingSkuStatus:
+            self.status_selector.addItem(status.value, status)
+        self.artwork_view = QListWidget(self)
+        self.artwork_view.setObjectName("packlab.library.create-sku.artwork")
+        self.artwork_view.setMaximumHeight(120)
+        self.error_label = QLabel("", self)
+        self.error_label.setObjectName("packlab.library.create-sku.error")
+        form.addRow("SKU ID", self.sku_id_field)
+        form.addRow("Name", self.display_name_field)
+        form.addRow("Status", self.status_selector)
+        form.addRow("Accepted artwork assignments", self.artwork_view)
+        layout.addLayout(form)
+        layout.addWidget(self.error_label)
+        try:
+            artwork = service.available_sku_artwork_references(
+                summary.asset_id, summary.revision_id
+            )
+        except Exception as error:
+            artwork = ()
+            self.error_label.setText(f"Artwork choices unavailable: {error}")
+        for reference in artwork:
+            item = QListWidgetItem(
+                f"{reference.label_zone_id} · {reference.variant_id} · "
+                f"assignment {reference.assignment_revision_id}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, reference)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.artwork_view.addItem(item)
+        if not artwork:
+            self.artwork_view.addItem("No accepted artwork assignment references available.")
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Save,
+            parent=self,
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Save).setObjectName(
+            "packlab.library.create-sku.save"
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setObjectName(
+            "packlab.library.create-sku.cancel"
+        )
+        buttons.accepted.connect(self._create)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _create(self) -> None:
+        selected = tuple(
+            self.artwork_view.item(index).data(Qt.ItemDataRole.UserRole)
+            for index in range(self.artwork_view.count())
+            if self.artwork_view.item(index).checkState() is Qt.CheckState.Checked
+        )
+        selected = tuple(
+            item for item in selected if isinstance(item, SkuArtworkPresentationReference)
+        )
+        try:
+            raw_status = self.status_selector.currentData()
+            status = (
+                raw_status
+                if isinstance(raw_status, PackagingSkuStatus)
+                else PackagingSkuStatus(raw_status)
+            )
+            snapshot = self.service.create_sku_from_asset(
+                self.summary,
+                sku_id=self.sku_id_field.text().strip(),
+                display_name=self.display_name_field.text(),
+                status=status,
+                artwork_references=selected,
+                expected_state_revision=self.expected_state_revision,
+                actor_id="studio-user",
+                reason="Create Packaging SKU from existing library geometry",
+            )
+            self.created_sku = next(
+                item for item in snapshot.skus if item.sku_id == self.sku_id_field.text().strip()
+            )
+        except Exception as error:
+            self.error_label.setText(f"Unable to create SKU: {error}")
+            return
+        self.accept()
+
+
 class PackagingLibraryBrowserView(QWidget):
     """Grid/list browser with stable selection and deterministic local-thumbnail fallback."""
 
@@ -649,6 +896,8 @@ class PackagingLibraryBrowserView(QWidget):
         self.clear_filters_button.setObjectName("packlab.library.clear-filters")
         self.refresh_button = QPushButton("Refresh", self)
         self.refresh_button.setObjectName("packlab.library.refresh")
+        self.create_sku_button = QPushButton("Create SKU from selected geometry", self)
+        self.create_sku_button.setObjectName("packlab.library.create-sku")
         self.selection_summary = QLabel("No asset selected.", self)
         self.selection_summary.setObjectName("packlab.library.selection")
         self.item_view = QListWidget(self)
@@ -695,6 +944,7 @@ class PackagingLibraryBrowserView(QWidget):
         toolbar.addWidget(self.mode_selector)
         toolbar.addWidget(self.search_field, 1)
         toolbar.addWidget(self.refresh_button)
+        toolbar.addWidget(self.create_sku_button)
         toolbar.addStretch(1)
         filter_toolbar = QHBoxLayout()
         for combo in (
@@ -722,6 +972,7 @@ class PackagingLibraryBrowserView(QWidget):
             combo.currentIndexChanged.connect(self.refresh)
         self.clear_filters_button.clicked.connect(self._clear_filters)
         self.refresh_button.clicked.connect(self.refresh)
+        self.create_sku_button.clicked.connect(self._create_sku)
         self.item_view.currentItemChanged.connect(self._selection_changed)
         self.related_asset_view.itemClicked.connect(self._navigate_related_asset)
         self.refresh()
@@ -1082,6 +1333,30 @@ class PackagingLibraryBrowserView(QWidget):
         self.selection_changed.emit(asset_id)
         self._show_details(asset_id)
 
+    def _create_sku(self) -> None:
+        summary = next(
+            (item for item in self._summaries if item.asset_id == self.selected_asset_id), None
+        )
+        if summary is None or self.service is None:
+            self.selection_summary.setText("Select a packaging asset before creating a SKU.")
+            return
+        try:
+            detail = self.service.asset_detail(summary)
+            preview = self.service.render_preview(detail)
+            snapshot = self.service.audit_store.snapshot()
+            dialog = CreatePackagingSkuDialog(
+                self.service,
+                summary,
+                expected_state_revision=snapshot.state_revision,
+                preview=preview,
+                parent=self,
+            )
+        except Exception as error:
+            self.selection_summary.setText(f"Unable to open SKU workflow: {error}")
+            return
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.refresh()
+
 
 def _safe_relative_path(value: object) -> PurePosixPath:
     if not isinstance(value, str) or not value or "\\" in value or ":" in value:
@@ -1095,6 +1370,22 @@ def _safe_relative_path(value: object) -> PurePosixPath:
     ):
         raise PackagingLibraryBrowserError("library_thumbnail_path_invalid")
     return path
+
+
+def _design_model_link_from_dict(value: dict[str, object]) -> DesignModelLink:
+    return DesignModelLink(
+        project_id=value["project_id"],
+        revision_id=value["revision_id"],
+        content_sha256=value["content_sha256"],
+        parent_authority_kind=value["parent_authority_kind"],
+        parent_authority_revision_id=value["parent_authority_revision_id"],
+        scale_state=ScaleState(value["scale_state"]),
+        scan_master_revision_id=value["scan_master_revision_id"],
+        scan_master_geometry_sha256=value["scan_master_geometry_sha256"],
+        physical_accuracy_validation_status=value["physical_accuracy_validation_status"],
+        mold_use_authorized=value["mold_use_authorized"],
+        authority_class=value["authority_class"],
+    )
 
 
 def _ensure_safe_local_file(root: Path, candidate: Path) -> os.stat_result:

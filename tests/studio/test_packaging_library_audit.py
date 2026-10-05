@@ -12,6 +12,11 @@ from packlab_core.packaging_asset import (
     ProvenanceClass,
     RawScanLink,
 )
+from packlab_core.packaging_sku_library import (
+    PackagingSkuRevision,
+    PackagingSkuStatus,
+    SkuArtworkPresentationReference,
+)
 from packlab_studio import packaging_library_audit as audit
 from packlab_studio.packaging_library_audit import (
     PackagingAssetRelationship,
@@ -409,6 +414,122 @@ def test_variant_relationships_reject_self_cycles_and_stale_asset_revisions(
             provenance_class="USER_DECLARED",
         )
     assert store.validate() == second
+
+
+def test_create_sku_is_atomic_revisioned_unique_and_keeps_geometry_separate(
+    tmp_path: Path,
+) -> None:
+    store = _store(tmp_path / "library")
+    _, created = _created(store)
+    asset = _asset()
+    sku = PackagingSkuRevision.create(
+        asset,
+        sku_id="water-500-red",
+        display_name="500 mL Water · Red Label",
+        status=PackagingSkuStatus.DRAFT,
+    )
+    before_asset_revision = created.assets[0].revision_id
+    result = store.create_sku(
+        sku,
+        expected_state_revision=created.state_revision,
+        expected_asset_revision_id=before_asset_revision,
+        actor_id="operator-1",
+        reason="Create a SKU using the existing package geometry",
+    )
+
+    assert result.skus == (sku,)
+    assert result.assets[0].revision_id == before_asset_revision
+    assert result.events[-1].operation_type == "SKU_CREATE"
+    assert result.events[-1].target_entity_ids == (
+        "packaging-sku-id:" + sku.sku_id,
+        asset.asset_id,
+        before_asset_revision,
+    )
+    assert result.events[-1].after_revision_id == sku.revision_id
+    assert store.validate() == result
+    assert _store(tmp_path / "library").snapshot() == result
+
+    duplicate_id = PackagingSkuRevision.create(
+        asset,
+        sku_id=sku.sku_id,
+        display_name="A second distinct SKU revision",
+        status=PackagingSkuStatus.ACTIVE,
+    )
+    with pytest.raises(PackagingLibraryAuditError, match="sku_id_already_exists"):
+        store.create_sku(
+            duplicate_id,
+            expected_state_revision=result.state_revision,
+            expected_asset_revision_id=before_asset_revision,
+            actor_id="operator-1",
+            reason="Attempt duplicate SKU identity",
+        )
+    assert store.validate() == result
+
+    revised_asset = asset.with_field_update(
+        "display_name",
+        "500 mL Water Bottle Renamed",
+        FieldProvenance("display_name", ProvenanceClass.PACKLAB_ESTIMATE, method_id="rename-v1"),
+    )
+    after_asset_metadata_revision = store.update_asset(
+        revised_asset,
+        expected_state_revision=result.state_revision,
+        expected_asset_revision_id=before_asset_revision,
+        actor_id="operator-1",
+        reason="Update asset display metadata without changing SKU geometry authority",
+    )
+    assert after_asset_metadata_revision.assets[0].revision_id == revised_asset.revision_id
+    assert (
+        after_asset_metadata_revision.skus[0].packaging_asset_revision_id == before_asset_revision
+    )
+    assert store.validate() == after_asset_metadata_revision
+
+
+def test_create_sku_rejects_stale_asset_and_artwork_references(tmp_path: Path) -> None:
+    store = _store(tmp_path / "library")
+    _, created = _created(store)
+    asset = _asset()
+    sku = PackagingSkuRevision.create(
+        asset,
+        sku_id="water-500-art",
+        display_name="500 mL Water with Artwork",
+        status=PackagingSkuStatus.ACTIVE,
+    )
+    with pytest.raises(StalePackagingLibraryState, match="sku_asset_revision_stale"):
+        store.create_sku(
+            sku,
+            expected_state_revision=created.state_revision,
+            expected_asset_revision_id="packaging-asset:" + "0" * 64,
+            actor_id="operator-1",
+            reason="Try an obsolete asset revision",
+        )
+
+    artwork = SkuArtworkPresentationReference(
+        label_zone_id="zone-water-front",
+        label_zone_design_model_revision_id="model-rev-1",
+        label_zone_brep_revision_id="brep-rev-1",
+        label_zone_brep_geometry_sha256="a" * 64,
+        artwork_revision_id="art-rev-1",
+        artwork_content_sha256="b" * 64,
+        mapping_revision_id="mapping-rev-1",
+        assignment_revision_id="assignment-rev-1",
+        variant_id="front-primary",
+    )
+    with_artwork = PackagingSkuRevision.create(
+        asset,
+        sku_id="water-500-art",
+        display_name="500 mL Water with Artwork",
+        status=PackagingSkuStatus.ACTIVE,
+        artwork_references=(artwork,),
+    )
+    with pytest.raises(PackagingLibraryAuditError, match="sku_artwork_stale"):
+        store.create_sku(
+            with_artwork,
+            expected_state_revision=created.state_revision,
+            expected_asset_revision_id=created.assets[0].revision_id,
+            actor_id="operator-1",
+            reason="Artwork assignment is no longer current",
+        )
+    assert store.validate() == created
 
 
 def test_schema_one_state_without_relationships_remains_readable(tmp_path: Path) -> None:
