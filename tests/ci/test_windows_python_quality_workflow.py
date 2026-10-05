@@ -33,7 +33,9 @@ def test_windows_python_quality_workflow_has_locked_least_privilege_contract() -
     assert "uv lock --check" in workflow
     assert "uv sync --locked --all-groups" in workflow
     assert "uv run --locked ruff check core apps tools tests" in workflow
-    assert "uv run --locked ruff format --check -- $changedPython" in workflow
+    assert "ruff format --check --config" in workflow
+    assert "format.line-ending = 'auto'" in workflow
+    assert "-- $changedPython" in workflow
     assert "uv run --locked mypy core apps tools" in workflow
     assert "uv run --locked pytest -q" in workflow
     assert workflow.count("steps.locked-env.outcome == 'success'") == 4

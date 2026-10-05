@@ -91,7 +91,7 @@ jobs:
           $changedPython = @(git diff --name-only --diff-filter=ACMR "$base...HEAD" -- "*.py")
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($changedPython.Count -gt 0) {
-            uv run --locked ruff format --check -- $changedPython
+            uv run --locked ruff format --check --config "format.line-ending = 'auto'" -- $changedPython
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
