@@ -24,7 +24,8 @@
 | PL-0320 | READY_FOR_INDEPENDENT_AUDIT | `e8c458b24f08cf47e8e15ea9bbeaa82153fcd184` | `2dbea6dff7bea1babaf70ddc3c2faa8cbd3c66db` | 53 focused; full 1,770 passed, 6 skipped, 1 deselected |
 | PL-0321 | READY_FOR_INDEPENDENT_AUDIT | `0f4907869f378eb3f73576ad58760221e0e9cf37` | `694e8d7dafb778573ced842beb8f22be1f86f08b` | 52 focused; full 1,775 passed, 6 skipped, 1 deselected |
 | PL-0322 | READY_FOR_INDEPENDENT_AUDIT | `9fd3d63bdedd5059f20900ac208149beedaf6f6e` | `d4cf18284086dd53d978ee798e0121e9a0787166` | 46 focused/predecessor passed; full locked 1,797 passed, 6 skipped, 1 deselected |
-| PL-0323–PL-0331 | NOT_STARTED | pending | pending | pending |
+| PL-0323 | READY_FOR_INDEPENDENT_AUDIT | `b5412210f2a5e4cf29905cbde742467cffa58925` | `430565e094c3a87ce518bd49812a38ee7a50e064` | 83 focused/predecessor passed; full locked 1,805 passed, 6 skipped, 1 deselected |
+| PL-0324–PL-0331 | NOT_STARTED | pending | pending | pending |
 
 ## PL-0313 V02 resolution
 
@@ -36,7 +37,7 @@ Focused command: `uv run --locked pytest -q tests/core/test_label_metric_surface
 
 ## Continuation status
 
-PL-0313 V02 through PL-0322 V01 are builder-green and awaiting independent child audit. PL-0322 implementation, child log, and M14 indexes have been published with remote parity verified. Continue in exact frozen order at PL-0323. PL-0323 through PL-0331 have not started. PL-0324 remains a real Blender capability gate. No M15+ work has started.
+PL-0313 V02 through PL-0323 V01 are builder-green and awaiting independent child audit. PL-0323 implementation, child log, and M14 indexes have been published with remote parity verified. Continue in exact frozen order at PL-0324. PL-0324 remains a real Blender capability gate. PL-0324 through PL-0331 have not started. No M15+ work has started.
 
 ## PL-0314 V01 execution
 
@@ -115,4 +116,13 @@ Starting child SHA: `85a8ab1263fc2058fe8bde82c2394bc86eea8941`. Implementation/e
 
 Focused command `uv run pytest tests/core/test_pcr_material_declarations.py tests/core/test_visual_material_library.py tests/core/test_starter_material_catalog.py -q`: 46 passed. Full locked suite `uv run --locked pytest -q`: 1,797 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected-file/dependency checks, privacy/scope review and `git diff --check` passed.
 
-PL-0322 adds immutable deterministic PCR declaration and appearance-variant revisions. PCR percentages are bounded from 0 through 100. `VERIFIED_EXTERNAL_REFERENCE` requires an explicit authority name, reference ID and digest but is only a supplied reference; PackLab does not fetch, independently verify or certify it. Declarations and variants pin the exact Design Model revision/component and serialize certification, environmental-performance, regulatory and physical/environmental claim flags as false. Variants add bounded appearance metadata only. PL-0323 is next after index publication and remote parity; PL-0323 through PL-0331 remain unstarted.
+PL-0322 adds immutable deterministic PCR declaration and appearance-variant revisions. PCR percentages are bounded from 0 through 100. `VERIFIED_EXTERNAL_REFERENCE` requires an explicit authority name, reference ID and digest but is only a supplied reference; PackLab does not fetch, independently verify or certify it. Declarations and variants pin the exact Design Model revision/component and serialize certification, environmental-performance, regulatory and physical/environmental claim flags as false. Variants add bounded appearance metadata only. PL-0323's implementation, child log, and index commits have since been published with parity; PL-0324 is next.
+
+
+## PL-0323 V01 execution
+
+Starting child SHA: `1e05ff5979263b12ca6133f63e97d359fa905024`. Implementation/evidence commit: `b5412210f2a5e4cf29905cbde742467cffa58925`. Child log commit: `430565e094c3a87ce518bd49812a38ee7a50e064`.
+
+Focused command `uv run pytest tests/core/test_component_material_project.py tests/core/test_component_visual_assignments.py tests/core/test_pcr_material_declarations.py tests/core/test_pbr_visual_parameters.py tests/core/test_visual_material_library.py -q`: 83 passed. Full locked suite `uv run --locked pytest -q`: 1,805 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected-file/dependency checks, privacy/scope review and `git diff --check` passed.
+
+PL-0323 adds a versioned, deterministic canonical JSON snapshot for component-level geometry-material, optional content-appearance, PCR declaration and PCR appearance-variant metadata. Serialization pins exact Design Model and material-library revisions, stable component IDs, and nested assignment identities. Loading rejects stale/deleted components, duplicate component entries, stale material references, mismatched PCR metadata, invalid authority fields, content/digest tampering, and unsupported schema versions. Replacement/removal yields new snapshots and does not mutate Design Model geometry. The snapshot contains no geometry, file path, network fetch, or certification authority. PL-0324 is next after index publication and remote parity; it remains the real Blender capability gate.
