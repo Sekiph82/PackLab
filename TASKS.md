@@ -4,13 +4,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M14
-- Current Sprint: M14-C001 — Labels, Materials & Rendering
-- Current Task: M14-C001-R03 — PL-0326 scene authority resolution + continuation PL-0327 through PL-0331
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0326_CONTINUATION_CODEX_PROMPT_V04.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0326_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V04.md. Close PL-0326 V02 using truthful whole-solid single-component material binding plus exact separate label render overlays; never invent component triangle partitions or base-mesh UV authority. Then continue PL-0327 through PL-0331 automatically while green. Do not start M15.
+- Current Milestone: M15
+- Current Sprint: M15-C001 — Kenya Packaging Library
+- Current Task: M15-C001 — ordered batch PL-0332 through PL-0346
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Run PL-0332 through PL-0346 in exact order while green; preserve supplier-vs-estimate provenance, path-free portable library authority, local-only attachment storage, and existing PackLab project/revision authority. Stop truthfully on any real blocker. Do not start M16.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_PARTIAL_AUDIT_V03.md — AUDITED_PARTIAL_CHANGES_REQUIRED; PL-0310 through PL-0325 independently accepted, PL-0326 V01 authority stop accepted, resume at PL-0326 V02.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; M14-C001 and M14 complete, 22/22 children accepted.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -34,11 +34,10 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - M13 R01 Continuation: completed; PL-0299 V02 through PL-0309 implementations are independently accepted. Original continuation prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/MASTER_PL0299_CONTINUATION_CODEX_PROMPT_V02.md
 - Latest M13 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M13-C001/M13-C001-R02_CHATGPT_AUDIT_V01.md — AUDITED_PASS; F01 closed, 21/21 M13 children accepted, M13 complete.
 - M13 R02 Evidence Closure: completed and independently accepted.
-- M14 Original Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CODEX_PROMPT_V01.md — stopped correctly at PL-0312 V01 authority ambiguity.
-- M14 R01 Continuation: stopped correctly at PL-0313 after PL-0312 V02; PL-0312 V02 independently accepted.
-- M14 R02 Continuation: stopped correctly at PL-0326 after PL-0313 V02 through PL-0325 builder-green; PL-0313 through PL-0325 are now independently AUDITED_PASS.
-- Latest M14 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_PARTIAL_AUDIT_V03.md — PL-0310 through PL-0325 AUDITED_PASS; PL-0326 V01 blocker accepted.
-- Active M14 R03 Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0326_CONTINUATION_CODEX_PROMPT_V04.md — PL-0326 V02 then PL-0327 through PL-0331; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_PL0326_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V04.md
+- M14 Original Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/MASTER_CODEX_PROMPT_V01.md — historical; authority stops/remediations preserved.
+- M14 R01/R02/R03 continuations: completed. PL-0310 through PL-0331 are independently accepted.
+- Latest M14 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 22/22 children accepted, M14 complete.
+- Active M15 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/MASTER_CODEX_PROMPT_V01.md — ordered PL-0332 through PL-0346; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -612,12 +611,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - [x] **PL-0324** Integrate Blender headless executable discovery and version probe. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0324_CHATGPT_AUDIT_V01.md
 - [x] **PL-0325** Create deterministic Blender scene-generation script from PackLab project data. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0325_CHATGPT_AUDIT_V01.md
-- [ ] **PL-0326** Import Design Model, materials and artwork into render scene. **V02 ACTIVE:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0326_CODEX_PROMPT_V02.md
-- [ ] **PL-0327** Create standard studio-lighting/camera presets for packaging mockups.
-- [ ] **PL-0328** Render transparent-background product image.
-- [ ] **PL-0329** Render front/three-quarter/back standard views.
-- [ ] **PL-0330** Export GLB with materials/textures for lightweight viewing.
-- [ ] **PL-0331** Record render settings and Blender version for reproducibility.
+- [x] **PL-0326** Import Design Model, materials and artwork into render scene. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0326_CHATGPT_AUDIT_V02.md
+- [x] **PL-0327** Create standard studio-lighting/camera presets for packaging mockups. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0327_CHATGPT_AUDIT_V01.md
+- [x] **PL-0328** Render transparent-background product image. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0328_CHATGPT_AUDIT_V01.md
+- [x] **PL-0329** Render front/three-quarter/back standard views. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0329_CHATGPT_AUDIT_V01.md
+- [x] **PL-0330** Export GLB with materials/textures for lightweight viewing. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0330_CHATGPT_AUDIT_V01.md
+- [x] **PL-0331** Record render settings and Blender version for reproducibility. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0331_CHATGPT_AUDIT_V01.md
 
 ---
 
