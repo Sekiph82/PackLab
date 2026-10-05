@@ -11,7 +11,7 @@ import platform
 import tempfile
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
@@ -228,6 +228,9 @@ class CadSurfaceRegionSample:
     trimmed_or_boundary: bool
     periodic_seam_boundary: bool
     supported_surface_type: bool
+    # Runtime-only handle used to inspect the exact trimmed host after matching
+    # this sample to an accepted BREP-scoped analysis region. Never serialized.
+    _runtime_face: Any = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1185,6 +1188,7 @@ def sample_cad_surface_regions(
                         not all(inside) or on_boundary,
                         at_periodic_seam,
                         surface_type in supported_types,
+                        face,
                     )
                 )
                 if len(regions) > maximum_regions:
