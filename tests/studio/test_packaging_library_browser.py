@@ -1,0 +1,222 @@
+from __future__ import annotations
+
+import hashlib
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QImage
+from tests.core.test_packaging_asset import _asset
+
+from packlab_core.packaging_asset import RawScanLink
+from packlab_studio.app import create_application
+from packlab_studio.navigation import Route
+from packlab_studio.packaging_library_audit import PackagingLibraryAuditStore
+from packlab_studio.packaging_library_browser import (
+    BrowserDisplayState,
+    LibraryThumbnailReference,
+    PackagingLibraryBrowserError,
+    PackagingLibraryBrowserService,
+    PackagingLibraryBrowserView,
+    ThumbnailSource,
+)
+from packlab_studio.shell import StudioMainWindow
+
+NOW = datetime(2026, 10, 5, 14, 0, tzinfo=UTC)
+
+
+def _png(path: Path, color: Qt.GlobalColor = Qt.GlobalColor.darkBlue) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = QImage(32, 24, QImage.Format.Format_RGB32)
+    image.fill(color)
+    assert image.save(str(path), "PNG")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _library(root: Path, *, assets: tuple | None = None) -> PackagingLibraryAuditStore:
+    store = PackagingLibraryAuditStore(root, clock=lambda: NOW)
+    for asset in assets or (_asset(),):
+        snapshot = store.snapshot()
+        store.create_asset(
+            asset,
+            expected_state_revision=snapshot.state_revision,
+            actor_id="operator-1",
+            reason="Add package metadata to local library",
+        )
+    return store
+
+
+def test_route_library_renders_without_project_and_mode_refresh_keep_selection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = create_application(["packlab-library-browser-route-test"])
+    assets = (
+        _asset(asset_id="water-red", display_name="Red Water Bottle"),
+        _asset(asset_id="water-blue", display_name="Blue Water Bottle"),
+    )
+    audit_store = _library(tmp_path / "library", assets=assets)
+    service = PackagingLibraryBrowserService(audit_store, tmp_path / "library")
+    window = StudioMainWindow(packaging_library_service=service)
+    view = window.route_stack.views[Route.LIBRARY]
+
+    assert isinstance(view, PackagingLibraryBrowserView)
+    assert window.project_manager.current is None
+    assert view.isEnabled()
+    assert view.display_state is BrowserDisplayState.READY
+    assert view.item_view.count() == 2
+    assert view.item_view.viewMode() == view.item_view.ViewMode.IconMode
+    view.item_view.setCurrentRow(1)
+    selected = view.selected_asset_id
+    before_revisions = tuple(item.revision_id for item in audit_store.snapshot().assets)
+
+    view.mode_selector.setCurrentIndex(1)
+    assert view.item_view.viewMode() == view.item_view.ViewMode.ListMode
+    assert view.selected_asset_id == selected
+    view.refresh_button.click()
+
+    assert view.selected_asset_id == selected
+    assert view.display_state is BrowserDisplayState.READY
+    assert tuple(item.revision_id for item in audit_store.snapshot().assets) == before_revisions
+    window.navigation.navigate(Route.LIBRARY)
+    assert window.route_stack.currentWidget() is view
+    window.close()
+    app.processEvents()
+
+
+def test_empty_and_error_states_are_visible_and_refresh_recovers(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    app = create_application(["packlab-library-browser-state-test"])
+    empty_service = PackagingLibraryBrowserService(
+        PackagingLibraryAuditStore(tmp_path / "empty"), tmp_path / "empty"
+    )
+    empty = PackagingLibraryBrowserView(empty_service)
+    assert empty.display_state is BrowserDisplayState.EMPTY
+    assert empty.state_message.text() == "No packaging assets in this library."
+
+    class FailingService:
+        def list_assets(self):
+            raise PackagingLibraryBrowserError("simulated unavailable library")
+
+    failed = PackagingLibraryBrowserView(FailingService())  # type: ignore[arg-type]
+    assert failed.display_state is BrowserDisplayState.ERROR
+    assert "simulated unavailable library" in failed.state_message.text()
+
+    loading_states: list[BrowserDisplayState] = []
+
+    class LoadingAwareService:
+        def list_assets(self):
+            loading_states.append(recovered.display_state)
+            return ()
+
+    recovered = PackagingLibraryBrowserView(empty_service)
+    recovered.service = LoadingAwareService()  # type: ignore[assignment]
+    recovered.refresh()
+    assert loading_states == [BrowserDisplayState.LOADING]
+    assert recovered.display_state is BrowserDisplayState.EMPTY
+    empty.close()
+    failed.close()
+    recovered.close()
+    app.processEvents()
+
+
+def test_digest_bound_local_thumbnail_and_malformed_missing_fallback(tmp_path: Path) -> None:
+    app = create_application(["packlab-library-browser-thumbnail-test"])
+    library_root = tmp_path / "library"
+    audit_store = _library(library_root)
+    staged_image = tmp_path / "staged-thumbnail.png"
+    digest = _png(staged_image, Qt.GlobalColor.darkGreen)
+    image_path = library_root / "thumbnails" / "sha256" / digest[:2] / (digest + ".png")
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    staged_image.replace(image_path)
+    reference = LibraryThumbnailReference(
+        sha256=digest,
+        media_type="image/png",
+        relative_path=f"thumbnails/sha256/{digest[:2]}/{digest}.png",
+        source=ThumbnailSource.LIBRARY,
+    )
+    service = PackagingLibraryBrowserService(
+        audit_store,
+        library_root,
+        thumbnail_reference_provider=lambda _asset_id: reference,
+    )
+    view = PackagingLibraryBrowserView(service)
+    summary = service.list_assets()[0]
+    assert service.resolve_thumbnail(summary) == image_path
+    valid_icon = view.item_view.item(0).icon().pixmap(QSize(128, 96)).toImage()
+    assert not valid_icon.isNull()
+
+    image_path.write_bytes(b"tampered thumbnail")
+    view.refresh()
+    fallback_icon = view.item_view.item(0).icon().pixmap(QSize(128, 96)).toImage()
+    assert not fallback_icon.isNull()
+    assert fallback_icon != valid_icon
+    assert service.resolve_thumbnail(service.list_assets()[0]) is None
+
+    remote_service = PackagingLibraryBrowserService(
+        audit_store,
+        library_root,
+        thumbnail_reference_provider=lambda _asset_id: "https://example.invalid/preview.png",  # type: ignore[return-value]
+    )
+    assert remote_service.list_assets()[0].thumbnail_reference is None
+    with pytest.raises(PackagingLibraryBrowserError, match="path_invalid"):
+        LibraryThumbnailReference(
+            sha256="b" * 64,
+            media_type="image/png",
+            relative_path="../../outside.png",
+            source=ThumbnailSource.PROJECT,
+            project_id="project-1",
+            revision_id="revision-1",
+        )
+    view.close()
+    app.processEvents()
+
+
+def test_project_thumbnail_requires_an_exact_asset_source_link(tmp_path: Path) -> None:
+    library_root = tmp_path / "library"
+    project_root = tmp_path / "project"
+    thumb_path = project_root / "derived" / "thumb.png"
+    digest = _png(thumb_path)
+    linked = _asset().with_source_links(
+        raw_scan_links=(RawScanLink("project-1", "raw-rev-1", "a" * 64),),
+        scan_master_link=None,
+        design_model_links=(),
+    )
+    audit_store = _library(library_root, assets=(linked,))
+    reference = LibraryThumbnailReference(
+        sha256=digest,
+        media_type="image/png",
+        relative_path="derived/thumb.png",
+        source=ThumbnailSource.PROJECT,
+        project_id="project-1",
+        revision_id="raw-rev-1",
+    )
+    service = PackagingLibraryBrowserService(
+        audit_store,
+        library_root,
+        thumbnail_reference_provider=lambda _asset_id: reference,
+        project_root_resolver=lambda project_id: (
+            project_root if project_id == "project-1" else None
+        ),
+    )
+    summary = service.list_assets()[0]
+    assert service.resolve_thumbnail(summary) == thumb_path
+
+    stale_reference = LibraryThumbnailReference(
+        sha256=digest,
+        media_type="image/png",
+        relative_path="derived/thumb.png",
+        source=ThumbnailSource.PROJECT,
+        project_id="project-1",
+        revision_id="stale-revision",
+    )
+    stale_service = PackagingLibraryBrowserService(
+        audit_store,
+        library_root,
+        thumbnail_reference_provider=lambda _asset_id: stale_reference,
+        project_root_resolver=lambda _project_id: project_root,
+    )
+    assert stale_service.list_assets()[0].thumbnail_reference is None

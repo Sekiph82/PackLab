@@ -21,6 +21,8 @@ from .navigation import (
     RouteStack,
     ScanMasterEditorView,
 )
+from .packaging_library_audit import PackagingLibraryAuditStore
+from .packaging_library_browser import PackagingLibraryBrowserService
 from .preferences import PreferencesStore, WindowPreferences
 from .project import ProjectManager
 from .recovery import RecoveryManager
@@ -48,6 +50,8 @@ class StudioMainWindow(QMainWindow):
         design_model_export_source_provider: Callable[[], DesignModelExportSource | None]
         | None = None,
         export_destination_provider: DestinationProvider | None = None,
+        packaging_library_service: PackagingLibraryBrowserService | None = None,
+        packaging_library_root: str | Path | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName(self.WINDOW_OBJECT_NAME)
@@ -58,6 +62,29 @@ class StudioMainWindow(QMainWindow):
         self.navigation = NavigationController()
         self.job_manager = JobManager()
         self.project_manager = ProjectManager(job_manager=self.job_manager)
+        self.packaging_library_audit_store: PackagingLibraryAuditStore | None = None
+        if packaging_library_service is not None and packaging_library_root is not None:
+            raise ValueError("provide a library service or root, not both")
+        if packaging_library_service is None:
+            configured_root = packaging_library_root
+            if configured_root is None:
+                app_data_root = QStandardPaths.writableLocation(
+                    QStandardPaths.StandardLocation.AppLocalDataLocation
+                )
+                configured_root = (
+                    Path(app_data_root or Path.home() / ".local/share/PackLab Studio")
+                    / "packaging-library"
+                )
+            self.packaging_library_audit_store = PackagingLibraryAuditStore(configured_root)
+            packaging_library_service = PackagingLibraryBrowserService(
+                self.packaging_library_audit_store,
+                configured_root,
+            )
+        else:
+            self.packaging_library_audit_store = getattr(
+                packaging_library_service, "audit_store", None
+            )
+        self.packaging_library_service = packaging_library_service
         self.scan_master_promotion = ScanMasterPromotionAction(self.project_manager)
         self.scan_master_request_provider = scan_master_request_provider
         self.project_manager.add_listener(self._on_project_changed)
@@ -79,6 +106,7 @@ class StudioMainWindow(QMainWindow):
             ingest_controller=ingest_controller,
             receiver=receiver,
             project_manager=self.project_manager,
+            packaging_library_service=packaging_library_service,
             design_model_export_source_provider=design_model_export_source_provider,
             export_destination_provider=export_destination_provider,
         )

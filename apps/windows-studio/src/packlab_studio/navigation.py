@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from .engineering_export import EngineeringExportView
 from .mask_correction import MaskCorrectionView
+from .packaging_library_browser import PackagingLibraryBrowserService, PackagingLibraryBrowserView
 from .version import AboutView
 
 
@@ -178,6 +179,7 @@ class RouteStack(QStackedWidget):
         ingest_controller: Any = None,
         receiver: Any = None,
         project_manager: Any = None,
+        packaging_library_service: PackagingLibraryBrowserService | None = None,
         design_model_export_source_provider: Any = None,
         export_destination_provider: Any = None,
     ) -> None:
@@ -186,7 +188,9 @@ class RouteStack(QStackedWidget):
         self.views: dict[Route, QWidget] = {}
         for route in Route:
             view: QWidget
-            if route is Route.CAPTURE_INBOX:
+            if route is Route.LIBRARY:
+                view = PackagingLibraryBrowserView(packaging_library_service)
+            elif route is Route.CAPTURE_INBOX:
                 view = CaptureInboxView(ingest_controller=ingest_controller, receiver=receiver)
             elif route is Route.MASK_CORRECTION:
                 view = MaskCorrectionView()
