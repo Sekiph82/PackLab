@@ -9,11 +9,13 @@ from packlab_core.packaging_asset import (
     AssetStatus,
     BaseMaterial,
     ClosureType,
+    FieldProvenance,
     MeasurementUnit,
     PackagingAsset,
     PackagingAssetError,
     PackagingFamily,
     PackagingMeasurement,
+    ProvenanceClass,
 )
 
 
@@ -35,6 +37,36 @@ def _asset(**overrides: object) -> PackagingAsset:
         "status": AssetStatus.ACTIVE,
     }
     values.update(overrides)
+    if "field_provenance" not in values:
+        field_names = (
+            "display_name",
+            "family",
+            "nominal_volume",
+            "supplier_id",
+            "supplier_name",
+            "base_material",
+            "other_family_label",
+            "other_material_label",
+            "empty_package_weight",
+            "overall_height",
+            "body_diameter",
+            "neck_finish",
+            "neck_finish_diameter",
+            "closure_type",
+            "closure_description",
+            "status",
+        )
+        values["field_provenance"] = tuple(
+            FieldProvenance(
+                field_name,
+                ProvenanceClass.UNKNOWN
+                if value is None or getattr(value, "value", None) == "UNKNOWN"
+                else ProvenanceClass.USER_DECLARED,
+            )
+            for field_name in field_names
+            if (value := values.get(field_name)) is not None
+            or getattr(values.get(field_name), "value", None) == "UNKNOWN"
+        )
     return PackagingAsset(**values)  # type: ignore[arg-type]
 
 
@@ -160,3 +192,134 @@ def test_unknown_measurement_is_distinct_from_numeric_zero() -> None:
     with pytest.raises(PackagingAssetError, match="measurement_value_invalid"):
         PackagingMeasurement(0, MeasurementUnit.MILLILITER)
     assert unknown.nominal_volume is None
+
+
+def test_supplier_fact_and_packlab_estimate_remain_distinct_and_noncertifying() -> None:
+    supplier_fact = FieldProvenance(
+        "nominal_volume",
+        ProvenanceClass.SUPPLIER_FACT,
+        source_reference_id="supplier-sheet-17",
+        source_description="Supplier product specification",
+    )
+    estimate = FieldProvenance(
+        "empty_package_weight",
+        ProvenanceClass.PACKLAB_ESTIMATE,
+        method_id="weighing-estimator.v1",
+        confidence=0.72,
+    )
+    asset = _asset(
+        field_provenance=_provenance_tuple(_base_user_provenance(), supplier_fact, estimate)
+    )
+
+    serialized = asset.as_dict()
+    provenance = {item["field_name"]: item for item in serialized["field_provenance"]}
+    assert provenance["nominal_volume"]["classification"] == "SUPPLIER_FACT"
+    assert provenance["nominal_volume"]["source_reference_id"] == "supplier-sheet-17"
+    assert provenance["empty_package_weight"]["classification"] == "PACKLAB_ESTIMATE"
+    assert provenance["empty_package_weight"]["method_id"] == "weighing-estimator.v1"
+    assert provenance["empty_package_weight"]["confidence"] == 0.72
+    assert serialized["supplier_certification_inferred"] is False
+    assert serialized["physical_accuracy_verified"] is False
+    assert serialized["manufacturing_authorized"] is False
+
+
+def test_provenance_is_required_for_populated_fields_and_unknown_is_explicit() -> None:
+    provenance = list(_base_user_provenance())
+    provenance.remove(next(item for item in provenance if item.field_name == "nominal_volume"))
+    with pytest.raises(PackagingAssetError, match="nominal_volume_provenance_required"):
+        _asset(field_provenance=tuple(provenance))
+
+    unknown = _asset(
+        nominal_volume=None,
+        field_provenance=_provenance_tuple(
+            _base_user_provenance(),
+            FieldProvenance("nominal_volume", ProvenanceClass.UNKNOWN),
+        ),
+    )
+    assert (
+        next(
+            item["classification"]
+            for item in unknown.as_dict()["field_provenance"]
+            if item["field_name"] == "nominal_volume"
+        )
+        == "UNKNOWN"
+    )
+
+
+def test_provenance_input_order_does_not_change_canonical_revision() -> None:
+    provenance = _base_user_provenance()
+    forward = _asset(field_provenance=provenance)
+    reverse = _asset(field_provenance=tuple(reversed(provenance)))
+
+    assert forward.field_provenance == reverse.field_provenance
+    assert forward.canonical_json == reverse.canonical_json
+    assert forward.revision_id == reverse.revision_id
+
+
+def test_edit_creates_immutable_successor_revision_and_preserves_prior_record() -> None:
+    original = _asset()
+    successor = original.with_field_update(
+        "nominal_volume",
+        PackagingMeasurement(750, MeasurementUnit.MILLILITER),
+        FieldProvenance(
+            "nominal_volume",
+            ProvenanceClass.PACKLAB_ESTIMATE,
+            method_id="capacity-inference.v2",
+            confidence=0.65,
+        ),
+    )
+
+    assert original.nominal_volume == PackagingMeasurement(500, MeasurementUnit.MILLILITER)
+    assert original.revision_id != successor.revision_id
+    assert successor.nominal_volume == PackagingMeasurement(750, MeasurementUnit.MILLILITER)
+    assert (
+        next(
+            item["classification"]
+            for item in successor.as_dict()["field_provenance"]
+            if item["field_name"] == "nominal_volume"
+        )
+        == "PACKLAB_ESTIMATE"
+    )
+
+
+def test_provenance_rejects_bad_authority_combinations_and_invalid_edits() -> None:
+    with pytest.raises(PackagingAssetError, match="supplier_fact_provenance_invalid"):
+        FieldProvenance("nominal_volume", ProvenanceClass.SUPPLIER_FACT)
+    with pytest.raises(PackagingAssetError, match="estimate_provenance_invalid"):
+        FieldProvenance(
+            "nominal_volume",
+            ProvenanceClass.PACKLAB_ESTIMATE,
+            source_reference_id="supplier-source-1",
+            method_id="volume-estimator.v1",
+        )
+    with pytest.raises(PackagingAssetError, match="confidence_invalid"):
+        FieldProvenance(
+            "nominal_volume",
+            ProvenanceClass.PACKLAB_ESTIMATE,
+            method_id="volume-estimator.v1",
+            confidence=1.01,
+        )
+    with pytest.raises(PackagingAssetError, match="field_not_editable"):
+        _asset().with_field_update(
+            "asset_id",
+            "another-id",
+            FieldProvenance("display_name", ProvenanceClass.USER_DECLARED),
+        )
+    with pytest.raises(PackagingAssetError, match="field_provenance_mismatch"):
+        _asset().with_field_update(
+            "nominal_volume",
+            PackagingMeasurement(750, MeasurementUnit.MILLILITER),
+            FieldProvenance("empty_package_weight", ProvenanceClass.USER_DECLARED),
+        )
+
+
+def _base_user_provenance() -> tuple[FieldProvenance, ...]:
+    return _asset().field_provenance
+
+
+def _provenance_tuple(
+    base: tuple[FieldProvenance, ...], *updates: FieldProvenance
+) -> tuple[FieldProvenance, ...]:
+    by_field = {item.field_name: item for item in base}
+    by_field.update({item.field_name: item for item in updates})
+    return tuple(by_field[name] for name in sorted(by_field))
