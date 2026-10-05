@@ -53,7 +53,7 @@ Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M1
 ## Handoff
 
 - Implementation/evidence commits: `4431c7d7789789831c09ae6de77fcf239f74f00f`, `7cd7cc0c4b38078285a88a1aa62714a679818b1c`.
-- Exact blocker: required `uv run --locked mypy core apps tools` fails on the live Windows runner with 46 errors in 12 unchanged source files; PL-0347 cannot be marked builder-green under the frozen quality gate.
+- Exact blocker: required `uv run --locked mypy core apps tools` fails on the live Windows runner with 46 errors in 12 unchanged source files: `core/src/packlab_core/calibration/marker_detection.py`, `core/src/packlab_core/transfer_protocol.py`, `core/src/packlab_core/packscan/container.py`, `apps/windows-studio/src/packlab_studio/import_report.py`, `apps/windows-studio/src/packlab_studio/receiver.py`, `core/src/packlab_core/jerrycan_grip_indent.py`, `core/src/packlab_core/assembly_variant_swap.py`, `core/src/packlab_core/jerrycan_handle_void_candidates.py`, `core/src/packlab_core/assembly_clearance.py`, `apps/windows-studio/src/packlab_studio/engineering_export.py`, `apps/windows-studio/src/packlab_studio/packaging_library_audit.py`, and `apps/windows-studio/src/packlab_studio/packaging_library_browser.py`. PL-0347 cannot be marked builder-green under the frozen quality gate.
 - The implementation is published, but this child log intentionally does not claim `READY_FOR_INDEPENDENT_AUDIT`. The master log records the stopped/pending frontier and is published separately.
 
 BATCH_STOPPED_AT_PL-0347
