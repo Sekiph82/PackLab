@@ -1,3 +1,4 @@
+from packlab_core.blender_capability import BlenderCapability, BlenderCapabilityStatus
 from packlab_core.capabilities import CapabilityStatus, ProbeResult, discover_capabilities
 
 
@@ -30,7 +31,9 @@ def test_nvidia_smi_alone_does_not_establish_cuda():
 def test_direct_cuda_toolkit_evidence_establishes_cuda():
     def probe(command):
         if command[0] == "nvcc":
-            return ProbeResult("ok", "Cuda compilation tools, release 12.4, V12.4.99", "exit code 0")
+            return ProbeResult(
+                "ok", "Cuda compilation tools, release 12.4, V12.4.99", "exit code 0"
+            )
         return ProbeResult("missing", detail="not installed")
 
     record = discover_capabilities(probe)["cuda"]
@@ -65,3 +68,28 @@ def test_opencascade_binding_remains_unselected():
     record = discover_capabilities(lambda command: ProbeResult("missing"))["opencascade"]
     assert record.status is CapabilityStatus.UNKNOWN
     assert "not selected" in record.provenance
+
+
+def test_default_capability_registry_uses_headless_blender_probe(monkeypatch):
+    import packlab_core.capabilities as capabilities
+
+    monkeypatch.setattr(
+        capabilities,
+        "discover_blender",
+        lambda path: BlenderCapability(
+            BlenderCapabilityStatus.INCOMPATIBLE,
+            "4.2.0",
+            "buildhash",
+            "release-branch",
+            "2026-01-01",
+            "configured",
+            "supported_major_policy_mismatch",
+        ),
+    )
+
+    record = discover_capabilities(blender_path="configured blender.exe")["blender"]
+
+    assert record.status is CapabilityStatus.UNKNOWN
+    assert record.version == "4.2.0"
+    assert record.provenance == "headless Blender probe: configured"
+    assert record.detail == "INCOMPATIBLE: supported_major_policy_mismatch"

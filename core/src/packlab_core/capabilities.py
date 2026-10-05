@@ -8,7 +8,10 @@ import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from enum import StrEnum
+from os import PathLike
 from typing import Any
+
+from .blender_capability import BlenderCapabilityStatus, discover_blender
 
 
 class CapabilityStatus(StrEnum):
@@ -98,11 +101,17 @@ def _record_cuda(result: ProbeResult) -> Capability:
         )
     match = _VERSION.search(result.output)
     if not match:
-        return Capability("cuda", CapabilityStatus.UNKNOWN, None, provenance, "no CUDA version found")
+        return Capability(
+            "cuda", CapabilityStatus.UNKNOWN, None, provenance, "no CUDA version found"
+        )
     return Capability("cuda", CapabilityStatus.AVAILABLE, match.group(0), provenance, result.detail)
 
 
-def discover_capabilities(probe: Probe = default_probe) -> dict[str, Capability]:
+def discover_capabilities(
+    probe: Probe = default_probe,
+    *,
+    blender_path: str | PathLike[str] | None = None,
+) -> dict[str, Capability]:
     """Discover optional executables without inferring capabilities from hardware labels."""
 
     records: dict[str, Capability] = {}
@@ -114,6 +123,20 @@ def discover_capabilities(probe: Probe = default_probe) -> dict[str, Capability]
                 None,
                 "Python OpenCascade binding deliberately not selected; PL-0289 owns the decision",
                 "no executable probe configured",
+            )
+        elif name == "blender" and probe is default_probe:
+            blender = discover_blender(blender_path)
+            status = {
+                BlenderCapabilityStatus.READY: CapabilityStatus.AVAILABLE,
+                BlenderCapabilityStatus.UNAVAILABLE: CapabilityStatus.UNAVAILABLE,
+                BlenderCapabilityStatus.INCOMPATIBLE: CapabilityStatus.UNKNOWN,
+            }[blender.status]
+            records[name] = Capability(
+                name,
+                status,
+                blender.version,
+                f"headless Blender probe: {blender.discovery_source}",
+                f"{blender.status.value}: {blender.detail}",
             )
         else:
             result = probe(command)
