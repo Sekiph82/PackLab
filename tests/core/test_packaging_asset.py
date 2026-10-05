@@ -248,6 +248,13 @@ def test_provenance_is_required_for_populated_fields_and_unknown_is_explicit() -
         )
         == "UNKNOWN"
     )
+    with pytest.raises(PackagingAssetError, match="field_provenance_invalid"):
+        _asset(
+            field_provenance=_provenance_tuple(
+                _base_user_provenance(),
+                FieldProvenance("component_interface_reference", ProvenanceClass.UNKNOWN),
+            )
+        )
 
 
 def test_provenance_input_order_does_not_change_canonical_revision() -> None:

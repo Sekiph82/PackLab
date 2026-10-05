@@ -85,7 +85,7 @@ class ProvenanceClass(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
-_PROVENANCE_FIELDS = frozenset(
+_ASSET_FIELDS = frozenset(
     {
         "display_name",
         "family",
@@ -105,7 +105,8 @@ _PROVENANCE_FIELDS = frozenset(
         "status",
     }
 )
-_EDITABLE_FIELDS = _PROVENANCE_FIELDS
+_PROVENANCE_FIELDS = _ASSET_FIELDS | {"component_interface_reference"}
+_EDITABLE_FIELDS = _ASSET_FIELDS
 
 
 @dataclass(frozen=True, slots=True)
@@ -389,6 +390,8 @@ class PackagingAsset:
         ):
             raise PackagingAssetError("packaging_asset_field_provenance_invalid")
         provenance_names = tuple(item.field_name for item in self.field_provenance)
+        if any(name not in _ASSET_FIELDS for name in provenance_names):
+            raise PackagingAssetError("packaging_asset_field_provenance_invalid")
         if len(provenance_names) != len(set(provenance_names)):
             raise PackagingAssetError("packaging_asset_field_provenance_duplicate")
         if provenance_names != tuple(sorted(provenance_names)):
@@ -398,7 +401,7 @@ class PackagingAsset:
                 tuple(sorted(self.field_provenance, key=lambda item: item.field_name)),
             )
         provenance_by_field = {item.field_name: item for item in self.field_provenance}
-        for field_name in _PROVENANCE_FIELDS:
+        for field_name in _ASSET_FIELDS:
             value = getattr(self, field_name)
             source = provenance_by_field.get(field_name)
             if _is_known_value(value):
