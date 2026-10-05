@@ -37,7 +37,7 @@ PL-0332 through PL-0346 implementation validations are green and each child log 
 
 - Batch builder status: `BATCH_COMPLETED`.
 - Final locked suite: `1969 passed, 11 skipped, 1 deselected`; 2 existing duplicate-ZIP fixture warnings.
-- Final local `HEAD`, fetched `origin/main`, and live GitHub `main` are equal at `bd02188c1d9dd22dfce5e7a7937f68247de872b3`; divergence is `0 0`.
+- After PL-0346 child-log publication, local `HEAD`, fetched `origin/main`, and live GitHub `main` were equal at `bd02188c1d9dd22dfce5e7a7937f68247de872b3`. The master-index publication was then pushed and final parity was rechecked at `0 0`.
 - Root `TASKS.md` was not edited. M16 started: NO.
 - Independent audit remains pending for all children and the batch.
 
