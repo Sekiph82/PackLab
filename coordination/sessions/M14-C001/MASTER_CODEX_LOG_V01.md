@@ -48,16 +48,17 @@ Master audit criteria: https://github.com/Sekiph82/PackLab/blob/main/coordinatio
 | PL-0328 | READY_FOR_INDEPENDENT_AUDIT | PL-0328_CODEX_PROMPT_V01.md | PL-0328_CHATGPT_AUDIT_CRITERIA_V01.md | `60c7c73cc141ac8a87d8e7a46a8dfd5fc5d1990c` | `93c1733e2831c5fd73219f621ee7e1f160f492d7` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0328_CODEX_LOG_V01.md)) | 24 focused tests including actual Blender render passed | 1,855 passed, 9 skipped, 1 deselected | Real 256×256 RGBA transparent render and path-free digest evidence; presentation-only. |
 | PL-0329 | READY_FOR_INDEPENDENT_AUDIT | PL-0329_CODEX_PROMPT_V01.md | PL-0329_CHATGPT_AUDIT_CRITERIA_V01.md | `ff2928227448cd11b67875f66c1dafe8fdcd1fd5` | `463aa2872325862b3519447899789c6b399727bf` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0329_CODEX_LOG_V01.md)) | 3 focused tests including real three-view render passed | 1,857 passed, 10 skipped, 1 deselected | Ordered FRONT/THREE_QUARTER/BACK PNGs; shared source/settings manifest and partial-failure cleanup. |
 | PL-0330 | READY_FOR_INDEPENDENT_AUDIT | PL-0330_CODEX_PROMPT_V01.md | PL-0330_CHATGPT_AUDIT_CRITERIA_V01.md | `69fd4aecf06b8654b19608077b1ad80af710fe4` | `150613ba6a43f8685c5ca75a056aa27cf788fe0b` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0330_CODEX_LOG_V01.md)) | 5 focused passed including real Blender 5.2.2 GLB export | 1,861 passed, 11 skipped, 1 deselected | Embedded material/artwork GLB and path-free provenance sidecar; mm_unverified and physical-validation limits retained. |
-| PL-0331 | ACTIVE (M14-C001-R03) | PL-0331_CODEX_PROMPT_V01.md | PL-0331_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0331 | READY_FOR_INDEPENDENT_AUDIT | PL-0331_CODEX_PROMPT_V01.md | PL-0331_CHATGPT_AUDIT_CRITERIA_V01.md | `fb438304c9cb705609d135b67f8ddafd98f2d046` | `f2df6c91fc818160981481608872373cb126fdad` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0331_CODEX_LOG_V01.md)) | 14 focused passed including actual Blender three-view render and GLB export | 1,867 passed, 11 skipped, 1 deselected | Shared path-free provenance binds Blender executable/build, PackLab commit/version, source/settings/presets/output digests; no physical or production authority escalation. |
 
 ## Batch status and final handoff
 
-- Batch status: `ACTIVE` under M14-C001-R03; PL-0326 V02 and PL-0327 through PL-0330 builder evidence published; PL-0331 is the active child.
+- Batch status: `BATCH_COMPLETED` under M14-C001-R03; PL-0326 V02 and PL-0327 through PL-0331 builder evidence are published and handed to independent milestone audit.
 - Independently accepted frontier: PL-0310 and PL-0311 (`AUDITED_PASS`); PL-0312 V02 builder evidence is `READY_FOR_INDEPENDENT_AUDIT`.
-- PL-0312 V01's authority stop and PL-0313 V01 authority stop remain preserved. PL-0326 V01 authority stop remains historical; PL-0326 V02 resolves it with exact one-component BREP lineage and renderer-only overlays. PL-0331 is the only remaining authorized child.
+- PL-0312 V01's authority stop and PL-0313 V01 authority stop remain preserved. PL-0326 V01 authority stop remains historical; PL-0326 V02 resolves it with exact one-component BREP lineage and renderer-only overlays.
 - M14 stop conditions and PL-0324 real Blender capability gate remain active.
 - M15 started: NO.
 - PL-0330 implementation/evidence commit: `69fd4aecf06b8654b19608077b1ad80af710fe4`; separate child log commit: `150613ba6a43f8685c5ca75a056aa27cf788fe0b`. After PL-0330 log publication, local `HEAD`, fetched `origin/main`, and GitHub `main` all equaled `150613ba6a43f8685c5ca75a056aa27cf788fe0b`.
-- The R03 continuation is maintained in `MASTER_PL0326_CONTINUATION_CODEX_LOG_V04.md`. PL-0331 remains the final frozen child; M15 remains unauthorized.
+- PL-0331 implementation/evidence commit: `fb438304c9cb705609d135b67f8ddafd98f2d046`; separate child log commit: `f2df6c91fc818160981481608872373cb126fdad`. Final local `HEAD`, fetched `origin/main`, and GitHub `main` all equaled `f2df6c91fc818160981481608872373cb126fdad`.
+- R03 batch is complete and awaiting independent milestone audit. M15 remains unauthorized and was not started. Detailed per-child records remain in `MASTER_PL0326_CONTINUATION_CODEX_LOG_V04.md`.
 
 AWAITING_MILESTONE_AUDIT

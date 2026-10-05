@@ -25,7 +25,7 @@ Root `TASKS.md` was read as the live status authority and not edited. The publis
 | PL-0328 V01 | READY_FOR_INDEPENDENT_AUDIT | `60c7c73cc141ac8a87d8e7a46a8dfd5fc5d1990c` | `93c1733e2831c5fd73219f621ee7e1f160f492d7` | 24 focused tests including real Blender 5.2.2 render; locked suite 1,855 passed, 9 skipped, 1 deselected. Render output SHA-256 `8670087c69ada04f1f745b90204be9981b55685136091a0314e2428c13a21ef7`. See `PL-0328_CODEX_LOG_V01.md`. |
 | PL-0329 V01 | READY_FOR_INDEPENDENT_AUDIT | `ff2928227448cd11b67875f66c1dafe8fdcd1fd5` | `463aa2872325862b3519447899789c6b399727bf` | Real Blender 5.2.2 FRONT/THREE_QUARTER/BACK renders, each 256×256 RGBA; locked suite 1,857 passed, 10 skipped, 1 deselected. See `PL-0329_CODEX_LOG_V01.md` for per-view digests. |
 | PL-0330 V01 | READY_FOR_INDEPENDENT_AUDIT | `69fd4aecf06b8654b19608077b1ad80af710fe4` | `150613ba6a43f8685c5ca75a056aa27cf788fe0b` | Real Blender 5.2.2 GLB export; 5 materials, 3 textures, embedded image, 0 URIs; output SHA-256 `9734def46557780899e690710a7a9a27bea71cf94e58788d83faee0b6400eda7`; locked suite 1,861 passed, 11 skipped, 1 deselected. See `PL-0330_CODEX_LOG_V01.md`. |
-| PL-0331 V01 | PENDING | | | |
+| PL-0331 V01 | READY_FOR_INDEPENDENT_AUDIT | `fb438304c9cb705609d135b67f8ddafd98f2d046` | `f2df6c91fc818160981481608872373cb126fdad` | Shared M14 provenance passed real Blender 5.2.2 still and GLB smokes; 14 focused passed; locked suite 1,867 passed, 11 skipped, 1 deselected. Still, GLB and PackLab/Blender identities, source revisions, settings, presets and digests recorded path-free. See `PL-0331_CODEX_LOG_V01.md`. |
 
 ## PL-0326 V02 publication
 
@@ -37,9 +37,12 @@ Root `TASKS.md` was read as the live status authority and not edited. The publis
 - PL-0328 implementation/evidence commit: `60c7c73cc141ac8a87d8e7a46a8dfd5fc5d1990c`; separate log-only commit: `93c1733e2831c5fd73219f621ee7e1f160f492d7`. After the log push, local `HEAD`, fetched `origin/main`, and GitHub `refs/heads/main` all equaled `93c1733e2831c5fd73219f621ee7e1f160f492d7`.
 - PL-0329 implementation/evidence commit: `ff2928227448cd11b67875f66c1dafe8fdcd1fd5`; separate log-only commit: `463aa2872325862b3519447899789c6b399727bf`. After the log push, local `HEAD`, fetched `origin/main`, and GitHub `refs/heads/main` all equaled `463aa2872325862b3519447899789c6b399727bf`.
 - PL-0330 implementation/evidence commit: `69fd4aecf06b8654b19608077b1ad80af710fe4`; separate log-only commit: `150613ba6a43f8685c5ca75a056aa27cf788fe0b`. After the log push, local `HEAD`, fetched `origin/main`, and GitHub `refs/heads/main` all equaled `150613ba6a43f8685c5ca75a056aa27cf788fe0b`.
+- PL-0331 implementation/evidence commit: `fb438304c9cb705609d135b67f8ddafd98f2d046`; separate log-only commit: `f2df6c91fc818160981481608872373cb126fdad`. After the log push, local `HEAD`, fetched `origin/main`, and GitHub `refs/heads/main` all equaled `f2df6c91fc818160981481608872373cb126fdad`.
 - The original M14 index has been updated with PL-0326 V02 evidence and PL-0327 as active. This continuation record was missing at the synchronized baseline and is created here as its referenced R03 artifact.
 - Exact Blender executable: `C:\Program Files\Blender Foundation\Blender 5.2\blender.exe`; version `5.2.2 LTS` (`[5, 2, 2]`), build hash `d13f752e3b9c`, branch `blender-v5.2-release`, build date `2026-09-15`.
 
 ## Current frontier
 
-PL-0326 V02 and PL-0327 through PL-0330 builder evidence are handed to independent audit; no Codex acceptance is asserted. PL-0331 is the final active child in this authorized batch. Each child has its own implementation/evidence commit and separate log-only commit, exact frozen criteria, required real Blender evidence, locked full suite and scope/security checks. Update this continuation and the original M14 index at the final child boundary. Stop immediately and record `BATCH_STOPPED` if any frozen gate or authority check fails. Do not edit `TASKS.md` or start M15+.
+BATCH_COMPLETED. PL-0326 V02 and PL-0327 through PL-0331 builder evidence are handed to independent milestone audit; no Codex acceptance is asserted. Every child has its own implementation/evidence commit and separate log-only commit, exact frozen criteria, real Blender evidence where required, locked full suite, and scope/security checks. Final local `HEAD`, fetched `origin/main`, and GitHub `main` match at `f2df6c91fc818160981481608872373cb126fdad`. `TASKS.md` was not edited. M15+ was not started.
+
+AWAITING_MILESTONE_AUDIT
