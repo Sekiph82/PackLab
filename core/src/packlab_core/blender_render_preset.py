@@ -157,7 +157,7 @@ def create_blender_render_preset(
         "camera_target": center,
         "camera_lens_mm": 50.0,
         "camera_sensor_width_mm": 36.0,
-        "camera_margin_factor": 1.2,
+        "camera_margin_factor": margin,
         "orthographic": False,
         "lights": lights,
         "transparent_background": transparent_background,
