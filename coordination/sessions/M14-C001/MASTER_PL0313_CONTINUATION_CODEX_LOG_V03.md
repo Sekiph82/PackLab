@@ -26,7 +26,8 @@
 | PL-0322 | READY_FOR_INDEPENDENT_AUDIT | `9fd3d63bdedd5059f20900ac208149beedaf6f6e` | `d4cf18284086dd53d978ee798e0121e9a0787166` | 46 focused/predecessor passed; full locked 1,797 passed, 6 skipped, 1 deselected |
 | PL-0323 | READY_FOR_INDEPENDENT_AUDIT | `b5412210f2a5e4cf29905cbde742467cffa58925` | `430565e094c3a87ce518bd49812a38ee7a50e064` | 83 focused/predecessor passed; full locked 1,805 passed, 6 skipped, 1 deselected |
 | PL-0324 | READY_FOR_INDEPENDENT_AUDIT | `35e8f64895925864280096fcd66052ed06a91434` | `a05213c6d0f80399aac74e17dc357bc0340f1aba` | 18 focused, including real Blender 5.2.2 headless probe; full locked 1,816 passed, 6 skipped, 1 deselected |
-| PL-0325–PL-0331 | NOT_STARTED | pending | pending | pending |
+| PL-0325 | READY_FOR_INDEPENDENT_AUDIT | `88b4ac8fe123feb1a44dbba07357939e28a7e072` | `d06b506325d4f97ec7961ae3e10caf446fc215cb` | 11 focused; real Blender 5.2.2 valid-package/tamper smoke; full locked 1,827 passed, 6 skipped, 1 deselected |
+| PL-0326–PL-0331 | NOT_STARTED | pending | pending | pending |
 
 ## PL-0313 V02 resolution
 
@@ -38,7 +39,7 @@ Focused command: `uv run --locked pytest -q tests/core/test_label_metric_surface
 
 ## Continuation status
 
-PL-0313 V02 through PL-0324 V01 are builder-green and awaiting independent child audit. PL-0324 implementation, child log, and M14 indexes have been published with remote parity verified. The real Blender capability gate passed with an installed Blender 5.2.2 LTS executable. Continue in exact frozen order at PL-0325. PL-0325 through PL-0331 have not started. No M15+ work has started.
+PL-0313 V02 through PL-0325 V01 are builder-green and awaiting independent child audit. PL-0325 implementation and its separate child log are published with remote parity verified. The real Blender 5.2.2 LTS package smoke accepted the generated package and rejected a body-tampered manifest. Continue in exact frozen order at PL-0326. PL-0326 through PL-0331 have not started. No M15+ work has started.
 
 ## PL-0314 V01 execution
 
@@ -136,3 +137,12 @@ Starting child SHA: `4a8a8399acf79383851a52159a8aab530a80e271`. Implementation/e
 Focused command `uv run pytest tests/core/test_blender_capability.py tests/core/test_capabilities.py -q`: 18 passed, including the real local headless probe. Full locked suite `uv run --locked pytest -q`: 1,816 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected-file/dependency checks, privacy/scope review and `git diff --check` passed.
 
 PL-0324 adds deterministic configured/PATH/platform discovery and a bounded offline Blender headless/version probe with READY/UNAVAILABLE/INCOMPATIBLE states. The supported policy is major version 5. The real installation passed with Blender 5.2.2 LTS, build hash `d13f752e3b9c`, branch `blender-v5.2-release`, build date `2026-09-15`. The probe uses `shell=False`, a fixed argv, factory startup, disabled auto-execution, closed stdin, and a timeout. Diagnostics omit executable paths and raw process output; no Blender binary or download is introduced. This confirms headless `bpy` availability only, not a scene render/export or physical/material claim. PL-0325 is next after index publication and remote parity.
+
+
+## PL-0325 V01 execution
+
+Starting child SHA: `6ba532c2fc515c4b419112bdad70b5019b4fa97e`. Implementation/evidence commit: `88b4ac8fe123feb1a44dbba07357939e28a7e072`. Child log commit: `d06b506325d4f97ec7961ae3e10caf446fc215cb`.
+
+Focused command `uv run --locked pytest tests/core/test_blender_scene_package.py -q`: 11 passed. Full locked suite `uv run --locked pytest -q`: 1,827 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy with imported-module traversal silenced, compileall, `uv lock --check`, protected-file/dependency checks and `git diff --cached --check` passed. Unfiltered mypy traversal also reported two errors in untouched `calibration/marker_detection.py` at lines 112 and 140. Real Blender 5.2.2 LTS build `d13f752e3b9c`, branch `blender-v5.2-release`, date `2026-09-15`, accepted the generated package and emitted the success marker; a body-tampered manifest was rejected as `manifest_digest_invalid` without a success marker.
+
+PL-0325 adds deterministic canonical JSON source metadata and a fixed, data-only Blender validator with exact Design Model/CAD/material/artwork revision and digest binding. Safe project-relative asset paths and fixed object/material/artwork/asset/package bounds are enforced. Source revisions remain immutable. No user value is executed as code, no ambient workspace path is serialized, and physical accuracy/manufacturing/material/print/regulatory claims remain false. This validates package integrity only; no scene is constructed or rendered. PL-0326 is next. The implementation and separate log commits matched local `HEAD`, `origin/main`, and GitHub `main` at their respective publication SHAs; index parity will be recorded after the index-only publication.
