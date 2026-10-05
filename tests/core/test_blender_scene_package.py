@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 from dataclasses import replace
 
@@ -16,6 +17,8 @@ from packlab_core.blender_scene_package import (
     ProjectAssetReference,
     create_blender_scene_package,
 )
+from packlab_core.cad_adapter import _registered_shape_build
+from packlab_core.cad_brep import _representation_from_lineage
 from packlab_core.cad_mesh_export import CadMeshExportRevision
 from packlab_core.component_material_project import (
     ComponentMaterialProjectEntry,
@@ -24,6 +27,12 @@ from packlab_core.component_material_project import (
 from packlab_core.component_visual_assignments import (
     create_component_visual_assignment_state,
     create_geometry_material_assignment,
+)
+from packlab_core.design_model import (
+    DesignModelFeatureReference,
+    FeatureKind,
+    create_standalone_design_model_revision,
+    stable_feature_id,
 )
 from packlab_core.label_artwork import (
     create_label_artwork_assignment,
@@ -153,6 +162,37 @@ def test_stale_export_digest_and_ambient_identity_are_rejected_or_absent() -> No
     json.loads(package.manifest_bytes)
 
 
+def test_stale_component_geometry_material_library_binding_rejects() -> None:
+    model, export, library, project, glb_ref, _ = _sources()
+    different_library = create_visual_material_library(
+        (
+            VisualMaterialRecord(
+                "material-hdpe",
+                MaterialFamily.HDPE,
+                "Different visual revision",
+                (0.7, 0.7, 0.7, 1.0),
+                0.0,
+                0.5,
+                MaterialSourceClass.USER_AUTHORED_VISUAL,
+            ),
+        )
+    )
+    wrong_assignment = create_geometry_material_assignment(
+        model, COMPONENT_ID, different_library, "material-hdpe"
+    )
+    wrong_project = create_component_material_project(
+        model,
+        different_library,
+        (
+            ComponentMaterialProjectEntry(
+                COMPONENT_ID, create_component_visual_assignment_state(wrong_assignment)
+            ),
+        ),
+    )
+    with pytest.raises(BlenderScenePackageError, match="scene_geometry_material_assignment_stale"):
+        create_blender_scene_package(model, export, glb_ref, wrong_project, library)
+
+
 def test_scene_runner_rejects_manifest_body_tampering() -> None:
     # The runner validates a content-addressed data envelope before inspecting assets.
     assert "manifest_digest_invalid" in BLENDER_SCENE_RUNNER
@@ -245,3 +285,52 @@ def test_object_material_and_artwork_count_limits_fail_closed(monkeypatch) -> No
                 library,
                 artwork_bindings=(binding,),
             )
+
+
+def test_scene_geometry_binding_rejects_multi_component_fused_brep() -> None:
+    source_model, source_export, library, _project, _glb_ref, _package = _sources()
+    other_component = "package-cap"
+    other_feature_id = stable_feature_id(other_component, FeatureKind.CAP, "cap")
+    multi_model = create_standalone_design_model_revision(
+        source_model.standalone_root,
+        package_family=source_model.package_family,
+        features=(
+            source_model.features[0],
+            DesignModelFeatureReference(other_feature_id, other_component, FeatureKind.CAP, "cap"),
+        ),
+        actor_id="operator-1",
+        reason="Create a multi-component partition rejection fixture.",
+        created_at_utc="2026-10-05T13:00:00Z",
+    )
+    shape = importlib.import_module("OCP.BRepPrimAPI").BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape()
+    feature_ids = (source_model.features[0].feature_id, other_feature_id)
+    shape_build = _registered_shape_build(
+        multi_model, "multi-component-lineage", feature_ids, shape, 1
+    )
+    representation = _representation_from_lineage(
+        multi_model,
+        "multi-component-lineage",
+        feature_ids,
+        shape_build,
+        source_feature_ids=feature_ids,
+    )
+    assignments = tuple(
+        ComponentMaterialProjectEntry(
+            component_id,
+            create_component_visual_assignment_state(
+                create_geometry_material_assignment(
+                    multi_model, component_id, library, "material-hdpe"
+                )
+            ),
+        )
+        for component_id in (COMPONENT_ID, other_component)
+    )
+    project = create_component_material_project(multi_model, library, assignments)
+    export = replace(
+        source_export,
+        source_design_model_revision_id=multi_model.revision_id,
+        source_brep_revision_id=representation.revision_id,
+        source_brep_geometry_sha256=representation.geometry_sha256,
+    )
+    with pytest.raises(BlenderScenePackageError, match="component_mesh_partition_unavailable"):
+        scene_package._scene_authority_record(multi_model, export, representation, project)
