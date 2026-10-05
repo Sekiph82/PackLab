@@ -25,7 +25,8 @@
 | PL-0321 | READY_FOR_INDEPENDENT_AUDIT | `0f4907869f378eb3f73576ad58760221e0e9cf37` | `694e8d7dafb778573ced842beb8f22be1f86f08b` | 52 focused; full 1,775 passed, 6 skipped, 1 deselected |
 | PL-0322 | READY_FOR_INDEPENDENT_AUDIT | `9fd3d63bdedd5059f20900ac208149beedaf6f6e` | `d4cf18284086dd53d978ee798e0121e9a0787166` | 46 focused/predecessor passed; full locked 1,797 passed, 6 skipped, 1 deselected |
 | PL-0323 | READY_FOR_INDEPENDENT_AUDIT | `b5412210f2a5e4cf29905cbde742467cffa58925` | `430565e094c3a87ce518bd49812a38ee7a50e064` | 83 focused/predecessor passed; full locked 1,805 passed, 6 skipped, 1 deselected |
-| PL-0324–PL-0331 | NOT_STARTED | pending | pending | pending |
+| PL-0324 | READY_FOR_INDEPENDENT_AUDIT | `35e8f64895925864280096fcd66052ed06a91434` | `a05213c6d0f80399aac74e17dc357bc0340f1aba` | 18 focused, including real Blender 5.2.2 headless probe; full locked 1,816 passed, 6 skipped, 1 deselected |
+| PL-0325–PL-0331 | NOT_STARTED | pending | pending | pending |
 
 ## PL-0313 V02 resolution
 
@@ -37,7 +38,7 @@ Focused command: `uv run --locked pytest -q tests/core/test_label_metric_surface
 
 ## Continuation status
 
-PL-0313 V02 through PL-0323 V01 are builder-green and awaiting independent child audit. PL-0323 implementation, child log, and M14 indexes have been published with remote parity verified. Continue in exact frozen order at PL-0324. PL-0324 remains a real Blender capability gate. PL-0324 through PL-0331 have not started. No M15+ work has started.
+PL-0313 V02 through PL-0324 V01 are builder-green and awaiting independent child audit. PL-0324 implementation, child log, and M14 indexes have been published with remote parity verified. The real Blender capability gate passed with an installed Blender 5.2.2 LTS executable. Continue in exact frozen order at PL-0325. PL-0325 through PL-0331 have not started. No M15+ work has started.
 
 ## PL-0314 V01 execution
 
@@ -125,4 +126,13 @@ Starting child SHA: `1e05ff5979263b12ca6133f63e97d359fa905024`. Implementation/e
 
 Focused command `uv run pytest tests/core/test_component_material_project.py tests/core/test_component_visual_assignments.py tests/core/test_pcr_material_declarations.py tests/core/test_pbr_visual_parameters.py tests/core/test_visual_material_library.py -q`: 83 passed. Full locked suite `uv run --locked pytest -q`: 1,805 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected-file/dependency checks, privacy/scope review and `git diff --check` passed.
 
-PL-0323 adds a versioned, deterministic canonical JSON snapshot for component-level geometry-material, optional content-appearance, PCR declaration and PCR appearance-variant metadata. Serialization pins exact Design Model and material-library revisions, stable component IDs, and nested assignment identities. Loading rejects stale/deleted components, duplicate component entries, stale material references, mismatched PCR metadata, invalid authority fields, content/digest tampering, and unsupported schema versions. Replacement/removal yields new snapshots and does not mutate Design Model geometry. The snapshot contains no geometry, file path, network fetch, or certification authority. PL-0324 is next after index publication and remote parity; it remains the real Blender capability gate.
+PL-0323 adds a versioned, deterministic canonical JSON snapshot for component-level geometry-material, optional content-appearance, PCR declaration and PCR appearance-variant metadata. Serialization pins exact Design Model and material-library revisions, stable component IDs, and nested assignment identities. Loading rejects stale/deleted components, duplicate component entries, stale material references, mismatched PCR metadata, invalid authority fields, content/digest tampering, and unsupported schema versions. Replacement/removal yields new snapshots and does not mutate Design Model geometry. The snapshot contains no geometry, file path, network fetch, or certification authority. PL-0324 subsequently passed its real Blender 5.2.2 capability gate; PL-0325 is next.
+
+
+## PL-0324 V01 execution
+
+Starting child SHA: `4a8a8399acf79383851a52159a8aab530a80e271`. Implementation/evidence commit: `35e8f64895925864280096fcd66052ed06a91434`. Child log commit: `a05213c6d0f80399aac74e17dc357bc0340f1aba`.
+
+Focused command `uv run pytest tests/core/test_blender_capability.py tests/core/test_capabilities.py -q`: 18 passed, including the real local headless probe. Full locked suite `uv run --locked pytest -q`: 1,816 passed, 6 skipped, 1 deselected; two existing duplicate ZIP-name warnings. Changed-file Ruff/format, targeted mypy, compileall, `uv lock --check`, protected-file/dependency checks, privacy/scope review and `git diff --check` passed.
+
+PL-0324 adds deterministic configured/PATH/platform discovery and a bounded offline Blender headless/version probe with READY/UNAVAILABLE/INCOMPATIBLE states. The supported policy is major version 5. The real installation passed with Blender 5.2.2 LTS, build hash `d13f752e3b9c`, branch `blender-v5.2-release`, build date `2026-09-15`. The probe uses `shell=False`, a fixed argv, factory startup, disabled auto-execution, closed stdin, and a timeout. Diagnostics omit executable paths and raw process output; no Blender binary or download is introduced. This confirms headless `bpy` availability only, not a scene render/export or physical/material claim. PL-0325 is next after index publication and remote parity.
