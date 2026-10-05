@@ -10,7 +10,7 @@ Criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M1
 - Live root `TASKS.md` authorizes M14-C001-R02: PL-0313 V02 followed by PL-0314 through PL-0331; actor `CODEX`. The tracker was not edited.
 - Re-read the PL-0313 V02 prompt/criteria/log, R02 master, M13 final audit, M09 physical-validation deferral, ADR-0005, and PL-0314 V01 prompt/criteria before implementation.
 - Starting synchronized SHA: `e13976cab8208f0e7cad7d17fa08c6ecdbc4ea9d`; clean managed worktree, branch `codex/m13-c001-pl0297`, push target `origin/main`. The Desktop owner checkout remains untouched.
-- Implementation/evidence commit: `2878bf1` (`Add label dieline print intent metadata`), pushed to `origin/main`.
+- Implementation/evidence commit: `2878bf1edb1a29aaaba85c9bfb3e1b97081342bd` (`Add label dieline print intent metadata`), pushed to `origin/main`.
 
 ## Implementation
 
