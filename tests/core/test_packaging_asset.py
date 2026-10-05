@@ -1,0 +1,162 @@
+from __future__ import annotations
+
+import json
+from dataclasses import FrozenInstanceError
+
+import pytest
+
+from packlab_core.packaging_asset import (
+    AssetStatus,
+    BaseMaterial,
+    ClosureType,
+    MeasurementUnit,
+    PackagingAsset,
+    PackagingAssetError,
+    PackagingFamily,
+    PackagingMeasurement,
+)
+
+
+def _asset(**overrides: object) -> PackagingAsset:
+    values: dict[str, object] = {
+        "asset_id": "kenya-pack-001",
+        "display_name": "500 mL water bottle",
+        "family": PackagingFamily.BOTTLE,
+        "nominal_volume": PackagingMeasurement(500, MeasurementUnit.MILLILITER),
+        "supplier_id": "supplier-001",
+        "supplier_name": "Example Supplier",
+        "base_material": BaseMaterial.PET,
+        "empty_package_weight": PackagingMeasurement(18.5, MeasurementUnit.GRAM),
+        "overall_height": PackagingMeasurement(210, MeasurementUnit.MILLIMETER),
+        "body_diameter": PackagingMeasurement(62, MeasurementUnit.MILLIMETER),
+        "neck_finish": "28/410",
+        "neck_finish_diameter": PackagingMeasurement(28, MeasurementUnit.MILLIMETER),
+        "closure_type": ClosureType.SCREW_CAP,
+        "status": AssetStatus.ACTIVE,
+    }
+    values.update(overrides)
+    return PackagingAsset(**values)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("family", list(PackagingFamily))
+def test_packaging_asset_accepts_bounded_families_and_explicit_unknowns(
+    family: PackagingFamily,
+) -> None:
+    overrides: dict[str, object] = {"family": family}
+    if family is PackagingFamily.OTHER:
+        overrides["other_family_label"] = "Refill cartridge"
+    known = _asset(**overrides)
+    assert known.family is family
+
+    unknown = _asset(
+        family=PackagingFamily.UNKNOWN,
+        nominal_volume=None,
+        supplier_id=None,
+        supplier_name=None,
+        base_material=BaseMaterial.UNKNOWN,
+        empty_package_weight=None,
+        overall_height=None,
+        body_diameter=None,
+        neck_finish=None,
+        neck_finish_diameter=None,
+        closure_type=ClosureType.UNKNOWN,
+        status=AssetStatus.UNKNOWN,
+    )
+
+    assert unknown.nominal_volume is None
+    assert unknown.empty_package_weight is None
+    assert unknown.as_dict()["supplier"] == {"supplier_id": None, "name": None}
+    assert unknown.as_dict()["base_material"] == "UNKNOWN"
+    assert unknown.as_dict()["status"] == "UNKNOWN"
+    assert unknown.as_dict()["physical_accuracy_verified"] is False
+
+
+def test_other_family_and_material_require_explicit_bounded_labels() -> None:
+    asset = _asset(
+        family=PackagingFamily.OTHER,
+        other_family_label="Refill cartridge",
+        base_material=BaseMaterial.OTHER,
+        other_material_label="Plant fiber composite",
+    )
+
+    assert asset.as_dict()["other_family_label"] == "Refill cartridge"
+    assert asset.as_dict()["other_material_label"] == "Plant fiber composite"
+    with pytest.raises(PackagingAssetError, match="other_family_label_invalid"):
+        _asset(family=PackagingFamily.OTHER)
+    with pytest.raises(PackagingAssetError, match="other_material_label_invalid"):
+        _asset(base_material=BaseMaterial.OTHER)
+
+
+def test_serialization_and_revision_are_deterministic_and_path_free() -> None:
+    first = _asset()
+    second = _asset()
+
+    assert first.canonical_json == second.canonical_json
+    assert first.revision_id == second.revision_id
+    assert first.revision_id.startswith("packaging-asset:")
+    assert "C:\\" not in first.canonical_json
+    assert "project_root" not in first.as_dict()
+    assert json.loads(first.canonical_json) == first.as_dict()
+
+
+def test_each_metadata_change_creates_a_distinct_content_revision() -> None:
+    assert (
+        _asset(display_name="500 mL bottle").revision_id
+        != _asset(display_name="1 L bottle").revision_id
+    )
+
+
+def test_asset_values_are_immutable() -> None:
+    with pytest.raises(FrozenInstanceError):
+        _asset().display_name = "Changed"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("asset_id", "../private", "asset_id_invalid"),
+        ("asset_id", "C:\\owner\\asset", "asset_id_invalid"),
+        ("display_name", "  ", "display_name_invalid"),
+        ("display_name", "x" * 121, "display_name_invalid"),
+        ("display_name", "C:\\private\\supplier.xlsx", "display_name_invalid"),
+        ("family", "BOTTLE", "family_invalid"),
+        ("base_material", "PET", "base_material_invalid"),
+        ("closure_type", "PUMP", "closure_type_invalid"),
+        ("status", "ACTIVE", "status_invalid"),
+        ("supplier_name", None, "supplier_identity_incomplete"),
+        ("supplier_name", "https://supplier.example", "supplier_name_invalid"),
+        (
+            "nominal_volume",
+            PackagingMeasurement(10, MeasurementUnit.GRAM),
+            "nominal_volume_unit_invalid",
+        ),
+        (
+            "empty_package_weight",
+            PackagingMeasurement(10, MeasurementUnit.MILLILITER),
+            "empty_package_weight_unit_invalid",
+        ),
+        (
+            "overall_height",
+            PackagingMeasurement(10, MeasurementUnit.KILOGRAM),
+            "overall_height_unit_invalid",
+        ),
+    ],
+)
+def test_invalid_ids_enums_supplier_pairs_and_units_reject(
+    field: str, value: object, message: str
+) -> None:
+    with pytest.raises(PackagingAssetError, match=message):
+        _asset(**{field: value})
+
+
+@pytest.mark.parametrize("value", [0, -1, float("nan"), float("inf"), True, 1e100])
+def test_measurements_reject_nonpositive_nonfinite_or_unbounded_values(value: object) -> None:
+    with pytest.raises(PackagingAssetError, match="measurement_value_invalid"):
+        PackagingMeasurement(value, MeasurementUnit.MILLILITER)  # type: ignore[arg-type]
+
+
+def test_unknown_measurement_is_distinct_from_numeric_zero() -> None:
+    unknown = _asset(nominal_volume=None)
+    with pytest.raises(PackagingAssetError, match="measurement_value_invalid"):
+        PackagingMeasurement(0, MeasurementUnit.MILLILITER)
+    assert unknown.nominal_volume is None
