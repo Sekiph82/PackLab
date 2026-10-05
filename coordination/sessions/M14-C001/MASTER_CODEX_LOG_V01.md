@@ -45,18 +45,18 @@ Master audit criteria: https://github.com/Sekiph82/PackLab/blob/main/coordinatio
 | PL-0326 V01 | AUTHORITY_STOP_ACCEPTED; superseded by V02 | PL-0326_CODEX_PROMPT_V01.md | PL-0326_CHATGPT_AUDIT_CRITERIA_V01.md | No implementation commit; preserved authority-stop result | `c30276638ff96a3e1714ef40f1168d5ec6fc2ed3` ([blocker log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0326_CODEX_LOG_V01.md)) | Read-only source-contract review | Not run: authority stop | Historical V01 blocker remains immutable; V02 resolves scope without inventing partitions or base UVs. |
 | PL-0326 V02 | READY_FOR_INDEPENDENT_AUDIT | PL-0326_CODEX_PROMPT_V02.md | PL-0326_CHATGPT_AUDIT_CRITERIA_V02.md | `02995a239682d9363c1c56328d6d4a70480d7484` | `6732f08176591254cfdc24c59f5d3d32e76ee978` ([V02 log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0326_CODEX_LOG_V02.md)) | 17 focused passed; real Blender scene smoke passed | 1,833 passed, 7 skipped, 1 deselected | Exact single-component BREP material mapping; PNG FRONT/BACK planar and WRAP overlays. No partition/base UV; SVG unsupported; no render/physical/certification claim. |
 | PL-0327 | READY_FOR_INDEPENDENT_AUDIT | PL-0327_CODEX_PROMPT_V01.md | PL-0327_CHATGPT_AUDIT_CRITERIA_V01.md | `35b79489d1c94b00cfbeea63cdbaa369f90b1be5` | `91c52144e7ead477a0a328b75248b216fb66d26c` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0327_CODEX_LOG_V01.md)) | 15 preset tests passed; real Blender studio scene smoke passed | 1,847 passed, 8 skipped, 1 deselected | Deterministic presentation-only camera and lighting presets; no physical inference or authority mutation. |
-| PL-0328 | ACTIVE (M14-C001-R03) | PL-0328_CODEX_PROMPT_V01.md | PL-0328_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
-| PL-0329 | PENDING | PL-0329_CODEX_PROMPT_V01.md | PL-0329_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
+| PL-0328 | READY_FOR_INDEPENDENT_AUDIT | PL-0328_CODEX_PROMPT_V01.md | PL-0328_CHATGPT_AUDIT_CRITERIA_V01.md | `60c7c73cc141ac8a87d8e7a46a8dfd5fc5d1990c` | `93c1733e2831c5fd73219f621ee7e1f160f492d7` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/PL-0328_CODEX_LOG_V01.md)) | 24 focused tests including actual Blender render passed | 1,855 passed, 9 skipped, 1 deselected | Real 256×256 RGBA transparent render and path-free digest evidence; presentation-only. |
+| PL-0329 | ACTIVE (M14-C001-R03) | PL-0329_CODEX_PROMPT_V01.md | PL-0329_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0330 | PENDING | PL-0330_CODEX_PROMPT_V01.md | PL-0330_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 | PL-0331 | PENDING | PL-0331_CODEX_PROMPT_V01.md | PL-0331_CHATGPT_AUDIT_CRITERIA_V01.md | | | | | |
 
 ## Batch status and final handoff
 
-- Batch status: `ACTIVE` under M14-C001-R03; PL-0326 V02 and PL-0327 published; PL-0328 is the active child.
+- Batch status: `ACTIVE` under M14-C001-R03; PL-0326 V02, PL-0327 and PL-0328 published; PL-0329 is the active child.
 - Independently accepted frontier: PL-0310 and PL-0311 (`AUDITED_PASS`); PL-0312 V02 builder evidence is `READY_FOR_INDEPENDENT_AUDIT`.
 - PL-0312 V01's authority stop and PL-0313 V01 authority stop remain preserved. PL-0326 V01 authority stop remains historical; PL-0326 V02 resolves it with exact one-component BREP lineage and renderer-only overlays. PL-0327 through PL-0331 remain frozen and must execute in order.
 - M14 stop conditions and PL-0324 real Blender capability gate remain active.
 - M15 started: NO.
-- PL-0327 implementation and log publication parity: local `HEAD`, `origin/main`, and GitHub `main` verified equal at `91c52144e7ead477a0a328b75248b216fb66d26c`. R03 continuation is proceeding under `MASTER_PL0326_CONTINUATION_CODEX_LOG_V04.md`.
+- PL-0328 implementation and log publication parity: local `HEAD`, `origin/main`, and GitHub `main` verified equal at `93c1733e2831c5fd73219f621ee7e1f160f492d7`. R03 continuation is proceeding under `MASTER_PL0326_CONTINUATION_CODEX_LOG_V04.md`.
 
 AWAITING_MILESTONE_AUDIT
