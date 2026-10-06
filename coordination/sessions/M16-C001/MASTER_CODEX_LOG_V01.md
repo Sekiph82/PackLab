@@ -75,3 +75,15 @@ The V01 stop above is retained as historical evidence. Under the owner-authorize
 BATCH_STOPPED_AT_PL-0350
 
 AWAITING_MILESTONE_AUDIT
+
+## R02 continuation stop - PL-0350 V02
+
+- R02 resumed from synchronized `7fac33346525ca92a3949f105017bed49ebe0650`; implementation/evidence commits are `5b933b18083763a8f281b49a420e6715dbc69bab` and `397786cac0cf276d1ebd5a27e0fc6c77e07619b9`.
+- Hosted Windows run [37431656815](https://github.com/Sekiph82/PackLab/actions/runs/37431656815) built Studio `0.1.0`, completed the packaged no-network smoke, inventoried the exact 283-file / 141,367,765-byte stage, and uploaded only text/JSON/license evidence. The artifact is `packlab-windows-compliance-preclearance-397786cac0cf276d1ebd5a27e0fc6c77e07619b9` (ID `11396764327`).
+- Hosted compliance result is `BLOCKED`: `unresolved_count=55`, including seven unresolved components: Microsoft Windows runtime, PyInstaller hooks contrib, PySide6, PySide6 Addons, PySide6 Essentials, Shiboken6, and an unmapped TOC source component. The exact component reasons and per-file evidence are in the artifact and PL-0350 V02 log. No installer or binary artifact was built or uploaded.
+- PL-0350 child log V02 is published in separate log-only commit `3c40549fe47a6114a89b35a8eb04ac3ebf64d489`: [PL-0350_CODEX_LOG_V02.md](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_CODEX_LOG_V02.md). PL-0351 through PL-0367 were not started. Root `TASKS.md` remains unchanged; PL-0368 remains `DEFERRED_POST_M17`; M17 has not started. No tag, GitHub Release, signing claim, or V0.1 release was created.
+- Final builder worktree / `origin/main` parity before this master-log-only publication was `3c40549fe47a6114a89b35a8eb04ac3ebf64d489`. This is builder evidence and an audit handoff, not acceptance or lifecycle closure.
+
+R02_BATCH_STOPPED_AT_PL-0350
+
+AWAITING_MILESTONE_AUDIT
