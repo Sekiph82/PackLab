@@ -22,6 +22,8 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     shortcuts = (ROOT / "tools/dev/refresh_owner_packlab_shortcuts.ps1").read_text(encoding="utf-8")
     post = (ROOT / "tools/dev/post_codex_owner_dev_refresh.ps1").read_text(encoding="utf-8")
     assert "uv sync --locked" in deploy
+    assert "ls-tree -r --name-only $sha" in deploy
+    assert "Copy-Item -LiteralPath $source -Destination $destination -Force" in deploy
     assert "Move-Item -LiteralPath $stage -Destination $current" in deploy
     assert "run_module('packlab_studio'" in launch
     assert "--no-install-project" in deploy
