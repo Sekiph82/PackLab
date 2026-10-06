@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -125,12 +125,14 @@ class EngineeringExportView(QWidget):
         source_kind = self.selected_source_kind
         formats: tuple[tuple[str, str], ...] = ()
         summary = ""
+        source_available = False
         if source_kind is ExportSourceKind.SCAN_MESH:
-            source = self._scan_source()
-            if source is None:
+            scan_source = self._scan_source()
+            if scan_source is None:
                 summary = "No selected persisted Scan Master revision is available."
             else:
-                manifest = source.manifest
+                source_available = True
+                manifest = scan_source.manifest
                 scale_state = _manifest_string(manifest, "scale_state", "unknown")
                 unit = (
                     "mm_unverified"
@@ -139,13 +141,13 @@ class EngineeringExportView(QWidget):
                 )
                 summary = (
                     "Authority: Scan Master (captured Scan Mesh); "
-                    f"revision: {source.revision_id}; unit: {unit}; scale: {scale_state}; "
+                    f"revision: {scan_source.revision_id}; unit: {unit}; scale: {scale_state}; "
                     "physical validation: DEFERRED_OWNER_VALIDATION; mold use: not authorized."
                 )
                 formats = self.SCAN_FORMATS
         else:
-            source = self._design_source()
-            if source is None:
+            design_source = self._design_source()
+            if design_source is None:
                 self.source_summary.setText(
                     "No active Design Model source is connected. Select an exact Design Model, "
                     "CAD/BREP, and preview through the Studio design authority."
@@ -154,7 +156,8 @@ class EngineeringExportView(QWidget):
                 self.format_selector.clear()
                 self.export_button.setEnabled(False)
                 return
-            model = source.model
+            source_available = True
+            model = design_source.model
             parent_id = (
                 model.standalone_root.revision_id
                 if model.standalone_root is not None
@@ -163,17 +166,17 @@ class EngineeringExportView(QWidget):
             summary = (
                 f"Authority: editable Design Model ({model.parent_kind.value}, parent {parent_id}); "
                 f"revision: {model.revision_id}; unit: {model.coordinate_unit}; "
-                f"scale: {model.scale_state.value}; CAD/BREP: {source.representation.revision_id}; "
+                f"scale: {model.scale_state.value}; CAD/BREP: {design_source.representation.revision_id}; "
                 "physical validation: DEFERRED_OWNER_VALIDATION; mold use: not authorized."
             )
-            formats = self._design_formats_for(source)
+            formats = self._design_formats_for(design_source)
 
         self.source_summary.setText(summary)
         self.available_formats.setText(", ".join(label for label, _value in formats) or "None")
         self.format_selector.clear()
         for label, value in formats:
             self.format_selector.addItem(label, value)
-        self.export_button.setEnabled(source is not None and bool(formats))
+        self.export_button.setEnabled(source_available and bool(formats))
 
     def cancel_export(self) -> None:
         self.status.setText("Export cancelled; no domain service was called.")
@@ -363,7 +366,7 @@ class EngineeringExportView(QWidget):
         raise RuntimeError("unsupported Design Model export format")
 
 
-def _manifest_string(manifest: dict[str, object], key: str, fallback: str) -> str:
+def _manifest_string(manifest: Mapping[str, object], key: str, fallback: str) -> str:
     value = manifest.get(key)
     return value if isinstance(value, str) and value else fallback
 

@@ -71,7 +71,11 @@ def test_future_version_and_insecure_transport_fail_closed() -> None:
 
 
 def test_shared_golden_contract_covers_status_control_completion_and_error() -> None:
-    fixture = json.loads((Path(__file__).parents[1] / "fixtures" / "transfer-protocol-v1-golden.json").read_text(encoding="utf-8"))
+    fixture = json.loads(
+        (Path(__file__).parents[1] / "fixtures" / "transfer-protocol-v1-golden.json").read_text(
+            encoding="utf-8"
+        )
+    )
     create = TransferCreate.from_dict(fixture["create"])
     assert create.to_dict() == fixture["create"]
     status = TransferStatus.from_dict(fixture["status"])
@@ -86,6 +90,35 @@ def test_shared_golden_contract_covers_status_control_completion_and_error() -> 
 
 def test_control_and_error_versions_fail_closed() -> None:
     with pytest.raises(TransferProtocolError, match="unsupported_version"):
-        TransferControlMessage.from_dict({"message": "cancel", "protocol": PROTOCOL_NAME, "protocol_version": "2", "transfer_id": "transfer-1"})
+        TransferControlMessage.from_dict(
+            {
+                "message": "cancel",
+                "protocol": PROTOCOL_NAME,
+                "protocol_version": "2",
+                "transfer_id": "transfer-1",
+            }
+        )
     with pytest.raises(TransferProtocolError, match="unsupported_version"):
-        TransferErrorEnvelope.from_dict({"message": "error", "protocol": PROTOCOL_NAME, "protocol_version": "2", "error_code": "bad_request", "error": "bad"})
+        TransferErrorEnvelope.from_dict(
+            {
+                "message": "error",
+                "protocol": PROTOCOL_NAME,
+                "protocol_version": "2",
+                "error_code": "bad_request",
+                "error": "bad",
+            }
+        )
+
+
+def test_completion_boolean_fields_require_json_booleans() -> None:
+    value = {
+        "message": "complete",
+        "protocol": PROTOCOL_NAME,
+        "protocol_version": PROTOCOL_VERSION,
+        "transfer_id": "transfer-1",
+        "package_sha256": "a" * 64,
+        "verified": "true",
+        "authenticated": True,
+    }
+    with pytest.raises(TransferProtocolError, match="bad_request"):
+        CompletionAcknowledgement.from_dict(value)

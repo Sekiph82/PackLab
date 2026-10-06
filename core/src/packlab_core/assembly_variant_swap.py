@@ -229,6 +229,14 @@ def swap_trigger_pump_variant(
         raise AssemblyVariantSwapError("trigger_pump_attachment_semantic_incompatible")
     body = by_role[AssemblyComponentRole.BODY].model
     closure = by_role[AssemblyComponentRole.CLOSURE].model
+    body_scan_master_revision_id = body.fitted_to_scan_master_revision_id
+    body_scan_master_geometry_sha256 = body.scan_master_geometry_sha256
+    if (
+        body.parent_binding_revision_id is None
+        or body_scan_master_revision_id is None
+        or body_scan_master_geometry_sha256 is None
+    ):
+        raise AssemblyVariantSwapError("assembly_captured_scan_master_parent_required")
     if (
         candidate_trigger_pump_model.project_id != old_pump_model.project_id
         or candidate_trigger_pump_model.fitted_to_scan_master_revision_id
@@ -308,8 +316,8 @@ def swap_trigger_pump_variant(
         "dip_tube_model_revision_id": revised_tube.revision_id,
         "body_model_revision_id": body.revision_id,
         "closure_model_revision_id": closure.revision_id,
-        "scan_master_revision_id": body.fitted_to_scan_master_revision_id,
-        "scan_master_geometry_sha256": body.scan_master_geometry_sha256,
+        "scan_master_revision_id": body_scan_master_revision_id,
+        "scan_master_geometry_sha256": body_scan_master_geometry_sha256,
         "attachment_semantic_key": candidate_feature.semantic_key,
     }
     revision_id = (
@@ -328,8 +336,8 @@ def swap_trigger_pump_variant(
         candidate_trigger_pump_model.revision_id,
         dip_tube.revision_id,
         revised_tube.revision_id,
-        body.fitted_to_scan_master_revision_id,
-        body.scan_master_geometry_sha256,
+        body_scan_master_revision_id,
+        body_scan_master_geometry_sha256,
         candidate_feature.semantic_key,
         current_graph.scale_state,
         current_graph.coordinate_unit,

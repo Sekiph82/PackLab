@@ -8,9 +8,11 @@ import pytest
 from tests.core.test_packaging_asset import _asset
 
 from packlab_core.packaging_asset import (
+    DesignModelLink,
     FieldProvenance,
     ProvenanceClass,
     RawScanLink,
+    ScaleState,
 )
 from packlab_core.packaging_sku_library import (
     PackagingSkuRevision,
@@ -41,6 +43,22 @@ def _created(store: PackagingLibraryAuditStore):
         reason="Record the supplier package metadata",
     )
     return initial, created
+
+
+def test_design_model_link_parser_preserves_standalone_authority_and_checks_types() -> None:
+    link = DesignModelLink(
+        project_id="project-1",
+        revision_id="design-1",
+        content_sha256="a" * 64,
+        parent_authority_kind="STANDALONE_DESIGN_GEOMETRY",
+        parent_authority_revision_id="standalone-root-1",
+        scale_state=ScaleState.METRIC_UNVERIFIED,
+    )
+    assert audit._design_model_link_from_dict(link.as_dict()) == link
+    malformed = link.as_dict()
+    malformed["scan_master_revision_id"] = ""
+    with pytest.raises(ValueError, match="standalone_model_has_scan_master"):
+        audit._design_model_link_from_dict(malformed)
 
 
 def _relationship_assets(store: PackagingLibraryAuditStore) -> dict[str, str]:

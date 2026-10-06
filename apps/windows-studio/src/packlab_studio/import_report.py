@@ -18,9 +18,23 @@ def _safe_transfer_provenance(value: dict[str, str] | None) -> dict[str, str] | 
     clean: dict[str, str] = {}
     for key in sorted(allowed):
         item = value.get(key)
-        if isinstance(item, str) and item and len(item) <= 128 and "\\" not in item and "/" not in item and "Bearer" not in item:
+        if (
+            isinstance(item, str)
+            and item
+            and len(item) <= 128
+            and "\\" not in item
+            and "/" not in item
+            and "Bearer" not in item
+        ):
             clean[key] = item
     return clean or None
+
+
+def _report_integer(value: object) -> int:
+    """Preserve the existing int() conversion for validated JSON scalar values."""
+    if not isinstance(value, (str, int, float)):
+        raise TypeError("PackScan integer field is invalid")
+    return int(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,29 +57,67 @@ class ImportReport:
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "capture_id": self.capture_id, "schema_version": self.schema_version, "source_channel": self.source_channel,
-            "package_sha256": self.package_sha256, "image_count": self.image_count, "image_bytes": self.image_bytes,
-            "photo_metadata_count": self.photo_metadata_count, "capture_mode": self.capture_mode,
-            "device_summary": self.device_summary, "calibration_profile_reference": self.calibration_profile_reference,
-            "calibration_status": self.calibration_status, "optional_payload_counts": self.optional_payload_counts,
-            "warnings": self.warnings, "raw_location": self.raw_location, "transfer_provenance": self.transfer_provenance,
+            "capture_id": self.capture_id,
+            "schema_version": self.schema_version,
+            "source_channel": self.source_channel,
+            "package_sha256": self.package_sha256,
+            "image_count": self.image_count,
+            "image_bytes": self.image_bytes,
+            "photo_metadata_count": self.photo_metadata_count,
+            "capture_mode": self.capture_mode,
+            "device_summary": self.device_summary,
+            "calibration_profile_reference": self.calibration_profile_reference,
+            "calibration_status": self.calibration_status,
+            "optional_payload_counts": self.optional_payload_counts,
+            "warnings": self.warnings,
+            "raw_location": self.raw_location,
+            "transfer_provenance": self.transfer_provenance,
         }
 
 
-def build_import_report(report: PackScanReport, *, package_sha256: str, source_channel: str, raw_location: str | None = None, transfer_provenance: dict[str, str] | None = None) -> ImportReport:
+def build_import_report(
+    report: PackScanReport,
+    *,
+    package_sha256: str,
+    source_channel: str,
+    raw_location: str | None = None,
+    transfer_provenance: dict[str, str] | None = None,
+) -> ImportReport:
     manifest = report.manifest
-    payloads = list(manifest.get("payloads", []))
+    raw_payloads = manifest.get("payloads", [])
+    if not isinstance(raw_payloads, list):
+        raise TypeError("validated PackScan payloads must be a list")
+    payloads: list[dict[str, object]] = []
+    for item in raw_payloads:
+        if not isinstance(item, dict):
+            raise TypeError("validated PackScan payload entries must be objects")
+        payloads.append(item)
     images = [item for item in payloads if item.get("kind") == "image"]
     metadata_bytes = report.payloads.get("metadata/photos.json", b"{}")
     try:
         photo_document = json.loads(metadata_bytes.decode("utf-8"))
-        photo_count = len(photo_document.get("photos", [])) if isinstance(photo_document, dict) and isinstance(photo_document.get("photos"), list) else 0
+        photo_count = (
+            len(photo_document.get("photos", []))
+            if isinstance(photo_document, dict) and isinstance(photo_document.get("photos"), list)
+            else 0
+        )
     except (UnicodeDecodeError, json.JSONDecodeError):
         photo_count = 0
-    calibration_ref = manifest.get("calibration_profile_ref") if isinstance(manifest.get("calibration_profile_ref"), str) else None
+    calibration_value = manifest.get("calibration_profile_ref")
+    calibration_ref = calibration_value if isinstance(calibration_value, str) else None
+    capture_mode_value = manifest.get("capture_mode", {})
+    device_value = manifest.get("device", {})
+    if not isinstance(capture_mode_value, dict) or not isinstance(device_value, dict):
+        raise TypeError("validated PackScan capture and device fields must be objects")
     warnings: list[dict[str, str]] = []
     if calibration_ref is None:
-        warnings.append({"code": "calibration_owner_required", "severity": "owner_required", "message": "calibration reference is not present"})
+        warnings.append(
+            {
+                "code": "calibration_owner_required",
+                "severity": "owner_required",
+                "message": "calibration reference is not present",
+            }
+        )
     optional_counts: dict[str, int] = {}
     for item in payloads:
         if isinstance(item, dict) and item.get("required") is False:
@@ -73,14 +125,30 @@ def build_import_report(report: PackScanReport, *, package_sha256: str, source_c
             optional_counts[kind] = optional_counts.get(kind, 0) + 1
     for kind in ("mask", "diagnostics", "calibration"):
         if kind not in optional_counts:
-            warnings.append({"code": f"optional_{kind}_missing", "severity": "optional", "message": f"optional {kind} payload is absent"})
+            warnings.append(
+                {
+                    "code": f"optional_{kind}_missing",
+                    "severity": "optional",
+                    "message": f"optional {kind} payload is absent",
+                }
+            )
     return ImportReport(
-        capture_id=str(manifest["capture_id"]), schema_version=str(manifest["schema_version"]), source_channel=source_channel,
-        package_sha256=package_sha256, image_count=len(images), image_bytes=sum(int(item.get("size_bytes", 0)) for item in images),
-        photo_metadata_count=photo_count, capture_mode=str(manifest.get("capture_mode", {}).get("mode", "unknown")),
-        device_summary={key: str(manifest.get("device", {}).get(key, "")) for key in ("platform", "model", "os_version")},
-        calibration_profile_reference=calibration_ref, calibration_status="available" if calibration_ref else "owner_required",
-        optional_payload_counts=dict(sorted(optional_counts.items())), warnings=warnings, raw_location=raw_location,
+        capture_id=str(manifest["capture_id"]),
+        schema_version=str(manifest["schema_version"]),
+        source_channel=source_channel,
+        package_sha256=package_sha256,
+        image_count=len(images),
+        image_bytes=sum(_report_integer(item.get("size_bytes", 0)) for item in images),
+        photo_metadata_count=photo_count,
+        capture_mode=str(capture_mode_value.get("mode", "unknown")),
+        device_summary={
+            key: str(device_value.get(key, "")) for key in ("platform", "model", "os_version")
+        },
+        calibration_profile_reference=calibration_ref,
+        calibration_status="available" if calibration_ref else "owner_required",
+        optional_payload_counts=dict(sorted(optional_counts.items())),
+        warnings=warnings,
+        raw_location=raw_location,
         transfer_provenance=_safe_transfer_provenance(transfer_provenance),
     )
 

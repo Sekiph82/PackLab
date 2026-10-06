@@ -25,6 +25,7 @@ from packlab_core.packaging_sku_library import (
     PackagingSkuStatus,
     SkuArtworkPresentationReference,
 )
+from packlab_studio import packaging_library_browser as browser
 from packlab_studio.app import create_application
 from packlab_studio.navigation import Route
 from packlab_studio.packaging_library_audit import PackagingLibraryAuditStore
@@ -44,6 +45,22 @@ from packlab_studio.packaging_library_browser import (
 from packlab_studio.shell import StudioMainWindow
 
 NOW = datetime(2026, 10, 5, 14, 0, tzinfo=UTC)
+
+
+def test_design_model_link_parser_checks_optional_parent_fields() -> None:
+    link = DesignModelLink(
+        project_id="water-project",
+        revision_id="design-model-rev-1",
+        content_sha256="c" * 64,
+        parent_authority_kind="STANDALONE_DESIGN_GEOMETRY",
+        parent_authority_revision_id="standalone-root-1",
+        scale_state=ScaleState.METRIC_UNVERIFIED,
+    )
+    assert browser._design_model_link_from_dict(link.as_dict()) == link
+    malformed = link.as_dict()
+    malformed["mold_use_authorized"] = "false"
+    with pytest.raises(PackagingLibraryBrowserError, match="design_model_link_invalid"):
+        browser._design_model_link_from_dict(malformed)
 
 
 def _png(path: Path, color: Qt.GlobalColor = Qt.GlobalColor.darkBlue) -> str:

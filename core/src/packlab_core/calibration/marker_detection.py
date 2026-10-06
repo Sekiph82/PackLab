@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, TypeGuard
 
 CORNER_ORDER = "clockwise_from_top_left_image_coordinates"
 
@@ -164,8 +164,13 @@ def detect_markers(image: Any) -> DetectionBatch:
     return DetectionBatch("detected", tuple(observations), (), _provenance())
 
 
-def _supported_image(shape: Any, dtype: str) -> bool:
-    if dtype != "uint8" or not isinstance(shape, tuple) or len(shape) not in {2, 3}:
+def _supported_image(shape: object, dtype: str) -> TypeGuard[tuple[int, ...]]:
+    if (
+        dtype != "uint8"
+        or not isinstance(shape, tuple)
+        or len(shape) not in {2, 3}
+        or any(isinstance(size, bool) or not isinstance(size, int) for size in shape)
+    ):
         return False
     if shape[0] <= 0 or shape[1] <= 0:
         return False

@@ -212,10 +212,24 @@ def _load_archive(path: Path) -> dict[str, bytes]:
 def _read_checksums(data: bytes) -> dict[str, str]:
     value = _read_json(data, "corrupt_checksums", "checksums.json")
     _validate_against_schema(value, "checksums.schema.json", "checksums.json", "invalid_checksums")
+    if not isinstance(value, dict):
+        raise PackScanError(
+            "invalid_checksums", "checksum document must be an object", "checksums.json"
+        )
     entries = value.get("entries")
+    if not isinstance(entries, dict):
+        raise PackScanError(
+            "invalid_checksums", "checksum entries must be an object", "checksums.json"
+        )
+    normalized: dict[str, str] = {}
     for name, digest in entries.items():
+        if not isinstance(name, str) or not isinstance(digest, str):
+            raise PackScanError(
+                "invalid_checksums", "checksum names and digests must be strings", "checksums.json"
+            )
         _safe_entry_name(name)
-    return dict(entries)
+        normalized[name] = digest
+    return normalized
 
 
 def validate_packscan(source: str | Path) -> PackScanReport:
@@ -261,6 +275,8 @@ def validate_packscan(source: str | Path) -> PackScanReport:
             )
         data = archive[path]
         expected_size = item["size_bytes"]
+        if isinstance(expected_size, bool) or not isinstance(expected_size, (int, float)):
+            raise PackScanError("schema_invalid", "payload size must be numeric", path)
         if len(data) != expected_size:
             code = "truncated_entry" if len(data) < expected_size else "payload_size_mismatch"
             raise PackScanError(code, "payload byte length differs from manifest", path)
@@ -349,15 +365,16 @@ def extract_packscan(source: str | Path, destination: str | Path) -> Path:
     if target.exists():
         raise PackScanError("destination_exists", "refusing to overwrite an extraction destination")
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary: str | None = tempfile.mkdtemp(prefix=".packscan-extract-", dir=target.parent)
+    temporary_directory = Path(tempfile.mkdtemp(prefix=".packscan-extract-", dir=target.parent))
+    temporary: Path | None = temporary_directory
     try:
         with zipfile.ZipFile(report.source, mode="r") as archive:
             for name in sorted(archive.namelist()):
                 safe_name = _safe_entry_name(name)
-                output = Path(temporary, *safe_name.split("/"))
+                output = temporary_directory.joinpath(*safe_name.split("/"))
                 output.parent.mkdir(parents=True, exist_ok=True)
                 output.write_bytes(archive.read(name))
-        os.replace(temporary, target)
+        os.replace(temporary_directory, target)
         temporary = None
     finally:
         if temporary is not None:

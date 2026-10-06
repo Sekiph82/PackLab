@@ -184,6 +184,9 @@ def measure_jerrycan_grip_indent_evidence(
     body = _resolve_body(model, body_feature_id)
     scan_digest = mesh_sha256(scan_master.mesh)
     _validate_scan_parent(scan_master, model, scan_digest)
+    parent_binding_revision_id = model.parent_binding_revision_id
+    if parent_binding_revision_id is None:
+        raise GripIndentError("grip_indent_captured_parent_required")
     front_sign = _front_sign(model)
     side_sign = front_sign if side is GripIndentSide.FRONT else -front_sign
 
@@ -271,7 +274,7 @@ def measure_jerrycan_grip_indent_evidence(
         scan_master.revision_id,
         scan_digest,
         model.revision_id,
-        model.parent_binding_revision_id,
+        parent_binding_revision_id,
         body.feature_id,
         region_id,
         region,

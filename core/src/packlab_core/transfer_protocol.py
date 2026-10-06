@@ -51,12 +51,23 @@ def _require_string(value: Any, field: str, *, nonempty: bool = True) -> str:
 def _require_sha256(value: Any, field: str) -> str:
     text = _require_string(value, field)
     if not SHA256_RE.fullmatch(text):
-        raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, f"{field} must be lowercase SHA-256")
+        raise TransferProtocolError(
+            TransferErrorCode.BAD_REQUEST, f"{field} must be lowercase SHA-256"
+        )
     return text
 
 
+def _json_integer(value: object) -> int:
+    """Keep the protocol's existing int() coercion for JSON scalar values."""
+    if not isinstance(value, (str, int, float)):
+        raise TypeError("JSON value cannot be converted to an integer")
+    return int(value)
+
+
 def canonical_json(value: object) -> bytes:
-    return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    return (
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,14 +85,22 @@ class TransferCreate:
         for field in ("receiver_id", "transfer_id", "capture_id", "package_name"):
             _require_string(getattr(self, field), field)
         if self.protocol_version != PROTOCOL_VERSION:
-            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
+            raise TransferProtocolError(
+                TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported"
+            )
         if self.transport != REQUIRED_TRANSPORT:
-            raise TransferProtocolError(TransferErrorCode.INSECURE_TRANSPORT, "production transport must be HTTPS")
+            raise TransferProtocolError(
+                TransferErrorCode.INSECURE_TRANSPORT, "production transport must be HTTPS"
+            )
         if self.total_bytes < 0:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "total_bytes must be non-negative")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "total_bytes must be non-negative"
+            )
         _require_sha256(self.package_sha256, "package_sha256")
         if not self.package_name.lower().endswith(".packscan"):
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "package_name must be a .packscan")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "package_name must be a .packscan"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -100,14 +119,16 @@ class TransferCreate:
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> TransferCreate:
         if value.get("message") != "create_transfer" or value.get("protocol") != PROTOCOL_NAME:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a create_transfer message")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "not a create_transfer message"
+            )
         try:
             return cls(
                 receiver_id=_require_string(value.get("receiver_id"), "receiver_id"),
                 transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
                 capture_id=_require_string(value.get("capture_id"), "capture_id"),
                 package_name=_require_string(value.get("package_name"), "package_name"),
-                total_bytes=int(value.get("total_bytes", -1)),
+                total_bytes=_json_integer(value.get("total_bytes", -1)),
                 package_sha256=_require_sha256(value.get("package_sha256"), "package_sha256"),
                 protocol_version=_require_string(value.get("protocol_version"), "protocol_version"),
                 transport=_require_string(value.get("transport"), "transport"),
@@ -115,7 +136,9 @@ class TransferCreate:
         except (TypeError, ValueError) as error:
             if isinstance(error, TransferProtocolError):
                 raise
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "create_transfer fields are invalid") from error
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "create_transfer fields are invalid"
+            ) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,20 +167,26 @@ class TransferStatus:
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> TransferStatus:
         if value.get("message") != "transfer_status" or value.get("protocol") != PROTOCOL_NAME:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a transfer_status message")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "not a transfer_status message"
+            )
         if value.get("protocol_version") != PROTOCOL_VERSION:
-            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
+            raise TransferProtocolError(
+                TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported"
+            )
         try:
             return cls(
                 transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
-                confirmed_bytes=int(value["confirmed_bytes"]),
-                total_bytes=int(value["total_bytes"]),
+                confirmed_bytes=_json_integer(value["confirmed_bytes"]),
+                total_bytes=_json_integer(value["total_bytes"]),
                 state=_require_string(value.get("state"), "state"),
                 package_sha256=_require_sha256(value.get("package_sha256"), "package_sha256"),
-                next_offset=int(value["next_offset"]),
+                next_offset=_json_integer(value["next_offset"]),
             )
         except (KeyError, TypeError, ValueError) as error:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "transfer_status fields are invalid") from error
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "transfer_status fields are invalid"
+            ) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,9 +198,13 @@ class TransferControlMessage:
     def __post_init__(self) -> None:
         _require_string(self.transfer_id, "transfer_id")
         if self.action not in {"cancel", "resume"}:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "unsupported transfer control action")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "unsupported transfer control action"
+            )
         if self.protocol_version != PROTOCOL_VERSION:
-            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
+            raise TransferProtocolError(
+                TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -183,8 +216,13 @@ class TransferControlMessage:
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> TransferControlMessage:
-        if value.get("protocol") != PROTOCOL_NAME or value.get("message") not in {"cancel", "resume"}:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a transfer control message")
+        if value.get("protocol") != PROTOCOL_NAME or value.get("message") not in {
+            "cancel",
+            "resume",
+        }:
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "not a transfer control message"
+            )
         return cls(
             transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
             action=_require_string(value.get("message"), "message"),
@@ -207,9 +245,13 @@ class ChunkRange:
 
     def validate_bytes(self, payload: bytes) -> None:
         if len(payload) != self.length:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "chunk length does not match body")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "chunk length does not match body"
+            )
         if hashlib.sha256(payload).hexdigest() != self.chunk_sha256:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "chunk digest does not match body")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "chunk digest does not match body"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -227,15 +269,20 @@ class ChunkRange:
         if value.get("message") != "put_chunk" or value.get("protocol") != PROTOCOL_NAME:
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a put_chunk message")
         if value.get("protocol_version") != PROTOCOL_VERSION:
-            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
+            raise TransferProtocolError(
+                TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported"
+            )
         try:
             return cls(
                 transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
-                offset=int(value["offset"]), length=int(value["length"]),
+                offset=_json_integer(value["offset"]),
+                length=_json_integer(value["length"]),
                 chunk_sha256=_require_sha256(value.get("chunk_sha256"), "chunk_sha256"),
             )
         except (KeyError, TypeError, ValueError) as error:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "put_chunk fields are invalid") from error
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "put_chunk fields are invalid"
+            ) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,16 +307,29 @@ class CompletionAcknowledgement:
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> CompletionAcknowledgement:
-        if value.get("message") != "completion_acknowledgement" or value.get("protocol") != PROTOCOL_NAME:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "not a completion acknowledgement")
+        if (
+            value.get("message") != "completion_acknowledgement"
+            or value.get("protocol") != PROTOCOL_NAME
+        ):
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "not a completion acknowledgement"
+            )
         if value.get("protocol_version") != PROTOCOL_VERSION:
-            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
-        if not isinstance(value.get("verified"), bool) or not isinstance(value.get("authenticated"), bool):
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "completion acknowledgement flags are invalid")
+            raise TransferProtocolError(
+                TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported"
+            )
+        verified = value.get("verified")
+        authenticated = value.get("authenticated")
+        if not isinstance(verified, bool) or not isinstance(authenticated, bool):
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "completion acknowledgement flags are invalid"
+            )
         return cls(
             transfer_id=_require_string(value.get("transfer_id"), "transfer_id"),
             package_sha256=_require_sha256(value.get("package_sha256"), "package_sha256"),
-            verified=value["verified"], authenticated=value["authenticated"], state=_require_string(value.get("state"), "state"),
+            verified=verified,
+            authenticated=authenticated,
+            state=_require_string(value.get("state"), "state"),
         )
 
 
@@ -283,10 +343,18 @@ class TransferErrorEnvelope:
         _require_string(self.code, "error_code")
         _require_string(self.message, "error")
         if self.protocol_version != PROTOCOL_VERSION:
-            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported")
+            raise TransferProtocolError(
+                TransferErrorCode.UNSUPPORTED_VERSION, "protocol version is not supported"
+            )
 
     def to_dict(self) -> dict[str, object]:
-        return {"message": "error", "protocol": PROTOCOL_NAME, "protocol_version": self.protocol_version, "error_code": self.code, "error": self.message}
+        return {
+            "message": "error",
+            "protocol": PROTOCOL_NAME,
+            "protocol_version": self.protocol_version,
+            "error_code": self.code,
+            "error": self.message,
+        }
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> TransferErrorEnvelope:

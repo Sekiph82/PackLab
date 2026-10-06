@@ -910,23 +910,7 @@ def _parse_sku(value: object) -> PackagingSkuRevision:
         geometry = document["geometry_reference"]
         preferred = document.get("preferred_design_model")
         design_model = (
-            DesignModelLink(
-                project_id=preferred["project_id"],
-                revision_id=preferred["revision_id"],
-                content_sha256=preferred["content_sha256"],
-                parent_authority_kind=preferred["parent_authority_kind"],
-                parent_authority_revision_id=preferred["parent_authority_revision_id"],
-                scale_state=ScaleState(preferred["scale_state"]),
-                scan_master_revision_id=preferred["scan_master_revision_id"],
-                scan_master_geometry_sha256=preferred["scan_master_geometry_sha256"],
-                physical_accuracy_validation_status=preferred[
-                    "physical_accuracy_validation_status"
-                ],
-                mold_use_authorized=preferred["mold_use_authorized"],
-                authority_class=preferred["authority_class"],
-            )
-            if isinstance(preferred, dict)
-            else None
+            _design_model_link_from_dict(preferred) if isinstance(preferred, dict) else None
         )
         artwork: list[SkuArtworkPresentationReference] = []
         raw_artwork = document["artwork_presentations"]
@@ -1298,12 +1282,19 @@ def _target_ids(
 ) -> tuple[str, ...]:
     if previous is None or operation_type not in {"LINK", "UNLINK"}:
         return (asset.asset_id,)
-    old_links = json.loads(previous.canonical_json)["source_links"]
-    new_links = asset.as_dict()["source_links"]
+    old_document = json.loads(previous.canonical_json)
+    new_document = asset.as_dict()
+    if not isinstance(old_document, dict):
+        raise PackagingLibraryAuditError("packaging_library_source_links_invalid")
+    old_links = _validated_source_links(old_document.get("source_links"))
+    new_links = _validated_source_links(new_document.get("source_links"))
     changed: set[str] = {asset.asset_id}
     for links in (old_links, new_links):
         for key in ("raw_scans", "design_models"):
-            for link in links.get(key, []):
+            raw_items = links.get(key, [])
+            if not isinstance(raw_items, list):
+                raise PackagingLibraryAuditError("packaging_library_source_links_invalid")
+            for link in raw_items:
                 if isinstance(link, dict):
                     changed.update(
                         value
@@ -1318,6 +1309,55 @@ def _target_ids(
                 if isinstance((value := scan_master.get(name)), str)
             )
     return (asset.asset_id, *sorted(changed - {asset.asset_id}))
+
+
+def _validated_source_links(value: object) -> dict[str, object]:
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+        raise PackagingLibraryAuditError("packaging_library_source_links_invalid")
+    return {key: item for key, item in value.items() if isinstance(key, str)}
+
+
+def _design_model_link_from_dict(value: dict[str, object]) -> DesignModelLink:
+    string_fields = (
+        "project_id",
+        "revision_id",
+        "content_sha256",
+        "parent_authority_kind",
+        "parent_authority_revision_id",
+        "physical_accuracy_validation_status",
+        "authority_class",
+    )
+    strings: dict[str, str] = {}
+    for field in string_fields:
+        item = value.get(field)
+        if not isinstance(item, str):
+            raise TypeError(f"{field} must be a string")
+        strings[field] = item
+    scan_revision = value.get("scan_master_revision_id")
+    scan_digest = value.get("scan_master_geometry_sha256")
+    if scan_revision is not None and not isinstance(scan_revision, str):
+        raise TypeError("scan_master_revision_id must be a string or null")
+    if scan_digest is not None and not isinstance(scan_digest, str):
+        raise TypeError("scan_master_geometry_sha256 must be a string or null")
+    mold_use_authorized = value.get("mold_use_authorized")
+    if not isinstance(mold_use_authorized, bool):
+        raise TypeError("mold_use_authorized must be a boolean")
+    scale_state = value.get("scale_state")
+    if not isinstance(scale_state, str):
+        raise TypeError("scale_state must be a string")
+    return DesignModelLink(
+        project_id=strings["project_id"],
+        revision_id=strings["revision_id"],
+        content_sha256=strings["content_sha256"],
+        parent_authority_kind=strings["parent_authority_kind"],
+        parent_authority_revision_id=strings["parent_authority_revision_id"],
+        scale_state=ScaleState(scale_state),
+        scan_master_revision_id=scan_revision,
+        scan_master_geometry_sha256=scan_digest,
+        physical_accuracy_validation_status=strings["physical_accuracy_validation_status"],
+        mold_use_authorized=mold_use_authorized,
+        authority_class=strings["authority_class"],
+    )
 
 
 def _validate_actor(actor_id: str) -> None:

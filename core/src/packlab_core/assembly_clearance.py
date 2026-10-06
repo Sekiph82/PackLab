@@ -34,6 +34,24 @@ class AssemblyClearanceError(ValueError):
     """Raised when assembly inputs, placement pins, or proxies are invalid."""
 
 
+def _captured_parent_fields(model: DesignModelRevision) -> tuple[str, str, str]:
+    parent_binding_revision_id = model.parent_binding_revision_id
+    scan_master_revision_id = model.fitted_to_scan_master_revision_id
+    scan_master_geometry_sha256 = model.scan_master_geometry_sha256
+    if (
+        model.standalone_root is not None
+        or parent_binding_revision_id is None
+        or scan_master_revision_id is None
+        or scan_master_geometry_sha256 is None
+    ):
+        raise AssemblyClearanceError("assembly_captured_scan_master_parent_required")
+    return (
+        parent_binding_revision_id,
+        scan_master_revision_id,
+        scan_master_geometry_sha256,
+    )
+
+
 class PairDiagnosticStatus(StrEnum):
     CANDIDATE_OVERLAP = "CANDIDATE_OVERLAP"
     NEAR_CLEARANCE = "NEAR_CLEARANCE"
@@ -144,6 +162,9 @@ class AssemblyComponentProxy:
             raise AssemblyClearanceError("assembly_proxy_role_invalid")
         if not isinstance(model, DesignModelRevision):
             raise AssemblyClearanceError("assembly_proxy_design_model_required")
+        parent_binding_revision_id, scan_master_revision_id, scan_master_geometry_sha256 = (
+            _captured_parent_fields(model)
+        )
         if not isinstance(preview, DesignPreview) or preview.authority_class != PREVIEW_AUTHORITY:
             raise AssemblyClearanceError("assembly_preview_proxy_required")
         if (
@@ -195,9 +216,9 @@ class AssemblyComponentProxy:
             role,
             model.revision_id,
             feature_id,
-            model.parent_binding_revision_id,
-            model.fitted_to_scan_master_revision_id,
-            model.scan_master_geometry_sha256,
+            parent_binding_revision_id,
+            scan_master_revision_id,
+            scan_master_geometry_sha256,
             model.scale_state,
             model.coordinate_unit,
             minimum,
@@ -216,6 +237,9 @@ class AssemblyComponentProxy:
             raise AssemblyClearanceError("assembly_proxy_role_invalid")
         if not isinstance(model, DesignModelRevision):
             raise AssemblyClearanceError("assembly_proxy_design_model_required")
+        parent_binding_revision_id, scan_master_revision_id, scan_master_geometry_sha256 = (
+            _captured_parent_fields(model)
+        )
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 200:
             raise AssemblyClearanceError("assembly_proxy_unsupported_reason_invalid")
         try:
@@ -228,9 +252,9 @@ class AssemblyComponentProxy:
             role,
             model.revision_id,
             feature_id,
-            model.parent_binding_revision_id,
-            model.fitted_to_scan_master_revision_id,
-            model.scan_master_geometry_sha256,
+            parent_binding_revision_id,
+            scan_master_revision_id,
+            scan_master_geometry_sha256,
             model.scale_state,
             model.coordinate_unit,
             None,

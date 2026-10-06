@@ -141,6 +141,9 @@ def detect_jerrycan_handle_void_candidates(
         expected_scan_master_revision_id=expected_scan_master_revision_id,
         expected_design_model_revision_id=expected_design_model_revision_id,
     )
+    parent_binding_revision_id = design_model.parent_binding_revision_id
+    if parent_binding_revision_id is None:
+        raise HandleVoidDetectionError("jerrycan_captured_parent_required")
     if not isinstance(plane, CanonicalPlaneSelection):
         raise HandleVoidDetectionError("explicit_canonical_plane_required")
     try:
@@ -244,7 +247,7 @@ def detect_jerrycan_handle_void_candidates(
         overlay.scan_master_geometry_sha256,
         design_model.revision_id,
         overlay.design_model_geometry_sha256,
-        design_model.parent_binding_revision_id,
+        parent_binding_revision_id,
         overlay.coordinate_unit,
         plane,
         candidates,

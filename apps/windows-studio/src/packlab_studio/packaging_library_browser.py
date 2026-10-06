@@ -1373,19 +1373,48 @@ def _safe_relative_path(value: object) -> PurePosixPath:
 
 
 def _design_model_link_from_dict(value: dict[str, object]) -> DesignModelLink:
-    return DesignModelLink(
-        project_id=value["project_id"],
-        revision_id=value["revision_id"],
-        content_sha256=value["content_sha256"],
-        parent_authority_kind=value["parent_authority_kind"],
-        parent_authority_revision_id=value["parent_authority_revision_id"],
-        scale_state=ScaleState(value["scale_state"]),
-        scan_master_revision_id=value["scan_master_revision_id"],
-        scan_master_geometry_sha256=value["scan_master_geometry_sha256"],
-        physical_accuracy_validation_status=value["physical_accuracy_validation_status"],
-        mold_use_authorized=value["mold_use_authorized"],
-        authority_class=value["authority_class"],
+    string_fields = (
+        "project_id",
+        "revision_id",
+        "content_sha256",
+        "parent_authority_kind",
+        "parent_authority_revision_id",
+        "physical_accuracy_validation_status",
+        "authority_class",
     )
+    strings: dict[str, str] = {}
+    for field in string_fields:
+        item = value.get(field)
+        if not isinstance(item, str):
+            raise PackagingLibraryBrowserError("design_model_link_invalid")
+        strings[field] = item
+    scan_revision = value.get("scan_master_revision_id")
+    scan_digest = value.get("scan_master_geometry_sha256")
+    scale_state = value.get("scale_state")
+    mold_use_authorized = value.get("mold_use_authorized")
+    if (
+        (scan_revision is not None and not isinstance(scan_revision, str))
+        or (scan_digest is not None and not isinstance(scan_digest, str))
+        or not isinstance(scale_state, str)
+        or not isinstance(mold_use_authorized, bool)
+    ):
+        raise PackagingLibraryBrowserError("design_model_link_invalid")
+    try:
+        return DesignModelLink(
+            project_id=strings["project_id"],
+            revision_id=strings["revision_id"],
+            content_sha256=strings["content_sha256"],
+            parent_authority_kind=strings["parent_authority_kind"],
+            parent_authority_revision_id=strings["parent_authority_revision_id"],
+            scale_state=ScaleState(scale_state),
+            scan_master_revision_id=scan_revision,
+            scan_master_geometry_sha256=scan_digest,
+            physical_accuracy_validation_status=strings["physical_accuracy_validation_status"],
+            mold_use_authorized=mold_use_authorized,
+            authority_class=strings["authority_class"],
+        )
+    except ValueError as error:
+        raise PackagingLibraryBrowserError("design_model_link_invalid") from error
 
 
 def _ensure_safe_local_file(root: Path, candidate: Path) -> os.stat_result:
