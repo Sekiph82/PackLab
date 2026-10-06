@@ -6,11 +6,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M16
 - Current Sprint: M16-C001 — CI/CD, Signing & Distribution
-- Current Task: M16-C001 — executable batch PL-0347 through PL-0367; PL-0368 DEFERRED_POST_M17
-- Current Task Status: READY
-- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md. Run PL-0347 through PL-0367 in exact order while green. Treat Windows redistribution inventory as a hard gate, keep default iOS CI unsigned/secret-free, and do not create any V0.1 tag/release. PL-0368 remains DEFERRED_POST_M17. Do not start M17.
+- Current Task: M16-C001-R01 — PL-0347 V02 mypy remediation + continuation PL-0348 through PL-0367; PL-0368 DEFERRED_POST_M17
+- Current Task Status: CHANGES_REQUIRED
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_PL0347_CONTINUATION_CODEX_PROMPT_V02.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_PL0347_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md. Close the 46-error configured-source mypy debt without ignores/baselines/excludes/soft-fail or authority weakening; require a fresh fully green hosted Windows quality run, then continue PL-0348 through PL-0367 automatically while green. Keep PL-0350 redistribution inventory as a hard gate. PL-0368 remains DEFERRED_POST_M17. Do not start M17.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/M15-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; M15-C001 and M15 complete, 15/15 children accepted.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/M16-C001_CHATGPT_PARTIAL_AUDIT_V01.md — AUDITED_PARTIAL_CHANGES_REQUIRED; PL-0347 V01 stop accepted, workflow retained, resume at PL-0347 V02.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -38,7 +38,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - M14 R01/R02/R03 continuations: completed. PL-0310 through PL-0331 are independently accepted.
 - Latest M14 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M14-C001/M14-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; 22/22 children accepted, M14 complete.
 - Latest M15 Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/M15-C001_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0332 through PL-0346 accepted, 15/15, M15 complete.
-- Active M16 Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_CODEX_PROMPT_V01.md — executable PL-0347 through PL-0367; PL-0368 is DEFERRED_POST_M17; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_CHATGPT_AUDIT_CRITERIA_V01.md
+- M16 Original Batch Master: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_CODEX_PROMPT_V01.md — stopped truthfully at PL-0347 when real Windows mypy exposed 46 pre-existing errors.
+- Latest M16 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/M16-C001_CHATGPT_PARTIAL_AUDIT_V01.md — PL-0347 V01 stop accepted; type debt must be repaired at source, not hidden.
+- Active M16 R01 Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_PL0347_CONTINUATION_CODEX_PROMPT_V02.md — PL-0347 V02 then PL-0348 through PL-0367; PL-0368 remains DEFERRED_POST_M17; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_PL0347_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V02.md
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -650,7 +652,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M16-S01 - GitHub Actions Windows
 
-- [ ] **PL-0347** Create Windows CI workflow for Python lint/type/unit tests.
+- [ ] **PL-0347** Create Windows CI workflow for Python lint/type/unit tests. **V02 ACTIVE:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0347_CODEX_PROMPT_V02.md
 - [ ] **PL-0348** Add cached dependency installation without caching secrets or mutable reconstruction outputs.
 - [ ] **PL-0349** Add Windows PackLab Studio build job.
 - [ ] **PL-0350** Produce versioned PackLabStudio.exe/installer artifact.
