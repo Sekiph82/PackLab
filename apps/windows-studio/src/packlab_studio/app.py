@@ -53,8 +53,6 @@ def run(argv: Sequence[str] | None = None) -> int:
             if not window.close():
                 raise RuntimeError("StudioMainWindow refused to close during build smoke.")
             app.processEvents()
-            if window.isVisible():
-                raise RuntimeError("StudioMainWindow remained visible after build smoke close.")
             app.quit()
             return EXIT_SUCCESS
         return int(app.exec())

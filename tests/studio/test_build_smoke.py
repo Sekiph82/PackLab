@@ -22,9 +22,6 @@ def test_app_build_smoke_constructs_and_closes_the_real_window(monkeypatch) -> N
             events.append("close")
             return True
 
-        def isVisible(self) -> bool:
-            return False
-
     def create_application(argv: list[str] | None) -> FakeApplication:
         created_argv.extend(argv or [])
         return FakeApplication()
