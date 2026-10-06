@@ -33,6 +33,11 @@ The integration modes describe the intended PackLab boundary, not work completed
 | [SAM 3D Objects](https://github.com/facebookresearch/sam-3d-objects) | Candidate future AI visual-reference completion | Future `AI_VISUAL_REFERENCE` only; must never become measurement or Scan Master authority | **NOT INSTALLED / NOT SELECTED** | Custom SAM License with trade-control/acceptable-use restrictions | PL-0435 must pin code/checkpoint/license and enforce generated-authority isolation | **HIGH LICENSE / AUTHORITY ATTENTION** |
 | [TRELLIS](https://github.com/microsoft/TRELLIS) | Candidate future image-conditioned 3D visual-reference generation | Future `AI_VISUAL_REFERENCE` only | **NOT INSTALLED / NOT SELECTED** | MIT for TRELLIS models and majority of project code per upstream; some submodules carry separate licenses | PL-0435 must inventory enabled submodules/checkpoints and keep outputs non-authoritative | **MEDIUM ATTENTION** |
 
+## CI workflow tooling
+
+- Reviewed 2026-10-06: [`actions/cache` v6.1.0](https://github.com/actions/cache/tree/55cc8345863c7cc4c66a329aec7e433d2d1c52a9), pinned to commit `55cc8345863c7cc4c66a329aec7e433d2d1c52a9` in `.github/workflows/windows-python-quality.yml`. The upstream repository is MIT-licensed. It is used only to cache the uv package/download cache at `${{ runner.temp }}/uv-cache`, keyed by runner OS/architecture, Python 3.12, uv 0.11.26, and `uv.lock`. It does not cache `.venv`, project/library/reconstruction outputs, or credentials. Cache restore does not replace `uv lock --check` or `uv sync --locked`.
+- This is CI tooling only; it is not a PackLab runtime dependency and is not included in Studio, Capture, or a distributable artifact. The Windows hosted runner must satisfy the upstream action runtime requirements.
+
 ### Focused provenance and compliance notes
 
 #### NextLevel
