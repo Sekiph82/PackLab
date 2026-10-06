@@ -19,6 +19,7 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert "uv lock --check" in workflow
     assert "uv sync --locked --all-groups" in workflow
     assert '"tools/packaging/packlab_studio.spec"' in workflow
+    assert '"--noupx"' not in workflow
     assert "Assert staged Qt module surface" in workflow
     assert "assert_staged_qt_surface.py" in workflow
     assert "PACKLAB_RUNTIME_CAPABILITIES_PATH" in workflow
@@ -55,6 +56,7 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert '"OCP.BRepAlgoAPI"' in spec
     assert '"open3d.pybind"' in spec
     assert 'copy_metadata("cadquery-ocp-novtk")' in spec
+    assert "upx=False" in spec
     assert 'base.startswith("icu")' in spec
     assert "collect_all" not in spec
     assert '"IPython", "jedi", "nbformat", "pytest"' in spec

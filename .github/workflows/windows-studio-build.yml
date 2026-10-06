@@ -112,7 +112,7 @@ jobs:
           $env:PACKLAB_STAGE_PATH = $stagePath
           $env:PACKLAB_WORK_PATH = $workPath
           $pyinstallerArgs = @(
-            "-m", "PyInstaller", "--noconfirm", "--clean", "--noupx",
+            "-m", "PyInstaller", "--noconfirm", "--clean",
             "--distpath", $stagePath, "--workpath", $workPath,
             "tools/packaging/packlab_studio.spec"
           )
