@@ -87,3 +87,15 @@ AWAITING_MILESTONE_AUDIT
 R02_BATCH_STOPPED_AT_PL-0350
 
 AWAITING_MILESTONE_AUDIT
+
+## R03 continuation stop - PL-0349 V02 Addons-only production capability
+
+- Live `origin/main:TASKS.md` authorized M16-C001-R03 starting at PL-0349 V02. Execution started from synchronized SHA `dcf907827aeccbcac82af684b47cd332e92fc7b8` in the managed PackLab worktree; the owner Desktop checkout was preserved.
+- PL-0349 V02 stopped before implementation when repository source inspection found PackLab's production PDF capability imports and uses `PySide6.QtPdf.QPdfDocument` and `PySide6.QtSvg.QSvgRenderer` in `core/src/packlab_core/technical_drawing_pdf.py`. Installed distribution file records identify `QtPdf.pyd` as belonging to `PySide6_Addons`, while `QtSvg.pyd` belongs to Essentials.
+- PL-0349 V02 explicitly directs Codex to stop and record the exact production module/use when Addons is required. No feature removal or alternative package architecture was inferred. No product code, dependency, lock, workflow, test, or license-register change was published; no hosted Windows run or OCP/Open3D smoke was started.
+- PL-0349 V02 blocker log: [PL-0349_CODEX_LOG_V02.md](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0349_CODEX_LOG_V02.md). R03 continuation log: [MASTER_PL0349_PL0350_CONTINUATION_CODEX_LOG_V04.md](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_PL0349_PL0350_CONTINUATION_CODEX_LOG_V04.md).
+- PL-0350 V03 and PL-0351 through PL-0367 were not started because PL-0349 is not builder-green. PL-0368 remains deferred; M17 was not started. `TASKS.md` was not edited.
+
+R03_BATCH_STOPPED_AT_PL-0349_V02
+
+AWAITING_MILESTONE_AUDIT
