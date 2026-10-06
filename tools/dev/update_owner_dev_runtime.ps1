@@ -38,7 +38,7 @@ try {
     $trackedPaths = @(& git -C $root ls-tree -r --name-only $sha -- $include)
     if ($LASTEXITCODE -ne 0 -or $trackedPaths.Count -eq 0) { throw 'Could not enumerate tracked runtime files from HEAD.' }
     foreach ($relativePath in $trackedPaths) {
-        if ($relativePath -match '(^|/)(\.git|__pycache__|\.pytest_cache|build|dist|tests|coordination)(/|$)|(^|/)\.env(?:\.|$)|\.(?:pem|p12|key)$') {
+        if ($relativePath -match '(^|/)(\.git|__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.cache|\.venv|build|dist|tests|coordination|local|private|scans|raw|working|derived|reconstruction-work|reconstruction-output|packlab-work)(/|$)|(^|/)\.env(?:\.|$)|\.(?:pem|p12|key|pyc|pyo|log|trace)$') {
             throw "Refusing an excluded path in the runtime allowlist: $relativePath"
         }
         $source = Join-Path $root $relativePath
