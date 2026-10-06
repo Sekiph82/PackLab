@@ -6,11 +6,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M16
 - Current Sprint: M16-C001 — CI/CD, Signing & Distribution
-- Current Task: M16-C001-R04 — PL-0350 V03 redistribution remediation against accepted PL-0349 V03 capability-complete stage; then continuation PL-0351 through PL-0367; PL-0368 DEFERRED_POST_M17
-- Current Task Status: CHANGES_REQUIRED
-- Next Task/Action: Continue the active https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_PL0349_QTPDF_PL0350_CONTINUATION_CODEX_PROMPT_V05.md at PL-0350 V03 against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_CHATGPT_AUDIT_CRITERIA_V03.md. PL-0349 V03 is independently accepted. Close exact file-level redistribution/license/notice/source evidence before any installer artifact. If PL-0350 is green, continue to the amended PL-0351 clean-artifact portability smoke and then PL-0352 through PL-0367 automatically. PL-0368 remains DEFERRED_POST_M17. Do not start M17.
+- Current Task: M16-C001-OWNERDEV — create permanent owner double-click PackLab launcher + icon integration + automatic post-Codex shortcut refresh; then resume M16-C001-R04 at PL-0350 V03
+- Current Task Status: READY
+- Next Task/Action: Execute https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/OWNER_DEV_LAUNCHER_CODEX_PROMPT_V01.md against https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/OWNER_DEV_LAUNCHER_CHATGPT_AUDIT_CRITERIA_V01.md. Create the stable OWNER_DEV runtime, canonical PackLab icon integration, Desktop and Start Menu PackLab.lnk files, verify double-click-equivalent launch on the owner's Windows machine, and install the permanent post-Codex refresh mechanism. After this owner-local task is builder-green, resume the active M16 R04 continuation at PL-0350 V03. PL-0368 remains DEFERRED_POST_M17. Do not start M17.
 - Required Actor: CODEX
-- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/M16-C001_CHATGPT_PARTIAL_AUDIT_V05.md — AUDITED_PARTIAL_CHANGES_REQUIRED; PL-0347 V02 through PL-0349 V03 independently accepted, owner-machine QtCore loader evidence converted into the future PL-0351 clean-artifact gate, resume at PL-0350 V03.
+- Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/M16-C001_CHATGPT_PARTIAL_AUDIT_V05.md — AUDITED_PARTIAL_CHANGES_REQUIRED; PL-0347 V02 through PL-0349 V03 independently accepted, PL-0350 V03 remains next milestone child after the owner launcher task.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
 - Latest PL-0187 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0187_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed parent raster/digest integrity before derivation.
@@ -45,6 +45,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - M16 R04 PL-0349 V03: independently AUDITED_PASS at https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0349_CHATGPT_AUDIT_V03.md — capability-complete frozen Qt GUI/QtPdf/OCP/Open3D stage accepted.
 - Latest M16 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/M16-C001_CHATGPT_PARTIAL_AUDIT_V05.md — accepted frontier PL-0349 V03; owner-machine QtCore loader evidence is now a mandatory clean-artifact PL-0351 gate.
 - Active M16 R04 Continuation: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_PL0349_QTPDF_PL0350_CONTINUATION_CODEX_PROMPT_V05.md — continue at PL-0350 V03, then amended PL-0351 and PL-0352 through PL-0367; PL-0368 remains DEFERRED_POST_M17; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_PL0349_QTPDF_PL0350_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V05.md
+- OWNER DEV Launcher Task: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/OWNER_DEV_LAUNCHER_CODEX_PROMPT_V01.md — must run before resuming PL-0350 V03; criteria: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/OWNER_DEV_LAUNCHER_CHATGPT_AUDIT_CRITERIA_V01.md
+- Standing OWNER DEV Delivery Rule: after every future Codex PackLab implementation is published and remote parity is confirmed, Codex must run `tools/dev/post_codex_owner_dev_refresh.ps1` and verify the owner runtime plus Desktop/Start Menu PackLab shortcuts reflect that published HEAD. A shortcut/runtime refresh failure must be recorded in the child log and must never be silently ignored.
 - Latest M06 Partial Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/CHATGPT_AUDIT_V01.md — CHANGES_REQUIRED; accepted PL-0135, PL-0136, PL-0137, PL-0139, PL-0142, PL-0143.
 - Latest M06 R01 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C001/M06-R01_CHATGPT_AUDIT_V01.md — AUDITED_PASS; PL-0135 through PL-0149 are independently accepted.
 - Latest M06 C002 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M06-C002/CHATGPT_AUDIT_V01.md — superseded by R02 closure.
@@ -651,6 +653,15 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0346** Add thumbnails/contact-sheet export for supplier discussions. **AUDITED_PASS:** https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M15-C001/PL-0346_CHATGPT_AUDIT_V01.md
 
 ---
+
+# Owner Local Development Delivery — Standing Rule
+
+- [ ] **OWNER-DEV-LAUNCHER** Create and maintain the owner's double-click PackLab Studio runtime/shortcuts/icons. Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/OWNER_DEV_LAUNCHER_CODEX_PROMPT_V01.md
+- After OWNER-DEV-LAUNCHER is implemented, every future Codex PackLab implementation must finish by running `tools/dev/post_codex_owner_dev_refresh.ps1` after GitHub publication parity is confirmed.
+- The owner must not manually recreate/update `.lnk` files after code changes.
+- The OWNER_DEV runtime must not depend on a transient Codex worktree or overwrite the owner's Desktop PackLab checkout.
+- Desktop and Start Menu shortcuts must expose the canonical PackLab icon and current published HEAD SHA in their description.
+- Taskbar/window icon identity must be supplied by PackLab itself; do not use registry/taskbar database hacks to force Windows 11 pinning.
 
 # M16 - CI/CD, Signing & Distribution
 
