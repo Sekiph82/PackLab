@@ -50,17 +50,17 @@ AWAITING_MILESTONE_AUDIT
 
 ## R01 continuation update - PL-0347 V02 builder-green
 
-The V01 stop above is retained as historical evidence. Under the owner-authorized M16-C001-R01 prompt, PL-0347 V02 remediation and PL-0348 are now builder-green; independent audits remain pending. Work has advanced to the PL-0349 frontier and the ordered batch is active.
+The V01 stop above is retained as historical evidence. Under the owner-authorized M16-C001-R01 prompt, PL-0347 V02 remediation, PL-0348, and PL-0349 are builder-green; independent audits remain pending. Work has advanced to the PL-0350 frontier and the ordered batch is active.
 
 | Child | R01 builder status | Implementation/evidence SHA | Child log | Validation / next action |
 |---|---|---|---|---|
 | PL-0347 V02 | BUILDER_GREEN / AWAITING_INDEPENDENT_AUDIT | `db0fca3086a17002de9c2be59c6bdc87cc959d12` | `bdda66019826147594cf1258827150dcb852d3f2` | Hosted Windows run 37418740833 passed all required quality steps. |
 | PL-0348 | BUILDER_GREEN / AWAITING_INDEPENDENT_AUDIT | `56876a27e4e8fd99eb7538a93c84deb36ad82558`; correction `49d0d1a5b26c54fa60684420587275b57e422cbc` | `142fa72af1a8a6e4dffb0f8925e52ede947d7605` | Hosted cache miss 37419853581 and exact cache hit 37420126178 both passed. |
-| PL-0349 | NOT_STARTED | — | — | Current frontier; read PL-0349 V01 prompt and criteria before implementation. |
+| PL-0349 | BUILDER_GREEN / AWAITING_INDEPENDENT_AUDIT | `a688e02d5f0cf65caf42e95ab108b70417edf950`; corrections `0ba3be5aeca7a6430f0fdcf29ab25a95dfde0266`, `18abcc25dc3b66fb11ed4f93bc3dd0092c31f7d0` | `a9913cda67e3252f4e2eed59395910314a6c6256` | Hosted Windows build and packaged no-network smoke run 37424680100 passed after two diagnosed smoke fixes. PL-0350 is next; redistribution inventory remains a hard gate. |
 
 - PL-0347 baseline remained the exact configured mypy command and 46 errors across 12 files. V02 reduced it to zero without suppressions, baselines, exclusions, workflow soft-fail, or scope reduction.
-- PL-0348's exact-key cache miss and hit both retained locked validation; its first invalid workflow definition and correction are documented in the child log. R01 continues in exact order at PL-0349; PL-0350 redistribution/license inventory remains a hard stop.
+- PL-0348's exact-key cache miss and hit both retained locked validation; its first invalid workflow definition and correction are documented in the child log. PL-0349 production Windows packaging and hosted smoke are builder-green after two diagnosed/fixed smoke failures; see its child log. R01 continues in exact order at PL-0350; its redistribution/license inventory remains a hard stop.
 - Local HEAD and `origin/main` were equal at `142fa72af1a8a6e4dffb0f8925e52ede947d7605` after the PL-0348 child log publication. No tag or GitHub Release was created. M17 has not started; PL-0368 remains `DEFERRED_POST_M17`.
 - This append preserves the earlier V01 stop record and is implementer progress evidence, not independent audit or project-status authority.
 
-R01_BATCH_IN_PROGRESS_AT_PL-0349
+R01_BATCH_IN_PROGRESS_AT_PL-0350

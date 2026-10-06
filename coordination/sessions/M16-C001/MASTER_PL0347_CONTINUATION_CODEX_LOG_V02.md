@@ -23,9 +23,10 @@
 
 - PL-0348 is builder-green and independently unaudited. Implementation/evidence commits are `56876a27e4e8fd99eb7538a93c84deb36ad82558` and correction `49d0d1a5b26c54fa60684420587275b57e422cbc`; its child log is separate commit `142fa72af1a8a6e4dffb0f8925e52ede947d7605`.
 - Hosted cache-miss push run [37419853581](https://github.com/Sekiph82/PackLab/actions/runs/37419853581) and exact cache-hit workflow-dispatch run [37420126178](https://github.com/Sekiph82/PackLab/actions/runs/37420126178) both passed. The cache hit still ran lock validation/install, mypy, and tests. The earlier invalid workflow definition and correction are detailed in `PL-0348_CODEX_LOG_V01.md`.
-- Current frontier is **PL-0349**, not yet implemented. Next action: read `PL-0349_CODEX_PROMPT_V01.md` and `PL-0349_CHATGPT_AUDIT_CRITERIA_V01.md`, then execute only PL-0349.
-- PL-0350 through PL-0367 have not started. PL-0350 Windows redistribution/license inventory remains a hard stop if actual shipped runtime files cannot be truthfully inventoried and packaged with required notices.
+- PL-0349 implementation is builder-green and independently unaudited. Implementation/evidence commits are `a688e02d5f0cf65caf42e95ab108b70417edf950`, `0ba3be5aeca7a6430f0fdcf29ab25a95dfde0266`, and `18abcc25dc3b66fb11ed4f93bc3dd0092c31f7d0`; its child log publication/correction is `4153002e` then `a9913cda67e3252f4e2eed59395910314a6c6256`.
+- Fresh hosted Windows build and packaged smoke run [37424680100](https://github.com/Sekiph82/PackLab/actions/runs/37424680100) passed after two smoke defects were diagnosed and corrected. The child log records local validation, limitations and hosted evidence.
+- Current frontier is **PL-0350**. PL-0350 through PL-0367 have not started. PL-0350 Windows redistribution/license inventory remains a hard stop if actual shipped runtime files cannot be truthfully inventoried and packaged with required notices.
 - PL-0368 remains `DEFERRED_POST_M17`. M17 has not started. No tag or GitHub Release was created.
-- Local implementation state, `origin/main`, and GitHub `main` were equal at `142fa72af1a8a6e4dffb0f8925e52ede947d7605` at this checkpoint.
+- Local implementation state, `origin/main`, and GitHub `main` were equal at `a9913cda67e3252f4e2eed59395910314a6c6256` at this checkpoint.
 
-R01_BATCH_IN_PROGRESS_AT_PL-0349
+R01_BATCH_IN_PROGRESS_AT_PL-0350
