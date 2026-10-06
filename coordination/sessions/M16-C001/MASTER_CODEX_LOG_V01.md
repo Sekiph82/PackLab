@@ -15,7 +15,7 @@ Master audit criteria: https://github.com/Sekiph82/PackLab/blob/main/coordinatio
 | Child | Status | Prompt | Criteria | Implementation/evidence SHA | Child log publication | Validation / blocker |
 |---|---|---|---|---|---|---|
 | PL-0347 | BATCH_STOPPED / builder-blocked | PL-0347_CODEX_PROMPT_V01.md | PL-0347_CHATGPT_AUDIT_CRITERIA_V01.md | `4431c7d7789789831c09ae6de77fcf239f74f00f`; correction `7cd7cc0c4b38078285a88a1aa62714a679818b1c` | `eae02181729e17fcaad6502b1d3b9f4ab6102057` ([log](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0347_CODEX_LOG_V01.md)) | Hosted Windows run 37382974030: lock validation/install, Ruff lint, changed-file format, and pytest passed; configured mypy failed with 46 errors in 12 unchanged source files. See child log for exact files and run evidence. |
-| PL-0348 | NOT_STARTED | PL-0348_CODEX_PROMPT_V01.md | PL-0348_CHATGPT_AUDIT_CRITERIA_V01.md | — | — | Batch stopped at PL-0347. |
+| PL-0348 | NOT_STARTED at V01 handoff | PL-0348_CODEX_PROMPT_V01.md | PL-0348_CHATGPT_AUDIT_CRITERIA_V01.md | — | — | Historical V01 stop at PL-0347; see R01 continuation update below. |
 | PL-0349 | NOT_STARTED | PL-0349_CODEX_PROMPT_V01.md | PL-0349_CHATGPT_AUDIT_CRITERIA_V01.md | — | — | Batch stopped at PL-0347. |
 | PL-0350 | NOT_STARTED | PL-0350_CODEX_PROMPT_V01.md | PL-0350_CHATGPT_AUDIT_CRITERIA_V01.md | — | — | Batch stopped at PL-0347; Windows redistribution gate not evaluated in this batch run. |
 | PL-0351 | NOT_STARTED | PL-0351_CODEX_PROMPT_V01.md | PL-0351_CHATGPT_AUDIT_CRITERIA_V01.md | — | — | Batch stopped at PL-0347. |
@@ -50,15 +50,17 @@ AWAITING_MILESTONE_AUDIT
 
 ## R01 continuation update - PL-0347 V02 builder-green
 
-The V01 stop above is retained as historical evidence. Under the owner-authorized M16-C001-R01 prompt, PL-0347 V02 remediation is now builder-green; independent audit remains pending. Work has advanced to the PL-0348 frontier and the ordered batch is active.
+The V01 stop above is retained as historical evidence. Under the owner-authorized M16-C001-R01 prompt, PL-0347 V02 remediation and PL-0348 are now builder-green; independent audits remain pending. Work has advanced to the PL-0349 frontier and the ordered batch is active.
 
 | Child | R01 builder status | Implementation/evidence SHA | Child log | Validation / next action |
 |---|---|---|---|---|
-| PL-0348 | NOT_STARTED | — | — | Current frontier; read PL-0348 V01 prompt and criteria before implementation. |
+| PL-0347 V02 | BUILDER_GREEN / AWAITING_INDEPENDENT_AUDIT | `db0fca3086a17002de9c2be59c6bdc87cc959d12` | `bdda66019826147594cf1258827150dcb852d3f2` | Hosted Windows run 37418740833 passed all required quality steps. |
+| PL-0348 | BUILDER_GREEN / AWAITING_INDEPENDENT_AUDIT | `56876a27e4e8fd99eb7538a93c84deb36ad82558`; correction `49d0d1a5b26c54fa60684420587275b57e422cbc` | `142fa72af1a8a6e4dffb0f8925e52ede947d7605` | Hosted cache miss 37419853581 and exact cache hit 37420126178 both passed. |
+| PL-0349 | NOT_STARTED | — | — | Current frontier; read PL-0349 V01 prompt and criteria before implementation. |
 
 - PL-0347 baseline remained the exact configured mypy command and 46 errors across 12 files. V02 reduced it to zero without suppressions, baselines, exclusions, workflow soft-fail, or scope reduction.
-- R01 is continuing in exact order. PL-0349 through PL-0367 remain not started; PL-0350 redistribution/license inventory remains a hard stop.
-- Local HEAD and `origin/main` were equal at `bbd5a1b3125d67c747eacefb7274e69c40da6228` after the child log publication. No tag or GitHub Release was created. M17 has not started; PL-0368 remains `DEFERRED_POST_M17`.
+- PL-0348's exact-key cache miss and hit both retained locked validation; its first invalid workflow definition and correction are documented in the child log. R01 continues in exact order at PL-0349; PL-0350 redistribution/license inventory remains a hard stop.
+- Local HEAD and `origin/main` were equal at `142fa72af1a8a6e4dffb0f8925e52ede947d7605` after the PL-0348 child log publication. No tag or GitHub Release was created. M17 has not started; PL-0368 remains `DEFERRED_POST_M17`.
 - This append preserves the earlier V01 stop record and is implementer progress evidence, not independent audit or project-status authority.
 
-R01_BATCH_IN_PROGRESS_AT_PL-0348
+R01_BATCH_IN_PROGRESS_AT_PL-0349

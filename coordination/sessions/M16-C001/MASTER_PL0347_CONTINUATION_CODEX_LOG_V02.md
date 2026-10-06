@@ -21,10 +21,11 @@
 
 ## Ordered continuation
 
-- R01 is active; current frontier is **PL-0348**, not yet implemented at the time this record was written.
-- Next action: read `PL-0348_CODEX_PROMPT_V01.md` and `PL-0348_CHATGPT_AUDIT_CRITERIA_V01.md`, confirm exact task scope and gates, then execute only PL-0348.
-- PL-0349 through PL-0367 have not started. PL-0350 Windows redistribution/license inventory remains a hard stop if actual shipped runtime files cannot be truthfully inventoried and packaged with required notices.
+- PL-0348 is builder-green and independently unaudited. Implementation/evidence commits are `56876a27e4e8fd99eb7538a93c84deb36ad82558` and correction `49d0d1a5b26c54fa60684420587275b57e422cbc`; its child log is separate commit `142fa72af1a8a6e4dffb0f8925e52ede947d7605`.
+- Hosted cache-miss push run [37419853581](https://github.com/Sekiph82/PackLab/actions/runs/37419853581) and exact cache-hit workflow-dispatch run [37420126178](https://github.com/Sekiph82/PackLab/actions/runs/37420126178) both passed. The cache hit still ran lock validation/install, mypy, and tests. The earlier invalid workflow definition and correction are detailed in `PL-0348_CODEX_LOG_V01.md`.
+- Current frontier is **PL-0349**, not yet implemented. Next action: read `PL-0349_CODEX_PROMPT_V01.md` and `PL-0349_CHATGPT_AUDIT_CRITERIA_V01.md`, then execute only PL-0349.
+- PL-0350 through PL-0367 have not started. PL-0350 Windows redistribution/license inventory remains a hard stop if actual shipped runtime files cannot be truthfully inventoried and packaged with required notices.
 - PL-0368 remains `DEFERRED_POST_M17`. M17 has not started. No tag or GitHub Release was created.
-- Local implementation state, `origin/main`, and GitHub `main` were equal at `bbd5a1b3125d67c747eacefb7274e69c40da6228` at this checkpoint.
+- Local implementation state, `origin/main`, and GitHub `main` were equal at `142fa72af1a8a6e4dffb0f8925e52ede947d7605` at this checkpoint.
 
-R01_BATCH_IN_PROGRESS_AT_PL-0348
+R01_BATCH_IN_PROGRESS_AT_PL-0349
