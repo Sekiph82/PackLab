@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "supplemental_evidence": {
+    "cadquery-ocp-novtk": {
+      "license_identifier": "Apache-2.0",
+      "license_file": "tools/packaging/windows_licenses/OCP-7.9.3.1.1/LICENSE.txt",
+      "license_sha256": "a13caea71627202ad33cc4cafafdd18e667e16716488f8d9c568127121fb89fd",
+      "upstream_reference": "https://github.com/CadQuery/OCP/tree/d69b064a3a604ebf245b1f3b14fb54c835a3a571",
+      "reason": "The exact locked wheel declares Apache-2.0 but omits the source project's license text.",
+      "native_review_status": "UNRESOLVED",
+      "native_unresolved_reason": "The exact wheel contains bundled native files whose per-file OCCT and other third-party component/license composition is not fully mapped by the existing reviewed evidence."
+    },
+    "cadquery-ocp-proxy": {
+      "license_identifier": "Apache-2.0",
+      "license_file": "tools/packaging/windows_licenses/OCP-7.9.3.1.1/LICENSE.txt",
+      "license_sha256": "a13caea71627202ad33cc4cafafdd18e667e16716488f8d9c568127121fb89fd",
+      "upstream_reference": "https://github.com/CadQuery/OCP/tree/d69b064a3a604ebf245b1f3b14fb54c835a3a571",
+      "reason": "The exact locked wheel declares Apache-2.0 but omits the source project's license text."
+    },
+    "pyside6": {
+      "license_identifier": "LGPL-3.0-only",
+      "license_file": "tools/packaging/windows_licenses/Qt-PySide6-6.11.2/LGPL-3.0-only.txt",
+      "license_sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "upstream_reference": "https://github.com/pyside/pyside-setup/tree/24627cd36e1593adf22eb1f2950e4248e7bcc1ec/LICENSES/LGPL-3.0-only.txt",
+      "reason": "The exact installed PySide6/Shiboken distributions declare the LGPL/GPL alternatives but package only the Qt commercial reference text; the LGPL text is supplied from the pinned upstream source release.",
+      "route": "Open-source LGPL-3.0-only route for dynamic Qt/PySide libraries; no commercial Qt license is claimed."
+    },
+    "pyside6-addons": {
+      "license_identifier": "LGPL-3.0-only",
+      "license_file": "tools/packaging/windows_licenses/Qt-PySide6-6.11.2/LGPL-3.0-only.txt",
+      "license_sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "upstream_reference": "https://github.com/pyside/pyside-setup/tree/24627cd36e1593adf22eb1f2950e4248e7bcc1ec/LICENSES/LGPL-3.0-only.txt",
+      "reason": "The exact installed PySide6 Addons distribution declares LGPL/GPL alternatives but does not package the selected LGPL text."
+    },
+    "pyside6-essentials": {
+      "license_identifier": "LGPL-3.0-only",
+      "license_file": "tools/packaging/windows_licenses/Qt-PySide6-6.11.2/LGPL-3.0-only.txt",
+      "license_sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "upstream_reference": "https://github.com/pyside/pyside-setup/tree/24627cd36e1593adf22eb1f2950e4248e7bcc1ec/LICENSES/LGPL-3.0-only.txt",
+      "reason": "The exact installed PySide6 Essentials distribution declares LGPL/GPL alternatives but does not package the selected LGPL text."
+    },
+    "shiboken6": {
+      "license_identifier": "LGPL-3.0-only",
+      "license_file": "tools/packaging/windows_licenses/Qt-PySide6-6.11.2/LGPL-3.0-only.txt",
+      "license_sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "upstream_reference": "https://github.com/pyside/pyside-setup/tree/24627cd36e1593adf22eb1f2950e4248e7bcc1ec/LICENSES/LGPL-3.0-only.txt",
+      "reason": "The exact installed Shiboken6 distribution declares LGPL/GPL alternatives but does not package the selected LGPL text."
+    },
+    "occt-7.9.3": {
+      "license_identifier": "LGPL-2.1-only WITH OCCT-exception",
+      "license_file": "tools/packaging/windows_licenses/OCCT-7.9.3/LGPL-2.1.txt",
+      "license_sha256": "f2f118b9029ec1871b953639ecc46651b2fc7b62e295e6cf3ef2ac4c9a058b33",
+      "exception_file": "tools/packaging/windows_licenses/OCCT-7.9.3/OCCT-LGPL-Exception.txt",
+      "exception_sha256": "04580a884ea6cea294402649ff7b5cbb167d47462d1340a4ed33e550db10a81b",
+      "upstream_reference": "https://github.com/Open-Cascade-SAS/OCCT/tree/a016080bf6738d6aeae020badee4e888ad1540a5",
+      "reason": "The selected OCP wheel bundles OCCT but omits the exact OCCT license and exception texts.",
+      "text_normalization": "The checked-in LGPL text has trailing horizontal whitespace removed; legal text and line ordering are preserved, and the recorded digest is for the checked-in bytes."
+    }
+  },
+  "native_review": {
+    "open3d": {
+      "status": "UNRESOLVED_IF_NATIVE_FILES_STAGED",
+      "reason": "Existing PL-0225 evidence does not map the exact wheel's full static native composition to each binary; the staged native contents require exact component and notice review."
+    },
+    "microsoft-vc-runtime": {
+      "status": "UNRESOLVED_IF_STAGED",
+      "reason": "A Microsoft runtime file requires exact source/build and redistribution evidence, not only PE company/version metadata."
+    },
+    "other-third-party-native": {
+      "status": "UNRESOLVED_IF_STAGED",
+      "reason": "Every native file not mapped to reviewed exact component/license evidence remains unresolved."
+    }
+  }
+}

@@ -28,7 +28,21 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert "WaitForExit(30000)" in workflow
     assert "PACKLAB_BUILD_SMOKE_LOG" in workflow
     assert "PL-0350 owns native/runtime inventory" in workflow
-    assert "actions/upload-artifact" not in workflow
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
+    assert "--staging-dir $appDirectory" in workflow
+    assert "--collect-toc $collectMatches[0].FullName" in workflow
+    assert "compliance-validation.json" in workflow
+    assert "unresolved_count -ne 0" in workflow
+    assert "if-no-files-found: error" in workflow
+    assert workflow.count("retention-days: 1") == 3
+    assert workflow.index("Upload text-only pre-clearance evidence") < workflow.index(
+        "Enforce redistribution clearance"
+    )
+    assert workflow.index("Revalidate exact installer input tree") < workflow.index(
+        "Install pinned Inno Setup"
+    )
+    assert "if: steps.clearance.outputs.cleared == 'true'" in workflow
+    assert "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732" in workflow
     assert "packlab_preview" not in workflow
     assert "secrets." not in workflow
 

@@ -175,3 +175,134 @@ jobs:
             "- Smoke: QApplication and StudioMainWindow constructed, shown, processed, closed, and exited with Qt offscreen; no network call was made.",
             "- Redistribution: NOT CLEARED; PL-0350 owns native/runtime inventory and notice review. The staging output is not uploaded or a release."
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Inventory exact hosted staging tree
+        id: inventory
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $appDirectory = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio"
+          $workPath = Join-Path $env:RUNNER_TEMP "packlab-pyinstaller-work"
+          $collectMatches = @(Get-ChildItem -LiteralPath $workPath -Filter "COLLECT-00.toc" -File -Recurse)
+          $analysisMatches = @(Get-ChildItem -LiteralPath $workPath -Filter "Analysis-00.toc" -File -Recurse)
+          if ($collectMatches.Count -ne 1 -or $analysisMatches.Count -ne 1) {
+            throw "Expected exactly one same-build PyInstaller COLLECT and Analysis TOC."
+          }
+          $evidencePath = Join-Path $env:RUNNER_TEMP "packlab-compliance-preclearance"
+          New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
+          uv run --locked python tools/packaging/windows_redistribution_inventory.py `
+            --staging-dir $appDirectory `
+            --collect-toc $collectMatches[0].FullName `
+            --analysis-toc $analysisMatches[0].FullName `
+            --project-root $env:GITHUB_WORKSPACE `
+            --registry tools/packaging/windows_component_license_registry.json `
+            --output-dir $evidencePath `
+            --build-revision $env:PACKLAB_BUILD_REVISION `
+            --studio-version $env:PACKLAB_STUDIO_VERSION
+          $inventoryExit = $LASTEXITCODE
+          "PACKLAB_COMPLIANCE_EVIDENCE=$evidencePath" >> $env:GITHUB_ENV
+          exit $inventoryExit
+
+      - name: Upload text-only pre-clearance evidence
+        if: always() && steps.inventory.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-windows-compliance-preclearance-${{ github.sha }}
+          path: ${{ runner.temp }}/packlab-compliance-preclearance/**
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Enforce redistribution clearance
+        id: clearance
+        shell: pwsh
+        run: |
+          $validationPath = Join-Path $env:PACKLAB_COMPLIANCE_EVIDENCE "compliance-validation.json"
+          if (!(Test-Path -LiteralPath $validationPath -PathType Leaf)) {
+            throw "Compliance validation evidence is missing; installer generation is blocked."
+          }
+          $validation = Get-Content -LiteralPath $validationPath -Raw | ConvertFrom-Json
+          if ($validation.PACKLAB_BUILD_REVISION -ne $env:PACKLAB_BUILD_REVISION -or
+              $validation.studio_version -ne $env:PACKLAB_STUDIO_VERSION -or
+              $validation.unresolved_count -ne 0 -or
+              $validation.status -ne "CLEARED_FOR_PL0350_PACKAGING") {
+            throw "The exact hosted staging tree has unresolved redistribution evidence; binary packaging is blocked."
+          }
+          "cleared=true" >> $env:GITHUB_OUTPUT
+
+      - name: Add reviewed compliance texts to installer input
+        if: steps.clearance.outputs.cleared == 'true'
+        shell: pwsh
+        run: |
+          $stagePath = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio"
+          Copy-Item -LiteralPath (Join-Path $env:PACKLAB_COMPLIANCE_EVIDENCE "THIRD_PARTY_NOTICES.txt") -Destination $stagePath
+          Copy-Item -LiteralPath (Join-Path $env:PACKLAB_COMPLIANCE_EVIDENCE "THIRD_PARTY_LICENSES") -Destination $stagePath -Recurse
+
+      - name: Revalidate exact installer input tree
+        id: final_inventory
+        if: steps.clearance.outputs.cleared == 'true'
+        shell: pwsh
+        run: |
+          $workPath = Join-Path $env:RUNNER_TEMP "packlab-pyinstaller-work"
+          $collect = (Get-ChildItem -LiteralPath $workPath -Filter "COLLECT-00.toc" -File -Recurse | Select-Object -First 1).FullName
+          $analysis = (Get-ChildItem -LiteralPath $workPath -Filter "Analysis-00.toc" -File -Recurse | Select-Object -First 1).FullName
+          $evidencePath = Join-Path $env:RUNNER_TEMP "packlab-compliance-final"
+          New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
+          uv run --locked python tools/packaging/windows_redistribution_inventory.py `
+            --staging-dir (Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio") `
+            --collect-toc $collect --analysis-toc $analysis `
+            --project-root $env:GITHUB_WORKSPACE `
+            --registry tools/packaging/windows_component_license_registry.json `
+            --output-dir $evidencePath `
+            --build-revision $env:PACKLAB_BUILD_REVISION `
+            --studio-version $env:PACKLAB_STUDIO_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "Final installer input redistribution inventory is unresolved." }
+          "PACKLAB_FINAL_COMPLIANCE_EVIDENCE=$evidencePath" >> $env:GITHUB_ENV
+
+      - name: Upload final text-only compliance evidence
+        if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-windows-compliance-final-${{ github.sha }}
+          path: ${{ runner.temp }}/packlab-compliance-final/**
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Install pinned Inno Setup
+        if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success'
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP "innosetup-6.7.3.exe"
+          Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe" -OutFile $installer
+          $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732") { throw "Inno Setup installer digest mismatch." }
+          $installDir = Join-Path $env:RUNNER_TEMP "innosetup"
+          $process = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$installDir" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Pinned Inno Setup installation failed." }
+          "PACKLAB_ISCC=$installDir\ISCC.exe" >> $env:GITHUB_ENV
+
+      - name: Build versioned unsigned installer
+        id: installer
+        if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success'
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "packlab-installer"
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          $name = "PackLabStudio-$env:PACKLAB_STUDIO_VERSION-$env:PACKLAB_BUILD_REVISION-unsigned-setup"
+          & $env:PACKLAB_ISCC "/DStudioVersion=$env:PACKLAB_STUDIO_VERSION" "/DGitRevision=$env:PACKLAB_BUILD_REVISION" "/DStageDir=$(Join-Path $env:GITHUB_WORKSPACE 'build\windows-studio\PackLabStudio')" "/DOutputDir=$output" "/DOutputName=$name" tools/packaging/PackLabStudio.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+          $artifact = Join-Path $output ($name + ".exe")
+          if (!(Test-Path -LiteralPath $artifact -PathType Leaf)) { throw "Versioned installer was not produced." }
+          $hash = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
+          $bytes = (Get-Item -LiteralPath $artifact).Length
+          $metadata = [ordered]@{ installer = ($name + ".exe"); studio_version = $env:PACKLAB_STUDIO_VERSION; build_revision = $env:PACKLAB_BUILD_REVISION; sha256 = $hash; byte_length = $bytes; signing = "unsigned"; inno_setup_version = "6.7.3" } | ConvertTo-Json -Compress
+          [System.IO.File]::WriteAllText((Join-Path $output "installer-metadata.json"), $metadata + "`n", [System.Text.UTF8Encoding]::new($false))
+          "PACKLAB_INSTALLER_DIR=$output" >> $env:GITHUB_ENV
+
+      - name: Upload cleared versioned installer
+        if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success' && steps.installer.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-windows-installer-${{ github.sha }}
+          path: ${{ runner.temp }}/packlab-installer/**
+          if-no-files-found: error
+          retention-days: 1
