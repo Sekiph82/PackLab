@@ -47,11 +47,11 @@ try {
         Copy-RuntimePath $path
     }
     $uv = if ($UvPath) { (Resolve-Path -LiteralPath $UvPath).Path } else { (Get-Command uv -ErrorAction Stop).Source }
-    & $uv sync --locked --project $stage
+    & $uv sync --locked --no-install-project --project $stage
     if ($LASTEXITCODE -ne 0) { throw "uv sync --locked failed with exit $LASTEXITCODE." }
     $python = Join-Path $stage '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) { throw 'uv sync did not create the runtime Python executable.' }
-    $smoke = "from PySide6.QtCore import QTimer; from packlab_studio.app import create_application; from packlab_studio.shell import StudioMainWindow; app=create_application(['PackLab owner runtime smoke']); window=StudioMainWindow(); window.show(); app.processEvents(); assert not window.windowIcon().isNull(), 'canonical icon did not load'; QTimer.singleShot(250, app.quit); raise SystemExit(app.exec())"
+    $smoke = "import sys; sys.path[:0]=['core/src','apps/windows-studio/src']; from PySide6.QtCore import QTimer; from packlab_studio.app import create_application; from packlab_studio.shell import StudioMainWindow; app=create_application(['PackLab owner runtime smoke']); window=StudioMainWindow(); window.show(); app.processEvents(); assert not window.windowIcon().isNull(), 'canonical icon did not load'; QTimer.singleShot(250, app.quit); raise SystemExit(app.exec())"
     & $python -c $smoke
     if ($LASTEXITCODE -ne 0) { throw "Source-mode Studio smoke failed with exit $LASTEXITCODE." }
     $icon = Join-Path $stage 'apps\windows-studio\assets\branding\PackLab.ico'

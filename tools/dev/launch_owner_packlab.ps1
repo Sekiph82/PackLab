@@ -6,6 +6,8 @@ $ownerRoot = Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'
 $runtimeRoot = Join-Path $ownerRoot 'current'
 $manifestPath = Join-Path $runtimeRoot 'owner-dev-runtime.json'
 $pythonw = Join-Path $runtimeRoot '.venv\Scripts\pythonw.exe'
+$studioSource = Join-Path $runtimeRoot 'apps\windows-studio\src'
+$coreSource = Join-Path $runtimeRoot 'core\src'
 $logRoot = Join-Path $ownerRoot 'logs'
 
 try {
@@ -15,7 +17,9 @@ try {
         throw 'Runtime manifest is invalid or has no successful smoke result.'
     }
     if (-not (Test-Path -LiteralPath $pythonw -PathType Leaf)) { throw 'PackLab Python runtime is missing.' }
-    Start-Process -FilePath $pythonw -ArgumentList @('-m', 'packlab_studio') -WorkingDirectory $runtimeRoot
+    if (-not (Test-Path -LiteralPath $studioSource -PathType Container) -or -not (Test-Path -LiteralPath $coreSource -PathType Container)) { throw 'PackLab source modules are missing.' }
+    $bootstrap = "import sys,runpy;sys.path[:0]=['core/src','apps/windows-studio/src'];runpy.run_module('packlab_studio',run_name='__main__')"
+    Start-Process -FilePath $pythonw -ArgumentList @('-c', $bootstrap) -WorkingDirectory $runtimeRoot
 } catch {
     New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
     $logPath = Join-Path $logRoot ('startup-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.log')
