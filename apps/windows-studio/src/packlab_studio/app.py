@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import traceback
 from collections.abc import Sequence
+from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
@@ -36,6 +39,7 @@ def create_application(argv: Sequence[str] | None = None) -> QApplication:
 def run(argv: Sequence[str] | None = None) -> int:
     """Start the shell and return a deterministic process exit code."""
 
+    build_smoke = False
     try:
         arguments = list(argv) if argv is not None else sys.argv.copy()
         build_smoke = BUILD_SMOKE_ARGUMENT in arguments
@@ -47,14 +51,21 @@ def run(argv: Sequence[str] | None = None) -> int:
         if build_smoke:
             app.processEvents()
             if not window.close():
-                return EXIT_STARTUP_FAILURE
+                raise RuntimeError("StudioMainWindow refused to close during build smoke.")
             app.processEvents()
             if window.isVisible():
-                return EXIT_STARTUP_FAILURE
+                raise RuntimeError("StudioMainWindow remained visible after build smoke close.")
             app.quit()
             return EXIT_SUCCESS
         return int(app.exec())
     except Exception:
+        if build_smoke:
+            log_path = os.environ.get("PACKLAB_BUILD_SMOKE_LOG")
+            if log_path:
+                try:
+                    Path(log_path).write_text(traceback.format_exc(), encoding="utf-8")
+                except OSError:
+                    pass
         return EXIT_STARTUP_FAILURE
 
 

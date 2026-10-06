@@ -145,12 +145,17 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: |
           $studioExe = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio\PackLabStudio.exe"
+          $smokeLog = Join-Path $env:RUNNER_TEMP ("packlab-studio-smoke-" + [guid]::NewGuid().ToString("N") + ".log")
+          $env:PACKLAB_BUILD_SMOKE_LOG = $smokeLog
           $smokeProcess = Start-Process -FilePath $studioExe -ArgumentList "--packlab-build-smoke" -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru
           if (!$smokeProcess.WaitForExit(30000)) {
             $smokeProcess.Kill()
             throw "Packaged Studio smoke did not exit within 30 seconds."
           }
-          if ($smokeProcess.ExitCode -ne 0) { throw "Packaged Studio smoke exited with code $($smokeProcess.ExitCode)." }
+          if ($smokeProcess.ExitCode -ne 0) {
+            $detail = if (Test-Path -LiteralPath $smokeLog -PathType Leaf) { Get-Content -LiteralPath $smokeLog -Raw } else { "No smoke traceback was written." }
+            throw "Packaged Studio smoke exited with code $($smokeProcess.ExitCode). $detail"
+          }
           $file = Get-Item -LiteralPath $studioExe
           $hash = (Get-FileHash -LiteralPath $studioExe -Algorithm SHA256).Hash.ToLowerInvariant()
           $files = @(Get-ChildItem -LiteralPath (Split-Path $studioExe -Parent) -File -Recurse)

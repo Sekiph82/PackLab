@@ -38,3 +38,20 @@ def test_app_build_smoke_constructs_and_closes_the_real_window(monkeypatch) -> N
     )
     assert created_argv == ["PackLabStudio"]
     assert events == ["show", "process", "close", "process", "quit"]
+
+
+def test_app_build_smoke_records_startup_exception(monkeypatch, tmp_path) -> None:
+    log_path = tmp_path / "studio-smoke.log"
+    monkeypatch.setenv("PACKLAB_BUILD_SMOKE_LOG", str(log_path))
+    monkeypatch.setattr(studio_app, "create_application", lambda _argv: object())
+
+    def fail_to_create_window() -> None:
+        raise RuntimeError("packaged startup detail")
+
+    monkeypatch.setattr(studio_app, "StudioMainWindow", fail_to_create_window)
+
+    assert (
+        studio_app.run(["PackLabStudio", studio_app.BUILD_SMOKE_ARGUMENT])
+        == studio_app.EXIT_STARTUP_FAILURE
+    )
+    assert "RuntimeError: packaged startup detail" in log_path.read_text(encoding="utf-8")

@@ -26,6 +26,7 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert "Start-Process -FilePath $studioExe" in workflow
     assert '"--packlab-build-smoke"' in workflow
     assert "WaitForExit(30000)" in workflow
+    assert "PACKLAB_BUILD_SMOKE_LOG" in workflow
     assert "PL-0350 owns native/runtime inventory" in workflow
     assert "actions/upload-artifact" not in workflow
     assert "packlab_preview" not in workflow
