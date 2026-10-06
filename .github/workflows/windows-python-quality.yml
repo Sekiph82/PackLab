@@ -37,7 +37,6 @@ jobs:
     timeout-minutes: 45
     env:
       UV_NO_PROGRESS: "1"
-      UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
 
     steps:
       - name: Check out source
@@ -62,6 +61,12 @@ jobs:
         with:
           path: ${{ runner.temp }}/uv-cache
           key: ${{ runner.os }}-${{ runner.arch }}-python-3.12-uv-0.11.26-${{ hashFiles('uv.lock') }}
+
+      - name: Configure uv dependency cache directory
+        shell: pwsh
+        run: |
+          $uvCacheDir = Join-Path $env:RUNNER_TEMP "uv-cache"
+          "UV_CACHE_DIR=$uvCacheDir" >> $env:GITHUB_ENV
 
       - name: Validate lock and install locked dependencies
         id: locked-env

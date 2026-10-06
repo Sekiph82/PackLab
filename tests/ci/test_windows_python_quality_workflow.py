@@ -50,15 +50,20 @@ def test_windows_python_quality_workflow_has_locked_least_privilege_contract() -
 def test_windows_quality_cache_is_exact_locked_uv_package_cache() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "UV_CACHE_DIR: ${{ runner.temp }}/uv-cache" in workflow
     assert "uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9" in workflow
     assert "path: ${{ runner.temp }}/uv-cache" in workflow
+    assert 'Join-Path $env:RUNNER_TEMP "uv-cache"' in workflow
+    assert '"UV_CACHE_DIR=$uvCacheDir" >> $env:GITHUB_ENV' in workflow
     assert (
         "key: ${{ runner.os }}-${{ runner.arch }}-python-3.12-uv-0.11.26-"
         "${{ hashFiles('uv.lock') }}"
     ) in workflow
     assert "restore-keys:" not in workflow
-    assert workflow.index("Restore exact uv dependency cache") < workflow.index("uv lock --check")
+    assert (
+        workflow.index("Restore exact uv dependency cache")
+        < workflow.index("Configure uv dependency cache directory")
+        < workflow.index("uv lock --check")
+    )
     assert '".venv"' not in workflow
     assert ".packscan" not in workflow
     assert "packaging-library" not in workflow
