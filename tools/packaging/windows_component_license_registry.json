@@ -1,6 +1,12 @@
 {
   "schema_version": 1,
   "supplemental_evidence": {
+    "blinker": {
+      "license_identifier": "MIT",
+      "license_mapping_evidence": "exact_locked_distribution_version_and_staged_distribution_license_file",
+      "upstream_reference": "https://github.com/pallets-eco/blinker/tree/1.9.0",
+      "reason": "The exact staged distribution includes its release license file; package metadata omits a normalized SPDX identifier."
+    },
     "cadquery-ocp-novtk": {
       "license_identifier": "Apache-2.0",
       "license_file": "tools/packaging/windows_licenses/OCP-7.9.3.1.1/LICENSE.txt",
@@ -16,6 +22,32 @@
       "license_sha256": "a13caea71627202ad33cc4cafafdd18e667e16716488f8d9c568127121fb89fd",
       "upstream_reference": "https://github.com/CadQuery/OCP/tree/d69b064a3a604ebf245b1f3b14fb54c835a3a571",
       "reason": "The exact locked wheel declares Apache-2.0 but omits the source project's license text."
+    },
+    "colorama": {
+      "license_identifier": "BSD-3-Clause",
+      "license_mapping_evidence": "exact_locked_distribution_version_and_staged_distribution_license_file",
+      "upstream_reference": "https://github.com/tartley/colorama/tree/0.4.6",
+      "reason": "The exact staged distribution includes its release license file; package metadata omits a normalized SPDX identifier."
+    },
+    "itsdangerous": {
+      "license_identifier": "BSD-3-Clause",
+      "license_mapping_evidence": "exact_locked_distribution_version_and_staged_distribution_license_file",
+      "upstream_reference": "https://github.com/pallets/itsdangerous/tree/2.2.0",
+      "reason": "The exact staged distribution includes its release license file; package metadata omits a normalized SPDX identifier."
+    },
+    "jinja2": {
+      "license_identifier": "BSD-3-Clause",
+      "license_mapping_evidence": "exact_locked_distribution_version_and_staged_distribution_license_file",
+      "upstream_reference": "https://github.com/pallets/jinja/tree/3.1.6",
+      "reason": "The exact staged distribution includes its release license file; package metadata omits a normalized SPDX identifier."
+    },
+    "pyinstaller-hooks-contrib-runtime-2026.8": {
+      "license_identifier": "Apache-2.0",
+      "license_file": "tools/packaging/windows_licenses/PyInstaller-hooks-contrib-2026.8/LICENSE.txt",
+      "license_sha256": "91d0baaff00773038e72c0a1fc9d5d2d38706b7a2b9c04f34296608f931b9cd0",
+      "license_mapping_evidence": "exact_embedded_runtime_hook_path_and_locked_distribution_license",
+      "upstream_reference": "https://github.com/pyinstaller/pyinstaller-hooks-contrib/tree/v2026.8",
+      "reason": "Only exact pyi_rth_*.py files under the locked distribution rthooks directory are classified here; upstream marks runtime hooks Apache-2.0. Standard analysis hooks remain build-only."
     },
     "pyside6": {
       "license_identifier": "LGPL-3.0-only",

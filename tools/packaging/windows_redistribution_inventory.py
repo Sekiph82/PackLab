@@ -108,6 +108,19 @@ def is_windows_api_runtime(path: Path) -> bool:
     return name.startswith(("api-ms-win-", "ext-ms-win-", "vcruntime", "ucrtbase"))
 
 
+def is_pyinstaller_hooks_contrib_runtime_hook(path: Path) -> bool:
+    """Return true only for an exact Apache-licensed hooks-contrib runtime hook."""
+    parts = tuple(part.casefold() for part in path.parts)
+    return (
+        any(
+            parts[index : index + 2] == ("_pyinstaller_hooks_contrib", "rthooks")
+            for index in range(max(0, len(parts) - 1))
+        )
+        and path.name.casefold().startswith("pyi_rth_")
+        and path.suffix.casefold() == ".py"
+    )
+
+
 def normalized_distribution_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
@@ -330,13 +343,14 @@ def license_rows(
             metadata_name = "CPython"
         if supplement:
             license_id = supplement.get("license_identifier") or license_id
-            supplemental_files = [
-                (
-                    "supplemental/" + Path(supplement["license_file"]).name,
-                    Path(supplement["license_file"]),
-                )
-            ]
-            files.extend(supplemental_files)
+            if supplement.get("license_file"):
+                supplemental_files = [
+                    (
+                        "supplemental/" + Path(supplement["license_file"]).name,
+                        Path(supplement["license_file"]),
+                    )
+                ]
+                files.extend(supplemental_files)
             exception_file = supplement.get("exception_file")
             if exception_file:
                 files.append(("supplemental/" + Path(exception_file).name, Path(exception_file)))
@@ -413,6 +427,14 @@ def license_rows(
                 "license_identifier": license_id,
                 "license_status": status,
                 "unresolved_reason": reason,
+                "license_mapping_evidence": (
+                    supplement.get("license_mapping_evidence")
+                    if supplement
+                    else "exact_installed_distribution_metadata_and_license_file"
+                ),
+                "upstream_reference": (
+                    supplement.get("upstream_reference") if supplement else None
+                ),
                 "notice_files": [row["path"] for row in copied],
             }
         )
@@ -466,9 +488,13 @@ def build_inventory(
         source = Path(raw_source)
         key = norm_source(source)
         matches = source_owners.get(key, [])
-        analysis_component_owners.update(
-            normalized_distribution_name(match.metadata.get("Name", "unknown")) for match in matches
-        )
+        for match in matches:
+            owner = normalized_distribution_name(match.metadata.get("Name", "unknown"))
+            if owner == "pyinstaller-hooks-contrib":
+                if is_pyinstaller_hooks_contrib_runtime_hook(source):
+                    analysis_component_owners.add("pyinstaller-hooks-contrib-runtime-2026.8")
+                continue
+            analysis_component_owners.add(owner)
         if is_python_runtime_source(source, runtime_root_norm):
             analysis_component_owners.add("cpython-runtime")
         if key.startswith(project_norm + os.sep):

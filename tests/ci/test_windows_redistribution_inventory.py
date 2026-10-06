@@ -15,6 +15,18 @@ def test_safe_posix_path_rejects_absolute_and_parent_paths() -> None:
     assert inventory.safe_posix_path(r"C:\private\file.dll") is None
 
 
+def test_hooks_contrib_runtime_hook_classification_is_path_and_name_bounded() -> None:
+    assert inventory.is_pyinstaller_hooks_contrib_runtime_hook(
+        Path("_pyinstaller_hooks_contrib/rthooks/pyi_rth_cryptography_openssl.py")
+    )
+    assert not inventory.is_pyinstaller_hooks_contrib_runtime_hook(
+        Path("_pyinstaller_hooks_contrib/hooks/hook-cryptography.py")
+    )
+    assert not inventory.is_pyinstaller_hooks_contrib_runtime_hook(
+        Path("_pyinstaller_hooks_contrib/rthooks/pyi_rth_unknown.txt")
+    )
+
+
 def test_toc_maps_exact_stage_layout_and_rejects_traversal(tmp_path: Path) -> None:
     stage = tmp_path / "PackLabStudio"
     (stage / "_internal").mkdir(parents=True)
@@ -121,3 +133,43 @@ def test_license_digest_mismatch_remains_unresolved(tmp_path: Path) -> None:
     )
     assert components[0]["license_status"] == "UNRESOLVED"
     assert "component:example" in unresolved
+
+
+def test_metadata_only_supplement_uses_exact_distribution_license_file(
+    tmp_path: Path,
+) -> None:
+    license_path = tmp_path / "LICENSE.txt"
+    license_path.write_text("BSD license evidence\n", encoding="utf-8")
+
+    class Distribution:
+        version = "1.2.3"
+        metadata = {"Name": "Example", "License": ""}
+        files = [Path("example-1.2.3.dist-info/licenses/LICENSE.txt")]
+
+        @staticmethod
+        def locate_file(_path: Path) -> Path:
+            return license_path
+
+    registry = {
+        "supplemental_evidence": {
+            "example": {
+                "license_identifier": "BSD-3-Clause",
+                "license_mapping_evidence": "exact_locked_distribution_and_staged_license_file",
+                "upstream_reference": "https://example.invalid/example/1.2.3",
+                "reason": "Exact release license text is packaged; metadata lacks SPDX.",
+            }
+        }
+    }
+    components, notices, unresolved = inventory.license_rows(
+        {"example"}, {"example": Distribution()}, registry, tmp_path / "evidence"
+    )
+
+    assert unresolved == set()
+    assert components[0]["license_identifier"] == "BSD-3-Clause"
+    assert components[0]["license_mapping_evidence"] == (
+        "exact_locked_distribution_and_staged_license_file"
+    )
+    assert len(notices) == 1
+    assert (tmp_path / "evidence" / notices[0]["path"]).read_text(encoding="utf-8") == (
+        "BSD license evidence\n"
+    )
