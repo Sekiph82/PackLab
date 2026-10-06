@@ -99,3 +99,17 @@ AWAITING_MILESTONE_AUDIT
 R03_BATCH_STOPPED_AT_PL-0349_V02
 
 AWAITING_MILESTONE_AUDIT
+
+## R04 continuation update - PL-0349 V03 builder-green
+
+Under the owner-authorized M16-C001-R04 V05 master prompt, the earlier R03 PL-0349 V02 stop is superseded by the corrected V03 rule that preserves the real QtPdf feature while constraining the shipped Qt module surface. PL-0349 V03 is builder-green and awaiting independent audit; PL-0350 V03 is the active continuation child.
+
+| Child | R04 builder status | Implementation/evidence SHA | Child log | Validation / next action |
+|---|---|---|---|---|
+| PL-0349 V03 | BUILDER_GREEN / AWAITING_INDEPENDENT_AUDIT | `e159654dc76f93043703ed54758bbd5aeac5f349`; workflow correction `9dccd1c00d2122f894b007b39ad33aef25b1ce42` | pending distinct log-only commit | Hosted Studio run 37455141899 passed build, staged Qt assertion, frozen Qt/PDF/OCP/Open3D smoke and exact inventory: 557 files / 542,575,818 bytes. |
+| PL-0350 V03 | IN_PROGRESS | — | — | Exact hosted pre-clearance artifact reports 64 unresolved items (173 files, 12 components); execute V03 against the capability-complete stage. |
+| PL-0351 through PL-0367 | NOT_STARTED | — | — | Continue only after PL-0350 V03 is builder-green. |
+
+- Local full pytest passed (`1998 passed, 11 skipped, 1 deselected, 2 warnings`); hosted quality run 37455141881 passed Ruff, mypy and repository tests (`2001 passed, 10 skipped, 1 deselected, 2 warnings`).
+- The Studio workflow stopped after its successful PL-0349 build/smoke/inventory at the independent PL-0350 clearance gate. The text-only artifact is `packlab-windows-compliance-preclearance-9dccd1c00d2122f894b007b39ad33aef25b1ce42` (ID `11408812753`). It produced no installer or binary artifact.
+- Root `TASKS.md` was not changed. No tag, GitHub Release or V0.1 publication was made. M17 has not started; PL-0368 remains `DEFERRED_POST_M17`.
