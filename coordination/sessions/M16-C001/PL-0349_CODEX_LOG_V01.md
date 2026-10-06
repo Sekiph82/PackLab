@@ -1,7 +1,7 @@
 # PL-0349 - Codex Implementation Log V01
 
-Task: **Windows PackLab Studio build job**  
-Milestone: **M16 - CI/CD, Signing & Distribution**  
+Task: **Windows PackLab Studio build job**
+Milestone: **M16 - CI/CD, Signing & Distribution**
 Cycle: **M16-C001-R01**
 
 ## Authorization and starting state
