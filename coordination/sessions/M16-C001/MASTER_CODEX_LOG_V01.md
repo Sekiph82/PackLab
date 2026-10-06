@@ -113,3 +113,12 @@ Under the owner-authorized M16-C001-R04 V05 master prompt, the earlier R03 PL-03
 - Local full pytest passed (`1998 passed, 11 skipped, 1 deselected, 2 warnings`); hosted quality run 37455141881 passed Ruff, mypy and repository tests (`2001 passed, 10 skipped, 1 deselected, 2 warnings`).
 - The Studio workflow stopped after its successful PL-0349 build/smoke/inventory at the independent PL-0350 clearance gate. The text-only artifact is `packlab-windows-compliance-preclearance-9dccd1c00d2122f894b007b39ad33aef25b1ce42` (ID `11408812753`). It produced no installer or binary artifact.
 - Root `TASKS.md` was not changed. No tag, GitHub Release or V0.1 publication was made. M17 has not started; PL-0368 remains `DEFERRED_POST_M17`.
+
+## R04 PL-0350 V03 stop
+
+- The live tracker and R04 V05 master authorized PL-0350 V03 against the exact PL-0349 V03 capability-complete Windows stage. The previous PL-0349 V03 acceptance remains intact.
+- PL-0350 remediation commit `14a8e83e05e48cc70d141c65b82978c68bf2b19c` closes four pure-Python metadata license gaps and correctly separates build-only PyInstaller standard hooks from an exact Apache-licensed runtime hook. The child log was published separately at `PL-0350_CODEX_LOG_V03.md`.
+- Hosted Windows run [37465015550](https://github.com/Sekiph82/PackLab/actions/runs/37465015550) passed build, approved Qt surface, frozen Qt GUI/QtPdf/OCP/Open3D smoke and inventory. Text-only preclearance artifact ID `11413813934` remains `BLOCKED`: 59 unresolved items, 167 unresolved file rows and 7 components, down from 64 / 173 / 12 on the same exact stage lineage.
+- The remaining OCP/OCCT, Open3D native third-party, Qt/PySide/Shiboken source/notice, Microsoft runtime pruning/prerequisite and source-mapping requirements block installer generation. No installer, source artifact, tag, GitHub Release or V0.1 publication was made. PL-0351 through PL-0367 were not started; PL-0368 remains `DEFERRED_POST_M17`; M17 was not started.
+- Local full pytest passed (`2002 passed, 11 skipped, 1 deselected, 2 warnings`), mypy passed (222 source files), and the hosted frozen capability smoke passed. Full repository Ruff and format findings are recorded in the PL-0350 child log; changed files passed scoped Ruff/format checks.
+- Root `TASKS.md` and audit verdicts were not changed. R04 is `BATCH_STOPPED` at PL-0350 V03 for independent milestone audit.
