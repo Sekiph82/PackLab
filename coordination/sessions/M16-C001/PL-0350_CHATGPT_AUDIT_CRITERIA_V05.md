@@ -4,6 +4,22 @@ Task: **Final five native-component redistribution gates + unsigned audit instal
 
 All criteria are mandatory.
 
+### Integrated OWNER DEV launcher repair criteria
+
+1. Before PL-0350 redistribution work continues, the existing OWNER DEV launcher is repaired inside this same execution; no separate task/tracker is created.
+2. Canonical shortcut ICO is copied to the stable non-swapped path `%LOCALAPPDATA%\PackLab\OwnerDev\branding\PackLab.ico` and SHA-256 equals `a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1`.
+3. Desktop and Start Menu `PackLab.lnk` files are recreated with `IconLocation` pointing to that stable branding path, never under `OwnerDev\current`.
+4. Shortcut/icon refresh uses only non-destructive Windows Shell notification behavior; no Explorer restart, Taskband/icon-cache registry hack or cache-database mutation is accepted.
+5. Windows Shell can extract a nonzero icon from the stable canonical ICO/refreshed shortcut.
+6. Owner launcher monitors spawned `pythonw.exe` for at least 8 seconds and treats any early exit as failure with child exit code plus local diagnostic.
+7. OWNER DEV startup exceptions preserve local-only exception type/message/traceback and deployed SHA/version context instead of being collapsed to a silent generic exit.
+8. Real owner-machine acceptance opens the actual Desktop `PackLab.lnk` through Shell `open`, shows `PackLab Studio`, and the application remains alive/visible for at least 15 continuous seconds before controlled test cleanup.
+9. The running owner window has a nonzero PackLab icon handle and both Desktop/Start Menu shortcuts resolve to the canonical stable icon path/hash.
+10. `OWNER_DEV_READY` is emitted only after runtime, shortcut target, stable icon and manifest checks pass.
+11. If owner launch closes before the 15-second gate, PL-0350 V05 does not continue until the actual local failure log is inspected and fixed.
+
+### PL-0350 V05 redistribution criteria
+
 1. Live TASKS, partial audit V07 and V04 audit are read; Codex does not edit root TASKS.
 2. V05 preserves all accepted V04 ownership/pruning/VC-runtime/OpenSSL closures and capability behavior.
 3. Three checked-in exact maps exist for Qt/PySide/Shiboken, OCP/OCCT/native-wheel and Open3D native files.
