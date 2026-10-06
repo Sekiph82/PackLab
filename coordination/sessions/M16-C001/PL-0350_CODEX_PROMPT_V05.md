@@ -33,6 +33,107 @@ Read before implementation:
 
 Do not edit root `TASKS.md`.
 
+## Integrated OWNER DEV launcher repair — mandatory before PL-0350 work
+
+This is **not a separate task**. It is a required preflight/remediation inside the current M16-C001-R06 execution before continuing the redistribution work.
+
+The owner has now provided real desktop evidence that the current `PackLab.lnk` is not acceptable:
+
+- the Desktop shortcut renders with a generic white-document icon instead of the canonical PackLab icon;
+- double-click launches a PackLab window/process briefly and it closes almost immediately;
+- therefore the previous OWNER DEV audit evidence was insufficient for actual sustained owner use.
+
+Do not treat the historical `AUDITED_PASS` label as authority to skip this repair.
+
+### OWNER DEV defect A — unstable shortcut icon source
+
+The current shortcut points `IconLocation` at:
+
+`%LOCALAPPDATA%\PackLab\OwnerDev\current\apps\windows-studio\assets\branding\PackLab.ico`
+
+but `current` is atomically replaced during every runtime refresh. That is not a stable Windows Shell icon source and can leave Explorer showing a generic icon.
+
+Fix this by creating a stable branding location outside the swapped runtime:
+
+`%LOCALAPPDATA%\PackLab\OwnerDev\branding\PackLab.ico`
+
+Requirements:
+
+1. copy the canonical PackLab ICO to that stable path during every owner-dev refresh;
+2. verify SHA-256 exactly equals:
+   `a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1`;
+3. Desktop and Start Menu shortcuts must use that stable ICO path, never a path under `OwnerDev\current`;
+4. delete/recreate the PackLab shortcuts deterministically after icon refresh;
+5. notify Windows Shell of the shortcut/icon change through a legitimate non-destructive shell notification API when needed;
+6. do not restart Explorer and do not alter icon-cache databases/registry hacks;
+7. verify the saved ShellLink `IconLocation` equals the stable branding path;
+8. verify Windows can extract a nonzero icon handle from the stable ICO / refreshed shortcut.
+
+The application-internal/frozen icon may still resolve from packaged/runtime resources. This stable path requirement is specifically for Windows Shell shortcut rendering.
+
+### OWNER DEV defect B — launcher returns before child failure is known
+
+The current PowerShell launcher calls `Start-Process` and immediately exits. That means the shortcut can appear successful even when the spawned `pythonw.exe` dies seconds later.
+
+Fix the owner launcher so it can detect **early child-process exit**.
+
+Required behavior:
+
+1. launch `pythonw.exe` with `-PassThru`;
+2. monitor the spawned process during an explicit startup-stability window of at least **8 seconds**;
+3. if the child exits during that window:
+   - capture its exit code;
+   - write a timestamped local diagnostic under `%LOCALAPPDATA%\PackLab\OwnerDev\logs`;
+   - include deployed Git SHA, Studio version, Python version, child exit code, and a safe reason/category;
+   - show a concise PackLab error dialog pointing to the local log;
+   - return nonzero from the launcher;
+4. if the child is still alive after the startup-stability window, launcher may exit success while PackLab continues running;
+5. no console window may remain visible.
+
+### OWNER DEV defect C — current Python error path discards the real exception
+
+`packlab_studio.app.run()` currently catches startup exceptions and returns `EXIT_STARTUP_FAILURE` without preserving the actual exception details for OWNER DEV.
+
+Add an OWNER-DEV-only diagnostic seam, controlled by a local environment variable set by the launcher, so a source-mode startup exception writes a path-private local log containing:
+
+- exception type;
+- safe exception message;
+- Python traceback;
+- deployed source SHA/version context.
+
+This diagnostic must remain local under `%LOCALAPPDATA%\PackLab\OwnerDev\logs`, must not enter Git/evidence artifacts, and must not expose secrets.
+
+Do not weaken the normal production exception boundary.
+
+### Mandatory real owner-machine acceptance after repair
+
+After publishing the repair and refreshing OWNER DEV:
+
+1. invoke the **actual Desktop `PackLab.lnk`** through the Windows Shell `open` verb;
+2. verify the PackLab Studio top-level window appears;
+3. verify the spawned PackLab process/window remains alive and visible for at least **15 continuous seconds** without automation closing it;
+4. verify the window title is `PackLab Studio`;
+5. verify the running window has a nonzero PackLab icon handle;
+6. verify Desktop and Start Menu shortcut `IconLocation` both point to the stable branding ICO;
+7. verify the stable ICO digest matches the canonical hash;
+8. only after the 15-second stability proof, close the window deliberately as part of the test cleanup;
+9. record the exact deployed SHA and `OWNER_DEV_READY`.
+
+If the application opens and closes before 15 seconds, OWNER DEV repair is FAILED and PL-0350 V05 must **not** continue until the local failure log is inspected and the actual root cause is fixed.
+
+### Standing refresh rule update
+
+Update `post_codex_owner_dev_refresh.ps1` and its checked-in policy so every future refresh:
+
+- refreshes the stable branding ICO first;
+- rebuilds/verifies both shortcuts against that stable icon path;
+- retains the runtime smoke;
+- refuses to print `OWNER_DEV_READY` if shortcut icon/target/manifest checks fail.
+
+The 15-second visible Desktop launch proof is mandatory for this repair execution. Future ordinary Codex refreshes do not need to pop the UI every time unless owner-launch health is in doubt.
+
+Only after this integrated OWNER DEV repair passes may you continue with the PL-0350 V05 redistribution work below.
+
 ## Frozen V04 baseline
 
 The exact hosted V04 stage is:
