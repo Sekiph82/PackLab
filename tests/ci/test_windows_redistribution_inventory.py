@@ -173,3 +173,61 @@ def test_metadata_only_supplement_uses_exact_distribution_license_file(
     assert (tmp_path / "evidence" / notices[0]["path"]).read_text(encoding="utf-8") == (
         "BSD license evidence\n"
     )
+
+
+def test_generated_runtime_json_must_match_build_revision_and_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "repo"
+    stage = project / "build" / "PackLabStudio"
+    evidence = tmp_path / "evidence"
+    stage.mkdir(parents=True)
+    revision = "b" * 40
+    version = "1.2.3"
+    provenance = {
+        "schema_version": 1,
+        "PACKLAB_BUILD_REVISION": revision,
+        "studio_version": version,
+    }
+    (stage / "packlab-build-provenance.json").write_text(json.dumps(provenance), encoding="utf-8")
+    for name in ("qt-staged-surface.json", "windows-runtime-capabilities.json"):
+        (stage / name).write_text(
+            json.dumps(
+                {
+                    "PACKLAB_BUILD_REVISION": revision,
+                    "studio_version": version,
+                    "status": "PASS",
+                }
+            ),
+            encoding="utf-8",
+        )
+    toc = tmp_path / "COLLECT-00.toc"
+    toc.write_text(repr([("packlab-build-provenance.json", "source", "DATA")]), encoding="utf-8")
+    analysis = tmp_path / "Analysis-00.toc"
+    analysis.write_text("()", encoding="utf-8")
+    registry = tmp_path / "registry.json"
+    registry.write_text('{"schema_version":1}', encoding="utf-8")
+    monkeypatch.setattr(inventory, "analysis_source_paths", lambda _path: [])
+    monkeypatch.setattr(inventory.importlib.metadata, "distributions", lambda: [])
+
+    files, _components, output = inventory.build_inventory(
+        stage,
+        toc,
+        analysis,
+        "_internal",
+        project,
+        revision,
+        version,
+        registry,
+        evidence,
+    )
+
+    generated = [
+        row
+        for row in files["files"]
+        if row["relative_path"] in {"qt-staged-surface.json", "windows-runtime-capabilities.json"}
+    ]
+    assert len(generated) == 2
+    assert all(row["component_ids"] == ["packlab-generated-runtime-evidence"] for row in generated)
+    assert all(row["license_status"] == "EVIDENCE_PRESENT" for row in generated)
+    assert output[0]["unresolved_count"] == 0

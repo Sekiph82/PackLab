@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "target_os": "Windows 10 or later, x64",
+  "prerequisite": "Microsoft Visual C++ 2015-2022 Redistributable (x64)",
+  "minimum_version": "14.44.35211.0",
+  "minimum_version_evidence": "Highest retained wheel-private VCRUNTIME140.dll PE FileVersion observed in the locked PySide6/Shiboken6 6.11.2 environment; final hosted stage must revalidate this value.",
+  "detection": "64-bit HKLM\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64 Installed, Major, Minor, and Bld registry values",
+  "automatic_download": false,
+  "official_reference": "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170",
+  "redistribution_reference": "https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170",
+  "status": "PRELIMINARY_LOCAL_PE_EVIDENCE_HOSTED_REVALIDATION_REQUIRED"
+}

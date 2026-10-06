@@ -142,7 +142,9 @@ jobs:
           uv run --locked python tools/packaging/assert_staged_qt_surface.py `
             --stage $appDirectory `
             --contract tools/packaging/qt_module_contract.json `
-            --output $assertionPath
+            --output $assertionPath `
+            --build-revision $env:PACKLAB_BUILD_REVISION `
+            --studio-version $env:PACKLAB_STUDIO_VERSION
           if ($LASTEXITCODE -ne 0) { throw "Staged Qt module contract assertion failed." }
           $assertion = Get-Content -LiteralPath $assertionPath -Raw | ConvertFrom-Json
           if ($assertion.status -ne "PASS") { throw "Staged Qt module assertion did not pass." }
@@ -252,7 +254,7 @@ jobs:
           if ($validation.PACKLAB_BUILD_REVISION -ne $env:PACKLAB_BUILD_REVISION -or
               $validation.studio_version -ne $env:PACKLAB_STUDIO_VERSION -or
               $validation.unresolved_count -ne 0 -or
-              $validation.status -ne "CLEARED_FOR_PL0350_PACKAGING") {
+              $validation.status -ne "CLEARED_FOR_PL0350_ENGINEERING_PACKAGING") {
             throw "The exact hosted staging tree has unresolved redistribution evidence; binary packaging is blocked."
           }
           "cleared=true" >> $env:GITHUB_OUTPUT

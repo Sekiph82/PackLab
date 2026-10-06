@@ -90,3 +90,25 @@ def test_qt_module_contract_is_json_and_requires_transitive_reason() -> None:
         "PySide6.QtSvg",
         "PySide6.QtPdf",
     }
+
+
+def test_staged_qt_evidence_is_bound_to_the_exact_build(tmp_path: Path) -> None:
+    stage = _stage(
+        tmp_path,
+        (
+            "PySide6/QtCore.pyd",
+            "PySide6/QtGui.pyd",
+            "PySide6/QtWidgets.pyd",
+            "PySide6/QtSvg.pyd",
+            "PySide6/QtPdf.pyd",
+        ),
+    )
+    report = inspect_stage(
+        stage,
+        CONTRACT,
+        "a" * 40,
+        "1.2.3",
+    )
+
+    assert report["PACKLAB_BUILD_REVISION"] == "a" * 40
+    assert report["studio_version"] == "1.2.3"

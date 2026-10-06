@@ -35,3 +35,31 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Run]
 Filename: "{app}\PackLabStudio.exe"; Description: "Launch PackLab Studio"; Flags: postinstall nowait skipifsilent
+
+[Code]
+function HasSupportedVCRuntime: Boolean;
+var
+  Installed, Major, Minor, Build: Cardinal;
+begin
+  Result := False;
+  if not RegQueryDWordValue(HKLM64,
+    'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed) then
+    Exit;
+  if (Installed <> 1) or
+     not RegQueryDWordValue(HKLM64,
+       'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Major', Major) or
+     not RegQueryDWordValue(HKLM64,
+       'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Minor', Minor) or
+     not RegQueryDWordValue(HKLM64,
+       'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Bld', Build) then
+    Exit;
+  Result := (Major > 14) or
+    ((Major = 14) and ((Minor > 44) or ((Minor = 44) and (Build >= 35211))));
+end;
+
+function InitializeSetup: Boolean;
+begin
+  Result := HasSupportedVCRuntime;
+  if not Result then
+    MsgBox('PackLab Studio requires Microsoft Visual C++ 2015-2022 Redistributable (x64), version 14.44.35211 or later. Install or update the prerequisite from Microsoft, then run this installer again. PackLab does not download it automatically.', mbError, MB_OK);
+end;

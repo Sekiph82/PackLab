@@ -8,7 +8,12 @@ import re
 from pathlib import Path
 
 
-def inspect_stage(stage: Path, contract_path: Path) -> dict[str, object]:
+def inspect_stage(
+    stage: Path,
+    contract_path: Path,
+    build_revision: str | None = None,
+    studio_version: str | None = None,
+) -> dict[str, object]:
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
     approved = set(contract["direct_modules"]) | set(contract["transitive_modules"])
     modules: set[str] = set()
@@ -58,7 +63,7 @@ def inspect_stage(stage: Path, contract_path: Path) -> dict[str, object]:
     missing = set(contract["direct_modules"]) - modules
     if missing:
         raise ValueError("required Qt extension module is missing")
-    return {
+    result: dict[str, object] = {
         "schema_version": 1,
         "status": "PASS",
         "approved_staged_modules": sorted(modules),
@@ -67,6 +72,17 @@ def inspect_stage(stage: Path, contract_path: Path) -> dict[str, object]:
         "forbidden_module_families_absent": True,
         "unrelated_icu_runtime_dlls_absent": True,
     }
+    if build_revision is not None:
+        if not re.fullmatch(r"[0-9a-f]{40}", build_revision):
+            raise ValueError("invalid build revision")
+        result["PACKLAB_BUILD_REVISION"] = build_revision
+    if studio_version is not None:
+        if not re.fullmatch(
+            r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", studio_version
+        ):
+            raise ValueError("invalid Studio version")
+        result["studio_version"] = studio_version
+    return result
 
 
 def main() -> int:
@@ -74,9 +90,11 @@ def main() -> int:
     parser.add_argument("--stage", required=True, type=Path)
     parser.add_argument("--contract", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--build-revision")
+    parser.add_argument("--studio-version")
     args = parser.parse_args()
     try:
-        result = inspect_stage(args.stage, args.contract)
+        result = inspect_stage(args.stage, args.contract, args.build_revision, args.studio_version)
     except (OSError, ValueError, KeyError, json.JSONDecodeError) as error:
         print(f"Qt staged surface assertion failed ({type(error).__name__}).")
         return 1

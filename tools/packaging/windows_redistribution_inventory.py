@@ -10,6 +10,7 @@ import importlib.metadata
 import json
 import os
 import re
+import ssl
 import sys
 from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -306,6 +307,8 @@ def license_rows(
                         "license_status": "UNRESOLVED",
                         "unresolved_reason": rule.get("reason")
                         or "This exact native/system component requires a reviewed redistribution mapping.",
+                        "source_evidence_required": True,
+                        "source_evidence": None,
                         "notice_files": [],
                     }
                 )
@@ -435,6 +438,11 @@ def license_rows(
                 "upstream_reference": (
                     supplement.get("upstream_reference") if supplement else None
                 ),
+                "source_evidence": supplement.get("source_evidence") if supplement else None,
+                "source_evidence_required": bool(
+                    (supplement and supplement.get("native_unresolved_reason"))
+                    or (owner in native_review)
+                ),
                 "notice_files": [row["path"] for row in copied],
             }
         )
@@ -507,13 +515,36 @@ def build_inventory(
         owner_ids: set[str] = set()
         mapping_evidence = "unmapped"
         unresolved_reason: str | None = None
-        if row is not None:
+        if Path(relative).name in {
+            "qt-staged-surface.json",
+            "windows-runtime-capabilities.json",
+        }:
+            owner_ids.add("packlab-generated-runtime-evidence")
+            mapping_evidence = "packlab_generated_revision_bound_runtime_json"
+            try:
+                generated = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                generated = None
+            if (
+                not isinstance(generated, dict)
+                or generated.get("PACKLAB_BUILD_REVISION") != revision
+                or generated.get("studio_version") != studio_version
+                or generated.get("status") != "PASS"
+            ):
+                unresolved_reason = "Generated runtime evidence is absent, not passing, or not bound to this build revision/version."
+        elif row is not None:
             raw_source, toc_kind = row
             toc_seen.add(relative)
             source_path = Path(raw_source) if raw_source else None
             if Path(relative).name == "packlab-build-provenance.json":
                 owner_ids.add("packlab-build-provenance")
                 mapping_evidence = "build_generated_path_free_provenance"
+            elif (
+                Path(relative).name == "base_library.zip"
+                and "cpython-runtime" in analysis_component_owners
+            ):
+                owner_ids.add("cpython-runtime")
+                mapping_evidence = "pyinstaller_base_library_from_exact_cpython_stdlib_analysis"
             elif toc_kind in {"EXECUTABLE", "PKG"}:
                 owner_ids.update(analysis_component_owners)
                 owner_ids.update({"packlab-application", "pyinstaller-bootloader"})
@@ -521,7 +552,21 @@ def build_inventory(
             elif source_path is not None and source_path.exists():
                 key = norm_source(source_path)
                 matches = source_owners.get(key, [])
-                if matches:
+                if source_path.name.casefold() in {
+                    "libcrypto-3.dll",
+                    "libssl-3.dll",
+                } and is_python_runtime_source(source_path, runtime_root_norm):
+                    openssl_version_match = re.search(
+                        r"OpenSSL\s+([0-9]+\.[0-9]+\.[0-9]+)", ssl.OPENSSL_VERSION
+                    )
+                    if openssl_version_match:
+                        owner_ids.add(f"openssl-runtime-{openssl_version_match.group(1)}")
+                        mapping_evidence = "python_dlls_exact_source_and_ssl_module_runtime_version"
+                    else:
+                        owner_ids.add("unmapped-source-component")
+                        mapping_evidence = "python_openssl_version_unparsed"
+                        unresolved_reason = "The selected Python runtime OpenSSL version could not be identified exactly."
+                elif matches:
                     owner_ids.update(
                         normalized_distribution_name(item.metadata.get("Name", "unknown"))
                         for item in matches
@@ -605,6 +650,7 @@ def build_inventory(
             "packlab-build-provenance",
             "packlab-compliance-notices",
             "packlab-compliance-license-evidence",
+            "packlab-generated-runtime-evidence",
         }
     }
     if "pyinstaller-bootloader" in owners_to_review:
@@ -688,6 +734,22 @@ def build_inventory(
         "\n".join(notices_lines), encoding="utf-8", newline="\n"
     )
     staged_bytes = sum(item["byte_length"] for item in records)
+    unresolved_shipped_file_count = sum(item["license_status"] == "UNRESOLVED" for item in records)
+    missing_notice_count = sum(not row["notice_files"] for row in component_rows)
+    missing_source_package_count = sum(
+        bool(row.get("source_evidence_required")) and not row.get("source_evidence")
+        for row in component_rows
+    )
+    forbidden_qt_component_count = sum(
+        bool(re.search(r"virtualkeyboard|qt3d|qtcharts|qtmultimedia", row["component_id"], re.I))
+        for row in component_rows
+    )
+    if missing_notice_count:
+        unresolved_items.add("evidence:missing-notices")
+    if missing_source_package_count:
+        unresolved_items.add("evidence:missing-source-packages")
+    if forbidden_qt_component_count:
+        unresolved_items.add("surface:forbidden-qt-components")
     validation = {
         "schema_version": SCHEMA_VERSION,
         "PACKLAB_BUILD_REVISION": revision,
@@ -700,9 +762,19 @@ def build_inventory(
             row["license_status"] == "UNRESOLVED" for row in component_rows
         ),
         "unresolved_count": len(unresolved_items),
+        "unresolved_shipped_file_count": unresolved_shipped_file_count,
+        "missing_notice_count": missing_notice_count,
+        "missing_source_package_count": missing_source_package_count,
+        "forbidden_qt_component_count": forbidden_qt_component_count,
+        "external_prerequisite_count": 1,
+        "engineering_packaging_status": (
+            "CLEARED_FOR_PL0350_ENGINEERING_PACKAGING" if not unresolved_items else "BLOCKED"
+        ),
+        "legal_review_required": True,
+        "public_release_authorized": False,
         "required_notice_count": sum(bool(row["license_identifier"]) for row in component_rows),
         "collected_notice_count": len(notice_rows),
-        "status": "CLEARED_FOR_PL0350_PACKAGING" if not unresolved_items else "BLOCKED",
+        "status": "CLEARED_FOR_PL0350_ENGINEERING_PACKAGING" if not unresolved_items else "BLOCKED",
         "unresolved_items": sorted(unresolved_items),
     }
     inventory = {

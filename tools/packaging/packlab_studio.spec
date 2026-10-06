@@ -64,6 +64,7 @@ analysis = Analysis(
     binaries=open3d_native,
     datas=[
         (str(provenance), "."),
+        (str(root / "tools" / "packaging" / "windows-runtime-prerequisite.json"), "."),
         (str(schema_path), "schemas"),
         (str(branding_path), "apps/windows-studio/assets/branding"),
         *copy_metadata("cadquery-ocp-novtk"),
@@ -93,6 +94,19 @@ analysis = Analysis(
 
 def keep_curated_qt_file(destination):
     normalized = destination.replace("\\", "/").casefold()
+    base = Path(normalized).name
+    # Windows API-set/UCRT names are operating-system contracts, not app
+    # payloads. The installer declares the supported Windows/VC prerequisite.
+    # Keep wheel-private runtime copies in their package directories.
+    if "/" not in normalized and (
+        base.startswith(("api-ms-win-", "ext-ms-win-", "vcruntime"))
+        or base == "ucrtbase.dll"
+    ):
+        return False
+    # These x64-suffixed OpenSSL files are unrelated Poppler PATH pollution;
+    # CPython's own _ssl extension uses the un-suffixed DLLs from Python/DLLs.
+    if base in {"libcrypto-3-x64.dll", "libssl-3-x64.dll"}:
+        return False
     if "pyside6" in normalized.split("/"):
         parts = normalized.split("/")
         package_index = parts.index("pyside6")
@@ -108,7 +122,6 @@ def keep_curated_qt_file(destination):
             return module in {"qtcore", "qtgui", "qtwidgets", "qtsvg", "qtpdf", "qtnetwork"}
         if tail.endswith(".qm") or "/translations/" in tail:
             return False
-    base = Path(normalized).name
     # Qt resolves its Windows ICU dependency from the OS. Prevent PyInstaller
     # from collecting unrelated ICU DLLs from the build machine's PATH (for
     # example, Codex's Poppler ICU 78, which is incompatible with this Qt build).

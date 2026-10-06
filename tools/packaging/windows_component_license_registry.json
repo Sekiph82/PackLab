@@ -23,6 +23,19 @@
       "upstream_reference": "https://github.com/CadQuery/OCP/tree/d69b064a3a604ebf245b1f3b14fb54c835a3a571",
       "reason": "The exact locked wheel declares Apache-2.0 but omits the source project's license text."
     },
+    "openssl-runtime-3.0.16": {
+      "license_identifier": "Apache-2.0",
+      "license_file": "tools/packaging/windows_licenses/OpenSSL-3.0.16/LICENSE.txt",
+      "license_sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+      "license_mapping_evidence": "CPython 3.12.10 ssl.OPENSSL_VERSION plus exact Python/DLLs source path; OpenSSL release source archive hash pinned separately",
+      "upstream_reference": "https://github.com/openssl/openssl/tree/openssl-3.0.16",
+      "source_evidence": {
+        "filename": "openssl-3.0.16.tar.gz",
+        "url": "https://github.com/openssl/openssl/releases/download/openssl-3.0.16/openssl-3.0.16.tar.gz",
+        "sha256": "57e03c50feab5d31b152af2b764f10379aecd8ee92f16c985983ce4a99f7ef86"
+      },
+      "reason": "OpenSSL 3 runtime files are owned separately from CPython and carry the exact OpenSSL 3.0.16 license and source release evidence."
+    },
     "colorama": {
       "license_identifier": "BSD-3-Clause",
       "license_mapping_evidence": "exact_locked_distribution_version_and_staged_distribution_license_file",
