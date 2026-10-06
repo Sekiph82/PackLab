@@ -18,7 +18,7 @@ try {
     }
     if (-not (Test-Path -LiteralPath $pythonw -PathType Leaf)) { throw 'PackLab Python runtime is missing.' }
     if (-not (Test-Path -LiteralPath $studioSource -PathType Container) -or -not (Test-Path -LiteralPath $coreSource -PathType Container)) { throw 'PackLab source modules are missing.' }
-    $bootstrap = "import sys,runpy;sys.path[:0]=['core/src','apps/windows-studio/src'];runpy.run_module('packlab_studio',run_name='__main__')"
+    $bootstrap = "import os,sys,runpy;sys.path[:0]=[os.path.join(os.environ['LOCALAPPDATA'],'PackLab','OwnerDev','current','core','src'),os.path.join(os.environ['LOCALAPPDATA'],'PackLab','OwnerDev','current','apps','windows-studio','src')];runpy.run_module('packlab_studio',run_name='__main__')"
     Start-Process -FilePath $pythonw -ArgumentList @('-c', $bootstrap) -WorkingDirectory $runtimeRoot
 } catch {
     New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
