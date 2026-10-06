@@ -14,6 +14,7 @@ ORGANIZATION_NAME = "PackLab"
 APPLICATION_NAME = "PackLab Studio"
 EXIT_SUCCESS = 0
 EXIT_STARTUP_FAILURE = 1
+BUILD_SMOKE_ARGUMENT = "--packlab-build-smoke"
 
 
 def create_application(argv: Sequence[str] | None = None) -> QApplication:
@@ -36,9 +37,22 @@ def run(argv: Sequence[str] | None = None) -> int:
     """Start the shell and return a deterministic process exit code."""
 
     try:
-        app = create_application(argv)
+        arguments = list(argv) if argv is not None else sys.argv.copy()
+        build_smoke = BUILD_SMOKE_ARGUMENT in arguments
+        if build_smoke:
+            arguments.remove(BUILD_SMOKE_ARGUMENT)
+        app = create_application(arguments)
         window = StudioMainWindow()
         window.show()
+        if build_smoke:
+            app.processEvents()
+            if not window.close():
+                return EXIT_STARTUP_FAILURE
+            app.processEvents()
+            if window.isVisible():
+                return EXIT_STARTUP_FAILURE
+            app.quit()
+            return EXIT_SUCCESS
         return int(app.exec())
     except Exception:
         return EXIT_STARTUP_FAILURE

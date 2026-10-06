@@ -30,6 +30,7 @@ from packlab_core.reconstruction import (
     CameraPriorUse,
     ReconstructionInputSet,
 )
+from packlab_core.resource_paths import packlab_data_root
 
 from .project_layout import ProjectLayout, ProjectLayoutError, safe_relative_path
 from .provenance import ArtifactRecord, ProvenanceManager
@@ -103,7 +104,9 @@ def _digest(path: Path) -> str:
 
 
 def _atomic_json(target: Path, value: object) -> None:
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}-", suffix=".tmp", dir=target.parent)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}-", suffix=".tmp", dir=target.parent
+    )
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(value, handle, sort_keys=True, separators=(",", ":"))
@@ -116,7 +119,9 @@ def _atomic_json(target: Path, value: object) -> None:
 
 
 def _atomic_bytes(target: Path, value: bytes) -> None:
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}-", suffix=".tmp", dir=target.parent)
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{target.name}-", suffix=".tmp", dir=target.parent
+    )
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(value)
@@ -129,9 +134,7 @@ def _atomic_bytes(target: Path, value: bytes) -> None:
 
 @cache
 def _packscan_schema_validator(schema_name: str) -> Draft202012Validator:
-    schema_path = (
-        Path(__file__).resolve().parents[4] / "schemas" / "packscan" / schema_name
-    )
+    schema_path = packlab_data_root() / "schemas" / "packscan" / schema_name
     try:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
@@ -150,9 +153,7 @@ def _validate_packscan_metadata(value: object, schema_name: str, path: str) -> N
     if errors:
         location = "/".join(str(part) for part in errors[0].absolute_path)
         suffix = f" at {location}" if location else ""
-        raise ReconstructionWorkspaceError(
-            f"PackScan metadata is invalid: {path}{suffix}"
-        )
+        raise ReconstructionWorkspaceError(f"PackScan metadata is invalid: {path}{suffix}")
 
 
 def _json_object(data: bytes, path: str) -> dict[str, object]:
@@ -170,9 +171,15 @@ def _flatten_matrix(value: object, *, size: int, path: str) -> tuple[float, ...]
         raise ReconstructionWorkspaceError(f"PackScan matrix shape is invalid: {path}")
     rows: list[tuple[float, ...]] = []
     for row in value:
-        if not isinstance(row, list) or len(row) != size or not all(
-            isinstance(number, (int, float)) and not isinstance(number, bool) and math.isfinite(number)
-            for number in row
+        if (
+            not isinstance(row, list)
+            or len(row) != size
+            or not all(
+                isinstance(number, (int, float))
+                and not isinstance(number, bool)
+                and math.isfinite(number)
+                for number in row
+            )
         ):
             raise ReconstructionWorkspaceError(f"PackScan matrix values are invalid: {path}")
         rows.append(tuple(float(number) for number in row))
@@ -218,7 +225,9 @@ def _payload_kind(path: str) -> str | None:
     return None
 
 
-def _payload_photo_id(path: str, photo_ids: tuple[str, ...], image_paths: tuple[str, ...]) -> str | None:
+def _payload_photo_id(
+    path: str, photo_ids: tuple[str, ...], image_paths: tuple[str, ...]
+) -> str | None:
     normalized = path.lower().replace("\\", "/")
     filename = normalized.rsplit("/", 1)[-1][:-5]
     candidates: list[str] = []
@@ -227,7 +236,15 @@ def _payload_photo_id(path: str, photo_ids: tuple[str, ...], image_paths: tuple[
         if lowered in normalized.split("/") or filename == lowered:
             candidates.append(photo_id)
             continue
-        suffixes = (".intrinsics", ".intrinsic", ".pose", "_intrinsics", "_pose", "-intrinsics", "-pose")
+        suffixes = (
+            ".intrinsics",
+            ".intrinsic",
+            ".pose",
+            "_intrinsics",
+            "_pose",
+            "-intrinsics",
+            "-pose",
+        )
         if any(filename == lowered + suffix for suffix in suffixes):
             candidates.append(photo_id)
     for image_path in image_paths:
@@ -438,7 +455,9 @@ class ReconstructionWorkspaceManager:
         working_set = self._published_working_set(workspace)
         self._verify_working_set_identity(workspace, working_set, report)
         photos_by_image, photos_by_id = self._read_photo_metadata(report, working_set)
-        candidates, candidate_warnings = self._find_prior_payloads(report, photos_by_id, photos_by_image)
+        candidates, candidate_warnings = self._find_prior_payloads(
+            report, photos_by_id, photos_by_image
+        )
         device = report.manifest.get("device")
         if not isinstance(device, dict):
             raise ReconstructionWorkspaceError("PackScan device metadata is invalid")
@@ -465,7 +484,11 @@ class ReconstructionWorkspaceManager:
                 photo_id = photo.get("photo_id")
                 width = photo.get("width")
                 height = photo.get("height")
-                if not isinstance(photo_id, str) or not isinstance(width, int) or not isinstance(height, int):
+                if (
+                    not isinstance(photo_id, str)
+                    or not isinstance(width, int)
+                    or not isinstance(height, int)
+                ):
                     raise ReconstructionWorkspaceError("PackScan photo metadata is invalid")
                 intrinsic_path = candidates.get(("intrinsics", photo_id))
                 pose_path = candidates.get(("pose", photo_id))
@@ -493,13 +516,13 @@ class ReconstructionWorkspaceManager:
                         policy_version=CAMERA_PRIOR_POLICY_VERSION,
                     )
             if prior.use is CameraPriorUse.REJECTED:
-                warnings.append(
-                    f"camera prior rejected: {image.working_asset_id} ({prior.reason})"
-                )
+                warnings.append(f"camera prior rejected: {image.working_asset_id} ({prior.reason})")
             priors.append(prior)
         return CameraPriorAssessment(tuple(priors), tuple(warnings))
 
-    def _published_working_set(self, workspace: ReconstructionWorkspace) -> ReconstructionWorkingSet:
+    def _published_working_set(
+        self, workspace: ReconstructionWorkspace
+    ) -> ReconstructionWorkingSet:
         manifest = self._read_workspace_manifest(workspace)
         value = manifest.get("working_set")
         if not isinstance(value, dict):
@@ -568,10 +591,16 @@ class ReconstructionWorkspaceManager:
             if image.order != order:
                 raise ReconstructionWorkspaceError("working-set image ordering is invalid")
             source_bytes = report.payloads.get(image.source_asset_id)
-            if source_bytes is None or hashlib.sha256(source_bytes).hexdigest() != image.source_sha256:
+            if (
+                source_bytes is None
+                or hashlib.sha256(source_bytes).hexdigest() != image.source_sha256
+            ):
                 raise ReconstructionWorkspaceError("working-set source image digest changed")
             expected = workspace.path / "inputs" / safe_relative_path(image.source_asset_id)
-            if image.working_asset_id != f"{workspace.relative_path}/inputs/{safe_relative_path(image.source_asset_id).as_posix()}":
+            if (
+                image.working_asset_id
+                != f"{workspace.relative_path}/inputs/{safe_relative_path(image.source_asset_id).as_posix()}"
+            ):
                 raise ReconstructionWorkspaceError("working-set working image ID is inconsistent")
             if expected.is_symlink() or not expected.is_file():
                 raise ReconstructionWorkspaceError("working-set image is missing or unsafe")
@@ -598,11 +627,17 @@ class ReconstructionWorkspaceManager:
             image_path = item.get("image_path")
             photo_id = item.get("photo_id")
             dimensions = item.get("pixel_dimensions")
-            if not isinstance(image_path, str) or not isinstance(photo_id, str) or not isinstance(dimensions, dict):
+            if (
+                not isinstance(image_path, str)
+                or not isinstance(photo_id, str)
+                or not isinstance(dimensions, dict)
+            ):
                 raise ReconstructionWorkspaceError("PackScan photo metadata is invalid")
             if image_path in by_image or photo_id in by_id:
                 raise ReconstructionWorkspaceError("PackScan photo metadata identity is duplicated")
-            if not isinstance(dimensions.get("width"), int) or not isinstance(dimensions.get("height"), int):
+            if not isinstance(dimensions.get("width"), int) or not isinstance(
+                dimensions.get("height"), int
+            ):
                 raise ReconstructionWorkspaceError("PackScan photo dimensions are invalid")
             by_image[image_path] = {
                 "photo_id": photo_id,
@@ -612,7 +647,9 @@ class ReconstructionWorkspaceManager:
             by_id[photo_id] = by_image[image_path]
         source_ids = {image.source_asset_id for image in working_set.images}
         if set(by_image) != source_ids:
-            raise ReconstructionWorkspaceError("PackScan photo metadata does not match working images")
+            raise ReconstructionWorkspaceError(
+                "PackScan photo metadata does not match working images"
+            )
         return by_image, by_id
 
     @staticmethod
@@ -669,7 +706,9 @@ class ReconstructionWorkspaceManager:
             raise ReconstructionWorkspaceError("camera intrinsics are unavailable for image")
         declaration = self._payload_declaration(report, intrinsic_path)
         if declaration.get("authority") != "source":
-            raise ReconstructionWorkspaceError("camera intrinsics are not authoritative source metadata")
+            raise ReconstructionWorkspaceError(
+                "camera intrinsics are not authoritative source metadata"
+            )
         intrinsic = _json_object(report.payloads[intrinsic_path], intrinsic_path)
         _validate_packscan_metadata(intrinsic, "camera-intrinsics.schema.json", intrinsic_path)
         lens = intrinsic.get("lens")
@@ -677,10 +716,14 @@ class ReconstructionWorkspaceManager:
         if not isinstance(lens, dict) or not isinstance(provenance, dict):
             raise ReconstructionWorkspaceError("camera intrinsics provenance is incomplete")
         if lens.get("device_model") != device.get("model"):
-            raise ReconstructionWorkspaceError("camera intrinsics device model does not match PackScan")
+            raise ReconstructionWorkspaceError(
+                "camera intrinsics device model does not match PackScan"
+            )
         manifest_lens = device.get("lens")
         if manifest_lens is not None and lens.get("lens_identity") != manifest_lens:
-            raise ReconstructionWorkspaceError("camera intrinsics lens identity does not match PackScan")
+            raise ReconstructionWorkspaceError(
+                "camera intrinsics lens identity does not match PackScan"
+            )
         dimensions = photo["width"], photo["height"]
         matrix, distortion_model, distortion_coefficients = self._normalize_intrinsics(
             intrinsic, dimensions, intrinsic_path
@@ -694,7 +737,9 @@ class ReconstructionWorkspaceManager:
         if pose_path is not None:
             pose_declaration = self._payload_declaration(report, pose_path)
             if pose_declaration.get("authority") != "source":
-                raise ReconstructionWorkspaceError("capture pose is not authoritative source metadata")
+                raise ReconstructionWorkspaceError(
+                    "capture pose is not authoritative source metadata"
+                )
             pose_record = _json_object(report.payloads[pose_path], pose_path)
             _validate_packscan_metadata(pose_record, "pose.schema.json", pose_path)
             status = pose_record.get("status")
@@ -723,9 +768,7 @@ class ReconstructionWorkspaceManager:
                     raise ReconstructionWorkspaceError("capture pose rotation is invalid")
                 world_to_camera_value = pose_record.get("world_to_camera_matrix")
                 if world_to_camera_value is not None:
-                    world_to_camera = _flatten_matrix(
-                        world_to_camera_value, size=4, path=pose_path
-                    )
+                    world_to_camera = _flatten_matrix(world_to_camera_value, size=4, path=pose_path)
                     if not _same_matrix_product(pose, world_to_camera) or not _same_matrix_product(
                         world_to_camera, pose
                     ):
@@ -734,7 +777,9 @@ class ReconstructionWorkspaceManager:
                 if isinstance(quaternion, dict):
                     values = tuple(float(quaternion[key]) for key in ("x", "y", "z", "w"))
                     if not math.isclose(sum(value * value for value in values), 1.0, abs_tol=1e-3):
-                        raise ReconstructionWorkspaceError("capture pose quaternion is not normalized")
+                        raise ReconstructionWorkspaceError(
+                            "capture pose quaternion is not normalized"
+                        )
         if use is CameraPriorUse.REJECTED:
             reason = "prior use was explicitly rejected by caller"
         width = photo.get("width")
@@ -802,15 +847,23 @@ class ReconstructionWorkspaceManager:
         target_dimensions = None
         if target is not None:
             if not isinstance(target, dict):
-                raise ReconstructionWorkspaceError("camera intrinsics target dimensions are invalid")
+                raise ReconstructionWorkspaceError(
+                    "camera intrinsics target dimensions are invalid"
+                )
             target_dimensions = (target.get("width"), target.get("height"))
             if not all(isinstance(value, int) and value > 0 for value in target_dimensions):
-                raise ReconstructionWorkspaceError("camera intrinsics target dimensions are invalid")
+                raise ReconstructionWorkspaceError(
+                    "camera intrinsics target dimensions are invalid"
+                )
             if target_dimensions != image_dimensions:
-                raise ReconstructionWorkspaceError("camera intrinsics target dimensions do not match image")
+                raise ReconstructionWorkspaceError(
+                    "camera intrinsics target dimensions do not match image"
+                )
         if policy == "exact_reference_only":
             if image_dimensions != reference_dimensions:
-                raise ReconstructionWorkspaceError("camera intrinsics dimensions do not match reference")
+                raise ReconstructionWorkspaceError(
+                    "camera intrinsics dimensions do not match reference"
+                )
         elif policy == "uniform_scale_about_origin":
             if not math.isclose(
                 width / reference_width,
@@ -841,14 +894,18 @@ class ReconstructionWorkspaceManager:
             tuple(float(value) for value in coefficients),
         )
 
-    def write_output(self, workspace: ReconstructionWorkspace, relative_path: str, data: bytes) -> Path:
+    def write_output(
+        self, workspace: ReconstructionWorkspace, relative_path: str, data: bytes
+    ) -> Path:
         self._ensure_active(workspace)
         target = workspace.path / "outputs" / safe_relative_path(relative_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_bytes(target, data)
         return target
 
-    def complete(self, workspace: ReconstructionWorkspace, *, parameters: dict[str, Any] | None = None) -> ArtifactRecord:
+    def complete(
+        self, workspace: ReconstructionWorkspace, *, parameters: dict[str, Any] | None = None
+    ) -> ArtifactRecord:
         self._ensure_active(workspace)
         if not self.source_is_intact(workspace):
             self.fail(workspace, "RAW_CAPTURE source changed")
@@ -874,7 +931,9 @@ class ReconstructionWorkspaceManager:
     def fail(self, workspace: ReconstructionWorkspace, reason: str) -> ReconstructionWorkspace:
         return self._finish(workspace, WorkspaceState.FAILED, reason)
 
-    def cancel(self, workspace: ReconstructionWorkspace, reason: str = "cancelled") -> ReconstructionWorkspace:
+    def cancel(
+        self, workspace: ReconstructionWorkspace, reason: str = "cancelled"
+    ) -> ReconstructionWorkspace:
         if workspace.state is WorkspaceState.CANCELLED:
             return workspace
         return self._finish(workspace, WorkspaceState.CANCELLED, reason)
@@ -883,7 +942,9 @@ class ReconstructionWorkspaceManager:
         source = self._source_path(workspace.source_asset_id)
         return source.is_file() and _digest(source) == workspace.source_digest
 
-    def _finish(self, workspace: ReconstructionWorkspace, state: WorkspaceState, reason: str) -> ReconstructionWorkspace:
+    def _finish(
+        self, workspace: ReconstructionWorkspace, state: WorkspaceState, reason: str
+    ) -> ReconstructionWorkspace:
         self._ensure_active(workspace)
         finished = ReconstructionWorkspace(
             workspace.project_id,

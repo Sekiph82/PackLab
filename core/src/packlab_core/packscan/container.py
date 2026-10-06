@@ -22,6 +22,8 @@ from pathlib import Path
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError, ValidationError
 
+from ..resource_paths import packlab_data_root
+
 CANONICALIZATION = "sha256_32_bytes_lowercase_hex_64_chars_v1"
 SCHEMA_VERSION = "1.0.0"
 _DRIVE_RE = re.compile(r"^[A-Za-z]:")
@@ -100,8 +102,7 @@ def _schema_validator(schema_name: str) -> Draft202012Validator:
 
 
 def _packscan_schema_dir() -> Path:
-    repo_root = Path(__file__).resolve().parents[4]
-    schema_dir = repo_root / "schemas" / "packscan"
+    schema_dir = packlab_data_root() / "schemas" / "packscan"
     if not schema_dir.is_dir():
         raise PackScanError("schema_resource_unavailable", "packscan schema directory is missing")
     return schema_dir

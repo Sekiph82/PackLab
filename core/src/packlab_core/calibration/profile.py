@@ -7,10 +7,11 @@ import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from functools import cache
-from pathlib import Path
 
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import SchemaError
+
+from ..resource_paths import packlab_data_root
 
 PROFILE_SCHEMA_VERSION = "1.0.0"
 PROFILE_COMPATIBILITY_VERSION = "calibration_profile_compatibility_v1"
@@ -158,12 +159,7 @@ def _schema_contract_errors(profile: CalibrationProfile) -> tuple[str, ...]:
 
 @cache
 def _profile_schema_validator() -> Draft202012Validator:
-    schema_path = (
-        Path(__file__).resolve().parents[4]
-        / "schemas"
-        / "packscan"
-        / "calibration-profile.schema.json"
-    )
+    schema_path = packlab_data_root() / "schemas" / "packscan" / "calibration-profile.schema.json"
     import json
 
     schema = json.loads(schema_path.read_text(encoding="utf-8"))

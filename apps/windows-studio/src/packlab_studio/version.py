@@ -13,6 +13,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QFormLayout, QLabel, QWidget
 
 from packlab_core.packscan.container import SCHEMA_VERSION
+from packlab_core.resource_paths import packlab_data_root
 
 from . import __version__
 
@@ -45,10 +46,28 @@ class VersionReport:
 def current_build_info() -> BuildInfo:
     from PySide6 import __version__ as qt_version
 
-    revision = os.environ.get("PACKLAB_BUILD_REVISION", "unknown")
+    revision = os.environ.get("PACKLAB_BUILD_REVISION")
+    if revision is None:
+        try:
+            provenance = json.loads(
+                (packlab_data_root() / "packlab-build-provenance.json").read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            provenance = None
+        revision = (
+            provenance.get("PACKLAB_BUILD_REVISION") if isinstance(provenance, dict) else "unknown"
+        )
+    if not isinstance(revision, str):
+        revision = "unknown"
     if not revision.isalnum() and revision != "unknown":
         revision = "unknown"
-    return BuildInfo(__version__, platform.python_version() or sys.version.split()[0], qt_version, SCHEMA_VERSION, revision)
+    return BuildInfo(
+        __version__,
+        platform.python_version() or sys.version.split()[0],
+        qt_version,
+        SCHEMA_VERSION,
+        revision,
+    )
 
 
 def read_local_manifest(path: str | Path | None) -> tuple[ManifestStatus, str | None, str | None]:
@@ -64,9 +83,17 @@ def read_local_manifest(path: str | Path | None) -> tuple[ManifestStatus, str | 
         return ManifestStatus.UNSUPPORTED, None, None
     version = value.get("version")
     revision = value.get("revision")
-    if not isinstance(version, str) or not version or (revision is not None and not isinstance(revision, str)):
+    if (
+        not isinstance(version, str)
+        or not version
+        or (revision is not None and not isinstance(revision, str))
+    ):
         return ManifestStatus.MALFORMED, None, None
-    return ManifestStatus.CURRENT if version == __version__ else ManifestStatus.AVAILABLE, version, revision
+    return (
+        ManifestStatus.CURRENT if version == __version__ else ManifestStatus.AVAILABLE,
+        version,
+        revision,
+    )
 
 
 def version_report(manifest: str | Path | None = None) -> VersionReport:

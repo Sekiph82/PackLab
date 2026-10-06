@@ -9,6 +9,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, TypeGuard
 
+from ..resource_paths import packlab_data_root
+
 CORNER_ORDER = "clockwise_from_top_left_image_coordinates"
 
 
@@ -17,12 +19,7 @@ class MarkerPolicyError(ValueError):
 
 
 def _policy_path() -> Path:
-    return (
-        Path(__file__).resolve().parents[4]
-        / "schemas"
-        / "packscan"
-        / ("calibration-marker-policy.json")
-    )
+    return packlab_data_root() / "schemas" / "packscan" / "calibration-marker-policy.json"
 
 
 def load_marker_policy(path: str | Path | None = None) -> dict[str, object]:

@@ -1,0 +1,172 @@
+name: PackLab Studio Windows Build
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-studio-build.yml"
+      - "apps/windows-studio/**"
+      - "core/**"
+      - "docs/architecture/DEPENDENCY_LICENSE_REGISTER.md"
+      - "pyproject.toml"
+      - "schemas/**"
+      - "tests/ci/**"
+      - "tests/studio/**"
+      - "tools/packaging/**"
+      - "uv.lock"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/windows-studio-build.yml"
+      - "apps/windows-studio/**"
+      - "core/**"
+      - "docs/architecture/DEPENDENCY_LICENSE_REGISTER.md"
+      - "pyproject.toml"
+      - "schemas/**"
+      - "tests/ci/**"
+      - "tests/studio/**"
+      - "tools/packaging/**"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-studio-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-studio:
+    name: Build and smoke-test production Studio
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      UV_NO_PROGRESS: "1"
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.26"
+          enable-cache: false
+
+      - name: Restore exact uv dependency cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/uv-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-python-3.12-uv-0.11.26-${{ hashFiles('uv.lock') }}
+
+      - name: Configure uv dependency cache directory
+        shell: pwsh
+        run: |
+          $uvCacheDir = Join-Path $env:RUNNER_TEMP "uv-cache"
+          "UV_CACHE_DIR=$uvCacheDir" >> $env:GITHUB_ENV
+
+      - name: Validate lock and install pinned build environment
+        shell: pwsh
+        run: |
+          uv lock --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv sync --locked --all-groups
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Create path-free build provenance
+        shell: pwsh
+        run: |
+          $revision = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') {
+            throw "The PackLab build revision is invalid."
+          }
+          $studioVersion = (uv run --locked python -c "from packlab_studio import __version__; print(__version__)").Trim()
+          if ($LASTEXITCODE -ne 0 -or $studioVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
+            throw "The semantic Studio version is invalid."
+          }
+          $provenancePath = Join-Path $env:RUNNER_TEMP "packlab-build-provenance.json"
+          $provenance = [ordered]@{
+            provenance_schema_version = 1
+            PACKLAB_BUILD_REVISION = $revision
+            studio_version = $studioVersion
+          } | ConvertTo-Json -Compress
+          [System.IO.File]::WriteAllText($provenancePath, $provenance + "`n", [System.Text.UTF8Encoding]::new($false))
+          "PACKLAB_BUILD_REVISION=$revision" >> $env:GITHUB_ENV
+          "PACKLAB_PROVENANCE_PATH=$provenancePath" >> $env:GITHUB_ENV
+          "PACKLAB_STUDIO_VERSION=$studioVersion" >> $env:GITHUB_ENV
+
+      - name: Build one-directory production Studio staging output
+        shell: pwsh
+        run: |
+          $stagePath = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio"
+          $workPath = Join-Path $env:RUNNER_TEMP "packlab-pyinstaller-work"
+          $specPath = Join-Path $env:RUNNER_TEMP "packlab-pyinstaller-spec"
+          $schemaPath = Join-Path $env:GITHUB_WORKSPACE "schemas"
+          $provenanceData = "$env:PACKLAB_PROVENANCE_PATH;."
+          $pyinstallerArgs = @(
+            "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed", "--noupx",
+            "--name", "PackLabStudio", "--distpath", $stagePath,
+            "--workpath", $workPath, "--specpath", $specPath,
+            "--paths", "core/src", "--paths", "apps/windows-studio/src",
+            "--add-data", $provenanceData,
+            "--add-data", "$schemaPath;schemas",
+            "tools/packaging/packlab_studio_entry.py"
+          )
+          & uv run --locked python @pyinstallerArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $appDirectory = Join-Path $stagePath "PackLabStudio"
+          $studioExe = Join-Path $appDirectory "PackLabStudio.exe"
+          if (!(Test-Path -LiteralPath $studioExe -PathType Leaf)) {
+            throw "The production Studio executable was not produced."
+          }
+          $embeddedProvenance = @(Get-ChildItem -LiteralPath $appDirectory -Filter "packlab-build-provenance.json" -File -Recurse)
+          if ($embeddedProvenance.Count -ne 1) { throw "Expected exactly one embedded build provenance file." }
+          $embedded = Get-Content -LiteralPath $embeddedProvenance[0].FullName -Raw | ConvertFrom-Json
+          if ($embedded.PACKLAB_BUILD_REVISION -ne $env:PACKLAB_BUILD_REVISION -or $embedded.studio_version -ne $env:PACKLAB_STUDIO_VERSION) {
+            throw "Embedded PackLab revision or Studio version does not match build inputs."
+          }
+          $forbidden = @(Get-ChildItem -LiteralPath $appDirectory -File -Recurse | Where-Object {
+            $_.Extension -in @(".packscan", ".pt", ".pth", ".blend") -or $_.Name -match '^(blender|colmap|openmvs)(\.exe)?$'
+          })
+          if ($forbidden.Count -gt 0) { throw "Private-data/checkpoint/external-engine content was found in the staging output." }
+
+      - name: Smoke-test packaged Studio without network
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $studioExe = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio\PackLabStudio.exe"
+          $smokeProcess = Start-Process -FilePath $studioExe -ArgumentList "--packlab-build-smoke" -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru
+          if (!$smokeProcess.WaitForExit(30000)) {
+            $smokeProcess.Kill()
+            throw "Packaged Studio smoke did not exit within 30 seconds."
+          }
+          if ($smokeProcess.ExitCode -ne 0) { throw "Packaged Studio smoke exited with code $($smokeProcess.ExitCode)." }
+          $file = Get-Item -LiteralPath $studioExe
+          $hash = (Get-FileHash -LiteralPath $studioExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $files = @(Get-ChildItem -LiteralPath (Split-Path $studioExe -Parent) -File -Recurse)
+          $dllCount = @($files | Where-Object Extension -EQ ".dll").Count
+          $totalBytes = ($files | Measure-Object -Property Length -Sum).Sum
+          @(
+            "## PackLab Studio staging smoke",
+            "",
+            "- Studio version: ``$env:PACKLAB_STUDIO_VERSION``",
+            "- Build revision: ``$env:PACKLAB_BUILD_REVISION``",
+            "- Executable: ``build/windows-studio/PackLabStudio/PackLabStudio.exe``",
+            "- Executable size: $($file.Length) bytes",
+            "- Executable SHA-256: ``$hash``",
+            "- Staged file count: $($files.Count)",
+            "- Staged DLL count: $dllCount",
+            "- Total staged size: $totalBytes bytes",
+            "- Smoke: QApplication and StudioMainWindow constructed, shown, processed, closed, and exited with Qt offscreen; no network call was made.",
+            "- Redistribution: NOT CLEARED; PL-0350 owns native/runtime inventory and notice review. The staging output is not uploaded or a release."
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
