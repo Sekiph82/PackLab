@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from packlab_studio import branding
-from packlab_studio.app import create_application
+from packlab_studio.app import _write_ownerdev_startup_failure, create_application
 from packlab_studio.shell import StudioMainWindow
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -58,3 +58,22 @@ def test_app_user_model_id_uses_explicit_windows_identity(monkeypatch) -> None:
     )
     assert branding.set_windows_app_user_model_id() is True
     assert calls == ["PackLab.Studio"]
+
+
+def test_ownerdev_startup_failure_log_contains_local_traceback_and_identity(
+    monkeypatch, tmp_path: Path
+) -> None:
+    log_path = tmp_path / "OwnerDev" / "logs" / "startup.log"
+    monkeypatch.setenv("PACKLAB_OWNERDEV_STARTUP_LOG", str(log_path))
+    monkeypatch.setenv("PACKLAB_OWNERDEV_SOURCE_SHA", "a" * 40)
+    monkeypatch.setenv("PACKLAB_OWNERDEV_STUDIO_VERSION", "0.1.0")
+    try:
+        raise RuntimeError("controlled startup failure")
+    except RuntimeError as error:
+        _write_ownerdev_startup_failure(error, enabled=True)
+    log = log_path.read_text(encoding="utf-8")
+    assert "deployed_sha=" + "a" * 40 in log
+    assert "studio_version=0.1.0" in log
+    assert "exception_type=RuntimeError" in log
+    assert "exception_message=controlled startup failure" in log
+    assert "traceback:" in log and "RuntimeError: controlled startup failure" in log

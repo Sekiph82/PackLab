@@ -31,6 +31,12 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "GetFolderPath('DesktopDirectory')" in shortcuts
     assert "GetFolderPath('Programs')" in shortcuts
     assert "OWNER_DEV_READY" in post
+    assert "Start-Process -FilePath $pythonw" in launch and "-PassThru" in launch
+    assert "AddSeconds(8)" in launch and "early_child_exit" in launch
+    assert "startup_exception_details" in launch
+    assert "$OwnerRoot 'branding'" in shortcuts
+    assert "a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1" in shortcuts
+    assert "SHChangeNotify" in shortcuts
     assert "Taskband" not in shortcuts and "Explorer" not in shortcuts
 
 
@@ -60,7 +66,15 @@ def test_shortcut_refresh_supports_temp_known_folders_with_spaces(tmp_path: Path
     (current / "tools/dev/launch_owner_packlab.ps1").write_text("# shortcut target\n")
     digest = hashlib.sha256(icon.read_bytes()).hexdigest()
     (current / "owner-dev-runtime.json").write_text(
-        json.dumps({"source_commit": "a" * 40, "smoke_status": "PASS", "icon_sha256": digest})
+        json.dumps(
+            {
+                "source_commit": "a" * 40,
+                "studio_version": "0.1.0",
+                "python_version": "Python 3.12.10",
+                "smoke_status": "PASS",
+                "icon_sha256": digest,
+            }
+        )
     )
     desktop = tmp_path / "Desktop with spaces"
     programs = tmp_path / "Start Menu with spaces"
@@ -84,6 +98,9 @@ def test_shortcut_refresh_supports_temp_known_folders_with_spaces(tmp_path: Path
     assert result.returncode == 0, result.stdout + result.stderr
     assert (desktop / "PackLab.lnk").is_file()
     assert (programs / "PackLab/PackLab.lnk").is_file()
+    stable_icon = owner_root / "branding/PackLab.ico"
+    assert stable_icon.is_file()
+    assert hashlib.sha256(stable_icon.read_bytes()).hexdigest() == digest
     assert f"OWNER_DEV_SHORTCUTS_REFRESHED {'a' * 40}" in result.stdout
 
 

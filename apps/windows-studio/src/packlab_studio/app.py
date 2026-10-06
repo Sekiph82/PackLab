@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import traceback
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -19,6 +20,28 @@ APPLICATION_NAME = "PackLab Studio"
 EXIT_SUCCESS = 0
 EXIT_STARTUP_FAILURE = 1
 BUILD_SMOKE_ARGUMENT = "--packlab-build-smoke"
+
+
+def _write_ownerdev_startup_failure(error: Exception, *, enabled: bool) -> None:
+    """Preserve a local traceback only for the explicit OWNER DEV source launcher."""
+
+    log_path = os.environ.get("PACKLAB_OWNERDEV_STARTUP_LOG")
+    if not enabled or not log_path:
+        return
+    try:
+        Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(log_path).write_text(
+            "PackLab OWNER DEV source startup exception\n"
+            f"deployed_sha={os.environ.get('PACKLAB_OWNERDEV_SOURCE_SHA', 'unknown')}\n"
+            f"studio_version={os.environ.get('PACKLAB_OWNERDEV_STUDIO_VERSION', 'unknown')}\n"
+            f"exception_type={type(error).__name__}\n"
+            f"exception_message={safe_exception_summary(error)}\n"
+            "traceback:\n"
+            f"{''.join(traceback.format_exception(type(error), error, error.__traceback__))}",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
 
 
 def create_application(argv: Sequence[str] | None = None) -> QApplication:
@@ -74,6 +97,10 @@ def run(argv: Sequence[str] | None = None) -> int:
                     )
                 except OSError:
                     pass
+        _write_ownerdev_startup_failure(
+            error,
+            enabled=os.name == "nt" and os.environ.get("PACKLAB_OWNERDEV_DIAGNOSTICS") == "1",
+        )
         return EXIT_STARTUP_FAILURE
 
 

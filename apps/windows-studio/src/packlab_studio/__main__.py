@@ -4,10 +4,41 @@ from __future__ import annotations
 
 import ctypes
 import os
+import traceback
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .app import main
+
+def _record_ownerdev_import_failure(error: Exception) -> None:
+    """Preserve import-time failures when the owner launcher opted into diagnostics."""
+
+    if os.name != "nt" or os.environ.get("PACKLAB_OWNERDEV_DIAGNOSTICS") != "1":
+        return
+    log_path = os.environ.get("PACKLAB_OWNERDEV_STARTUP_LOG")
+    if not log_path:
+        return
+    try:
+        path = Path(log_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "PackLab OWNER DEV source import exception\n"
+            f"deployed_sha={os.environ.get('PACKLAB_OWNERDEV_SOURCE_SHA', 'unknown')}\n"
+            f"studio_version={os.environ.get('PACKLAB_OWNERDEV_STUDIO_VERSION', 'unknown')}\n"
+            f"exception_type={type(error).__name__}\n"
+            f"exception_message={error}\n"
+            "traceback:\n"
+            f"{''.join(traceback.format_exception(type(error), error, error.__traceback__))}",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+try:
+    from .app import main
+except Exception as error:
+    _record_ownerdev_import_failure(error)
+    raise
 
 
 def _record_startup_failure() -> None:

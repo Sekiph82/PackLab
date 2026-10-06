@@ -12,9 +12,13 @@ tools/dev/post_codex_owner_dev_refresh.ps1 -AllowPublishedCommit
 ```
 
 The script builds a new runtime from that exact clean published commit, runs locked dependency sync and a bounded
-source-mode smoke before replacing the prior runtime, refreshes the user's Desktop and Start Menu shortcuts, checks
-their SHA/icon metadata, and prints `OWNER_DEV_READY <full_sha> <desktop_lnk> <start_menu_lnk>`. The shortcut always
-targets the stable `%LOCALAPPDATA%\PackLab\OwnerDev\current` runtime model; it must never capture a Codex worktree.
+source-mode smoke before replacing the prior runtime, copies the canonical icon to the stable
+`%LOCALAPPDATA%\PackLab\OwnerDev\branding\PackLab.ico` location, then recreates the user's Desktop and Start Menu
+shortcuts against that stable icon. It verifies shortcut target, deployed SHA, icon path and canonical icon digest
+before printing `OWNER_DEV_READY <full_sha> <desktop_lnk> <start_menu_lnk>`. The shortcut always targets the stable
+`%LOCALAPPDATA%\PackLab\OwnerDev\current` runtime model; it must never capture a Codex worktree. The launcher
+monitors `pythonw.exe` for an eight-second startup window and preserves OWNER DEV-only Python tracebacks in the
+local logs directory when startup fails.
 
 Record the command, exit status, deployed SHA, shortcut paths, and failures in the child task's own Codex log. A local
 refresh failure is an owner-local delivery failure; it does not authorize rewriting published commits, modifying the
