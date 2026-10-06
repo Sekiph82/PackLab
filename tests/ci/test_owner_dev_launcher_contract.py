@@ -26,6 +26,7 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "Copy-Item -LiteralPath $source -Destination $destination -Force" in deploy
     assert "reconstruction-work|reconstruction-output|packlab-work" in deploy
     assert "Move-Item -LiteralPath $stage -Destination $current" in deploy
+    assert "sourcePathsBase64" in deploy and "base64.b64decode" in deploy
     assert "run_module('packlab_studio'" in launch
     assert "--no-install-project" in deploy
     assert "GetFolderPath('DesktopDirectory')" in shortcuts
