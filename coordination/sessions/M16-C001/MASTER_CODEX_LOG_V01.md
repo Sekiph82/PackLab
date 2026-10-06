@@ -47,3 +47,18 @@ Master audit criteria: https://github.com/Sekiph82/PackLab/blob/main/coordinatio
 - The PL-0347 child evidence log is committed separately from its implementation and enumerates the blocker. This master index is a distinct log-only publication.
 
 AWAITING_MILESTONE_AUDIT
+
+## R01 continuation update - PL-0347 V02 builder-green
+
+The V01 stop above is retained as historical evidence. Under the owner-authorized M16-C001-R01 prompt, PL-0347 V02 remediation is now builder-green; independent audit remains pending. Work has advanced to the PL-0348 frontier and the ordered batch is active.
+
+| Child | R01 builder status | Implementation/evidence SHA | Child log | Validation / next action |
+|---|---|---|---|---|
+| PL-0348 | NOT_STARTED | — | — | Current frontier; read PL-0348 V01 prompt and criteria before implementation. |
+
+- PL-0347 baseline remained the exact configured mypy command and 46 errors across 12 files. V02 reduced it to zero without suppressions, baselines, exclusions, workflow soft-fail, or scope reduction.
+- R01 is continuing in exact order. PL-0349 through PL-0367 remain not started; PL-0350 redistribution/license inventory remains a hard stop.
+- Local HEAD and `origin/main` were equal at `bbd5a1b3125d67c747eacefb7274e69c40da6228` after the child log publication. No tag or GitHub Release was created. M17 has not started; PL-0368 remains `DEFERRED_POST_M17`.
+- This append preserves the earlier V01 stop record and is implementer progress evidence, not independent audit or project-status authority.
+
+R01_BATCH_IN_PROGRESS_AT_PL-0348
