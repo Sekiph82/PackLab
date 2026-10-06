@@ -1,6 +1,6 @@
 # PL-0347 - Codex Implementation Log V02
 
-Cycle: **M16-C001-R01**  
+Cycle: **M16-C001-R01**
 Task: **Close configured-source mypy debt and make Windows Python quality gate genuinely green**
 
 ## State and authorization
