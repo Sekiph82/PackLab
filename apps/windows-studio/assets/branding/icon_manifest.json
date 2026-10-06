@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "assets": [
+    {
+      "path": "apps/windows-studio/assets/branding/PackLab.ico",
+      "purpose": "PackLab Studio application, window, taskbar, owner shortcut, and Windows executable icon",
+      "source_sha256": "a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1",
+      "copied_sha256": "a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1"
+    }
+  ]
+}

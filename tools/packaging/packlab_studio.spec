@@ -9,6 +9,8 @@ entry = root / "tools" / "packaging" / "packlab_studio_entry.py"
 qt_contract = root / "tools" / "packaging" / "qt_module_contract.json"
 provenance = Path(__import__("os").environ["PACKLAB_PROVENANCE_PATH"])
 schema_path = root / "schemas"
+branding_path = root / "apps" / "windows-studio" / "assets" / "branding"
+icon_path = branding_path / "PackLab.ico"
 dist_path = Path(__import__("os").environ["PACKLAB_STAGE_PATH"])
 work_path = Path(__import__("os").environ["PACKLAB_WORK_PATH"])
 
@@ -63,6 +65,7 @@ analysis = Analysis(
     datas=[
         (str(provenance), "."),
         (str(schema_path), "schemas"),
+        (str(branding_path), "apps/windows-studio/assets/branding"),
         *copy_metadata("cadquery-ocp-novtk"),
     ],
     hiddenimports=[
@@ -135,6 +138,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon=str(icon_path),
 )
 collect = COLLECT(
     exe,

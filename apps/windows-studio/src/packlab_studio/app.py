@@ -10,6 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
+from .branding import application_icon, set_windows_app_user_model_id
 from .frozen_runtime import safe_exception_summary
 from .shell import StudioMainWindow
 
@@ -28,11 +29,13 @@ def create_application(argv: Sequence[str] | None = None) -> QApplication:
         if not isinstance(existing, QApplication):
             raise RuntimeError("PackLab Studio requires a QApplication instance")
         return existing
+    set_windows_app_user_model_id()
     arguments = list(argv) if argv is not None else sys.argv
     app = QApplication(arguments)
     app.setOrganizationName(ORGANIZATION_NAME)
     app.setApplicationName(APPLICATION_NAME)
     app.setApplicationDisplayName(APPLICATION_NAME)
+    app.setWindowIcon(application_icon())
     return app
 
 

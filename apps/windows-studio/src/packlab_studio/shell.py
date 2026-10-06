@@ -7,10 +7,11 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QStandardPaths, Qt
-from PySide6.QtGui import QCloseEvent, QGuiApplication, QIcon
+from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import QMainWindow, QSplitter
 
 from .autosave import AutosaveService
+from .branding import application_icon
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .engineering_export import DesignModelExportSource, DestinationProvider
 from .jobs import JobManager
@@ -69,7 +70,7 @@ class StudioMainWindow(QMainWindow):
         super().__init__()
         self.setObjectName(self.WINDOW_OBJECT_NAME)
         self.setWindowTitle("PackLab Studio")
-        self.setWindowIcon(QIcon())
+        self.setWindowIcon(application_icon())
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.preferences = preferences
         self.navigation = NavigationController()
