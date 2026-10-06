@@ -27,6 +27,22 @@ def test_toc_maps_exact_stage_layout_and_rejects_traversal(tmp_path: Path) -> No
         inventory.toc_destinations([("../escape.dll", "x", "BINARY")], "_internal", stage)
 
 
+def test_extensionless_declared_license_file_is_collected(tmp_path: Path) -> None:
+    license_path = tmp_path / "LICENSE"
+    license_path.write_text("MIT License\n", encoding="utf-8")
+
+    class Distribution:
+        files = [Path("example-1.dist-info/licenses/LICENSE")]
+
+        @staticmethod
+        def locate_file(_path: Path) -> Path:
+            return license_path
+
+    assert inventory.distribution_license_files(Distribution()) == [
+        ("example-1.dist-info/licenses/LICENSE", license_path)
+    ]
+
+
 def test_inventory_records_path_free_per_file_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -11,7 +11,6 @@ import json
 import os
 import re
 import sys
-import sysconfig
 from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
@@ -102,6 +101,11 @@ def is_python_runtime_source(path: Path, stdlib_root: str) -> bool:
     if not key.startswith(stdlib_root + os.sep):
         return False
     return not any(part in {"site-packages", "dist-packages"} for part in Path(key).parts)
+
+
+def is_windows_api_runtime(path: Path) -> bool:
+    name = path.name.casefold()
+    return name.startswith(("api-ms-win-", "ext-ms-win-", "vcruntime", "ucrtbase"))
 
 
 def normalized_distribution_name(name: str) -> str:
@@ -211,7 +215,9 @@ def distribution_license_files(
         if relative is None:
             continue
         path = Path(str(distribution.locate_file(package_path)))
-        if not path.is_file() or path.suffix.lower() not in TEXT_LICENSE_SUFFIXES:
+        if not path.is_file() or (
+            path.suffix.lower() not in TEXT_LICENSE_SUFFIXES and not LICENSE_NAME.search(path.name)
+        ):
             continue
         if LICENSE_NAME.search(path.name) or "third-party-licenses" in path.name.lower():
             result.append((relative, path))
@@ -276,6 +282,21 @@ def license_rows(
                 version = None
                 files = []
                 supplement = None
+            elif owner in native_review:
+                rule = native_review[owner]
+                unresolved.add(f"component:{owner}")
+                component_rows.append(
+                    {
+                        "component_id": owner,
+                        "version": None,
+                        "license_identifier": rule.get("license_identifier"),
+                        "license_status": "UNRESOLVED",
+                        "unresolved_reason": rule.get("reason")
+                        or "This exact native/system component requires a reviewed redistribution mapping.",
+                        "notice_files": [],
+                    }
+                )
+                continue
             elif supplemental_owner:
                 metadata_name = owner
                 version_match = re.search(r"\d+(?:\.\d+)+", owner)
@@ -430,7 +451,7 @@ def build_inventory(
     distributions = list(importlib.metadata.distributions())
     source_owners, by_name = distribution_source_index(distributions)
     project_norm = norm_source(project_root)
-    stdlib_norm = norm_source(Path(sysconfig.get_paths()["stdlib"]))
+    runtime_root_norm = norm_source(Path(sys.base_prefix))
     all_paths = sorted(
         (path for path in stage_root.rglob("*") if path.is_file()), key=lambda item: item.as_posix()
     )
@@ -448,7 +469,7 @@ def build_inventory(
         analysis_component_owners.update(
             normalized_distribution_name(match.metadata.get("Name", "unknown")) for match in matches
         )
-        if is_python_runtime_source(source, stdlib_norm):
+        if is_python_runtime_source(source, runtime_root_norm):
             analysis_component_owners.add("cpython-runtime")
         if key.startswith(project_norm + os.sep):
             analysis_component_owners.add("packlab-application")
@@ -495,7 +516,13 @@ def build_inventory(
                         unresolved_reason = (
                             "The staged PackLab file differs from its declared source file."
                         )
-                elif is_python_runtime_source(source_path, stdlib_norm):
+                elif is_windows_api_runtime(source_path) and is_python_runtime_source(
+                    source_path, runtime_root_norm
+                ):
+                    owner_ids.add("microsoft-windows-runtime")
+                    mapping_evidence = "pyinstaller_collect_toc_python_distribution_runtime_file"
+                    unresolved_reason = "Microsoft/system runtime redistribution evidence is not reviewed for this exact staged file."
+                elif is_python_runtime_source(source_path, runtime_root_norm):
                     owner_ids.add("cpython-runtime")
                     mapping_evidence = "pyinstaller_collect_toc_python_runtime_source"
                 elif source_path.exists():
