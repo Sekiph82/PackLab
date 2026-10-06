@@ -18,14 +18,18 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9" in workflow
     assert "uv lock --check" in workflow
     assert "uv sync --locked --all-groups" in workflow
-    assert "uv run --locked python @pyinstallerArgs" in workflow
-    assert '"--onedir", "--windowed", "--noupx"' in workflow
-    assert '"tools/packaging/packlab_studio_entry.py"' in workflow
-    assert '"$schemaPath;schemas"' in workflow
+    assert '"tools/packaging/packlab_studio.spec"' in workflow
+    assert "Assert staged Qt module surface" in workflow
+    assert "assert_staged_qt_surface.py" in workflow
+    assert "PACKLAB_RUNTIME_CAPABILITIES_PATH" in workflow
+    assert "qt_vector_pdf" in workflow
+    assert "ocp_cad" in workflow
+    assert "open3d_geometry" in workflow
+    assert "windows-runtime-capabilities.json" in workflow
     assert '"PACKLAB_BUILD_REVISION=$revision"' in workflow
     assert "Start-Process -FilePath $studioExe" in workflow
     assert '"--packlab-build-smoke"' in workflow
-    assert "WaitForExit(30000)" in workflow
+    assert "WaitForExit(120000)" in workflow
     assert "PACKLAB_BUILD_SMOKE_LOG" in workflow
     assert "PL-0350 owns native/runtime inventory" in workflow
     assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
@@ -45,10 +49,22 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732" in workflow
     assert "packlab_preview" not in workflow
     assert "secrets." not in workflow
+    spec = (ROOT / "tools" / "packaging" / "packlab_studio.spec").read_text(encoding="utf-8")
+    assert '"PySide6.QtPdf"' in spec
+    assert '"PySide6.QtSvg"' in spec
+    assert '"OCP.BRepAlgoAPI"' in spec
+    assert '"open3d.pybind"' in spec
+    assert 'copy_metadata("cadquery-ocp-novtk")' in spec
+    assert 'base.startswith("icu")' in spec
+    assert "collect_all" not in spec
+    assert '"IPython", "jedi", "nbformat", "pytest"' in spec
 
 
 def test_studio_entry_shim_invokes_production_application() -> None:
     entry = (ROOT / "tools" / "packaging" / "packlab_studio_entry.py").read_text(encoding="utf-8")
 
+    assert entry.index("register_frozen_native_directories()") < entry.index(
+        "from packlab_studio.app import main"
+    )
     assert "from packlab_studio.app import main" in entry
     assert "raise SystemExit(main())" in entry

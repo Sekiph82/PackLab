@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import os
 import sys
-import traceback
 from collections.abc import Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtWidgets import QApplication
 
+from .frozen_runtime import safe_exception_summary
 from .shell import StudioMainWindow
 
 ORGANIZATION_NAME = "PackLab"
@@ -50,18 +50,25 @@ def run(argv: Sequence[str] | None = None) -> int:
         window.show()
         if build_smoke:
             app.processEvents()
+            from .build_smoke import run_frozen_capability_smoke
+
+            run_frozen_capability_smoke()
             if not window.close():
                 raise RuntimeError("StudioMainWindow refused to close during build smoke.")
             app.processEvents()
             app.quit()
             return EXIT_SUCCESS
         return int(app.exec())
-    except Exception:
+    except Exception as error:
         if build_smoke:
             log_path = os.environ.get("PACKLAB_BUILD_SMOKE_LOG")
             if log_path:
                 try:
-                    Path(log_path).write_text(traceback.format_exc(), encoding="utf-8")
+                    Path(log_path).write_text(
+                        "PackLab frozen capability smoke failed "
+                        f"({type(error).__name__}): {safe_exception_summary(error)}\n",
+                        encoding="utf-8",
+                    )
                 except OSError:
                     pass
         return EXIT_STARTUP_FAILURE

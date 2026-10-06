@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "direct_modules": [
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
+    "PySide6.QtSvg",
+    "PySide6.QtPdf"
+  ],
+  "transitive_modules": {
+    "PySide6.QtNetwork": "QtPdf native runtime dependency reported by the locked PyInstaller QtPdf hook"
+  },
+  "plugin_allowlist": [
+    "platforms/qwindows.dll",
+    "platforms/qoffscreen.dll",
+    "imageformats/qico.dll",
+    "imageformats/qjpeg.dll",
+    "imageformats/qsvg.dll",
+    "iconengines/qsvgicon.dll",
+    "styles/qmodernwindowsstyle.dll"
+  ],
+  "native_module_dlls": [
+    "Qt6Core.dll",
+    "Qt6Gui.dll",
+    "Qt6Widgets.dll",
+    "Qt6Svg.dll",
+    "Qt6Pdf.dll",
+    "Qt6Network.dll"
+  ],
+  "forbidden_module_families": [
+    "QtVirtualKeyboard",
+    "QtGraphs",
+    "QtGrpc",
+    "QtHttpServer",
+    "QtQuick3D",
+    "QtQuickTimeline",
+    "QtQmlCompiler",
+    "QtWaylandCompositor",
+    "QtCoap",
+    "QtMqtt",
+    "QtNetworkAuth",
+    "QtLottieAnimation",
+    "QtCanvasPainter"
+  ],
+  "plugin_rationale": {
+    "platforms/qwindows.dll": "native Windows QApplication platform",
+    "platforms/qoffscreen.dll": "hosted no-display capability smoke",
+    "imageformats/qico.dll": "Studio Windows icon input",
+    "imageformats/qjpeg.dll": "Studio JPEG image input",
+    "imageformats/qico.dll": "Studio Windows icon input",
+    "imageformats/qsvg.dll": "Studio SVG image input",
+    "iconengines/qsvgicon.dll": "SVG-backed Studio icons",
+    "styles/qmodernwindowsstyle.dll": "QtWidgets default Windows style"
+  }
+}

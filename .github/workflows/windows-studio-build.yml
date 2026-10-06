@@ -109,17 +109,12 @@ jobs:
         run: |
           $stagePath = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio"
           $workPath = Join-Path $env:RUNNER_TEMP "packlab-pyinstaller-work"
-          $specPath = Join-Path $env:RUNNER_TEMP "packlab-pyinstaller-spec"
-          $schemaPath = Join-Path $env:GITHUB_WORKSPACE "schemas"
-          $provenanceData = "$env:PACKLAB_PROVENANCE_PATH;."
+          $env:PACKLAB_STAGE_PATH = $stagePath
+          $env:PACKLAB_WORK_PATH = $workPath
           $pyinstallerArgs = @(
-            "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed", "--noupx",
-            "--name", "PackLabStudio", "--distpath", $stagePath,
-            "--workpath", $workPath, "--specpath", $specPath,
-            "--paths", "core/src", "--paths", "apps/windows-studio/src",
-            "--add-data", $provenanceData,
-            "--add-data", "$schemaPath;schemas",
-            "tools/packaging/packlab_studio_entry.py"
+            "-m", "PyInstaller", "--noconfirm", "--clean", "--noupx",
+            "--distpath", $stagePath, "--workpath", $workPath,
+            "tools/packaging/packlab_studio.spec"
           )
           & uv run --locked python @pyinstallerArgs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -139,22 +134,54 @@ jobs:
           })
           if ($forbidden.Count -gt 0) { throw "Private-data/checkpoint/external-engine content was found in the staging output." }
 
+      - name: Assert staged Qt module surface
+        shell: pwsh
+        run: |
+          $appDirectory = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio"
+          $assertionPath = Join-Path $appDirectory "qt-staged-surface.json"
+          uv run --locked python tools/packaging/assert_staged_qt_surface.py `
+            --stage $appDirectory `
+            --contract tools/packaging/qt_module_contract.json `
+            --output $assertionPath
+          if ($LASTEXITCODE -ne 0) { throw "Staged Qt module contract assertion failed." }
+          $assertion = Get-Content -LiteralPath $assertionPath -Raw | ConvertFrom-Json
+          if ($assertion.status -ne "PASS") { throw "Staged Qt module assertion did not pass." }
+          @(
+            "## Approved staged Qt surface",
+            "",
+            "- Modules: $($assertion.approved_staged_modules -join ', ') ",
+            "- Plugins: $($assertion.approved_staged_plugins -join ', ') ",
+            "- Forbidden Qt module families absent: $($assertion.forbidden_module_families_absent)"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: Smoke-test packaged Studio without network
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
           $studioExe = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio\PackLabStudio.exe"
+          $runtimeManifest = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio\windows-runtime-capabilities.json"
           $smokeLog = Join-Path $env:RUNNER_TEMP ("packlab-studio-smoke-" + [guid]::NewGuid().ToString("N") + ".log")
           $env:PACKLAB_BUILD_SMOKE_LOG = $smokeLog
+          $env:PACKLAB_RUNTIME_CAPABILITIES_PATH = $runtimeManifest
           $smokeProcess = Start-Process -FilePath $studioExe -ArgumentList "--packlab-build-smoke" -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru
-          if (!$smokeProcess.WaitForExit(30000)) {
+          if (!$smokeProcess.WaitForExit(120000)) {
             $smokeProcess.Kill()
-            throw "Packaged Studio smoke did not exit within 30 seconds."
+            throw "Packaged Studio smoke did not exit within 120 seconds."
           }
           if ($smokeProcess.ExitCode -ne 0) {
-            $detail = if (Test-Path -LiteralPath $smokeLog -PathType Leaf) { Get-Content -LiteralPath $smokeLog -Raw } else { "No smoke traceback was written." }
-            throw "Packaged Studio smoke exited with code $($smokeProcess.ExitCode). $detail"
+            throw "Packaged Studio capability smoke exited with code $($smokeProcess.ExitCode)."
+          }
+          if (!(Test-Path -LiteralPath $runtimeManifest -PathType Leaf)) { throw "Runtime capability manifest is missing." }
+          $capabilities = Get-Content -LiteralPath $runtimeManifest -Raw | ConvertFrom-Json
+          $requiredGroups = @("qt_studio_gui", "qt_vector_pdf", "ocp_cad", "open3d_geometry")
+          foreach ($group in $requiredGroups) {
+            if ($capabilities.capability_groups.$group.status -ne "PASS" -or $capabilities.capability_groups.$group.network -ne "NONE") {
+              throw "A required packaged runtime capability did not pass its no-network check."
+            }
+          }
+          if ($capabilities.PACKLAB_BUILD_REVISION -ne $env:PACKLAB_BUILD_REVISION -or $capabilities.studio_version -ne $env:PACKLAB_STUDIO_VERSION) {
+            throw "Runtime capability manifest does not match this build revision and Studio version."
           }
           $file = Get-Item -LiteralPath $studioExe
           $hash = (Get-FileHash -LiteralPath $studioExe -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -172,7 +199,8 @@ jobs:
             "- Staged file count: $($files.Count)",
             "- Staged DLL count: $dllCount",
             "- Total staged size: $totalBytes bytes",
-            "- Smoke: QApplication and StudioMainWindow constructed, shown, processed, closed, and exited with Qt offscreen; no network call was made.",
+            "- Qt module contract: PASS; approved modules and plugins are recorded in ``qt-staged-surface.json``.",
+            "- Runtime capability manifest: ``windows-runtime-capabilities.json``; qt_studio_gui, qt_vector_pdf, ocp_cad, and open3d_geometry all PASS with no network.",
             "- Redistribution: NOT CLEARED; PL-0350 owns native/runtime inventory and notice review. The staging output is not uploaded or a release."
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
