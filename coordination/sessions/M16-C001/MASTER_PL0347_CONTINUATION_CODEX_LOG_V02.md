@@ -35,7 +35,7 @@
 - PL-0350 is `BATCH_STOPPED`. No installer was built or claimed distributable. The hosted PL-0349 staging files were not uploaded for inspection. The only local staging tree is bound by its embedded local provenance to pre-PL-0349 revision `3449acc929d63114da0ae4bc16c0e15e7a057ddb`; it contained 80 files, 58 DLLs, one EXE, and no license/notice-named files, and is not current bundle evidence.
 - The dependency/license register's OCP/OCCT per-file redistribution inventory and notices remain incomplete; the actual PySide6/Qt bundle and applicable licensing route are unresolved, and Open3D/native dependencies need exact-bundle review. The missing evidence and stop basis are recorded in `PL-0350_CODEX_LOG_V01.md`.
 - PL-0351 through PL-0367 were not started. PL-0368 remains `DEFERRED_POST_M17`; M17 has not started. No tag, GitHub Release, installer, or distribution claim exists. Root `TASKS.md` remains untouched.
-- Blocker child log commit: `2be165daf245383f34c305521b709db3840f4fbb`. At this progress-record checkpoint, local HEAD, `origin/main`, and GitHub `main` were equal at `2be165daf245383f34c305521b709db3840f4fbb`.
+- Blocker child log commit: `2be165daf245383f34c305521b709db3840f4fbb`. The separate progress-record commit was pushed, then local HEAD, `origin/main`, and GitHub `main` parity was verified.
 - This batch is stopped for independent ChatGPT audit; it must not resume without resolution/authorization for the redistribution gate.
 
 BATCH_STOPPED
