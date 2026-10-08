@@ -21,6 +21,7 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert "--verify-build-lock --verify-conda-lock --verify-uv-lock" in workflow
     assert "mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39" in workflow
     assert "environment-file: tools/packaging/packlab-ocp-bindings-win.lock" in workflow
+    assert "create-args: --strict-channel-priority" in workflow
     assert 'micromamba-version: "2.0.5-0"' in workflow
     assert "fetch_verify_windows_native_sources.py" in workflow
     assert workflow.index("Fetch and verify every locked corresponding source") < workflow.index(

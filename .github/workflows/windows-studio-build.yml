@@ -90,6 +90,7 @@ jobs:
         with:
           environment-file: tools/packaging/packlab-ocp-bindings-win.lock
           environment-name: packlab-ocp-bindings
+          create-args: --strict-channel-priority
           micromamba-version: "2.0.5-0"
           init-shell: powershell
           cache-environment: false
