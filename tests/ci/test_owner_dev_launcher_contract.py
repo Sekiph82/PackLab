@@ -56,6 +56,8 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "MoveFileEx" in shortcuts and "PackLab.lnk" in shortcuts
     assert "--no-install-project" in deploy
     assert "owner_packlab_bootstrap.py" in deploy
+    post = (ROOT / "tools/dev/post_codex_owner_dev_refresh.ps1").read_text(encoding="utf-8")
+    assert "rev-parse HEAD" in post and "runtimeFields" in post
     assert " OWNER_DEV_EXE_READY" in post or "OWNER_DEV_EXE_READY" in post
     assert "OWNER_DEV_READY" not in post
     assert "OWNER_DEV_EXE_READY" in policy

@@ -10,14 +10,19 @@ if ($AllowPublishedCommit) {
     $remoteSha = (& git -C $root rev-parse origin/main).Trim()
     if ($localSha -ne $remoteSha) { throw 'Local HEAD does not equal fetched origin/main.' }
 }
+$sha = (& git -C $root rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $sha -notmatch '^[0-9a-f]{40}$') { throw 'Could not resolve exact published source HEAD.' }
 $deployArgs = @{ RepositoryRoot = $root }
 if ($AllowPublishedCommit) { $deployArgs.AllowPublishedCommit = $true }
 $runtimeOutput = @(& (Join-Path $PSScriptRoot 'update_owner_dev_runtime.ps1') @deployArgs)
 if ($LASTEXITCODE -ne 0) { throw 'Owner runtime deployment failed.' }
 $runtimeLine = $runtimeOutput | Where-Object { $_ -match '^OWNER_DEV_RUNTIME_READY ' } | Select-Object -Last 1
-if (-not $runtimeLine -or $runtimeLine -notmatch '^OWNER_DEV_RUNTIME_READY ([0-9a-f]{40}) ([0-9a-f]{40}-[0-9a-f]{32}) ') { throw 'Owner runtime release identity is missing.' }
-$runtimeSha = $Matches[1]
-$runtimeId = $Matches[2]
+if (-not $runtimeLine) { throw 'Owner runtime release identity is missing.' }
+$runtimeFields = ([string]$runtimeLine) -split '\s+', 4
+if ($runtimeFields.Count -ne 4 -or $runtimeFields[0] -ne 'OWNER_DEV_RUNTIME_READY') { throw 'Owner runtime release identity is malformed.' }
+$runtimeSha = $runtimeFields[1]
+$runtimeId = $runtimeFields[2]
+if ($runtimeSha -notmatch '^[0-9a-f]{40}$' -or $runtimeId -notmatch ('^' + [regex]::Escape($runtimeSha) + '-[0-9a-f]{32}$')) { throw 'Owner runtime release identity is invalid.' }
 if ($runtimeSha -ne $sha) { throw 'Owner runtime release differs from source HEAD.' }
 $ownerRoot = Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'
 & (Join-Path $PSScriptRoot 'build_owner_packlab_exe.ps1') -RepositoryRoot $root -OwnerRoot $ownerRoot -SourceCommit $sha -RuntimeId $runtimeId
