@@ -346,12 +346,13 @@ internal static class PythonwWrapper {
 """,
         encoding="utf-8",
     )
+    fake_wrapper_build = tmp_path / "pythonw_wrapper.exe"
     compile_wrapper = subprocess.run(
         [
             str(csc),
             "/nologo",
             "/target:winexe",
-            f"/out:{descendant_python}",
+            f"/out:{fake_wrapper_build}",
             "/reference:System.Windows.Forms.dll",
             str(wrapper_source),
         ],
@@ -360,6 +361,7 @@ internal static class PythonwWrapper {
         text=True,
     )
     assert compile_wrapper.returncode == 0, compile_wrapper.stdout + compile_wrapper.stderr
+    shutil.copyfile(fake_wrapper_build, descendant_python)
     descendant_launcher = tmp_path / "launcher with descendant.exe"
     descendant_source = tmp_path / "PackLabOwnerLauncher.descendant.cs"
     descendant_source.write_text(
