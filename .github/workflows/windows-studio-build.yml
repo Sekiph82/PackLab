@@ -39,7 +39,7 @@ concurrency:
 jobs:
   build-studio:
     name: Build and smoke-test production Studio
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 180
     env:
       UV_NO_PROGRESS: "1"
