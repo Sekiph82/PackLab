@@ -30,6 +30,7 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert 'micromamba-version: "2.0.5-0"' in workflow
     assert "fetch_verify_windows_native_sources.py" in workflow
     assert "shell: micromamba-shell" not in workflow
+    assert "PYTHONPATH: ${{ github.workspace }}" in workflow
     assert (
         "micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_ocp_runtime.py"
         in workflow

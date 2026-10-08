@@ -112,6 +112,8 @@ jobs:
 
       - name: Fetch and verify every locked corresponding source
         shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           $sourceRoot = Join-Path $env:RUNNER_TEMP "packlab-native-sources"
           $sourceEvidence = Join-Path $env:RUNNER_TEMP "packlab-native-source-evidence.json"
