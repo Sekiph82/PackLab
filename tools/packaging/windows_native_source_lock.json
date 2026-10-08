@@ -29,6 +29,22 @@
       ]
     },
     {
+      "id": "ocp-pywrap-source-9251940",
+      "component": "OCP pywrap bindgen",
+      "version": "0.1dev",
+      "revision": "92519409a57f9ec3f2c005b8057006fdb4752c23",
+      "build": "source-commit-92519409a57f9ec3f2c005b8057006fdb4752c23",
+      "url": "https://github.com/CadQuery/pywrap/archive/92519409a57f9ec3f2c005b8057006fdb4752c23.tar.gz",
+      "sha256": "b88b0f2b9c7d2ae72a7399efc44951659fb1a28ea607d962ba1f507ce754ba48",
+      "license_identifier": "Apache-2.0",
+      "license_notice_source": "https://github.com/CadQuery/pywrap/blob/92519409a57f9ec3f2c005b8057006fdb4752c23/LICENSE",
+      "source_availability_role": "SOURCE_BUILD_INPUT",
+      "production_purpose": "Provide the exact pywrap bindgen submodule source required by the pinned OCP CMake build.",
+      "retained_runtime_surface": [
+        "OCP build input only; no pywrap files are retained at runtime"
+      ]
+    },
+    {
       "id": "occt-source-7.9.3",
       "component": "OCCT",
       "version": "7.9.3",
@@ -254,6 +270,7 @@
   ],
   "required_source_ids": [
     "ocp-source-7.9.3.1.1",
+    "ocp-pywrap-source-9251940",
     "occt-source-7.9.3",
     "pyside-source-6.11.2",
     "qtbase-source-6.11.2",
@@ -269,6 +286,7 @@
   "production_components": {
     "controlled-ocp-occt-runtime": [
       "ocp-source-7.9.3.1.1",
+      "ocp-pywrap-source-9251940",
       "occt-source-7.9.3"
     ],
     "retained-qt-pyside-runtime": [

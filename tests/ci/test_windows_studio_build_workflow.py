@@ -43,6 +43,9 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     ocp_builder = (ROOT / "tools" / "packaging" / "build_controlled_ocp_runtime.py").read_text(
         encoding="utf-8"
     )
+    assert 'OCP_PYWRAP_SOURCE_ID = "ocp-pywrap-source-9251940"' in ocp_builder
+    assert 'shutil.copytree(pywrap_source, ocp_source / "pywrap")' in ocp_builder
+    assert '"ocp_pywrap_source_revision"' in ocp_builder
     assert 'f"-DPython_EXECUTABLE={sys.executable}"' in ocp_builder
     assert '"-DPLATFORM=Windows"' not in ocp_builder
     assert "validate_controlled_ocp_manifest.py" in workflow

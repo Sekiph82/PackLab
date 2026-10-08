@@ -17,7 +17,10 @@ from typing import Any
 
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
 
-SOURCE_IDS = ("ocp-source-7.9.3.1.1", "occt-source-7.9.3")
+OCP_SOURCE_ID = "ocp-source-7.9.3.1.1"
+OCP_PYWRAP_SOURCE_ID = "ocp-pywrap-source-9251940"
+OCCT_SOURCE_ID = "occt-source-7.9.3"
+SOURCE_IDS = (OCP_SOURCE_ID, OCP_PYWRAP_SOURCE_ID, OCCT_SOURCE_ID)
 SYSTEM_DLLS = {
     "advapi32.dll",
     "bcrypt.dll",
@@ -110,9 +113,15 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
 
     extracted = args.build_root / "source"
     shutil.rmtree(extracted / "ocp", ignore_errors=True)
+    shutil.rmtree(extracted / "pywrap", ignore_errors=True)
     shutil.rmtree(extracted / "occt", ignore_errors=True)
-    ocp_source = extract_archive(archive_paths[SOURCE_IDS[0]], extracted / "ocp")
-    occt_source = extract_archive(archive_paths[SOURCE_IDS[1]], extracted / "occt")
+    ocp_source = extract_archive(archive_paths[OCP_SOURCE_ID], extracted / "ocp")
+    pywrap_source = extract_archive(archive_paths[OCP_PYWRAP_SOURCE_ID], extracted / "pywrap")
+    occt_source = extract_archive(archive_paths[OCCT_SOURCE_ID], extracted / "occt")
+    # The OCP source archive preserves the pywrap gitlink as an empty directory.
+    # Populate that exact pinned submodule path before configuring CMake.
+    shutil.rmtree(ocp_source / "pywrap", ignore_errors=True)
+    shutil.copytree(pywrap_source, ocp_source / "pywrap")
     occt_prefix = args.build_root / "occt-install"
     occt_build = args.build_root / "occt-build"
     ocp_build = args.build_root / "ocp-build"
@@ -249,7 +258,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
     for path in sorted(package_target.iterdir()):
         if path.suffix.casefold() not in {".pyd", ".dll"}:
             continue
-        source_id = SOURCE_IDS[0] if path.suffix.casefold() == ".pyd" else SOURCE_IDS[1]
+        source_id = OCP_SOURCE_ID if path.suffix.casefold() == ".pyd" else OCCT_SOURCE_ID
         source = records[source_id]
         file_records.append(
             {
@@ -268,8 +277,9 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "schema_version": 1,
         "status": "PASS",
         "input_lock_sha256": sha256(lock_path),
-        "ocp_source_revision": records[SOURCE_IDS[0]]["revision"],
-        "occt_source_revision": records[SOURCE_IDS[1]]["revision"],
+        "ocp_source_revision": records[OCP_SOURCE_ID]["revision"],
+        "ocp_pywrap_source_revision": records[OCP_PYWRAP_SOURCE_ID]["revision"],
+        "occt_source_revision": records[OCCT_SOURCE_ID]["revision"],
         "toolchain": {
             "python": sys.version.split()[0],
             "cmake": cmake_version,

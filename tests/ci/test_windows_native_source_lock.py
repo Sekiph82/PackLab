@@ -27,6 +27,19 @@ def test_checked_in_windows_native_source_lock_is_exact() -> None:
     assert lock["build_environment_lock"]["platform"] == "win-64"
 
 
+def test_controlled_ocp_lock_binds_exact_pywrap_submodule() -> None:
+    from tools.packaging.validate_windows_native_source_lock import load_source_lock
+
+    lock = load_source_lock(LOCK_PATH)
+    pywrap = next(
+        record for record in lock["records"] if record["id"] == "ocp-pywrap-source-9251940"
+    )
+    assert pywrap["revision"] == "92519409a57f9ec3f2c005b8057006fdb4752c23"
+    assert pywrap["sha256"] == "b88b0f2b9c7d2ae72a7399efc44951659fb1a28ea607d962ba1f507ce754ba48"
+    assert pywrap["id"] in lock["required_source_ids"]
+    assert pywrap["id"] in lock["production_components"]["controlled-ocp-occt-runtime"]
+
+
 def test_source_record_requires_sha256(valid_lock: dict[str, object]) -> None:
     data = copy.deepcopy(valid_lock)
     data["records"][0]["sha256"] = "missing"  # type: ignore[index]
