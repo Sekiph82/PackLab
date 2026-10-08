@@ -33,13 +33,13 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "reconstruction-work|reconstruction-output|packlab-work" in deploy
     assert "OWNER_DEV_RUNTIME_READY" in deploy and "releases" in deploy
     assert "Move-Item -LiteralPath $stage -Destination $current" not in deploy
-    current_refresh = (ROOT / "tools/dev/update_owner_dev_current_junction.ps1").read_text(
+    current_refresh = (ROOT / "tools/dev/update_owner_dev_current_runtime.ps1").read_text(
         encoding="utf-8"
     )
     post = (ROOT / "tools/dev/post_codex_owner_dev_refresh.ps1").read_text(encoding="utf-8")
-    assert "New-Item -ItemType Junction" in current_refresh
+    assert "Copy-Item -LiteralPath $_.FullName" in current_refresh
     assert post.index("refresh_owner_packlab_shortcuts.ps1") < post.index(
-        "update_owner_dev_current_junction.ps1"
+        "update_owner_dev_current_runtime.ps1"
     )
     assert "sourcePathsBase64" in deploy and "base64.b64decode" in deploy
     assert "owner_packlab_bootstrap.py" in launcher
@@ -346,7 +346,7 @@ def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:
     ]
 
 
-def test_compatibility_current_junction_switch_preserves_releases(tmp_path: Path) -> None:
+def test_compatibility_current_runtime_switch_preserves_releases(tmp_path: Path) -> None:
     if not shutil.which("powershell.exe"):
         return
     owner_root = tmp_path / "owner runtime with spaces"
@@ -356,15 +356,18 @@ def test_compatibility_current_junction_switch_preserves_releases(tmp_path: Path
     second_release = owner_root / "releases" / second_id
     first_release.mkdir(parents=True)
     second_release.mkdir(parents=True)
+    lock_bytes = b"immutable dependency lock\n"
     for release, runtime_id, source_sha in (
         (first_release, first_id, "a" * 40),
         (second_release, second_id, "c" * 40),
     ):
+        (release / "uv.lock").write_bytes(lock_bytes)
         (release / "owner-dev-runtime.json").write_text(
             json.dumps(
                 {
                     "runtime_id": runtime_id,
                     "source_commit": source_sha,
+                    "uv_lock_sha256": hashlib.sha256(lock_bytes).hexdigest(),
                     "smoke_status": "PASS",
                 }
             ),
@@ -380,7 +383,7 @@ def test_compatibility_current_junction_switch_preserves_releases(tmp_path: Path
                 "powershell.exe",
                 "-NoProfile",
                 "-File",
-                str(ROOT / "tools/dev/update_owner_dev_current_junction.ps1"),
+                str(ROOT / "tools/dev/update_owner_dev_current_runtime.ps1"),
                 "-OwnerRoot",
                 str(owner_root),
                 "-RuntimeId",
@@ -393,7 +396,7 @@ def test_compatibility_current_junction_switch_preserves_releases(tmp_path: Path
 
     first = switch(first_id)
     assert first.returncode == 0, first.stdout + first.stderr
-    assert Path(os.path.realpath(current)) == first_release
+    assert current.is_dir() and not current.is_symlink()
     assert json.loads((current / "owner-dev-runtime.json").read_text())["runtime_id"] == first_id
     preserved = list(owner_root.glob("previous-*"))
     assert (
@@ -403,6 +406,6 @@ def test_compatibility_current_junction_switch_preserves_releases(tmp_path: Path
 
     second = switch(second_id)
     assert second.returncode == 0, second.stdout + second.stderr
-    assert Path(os.path.realpath(current)) == second_release
+    assert current.is_dir() and not current.is_symlink()
     assert json.loads((current / "owner-dev-runtime.json").read_text())["runtime_id"] == second_id
     assert (first_release / "owner-dev-runtime.json").is_file()

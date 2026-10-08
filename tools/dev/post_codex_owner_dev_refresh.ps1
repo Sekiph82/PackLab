@@ -29,7 +29,7 @@ $ownerRoot = Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'
 if ($LASTEXITCODE -ne 0) { throw 'Native owner launcher build/deployment failed.' }
 $refreshOutput = & (Join-Path $PSScriptRoot 'refresh_owner_packlab_shortcuts.ps1') -OwnerRoot $ownerRoot -RuntimeId $runtimeId
 if ($LASTEXITCODE -ne 0) { throw 'Desktop EXE deployment or Start Menu refresh failed.' }
-$currentOutput = & (Join-Path $PSScriptRoot 'update_owner_dev_current_junction.ps1') -OwnerRoot $ownerRoot -RuntimeId $runtimeId
+$currentOutput = & (Join-Path $PSScriptRoot 'update_owner_dev_current_runtime.ps1') -OwnerRoot $ownerRoot -RuntimeId $runtimeId
 if ($LASTEXITCODE -ne 0 -or $currentOutput -notmatch ('OWNER_DEV_CURRENT_READY ' + [regex]::Escape($sha) + ' ' + [regex]::Escape($runtimeId) + ' ')) { throw 'Compatibility current junction refresh failed.' }
 $manifestPath = Join-Path (Join-Path $ownerRoot 'releases') (Join-Path $runtimeId 'owner-dev-runtime.json')
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json

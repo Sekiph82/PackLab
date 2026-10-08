@@ -15,8 +15,8 @@ The script builds a new immutable runtime release from that exact clean publishe
 `%LOCALAPPDATA%\PackLab\OwnerDev\releases\<source-commit>-<release-id>` and runs locked dependency sync plus a bounded
 source-mode smoke before publishing a native launcher bound to that release. Existing releases remain in place so an
 older Desktop EXE continues to resolve its matching runtime throughout the refresh. After the new native EXE is
-atomically installed, the historic `current` path is switched to a compatibility junction for diagnostics and older
-OWNER DEV helpers; the new native EXE never resolves its runtime through that mutable junction. It verifies the canonical icon at
+atomically installed, the historic `current` path is updated from a staged, verified copy for diagnostics and older
+OWNER DEV helpers; the new native EXE never resolves its runtime through that mutable path. It verifies the canonical icon at
 `%LOCALAPPDATA%\PackLab\OwnerDev\branding\PackLab.ico`, builds the checked-in Windows GUI launcher source with an
 already-installed compiler, and embeds that exact icon in
 `%LOCALAPPDATA%\PackLab\OwnerDev\launcher\PackLab.exe`. It atomically copies the verified launcher to the real
