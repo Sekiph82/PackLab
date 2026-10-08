@@ -85,12 +85,26 @@ jobs:
             --verify-build-lock --verify-conda-lock --verify-uv-lock
           if ($LASTEXITCODE -ne 0) { throw "Windows native source or package lock validation failed." }
 
+      - name: Render hash-pinned OCP explicit package lock
+        id: render_ocp_lock
+        shell: pwsh
+        run: |
+          $lockTemplate = Join-Path $env:RUNNER_TEMP "packlab-ocp-{platform}.lock"
+          $lockPath = Join-Path $env:RUNNER_TEMP "packlab-ocp-win-64.lock"
+          uv tool run --from conda-lock==3.0.0 conda-lock render `
+            --platform win-64 `
+            --kind explicit `
+            --filename-template $lockTemplate `
+            tools/packaging/packlab-ocp-bindings-win.lock
+          if ($LASTEXITCODE -ne 0) { throw "Could not render the exact Windows package lock." }
+          if (-not (Test-Path -LiteralPath $lockPath)) { throw "Rendered explicit package lock is missing." }
+          "path=$lockPath" >> $env:GITHUB_OUTPUT
+
       - name: Create exact OCP source-build environment
         uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3.2.1
         with:
-          environment-file: tools/packaging/packlab-ocp-bindings-win.lock
+          environment-file: ${{ steps.render_ocp_lock.outputs.path }}
           environment-name: packlab-ocp-bindings
-          create-args: --strict-channel-priority
           micromamba-version: "2.0.5-0"
           init-shell: powershell
           cache-environment: false

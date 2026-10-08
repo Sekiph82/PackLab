@@ -20,8 +20,13 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert "uv sync --locked --all-groups" in workflow
     assert "--verify-build-lock --verify-conda-lock --verify-uv-lock" in workflow
     assert "mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39" in workflow
-    assert "environment-file: tools/packaging/packlab-ocp-bindings-win.lock" in workflow
-    assert "create-args: --strict-channel-priority" in workflow
+    assert "uv tool run --from conda-lock==3.0.0 conda-lock render" in workflow
+    assert "--kind explicit" in workflow
+    assert "--platform win-64" in workflow
+    assert "environment-file: ${{ steps.render_ocp_lock.outputs.path }}" in workflow
+    assert workflow.index("Render hash-pinned OCP explicit package lock") < workflow.index(
+        "Create exact OCP source-build environment"
+    )
     assert 'micromamba-version: "2.0.5-0"' in workflow
     assert "fetch_verify_windows_native_sources.py" in workflow
     assert workflow.index("Fetch and verify every locked corresponding source") < workflow.index(
