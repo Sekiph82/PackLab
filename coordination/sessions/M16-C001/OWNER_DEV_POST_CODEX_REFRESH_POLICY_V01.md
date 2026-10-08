@@ -11,14 +11,20 @@ equal, the Codex implementation actor runs:
 tools/dev/post_codex_owner_dev_refresh.ps1 -AllowPublishedCommit
 ```
 
-The script builds a new runtime from that exact clean published commit, runs locked dependency sync and a bounded
-source-mode smoke before replacing the prior runtime, copies the canonical icon to the stable
-`%LOCALAPPDATA%\PackLab\OwnerDev\branding\PackLab.ico` location, then recreates the user's Desktop and Start Menu
-shortcuts against that stable icon. It verifies shortcut target, deployed SHA, icon path and canonical icon digest
-before printing `OWNER_DEV_READY <full_sha> <desktop_lnk> <start_menu_lnk>`. The shortcut always targets the stable
-`%LOCALAPPDATA%\PackLab\OwnerDev\current` runtime model; it must never capture a Codex worktree. The launcher
-monitors `pythonw.exe` for an eight-second startup window and preserves OWNER DEV-only Python tracebacks in the
-local logs directory when startup fails.
+The script builds a new runtime from that exact clean published commit and runs locked dependency sync plus a bounded
+source-mode smoke before replacing the prior runtime. It verifies the canonical icon at
+`%LOCALAPPDATA%\PackLab\OwnerDev\branding\PackLab.ico`, builds the checked-in Windows GUI launcher source with an
+already-installed compiler, and embeds that exact icon in
+`%LOCALAPPDATA%\PackLab\OwnerDev\launcher\PackLab.exe`. It atomically copies the verified launcher to the real
+Desktop known folder as `PackLab.exe`, removes only the obsolete owner-created `PackLab.lnk` after that copy passes
+hash, PE GUI-subsystem, and Shell icon checks, then recreates the Start Menu shortcut against the stable native EXE.
+The launcher runs the runtime's `pythonw.exe` and bootstrap directly, without PowerShell, and monitors child startup
+for ten seconds. OWNER DEV-only Python tracebacks and native launcher failures remain in the LocalAppData logs.
+
+The post-refresh command prints `OWNER_DEV_EXE_READY <full_sha> <desktop_exe> <launcher_exe>` only after runtime SHA,
+canonical icon, EXE hashes, GUI subsystem, Shell icon extraction, Desktop `.lnk` absence, and native Start Menu target
+checks pass. The Desktop executable is byte-identical to the stable launcher and never captures a Codex worktree.
+This owner-local source runtime does not satisfy PL-0350 redistribution or PL-0351 clean-install acceptance.
 
 Record the command, exit status, deployed SHA, shortcut paths, and failures in the child task's own Codex log. A local
 refresh failure is an owner-local delivery failure; it does not authorize rewriting published commits, modifying the

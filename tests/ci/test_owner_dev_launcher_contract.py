@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -18,25 +19,38 @@ def test_production_spec_embeds_branding_asset_and_executable_icon() -> None:
 
 def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     deploy = (ROOT / "tools/dev/update_owner_dev_runtime.ps1").read_text(encoding="utf-8")
-    launch = (ROOT / "tools/dev/launch_owner_packlab.ps1").read_text(encoding="utf-8")
+    launcher = (ROOT / "tools/dev/PackLabOwnerLauncher.cs").read_text(encoding="utf-8")
+    bootstrap = (ROOT / "tools/dev/owner_packlab_bootstrap.py").read_text(encoding="utf-8")
+    build = (ROOT / "tools/dev/build_owner_packlab_exe.ps1").read_text(encoding="utf-8")
     shortcuts = (ROOT / "tools/dev/refresh_owner_packlab_shortcuts.ps1").read_text(encoding="utf-8")
     post = (ROOT / "tools/dev/post_codex_owner_dev_refresh.ps1").read_text(encoding="utf-8")
+    policy = (
+        ROOT / "coordination/sessions/M16-C001/OWNER_DEV_POST_CODEX_REFRESH_POLICY_V01.md"
+    ).read_text(encoding="utf-8")
     assert "uv sync --locked" in deploy
     assert "ls-tree -r --name-only $sha" in deploy
     assert "Copy-Item -LiteralPath $source -Destination $destination -Force" in deploy
     assert "reconstruction-work|reconstruction-output|packlab-work" in deploy
     assert "Move-Item -LiteralPath $stage -Destination $current" in deploy
     assert "sourcePathsBase64" in deploy and "base64.b64decode" in deploy
-    assert "run_module('packlab_studio'" in launch
+    assert "owner_packlab_bootstrap.py" in launcher
+    assert '"pythonw.exe"' in launcher
+    assert 'run_module("packlab_studio"' in bootstrap
+    assert "WaitForExit(200)" in launcher and "StartupStabilitySeconds = 10" in launcher
+    assert "early_child_exit" in launcher and "MessageBox.Show" in launcher
+    assert "powershell.exe" not in launcher.lower()
+    assert "/target:winexe" in build and "/win32icon" in build
+    assert "OWNER_DEV_LAUNCHER_BUILT" in build and "GUI_ICON_OK" in build
+    assert "OWNER_DEV_EXE_READY" in shortcuts
+    assert "MoveFileEx" in shortcuts and "PackLab.lnk" in shortcuts
     assert "--no-install-project" in deploy
-    assert "GetFolderPath('DesktopDirectory')" in shortcuts
-    assert "GetFolderPath('Programs')" in shortcuts
-    assert "OWNER_DEV_READY" in post
-    assert "Start-Process -FilePath $pythonw" in launch and "-PassThru" in launch
-    assert "AddSeconds(8)" in launch and "early_child_exit" in launch
-    assert "startup_exception_details" in launch
-    assert "$OwnerRoot 'branding'" in shortcuts
-    assert "a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1" in shortcuts
+    assert "owner_packlab_bootstrap.py" in deploy
+    assert " OWNER_DEV_EXE_READY" in post or "OWNER_DEV_EXE_READY" in post
+    assert "OWNER_DEV_READY" not in post
+    assert "OWNER_DEV_EXE_READY" in policy
+    assert "GUI-subsystem" in policy and "PackLab.exe" in policy
+    assert "PACKLAB_OWNERDEV_DIAGNOSTICS" in launcher
+    assert "a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1" in build
     assert "SHChangeNotify" in shortcuts
     assert "Taskband" not in shortcuts and "Explorer" not in shortcuts
 
@@ -57,16 +71,38 @@ def test_runtime_manifest_contract_excludes_owner_local_paths() -> None:
     )
 
 
-def test_shortcut_refresh_supports_temp_known_folders_with_spaces(tmp_path: Path) -> None:
+def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None:
+    if not shutil.which("powershell.exe"):
+        return
+    csc = Path(os.environ["WINDIR"]) / "Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    if not csc.is_file():
+        csc = Path(os.environ["WINDIR"]) / "Microsoft.NET/Framework/v4.0.30319/csc.exe"
+    assert csc.is_file(), "V09 requires an already-installed Windows C# compiler"
     owner_root = tmp_path / "owner runtime with spaces"
-    current = owner_root / "current"
-    (current / "tools/dev").mkdir(parents=True)
-    icon = current / "apps/windows-studio/assets/branding/PackLab.ico"
+    icon = owner_root / "current/apps/windows-studio/assets/branding/PackLab.ico"
     icon.parent.mkdir(parents=True)
     icon.write_bytes((ROOT / "apps/windows-studio/assets/branding/PackLab.ico").read_bytes())
-    (current / "tools/dev/launch_owner_packlab.ps1").write_text("# shortcut target\n")
+    build = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-File",
+            str(ROOT / "tools/dev/build_owner_packlab_exe.ps1"),
+            "-RepositoryRoot",
+            str(ROOT),
+            "-OwnerRoot",
+            str(owner_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert build.returncode == 0, build.stdout + build.stderr
+    assert "GUI_ICON_OK" in build.stdout
+    launcher = owner_root / "launcher/PackLab.exe"
+    assert launcher.is_file() and launcher.stat().st_size > 20_000
     digest = hashlib.sha256(icon.read_bytes()).hexdigest()
-    (current / "owner-dev-runtime.json").write_text(
+    (owner_root / "current/owner-dev-runtime.json").write_text(
         json.dumps(
             {
                 "source_commit": "a" * 40,
@@ -75,14 +111,20 @@ def test_shortcut_refresh_supports_temp_known_folders_with_spaces(tmp_path: Path
                 "smoke_status": "PASS",
                 "icon_sha256": digest,
             }
-        )
+        ),
+        encoding="utf-8",
     )
     desktop = tmp_path / "Desktop with spaces"
     programs = tmp_path / "Start Menu with spaces"
+    desktop.mkdir()
+    obsolete = desktop / "PackLab.lnk"
+    obsolete.write_bytes(b"obsolete owner shortcut")
+    unrelated = desktop / "PackLab 3D.lnk"
+    unrelated.write_bytes(b"unrelated shortcut")
     environment = os.environ.copy()
     environment["PACKLAB_OWNERDEV_DESKTOP_OVERRIDE"] = str(desktop)
     environment["PACKLAB_OWNERDEV_PROGRAMS_OVERRIDE"] = str(programs)
-    result = subprocess.run(
+    deployed = subprocess.run(
         [
             "powershell.exe",
             "-NoProfile",
@@ -96,13 +138,83 @@ def test_shortcut_refresh_supports_temp_known_folders_with_spaces(tmp_path: Path
         text=True,
         env=environment,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert (desktop / "PackLab.lnk").is_file()
+    assert deployed.returncode == 0, deployed.stdout + deployed.stderr
+    desktop_exe = desktop / "PackLab.exe"
+    assert desktop_exe.read_bytes() == launcher.read_bytes()
+    assert not obsolete.exists()
+    assert unrelated.read_bytes() == b"unrelated shortcut"
+    assert "OWNER_DEV_EXE_READY " + "a" * 40 in deployed.stdout
     assert (programs / "PackLab/PackLab.lnk").is_file()
-    stable_icon = owner_root / "branding/PackLab.ico"
-    assert stable_icon.is_file()
-    assert hashlib.sha256(stable_icon.read_bytes()).hexdigest() == digest
-    assert f"OWNER_DEV_SHORTCUTS_REFRESHED {'a' * 40}" in result.stdout
+
+    test_launcher = tmp_path / "launcher with spaces.exe"
+    compile_test = subprocess.run(
+        [
+            str(csc),
+            "/nologo",
+            "/target:winexe",
+            "/define:OWNERDEV_TEST",
+            f"/out:{test_launcher}",
+            f"/win32icon:{ROOT / 'apps/windows-studio/assets/branding/PackLab.ico'}",
+            "/reference:System.Windows.Forms.dll",
+            str(ROOT / "tools/dev/PackLabOwnerLauncher.cs"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert compile_test.returncode == 0, compile_test.stdout + compile_test.stderr
+
+    local_app_data = tmp_path / "Local AppData with spaces"
+    result_file = tmp_path / "native error dialog result.txt"
+    environment = os.environ.copy()
+    environment["LOCALAPPDATA"] = str(local_app_data)
+    environment["PACKLAB_OWNERDEV_TEST_RESULT"] = str(result_file)
+    missing = subprocess.run([str(test_launcher)], env=environment, check=False, timeout=5)
+    assert missing.returncode == 1
+    assert "dialog_shown=true" in result_file.read_text(encoding="utf-8")
+    logs = list((local_app_data / "PackLab/OwnerDev/logs").glob("startup-*.log"))
+    assert logs and "reason=launcher_failure" in logs[0].read_text(encoding="utf-8")
+
+    current = local_app_data / "PackLab/OwnerDev/current"
+    pythonw = current / ".venv/Scripts/pythonw.exe"
+    pythonw.parent.mkdir(parents=True)
+    fake_child_source = tmp_path / "early_exit.cs"
+    fake_child_source.write_text(
+        "internal static class EarlyExit { private static int Main() { return 29; } }",
+        encoding="utf-8",
+    )
+    fake_child = subprocess.run(
+        [str(csc), "/nologo", "/target:winexe", f"/out:{pythonw}", str(fake_child_source)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert fake_child.returncode == 0, fake_child.stdout + fake_child.stderr
+    (current / "owner-dev-runtime.json").write_text(
+        json.dumps({"source_commit": "a" * 40, "studio_version": "0.1.0", "smoke_status": "PASS"}),
+        encoding="utf-8",
+    )
+    result_file.unlink()
+    missing_bootstrap = subprocess.run(
+        [str(test_launcher)], env=environment, check=False, timeout=5
+    )
+    assert missing_bootstrap.returncode == 1
+    assert "dialog_shown=true" in result_file.read_text(encoding="utf-8")
+    assert "bootstrap script is missing" in "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (local_app_data / "PackLab/OwnerDev/logs").glob("startup-*.log")
+    )
+
+    bootstrap = current / "tools/dev/owner_packlab_bootstrap.py"
+    bootstrap.parent.mkdir(parents=True)
+    bootstrap.write_text("# fixture\n", encoding="utf-8")
+    result_file.unlink()
+    early = subprocess.run([str(test_launcher)], env=environment, check=False, timeout=15)
+    assert early.returncode == 1
+    diagnostic = result_file.read_text(encoding="utf-8")
+    assert "dialog_shown=true" in diagnostic and "exit_code=29" in diagnostic
+    logs = list((local_app_data / "PackLab/OwnerDev/logs").glob("startup-*.log"))
+    assert any("reason=early_child_exit" in path.read_text(encoding="utf-8") for path in logs)
 
 
 def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:

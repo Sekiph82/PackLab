@@ -34,7 +34,7 @@ function Get-Sha256([string]$Path) {
 }
 
 try {
-    $include = @('pyproject.toml', 'uv.lock', 'core/src', 'apps/windows-studio/src', 'apps/windows-studio/assets/branding', 'schemas', 'assets', 'tools/dev/launch_owner_packlab.ps1')
+    $include = @('pyproject.toml', 'uv.lock', 'core/src', 'apps/windows-studio/src', 'apps/windows-studio/assets/branding', 'schemas', 'assets', 'tools/dev/launch_owner_packlab.ps1', 'tools/dev/owner_packlab_bootstrap.py')
     $trackedPaths = @(& git -C $root ls-tree -r --name-only $sha -- $include)
     if ($LASTEXITCODE -ne 0 -or $trackedPaths.Count -eq 0) { throw 'Could not enumerate tracked runtime files from HEAD.' }
     foreach ($relativePath in $trackedPaths) {
