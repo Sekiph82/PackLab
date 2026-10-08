@@ -130,6 +130,7 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
+          Remove-Item Env:Python_ROOT_DIR,Env:Python2_ROOT_DIR,Env:Python3_ROOT_DIR -ErrorAction SilentlyContinue
           $sitePackages = (& micromamba run -n packlab-ocp-bindings python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
           if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The locked production Python site-packages path could not be resolved." }
           $buildRoot = Join-Path $env:RUNNER_TEMP "packlab-controlled-ocp-build"

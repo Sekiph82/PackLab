@@ -180,7 +180,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             "x64",
             f"-DOCCT_LIB_DIR={occt_dll_directory}",
             f"-DCMAKE_PREFIX_PATH={occt_prefix}",
-            "-DPLATFORM=Windows",
+            f"-DPython_EXECUTABLE={sys.executable}",
         ]
     )
     run(["cmake", "--build", str(ocp_build), "--config", "Release", "--parallel", "2"])

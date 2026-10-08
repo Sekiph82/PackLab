@@ -31,6 +31,7 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert "fetch_verify_windows_native_sources.py" in workflow
     assert "shell: micromamba-shell" not in workflow
     assert "PYTHONPATH: ${{ github.workspace }}" in workflow
+    assert "Remove-Item Env:Python_ROOT_DIR,Env:Python2_ROOT_DIR,Env:Python3_ROOT_DIR" in workflow
     assert (
         "micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_ocp_runtime.py"
         in workflow
@@ -39,6 +40,11 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
         "Build and overlay the controlled OCP/OCCT runtime"
     )
     assert "build_controlled_ocp_runtime.py" in workflow
+    ocp_builder = (ROOT / "tools" / "packaging" / "build_controlled_ocp_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'f"-DPython_EXECUTABLE={sys.executable}"' in ocp_builder
+    assert '"-DPLATFORM=Windows"' not in ocp_builder
     assert "validate_controlled_ocp_manifest.py" in workflow
     assert workflow.index("Build and overlay the controlled OCP/OCCT runtime") < workflow.index(
         "Build one-directory production Studio staging output"
