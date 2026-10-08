@@ -30,6 +30,18 @@ function Assert-GuiExecutable([string]$Path) {
     if ($subsystem -ne 2) { throw "Launcher PE subsystem is $subsystem; expected Windows GUI (2)." }
 }
 
+function Assert-EmbeddedIcon([string]$Path) {
+    $large = [IntPtr]::Zero
+    $small = [IntPtr]::Zero
+    $count = [PackLabLauncherShellProbe]::ExtractIconEx($Path, 0, [ref]$large, [ref]$small, 1)
+    try {
+        if ($count -lt 1 -or ($large -eq [IntPtr]::Zero -and $small -eq [IntPtr]::Zero)) { throw "Windows Shell could not extract an icon handle from $Path." }
+    } finally {
+        if ($large -ne [IntPtr]::Zero) { [void][PackLabLauncherShellProbe]::DestroyIcon($large) }
+        if ($small -ne [IntPtr]::Zero) { [void][PackLabLauncherShellProbe]::DestroyIcon($small) }
+    }
+}
+
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
@@ -68,36 +80,42 @@ if (-not $compiler) {
 }
 if (-not $compiler) { throw 'No installed C# compiler was found; no toolchain was downloaded or installed.' }
 
-$tempExe = Join-Path $launcherDir ('PackLab-' + [guid]::NewGuid().ToString('N') + '.exe')
-try {
-    & $compiler /nologo /target:winexe /platform:anycpu /optimize+ /out:$tempExe /win32icon:$stableIcon /reference:System.Windows.Forms.dll $source
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempExe -PathType Leaf)) { throw "C# launcher compilation failed with exit $LASTEXITCODE." }
-    Assert-GuiExecutable $tempExe
-    $large = [IntPtr]::Zero
-    $small = [IntPtr]::Zero
-    $count = [PackLabLauncherShellProbe]::ExtractIconEx($tempExe, 0, [ref]$large, [ref]$small, 1)
+$sourceHash = Get-Sha256 $source
+$iconHash = Get-Sha256 $stableIcon
+$fingerprintPath = Join-Path $launcherDir 'PackLab.build.json'
+$reuseExisting = $false
+if ((Test-Path -LiteralPath $stableExe -PathType Leaf) -and (Test-Path -LiteralPath $fingerprintPath -PathType Leaf)) {
     try {
-        if ($count -lt 1 -or ($large -eq [IntPtr]::Zero -and $small -eq [IntPtr]::Zero)) { throw 'Windows Shell could not extract an icon handle from the compiled EXE.' }
+        $fingerprint = Get-Content -LiteralPath $fingerprintPath -Raw | ConvertFrom-Json
+        $reuseExisting = ($fingerprint.source_sha256 -eq $sourceHash -and $fingerprint.icon_sha256 -eq $iconHash -and $fingerprint.compiler_path -eq $compiler)
+        if ($reuseExisting) { Assert-GuiExecutable $stableExe; Assert-EmbeddedIcon $stableExe }
+    } catch { $reuseExisting = $false }
+}
+
+if (-not $reuseExisting) {
+    $tempExe = Join-Path $launcherDir ('PackLab-' + [guid]::NewGuid().ToString('N') + '.exe')
+    try {
+        & $compiler /nologo /target:winexe /platform:anycpu /optimize+ /out:$tempExe /win32icon:$stableIcon /reference:System.Windows.Forms.dll $source
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempExe -PathType Leaf)) { throw "C# launcher compilation failed with exit $LASTEXITCODE." }
+        Assert-GuiExecutable $tempExe
+        Assert-EmbeddedIcon $tempExe
+        $flags = 0x1 -bor 0x8 # MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
+        if (-not [PackLabLauncherShellProbe]::MoveFileEx($tempExe, $stableExe, $flags)) { throw "Could not atomically publish stable launcher: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
     } finally {
-        if ($large -ne [IntPtr]::Zero) { [void][PackLabLauncherShellProbe]::DestroyIcon($large) }
-        if ($small -ne [IntPtr]::Zero) { [void][PackLabLauncherShellProbe]::DestroyIcon($small) }
+        if (Test-Path -LiteralPath $tempExe) { Remove-Item -LiteralPath $tempExe -Force }
     }
-    $flags = 0x1 -bor 0x8 # MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH
-    if (-not [PackLabLauncherShellProbe]::MoveFileEx($tempExe, $stableExe, $flags)) { throw "Could not atomically publish stable launcher: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
-} finally {
-    if (Test-Path -LiteralPath $tempExe) { Remove-Item -LiteralPath $tempExe -Force }
 }
 
 Assert-GuiExecutable $stableExe
-$large = [IntPtr]::Zero
-$small = [IntPtr]::Zero
-$count = [PackLabLauncherShellProbe]::ExtractIconEx($stableExe, 0, [ref]$large, [ref]$small, 1)
-try {
-    if ($count -lt 1 -or ($large -eq [IntPtr]::Zero -and $small -eq [IntPtr]::Zero)) { throw 'Stable launcher has no extractable embedded icon.' }
-} finally {
-    if ($large -ne [IntPtr]::Zero) { [void][PackLabLauncherShellProbe]::DestroyIcon($large) }
-    if ($small -ne [IntPtr]::Zero) { [void][PackLabLauncherShellProbe]::DestroyIcon($small) }
-}
+Assert-EmbeddedIcon $stableExe
 $hash = Get-Sha256 $stableExe
 $bytes = (Get-Item -LiteralPath $stableExe).Length
-Write-Output "OWNER_DEV_LAUNCHER_BUILT $compiler $stableExe $hash $bytes GUI_ICON_OK"
+$fingerprint = [ordered]@{ source_sha256 = $sourceHash; icon_sha256 = $iconHash; compiler_path = $compiler; exe_sha256 = $hash; exe_bytes = $bytes } | ConvertTo-Json
+$fingerprintTemp = Join-Path $launcherDir ('PackLab.build-' + [guid]::NewGuid().ToString('N') + '.json')
+[IO.File]::WriteAllText($fingerprintTemp, $fingerprint + "`n", [Text.UTF8Encoding]::new($false))
+if (-not [PackLabLauncherShellProbe]::MoveFileEx($fingerprintTemp, $fingerprintPath, (0x1 -bor 0x8))) {
+    Remove-Item -LiteralPath $fingerprintTemp -Force -ErrorAction SilentlyContinue
+    throw "Could not atomically publish launcher fingerprint: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
+}
+$result = if ($reuseExisting) { 'OWNER_DEV_LAUNCHER_REUSED' } else { 'OWNER_DEV_LAUNCHER_BUILT' }
+Write-Output "$result $compiler $stableExe $hash $bytes GUI_ICON_OK"

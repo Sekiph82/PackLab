@@ -41,6 +41,7 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "powershell.exe" not in launcher.lower()
     assert "/target:winexe" in build and "/win32icon" in build
     assert "OWNER_DEV_LAUNCHER_BUILT" in build and "GUI_ICON_OK" in build
+    assert "OWNER_DEV_LAUNCHER_REUSED" in build and "PackLab.build.json" in build
     assert "OWNER_DEV_EXE_READY" in shortcuts
     assert "MoveFileEx" in shortcuts and "PackLab.lnk" in shortcuts
     assert "--no-install-project" in deploy
@@ -101,6 +102,25 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     assert "GUI_ICON_OK" in build.stdout
     launcher = owner_root / "launcher/PackLab.exe"
     assert launcher.is_file() and launcher.stat().st_size > 20_000
+    first_launcher = launcher.read_bytes()
+    repeated_build = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-File",
+            str(ROOT / "tools/dev/build_owner_packlab_exe.ps1"),
+            "-RepositoryRoot",
+            str(ROOT),
+            "-OwnerRoot",
+            str(owner_root),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert repeated_build.returncode == 0, repeated_build.stdout + repeated_build.stderr
+    assert "OWNER_DEV_LAUNCHER_REUSED" in repeated_build.stdout
+    assert launcher.read_bytes() == first_launcher
     digest = hashlib.sha256(icon.read_bytes()).hexdigest()
     (owner_root / "current/owner-dev-runtime.json").write_text(
         json.dumps(
