@@ -39,3 +39,31 @@ After refreshing from published `origin/main` at `3f116d80fcffd79d83a67e08bfee64
 
 This acceptance is implementer evidence only; independent audit remains pending. This evidence commit itself must be followed by the standing OWNER DEV refresh and a fresh 60-second check against its resulting published commit.
 
+## R07 V11 owner failure and regenerated Desktop EXE
+
+The owner supplied fresh evidence from the actual Desktop executable. Two private startup logs reported
+`System.IO.FileNotFoundException` with `Owner runtime manifest is missing`; both recorded `deployed_sha=unknown` and
+`studio_version=unknown`, so failure occurred before the launcher could read the manifest. The owner then removed the
+failed Desktop executable before regeneration. Its prior SHA and embedded runtime ID therefore could not be recovered;
+the exact stale/missing-path trigger is unverified. The private logs and machine paths remain local.
+
+The published OWNER DEV refresh was rerun from exact `origin/main`, creating a fresh immutable runtime and a newly
+compiled native launcher. After the workflow-timeout implementation was published at
+https://github.com/Sekiph82/PackLab/commit/abf1491a86cf66a3374dc09ee95e2fbf1aba180c, the OWNER DEV refresh was run
+again against that exact commit. The resulting `OWNER_DEV_EXE_READY` identity was:
+
+- source commit: `abf1491a86cf66a3374dc09ee95e2fbf1aba180c`;
+- runtime ID: `abf1491a86cf66a3374dc09ee95e2fbf1aba180c-004552519cf447248fbf0cac6e3825b0`;
+- Desktop EXE and stable launcher SHA-256: `72ccb9df69d72a2275863ebadfe960c76b45fbf5f6eb5f298384929523edbc4d`.
+
+The actual regenerated Desktop EXE passed the owner gate: exactly one visible window titled `PackLab Studio`, 61
+successful responsiveness checks over 60.7 seconds, zero new startup logs, and the launcher -> release `pythonw.exe` ->
+Studio process chain. The window was left open for the owner. This is implementer evidence; independent audit remains
+pending.
+
+The PL-0350 Windows build at
+https://github.com/Sekiph82/PackLab/actions/runs/37780787158 reached 45% of the OCP binding generation before its
+180-minute job timeout. Its logs show progress rather than a compiler error. The job timeout was raised to GitHub's
+documented 360-minute maximum in the commit above. The replacement Windows build is
+https://github.com/Sekiph82/PackLab/actions/runs/37806912263; PL-0350 remains open pending that hosted build and its
+downstream clearance gates.
