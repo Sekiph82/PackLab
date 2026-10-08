@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Management;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -20,6 +22,7 @@ internal static class PackLabOwnerLauncher
         string ownerRoot = OwnerRoot;
         string runtimeRoot = Path.Combine(ownerRoot, "releases", RuntimeId);
         string logRoot = Path.Combine(ownerRoot, "logs");
+        string manifestPath = Path.Combine(runtimeRoot, "owner-dev-runtime.json");
         string startupLog = Path.Combine(logRoot, "startup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".log");
         string deployedSha = "unknown";
         string studioVersion = "unknown";
@@ -27,7 +30,6 @@ internal static class PackLabOwnerLauncher
         try
         {
             Directory.CreateDirectory(logRoot);
-            string manifestPath = Path.Combine(runtimeRoot, "owner-dev-runtime.json");
             string pythonw = Path.Combine(runtimeRoot, ".venv", "Scripts", "pythonw.exe");
             string bootstrap = Path.Combine(runtimeRoot, "tools", "dev", "owner_packlab_bootstrap.py");
             RequireFile(manifestPath, "Owner runtime manifest is missing.");
@@ -69,24 +71,32 @@ internal static class PackLabOwnerLauncher
             {
                 if (child == null) throw new InvalidOperationException("Windows did not create the PackLab runtime process.");
                 DateTime deadline = DateTime.UtcNow.AddSeconds(StartupStabilitySeconds);
+                DateTime nextDescendantLookup = DateTime.MinValue;
+                int studioProcessId = 0;
                 while (DateTime.UtcNow < deadline)
                 {
                     if (child.WaitForExit(200))
                     {
                         int exitCode = child.ExitCode;
-                        string childLog = File.Exists(startupLog) ? File.ReadAllText(startupLog, Encoding.UTF8) : "(no Python startup log was produced)";
-                        string diagnostic = "PackLab OWNER DEV child exited during its startup stability window." + Environment.NewLine +
-                            "timestamp_utc=" + DateTime.UtcNow.ToString("o") + Environment.NewLine +
-                            "reason=early_child_exit" + Environment.NewLine +
-                            "exit_code=" + exitCode + Environment.NewLine +
-                            "deployed_sha=" + deployedSha + Environment.NewLine +
-                            "studio_version=" + studioVersion + Environment.NewLine +
-                            "python_startup_log=" + startupLog + Environment.NewLine + Environment.NewLine + childLog;
-                        File.WriteAllText(startupLog, diagnostic + Environment.NewLine, new UTF8Encoding(false));
-                        ShowStartupError("PackLab Studio exited during startup (code " + exitCode + "). Details: " + startupLog, startupLog, exitCode);
-                        return 1;
+                        if (exitCode != 0)
+                            return ReportEarlyChildExit(startupLog, deployedSha, studioVersion, exitCode,
+                                "The OWNER DEV Python launcher exited with a nonzero code.");
+
+                        if (studioProcessId == 0 && DateTime.UtcNow >= nextDescendantLookup)
+                        {
+                            studioProcessId = FindVisibleStudioDescendant(child.Id);
+                            nextDescendantLookup = DateTime.UtcNow.AddMilliseconds(500);
+                        }
+
+                        if (studioProcessId != 0 && !HasVisibleStudioWindow(studioProcessId))
+                            return ReportEarlyChildExit(startupLog, deployedSha, studioVersion, exitCode,
+                                "The launched PackLab Studio window exited or became hidden during startup.");
                     }
                 }
+
+                if (child.HasExited && studioProcessId == 0)
+                    return ReportEarlyChildExit(startupLog, deployedSha, studioVersion, child.ExitCode,
+                        "The Python launcher exited without leaving a visible PackLab Studio window.");
             }
             return 0;
         }
@@ -94,6 +104,7 @@ internal static class PackLabOwnerLauncher
         {
             try
             {
+                FileNotFoundException missingFile = error as FileNotFoundException;
                 Directory.CreateDirectory(logRoot);
                 File.WriteAllText(startupLog,
                     "PackLab OWNER DEV launcher failure." + Environment.NewLine +
@@ -101,7 +112,11 @@ internal static class PackLabOwnerLauncher
                     "reason=launcher_failure" + Environment.NewLine +
                     "deployed_sha=" + deployedSha + Environment.NewLine +
                     "studio_version=" + studioVersion + Environment.NewLine +
+                    "owner_root=" + ownerRoot + Environment.NewLine +
+                    "runtime_root=" + runtimeRoot + Environment.NewLine +
+                    "manifest_path=" + manifestPath + Environment.NewLine +
                     "exception_type=" + error.GetType().FullName + Environment.NewLine +
+                    "exception_path=" + (missingFile == null ? String.Empty : missingFile.FileName) + Environment.NewLine +
                     "exception_message=" + error.Message + Environment.NewLine,
                     new UTF8Encoding(false));
             }
@@ -114,6 +129,65 @@ internal static class PackLabOwnerLauncher
     private static void RequireFile(string path, string message)
     {
         if (!File.Exists(path)) throw new FileNotFoundException(message, path);
+    }
+
+    private static int FindVisibleStudioDescendant(int rootProcessId)
+    {
+        Dictionary<int, int> parentByProcessId = new Dictionary<int, int>();
+        using (ManagementObjectSearcher searcher = new ManagementObjectSearcher(
+            "SELECT ProcessId, ParentProcessId FROM Win32_Process"))
+        using (ManagementObjectCollection processes = searcher.Get())
+        {
+            foreach (ManagementObject process in processes)
+            using (process)
+            {
+                int processId = Convert.ToInt32(process["ProcessId"]);
+                int parentProcessId = Convert.ToInt32(process["ParentProcessId"]);
+                parentByProcessId[processId] = parentProcessId;
+            }
+        }
+
+        HashSet<int> descendants = new HashSet<int> { rootProcessId };
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (KeyValuePair<int, int> entry in parentByProcessId)
+                if (descendants.Contains(entry.Value) && descendants.Add(entry.Key)) changed = true;
+        } while (changed);
+
+        foreach (Process process in Process.GetProcesses())
+        using (process)
+            if (descendants.Contains(process.Id) && HasVisibleStudioWindow(process.Id)) return process.Id;
+        return 0;
+    }
+
+    private static bool HasVisibleStudioWindow(int processId)
+    {
+        try
+        {
+            using (Process process = Process.GetProcessById(processId))
+                return process.MainWindowHandle != IntPtr.Zero && process.MainWindowTitle == "PackLab Studio";
+        }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    private static int ReportEarlyChildExit(string startupLog, string deployedSha, string studioVersion,
+        int exitCode, string detail)
+    {
+        string childLog = File.Exists(startupLog) ? File.ReadAllText(startupLog, Encoding.UTF8) : "(no Python startup log was produced)";
+        string diagnostic = "PackLab OWNER DEV child exited during its startup stability window." + Environment.NewLine +
+            "timestamp_utc=" + DateTime.UtcNow.ToString("o") + Environment.NewLine +
+            "reason=early_child_exit" + Environment.NewLine +
+            "exit_code=" + exitCode + Environment.NewLine +
+            "deployed_sha=" + deployedSha + Environment.NewLine +
+            "studio_version=" + studioVersion + Environment.NewLine +
+            "python_startup_log=" + startupLog + Environment.NewLine +
+            "exception_message=" + detail + Environment.NewLine + Environment.NewLine + childLog;
+        File.WriteAllText(startupLog, diagnostic + Environment.NewLine, new UTF8Encoding(false));
+        ShowStartupError("PackLab Studio exited during startup (code " + exitCode + "). Details: " + startupLog, startupLog, exitCode);
+        return 1;
     }
 
     private static string ReadManifestValue(string json, string name)

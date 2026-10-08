@@ -103,7 +103,7 @@ if (-not $reuseExisting) {
         $ownerRootLiteral = $OwnerRoot.Replace('\', '\\').Replace('"', '\"')
         $launcherSource = $launcherSource.Replace('__PACKLAB_SOURCE_COMMIT__', $SourceCommit).Replace('__PACKLAB_RUNTIME_ID__', $RuntimeId).Replace('__PACKLAB_OWNER_ROOT__', $ownerRootLiteral)
         [IO.File]::WriteAllText($tempSource, $launcherSource, [Text.UTF8Encoding]::new($false))
-        & $compiler /nologo /target:winexe /platform:anycpu /optimize+ /out:$tempExe /win32icon:$stableIcon /reference:System.Windows.Forms.dll $tempSource
+        & $compiler /nologo /target:winexe /platform:anycpu /optimize+ /out:$tempExe /win32icon:$stableIcon /reference:System.Windows.Forms.dll /reference:System.Management.dll $tempSource
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempExe -PathType Leaf)) { throw "C# launcher compilation failed with exit $LASTEXITCODE." }
         Assert-GuiExecutable $tempExe
         Assert-EmbeddedIcon $tempExe

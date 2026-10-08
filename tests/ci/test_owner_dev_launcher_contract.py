@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,6 +47,8 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "__PACKLAB_OWNER_ROOT__" in launcher
     assert "LOCALAPPDATA" not in launcher
     assert "DesktopDirectory" in build and "DesktopDirectory" in post
+    assert "FindVisibleStudioDescendant" in launcher and "System.Management" in build
+    assert "manifest_path=" in launcher and "exception_path=" in launcher
     assert '"pythonw.exe"' in launcher
     assert 'run_module("packlab_studio"' in bootstrap
     assert "WaitForExit(200)" in launcher and "StartupStabilitySeconds = 10" in launcher
@@ -217,6 +220,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
             f"/out:{test_launcher}",
             f"/win32icon:{ROOT / 'apps/windows-studio/assets/branding/PackLab.ico'}",
             "/reference:System.Windows.Forms.dll",
+            "/reference:System.Management.dll",
             str(test_source),
         ],
         check=False,
@@ -235,6 +239,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     assert "dialog_shown=true" in result_file.read_text(encoding="utf-8")
     logs = list((owner_root / "logs").glob("startup-*.log"))
     assert logs and "reason=launcher_failure" in logs[0].read_text(encoding="utf-8")
+    assert str(owner_root) in logs[0].read_text(encoding="utf-8")
 
     runtime_id = "a" * 40 + "-" + "b" * 32
     release_runtime = owner_root / "releases" / runtime_id
@@ -288,6 +293,123 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     assert "dialog_shown=true" in diagnostic and "exit_code=29" in diagnostic
     logs = list((owner_root / "logs").glob("startup-*.log"))
     assert any("reason=early_child_exit" in path.read_text(encoding="utf-8") for path in logs)
+
+    descendant_runtime_id = "c" * 40 + "-" + "d" * 32
+    descendant_release = owner_root / "releases" / descendant_runtime_id
+    descendant_python = descendant_release / ".venv/Scripts/pythonw.exe"
+    descendant_python.parent.mkdir(parents=True, exist_ok=True)
+    (descendant_release / "uv.lock").write_bytes(lock_bytes)
+    (descendant_release / "owner-dev-runtime.json").write_text(
+        json.dumps(
+            {
+                "source_commit": "c" * 40,
+                "runtime_id": descendant_runtime_id,
+                "uv_lock_sha256": lock_digest,
+                "studio_version": "0.1.0",
+                "smoke_status": "PASS",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (descendant_release / "tools/dev/owner_packlab_bootstrap.py").parent.mkdir(
+        parents=True, exist_ok=True
+    )
+    (descendant_release / "tools/dev/owner_packlab_bootstrap.py").write_text(
+        "# fixture\n", encoding="utf-8"
+    )
+    studio_window = descendant_python.parent / "studio-window.exe"
+    studio_source = tmp_path / "studio_window.cs"
+    studio_source.write_text(
+        """
+using System;
+using System.Windows.Forms;
+internal static class StudioWindow {
+    [STAThread] private static void Main() {
+        Form window = new Form(); window.Text = "PackLab Studio";
+        Timer timer = new Timer(); timer.Interval = 12000;
+        timer.Tick += delegate { timer.Stop(); window.Close(); }; timer.Start();
+        Application.Run(window);
+    }
+}
+""",
+        encoding="utf-8",
+    )
+    compile_window = subprocess.run(
+        [
+            str(csc),
+            "/nologo",
+            "/target:winexe",
+            f"/out:{studio_window}",
+            "/reference:System.Windows.Forms.dll",
+            str(studio_source),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert compile_window.returncode == 0, compile_window.stdout + compile_window.stderr
+    wrapper_source = tmp_path / "pythonw_wrapper.cs"
+    wrapper_source.write_text(
+        """
+using System.Diagnostics;
+using System.IO;
+internal static class PythonwWrapper {
+    private static int Main() {
+        string window = Path.Combine(
+            Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName),
+            "studio-window.exe");
+        Process.Start(window);
+        return 0;
+    }
+}
+""",
+        encoding="utf-8",
+    )
+    compile_wrapper = subprocess.run(
+        [str(csc), "/nologo", "/target:winexe", f"/out:{descendant_python}", str(wrapper_source)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert compile_wrapper.returncode == 0, compile_wrapper.stdout + compile_wrapper.stderr
+    descendant_launcher = tmp_path / "launcher with descendant.exe"
+    descendant_source = tmp_path / "PackLabOwnerLauncher.descendant.cs"
+    descendant_source.write_text(
+        (ROOT / "tools/dev/PackLabOwnerLauncher.cs")
+        .read_text(encoding="utf-8")
+        .replace("__PACKLAB_SOURCE_COMMIT__", "c" * 40)
+        .replace("__PACKLAB_RUNTIME_ID__", descendant_runtime_id)
+        .replace("__PACKLAB_OWNER_ROOT__", str(owner_root).replace("\\", "\\\\")),
+        encoding="utf-8",
+    )
+    compile_descendant_launcher = subprocess.run(
+        [
+            str(csc),
+            "/nologo",
+            "/target:winexe",
+            "/define:OWNERDEV_TEST",
+            f"/out:{descendant_launcher}",
+            f"/win32icon:{ROOT / 'apps/windows-studio/assets/branding/PackLab.ico'}",
+            "/reference:System.Windows.Forms.dll",
+            "/reference:System.Management.dll",
+            str(descendant_source),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert compile_descendant_launcher.returncode == 0, (
+        compile_descendant_launcher.stdout + compile_descendant_launcher.stderr
+    )
+    result_file.unlink(missing_ok=True)
+    logs_before_descendant = set((owner_root / "logs").glob("startup-*.log"))
+    descendant_run = subprocess.run(
+        [str(descendant_launcher)], env=environment, check=False, timeout=20
+    )
+    assert descendant_run.returncode == 0
+    assert not result_file.exists()
+    assert set((owner_root / "logs").glob("startup-*.log")) == logs_before_descendant
+    time.sleep(3)
 
 
 def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:
