@@ -24,9 +24,12 @@ $previousTarget = $null
 if (Test-Path -LiteralPath $current) {
     $currentItem = Get-Item -LiteralPath $current -Force
     if (($currentItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        $previousManifest = Get-Content -LiteralPath (Join-Path $current 'owner-dev-runtime.json') -Raw | ConvertFrom-Json
-        if ([string]$previousManifest.runtime_id -notmatch '^[0-9a-f]{40}-[0-9a-f]{32}$') { throw 'Current junction has an invalid prior runtime identity.' }
-        $previousTarget = Join-Path (Join-Path $OwnerRoot 'releases') ([string]$previousManifest.runtime_id)
+        $previousTarget = [string]$currentItem.Target
+        $releaseRoot = [IO.Path]::GetFullPath((Join-Path $OwnerRoot 'releases')) + [IO.Path]::DirectorySeparatorChar
+        $previousTarget = [IO.Path]::GetFullPath($previousTarget)
+        if (-not $previousTarget.StartsWith($releaseRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Current junction points outside the OWNER DEV releases directory.' }
+        $previousManifest = Get-Content -LiteralPath (Join-Path $previousTarget 'owner-dev-runtime.json') -Raw | ConvertFrom-Json
+        if ([string]$previousManifest.runtime_id -notmatch '^[0-9a-f]{40}-[0-9a-f]{32}$' -or [string]$previousManifest.runtime_id -ne (Split-Path -Leaf $previousTarget)) { throw 'Current junction has an invalid prior runtime identity.' }
         [IO.Directory]::Delete($current, $false)
     } else {
         $previousCurrent = Join-Path $OwnerRoot ('previous-' + [guid]::NewGuid().ToString('N'))
