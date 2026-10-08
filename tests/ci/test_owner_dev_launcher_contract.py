@@ -394,6 +394,7 @@ def test_compatibility_current_junction_switch_preserves_releases(tmp_path: Path
     first = switch(first_id)
     assert first.returncode == 0, first.stdout + first.stderr
     assert Path(os.path.realpath(current)) == first_release
+    assert json.loads((current / "owner-dev-runtime.json").read_text())["runtime_id"] == first_id
     preserved = list(owner_root.glob("previous-*"))
     assert (
         len(preserved) == 1
@@ -403,4 +404,5 @@ def test_compatibility_current_junction_switch_preserves_releases(tmp_path: Path
     second = switch(second_id)
     assert second.returncode == 0, second.stdout + second.stderr
     assert Path(os.path.realpath(current)) == second_release
+    assert json.loads((current / "owner-dev-runtime.json").read_text())["runtime_id"] == second_id
     assert (first_release / "owner-dev-runtime.json").is_file()

@@ -19,7 +19,6 @@ $activeCurrentProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyC
 if ($activeCurrentProcesses.Count -gt 0) { throw 'An OWNER DEV process is using the compatibility current path; refusing to switch it.' }
 
 $current = Join-Path $OwnerRoot 'current'
-$currentTemp = Join-Path $OwnerRoot ('current-' + [guid]::NewGuid().ToString('N'))
 $previousCurrent = $null
 $previousTarget = $null
 if (Test-Path -LiteralPath $current) {
@@ -35,12 +34,13 @@ if (Test-Path -LiteralPath $current) {
     }
 }
 try {
-        New-Item -ItemType Junction -Path $currentTemp -Target $runtimeRoot | Out-Null
-        Move-Item -LiteralPath $currentTemp -Destination $current
+    New-Item -ItemType Junction -Path $current -Target $runtimeRoot | Out-Null
     $currentTarget = [string](Get-Item -LiteralPath $current -Force).Target
     if ([IO.Path]::GetFullPath($currentTarget) -ne [IO.Path]::GetFullPath($runtimeRoot)) { throw 'Compatibility current junction does not resolve to the selected immutable release.' }
+    $currentManifest = Get-Content -LiteralPath (Join-Path $current 'owner-dev-runtime.json') -Raw | ConvertFrom-Json
+    if ($currentManifest.source_commit -ne $manifest.source_commit -or $currentManifest.runtime_id -ne $RuntimeId) { throw 'Compatibility current junction does not expose the selected runtime manifest.' }
 } catch {
-    if (Test-Path -LiteralPath $currentTemp) { [IO.Directory]::Delete($currentTemp, $false) }
+    if (Test-Path -LiteralPath $current) { [IO.Directory]::Delete($current, $false) }
     if (-not (Test-Path -LiteralPath $current)) {
         if ($previousCurrent -and (Test-Path -LiteralPath $previousCurrent)) {
             Move-Item -LiteralPath $previousCurrent -Destination $current
