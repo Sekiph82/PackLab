@@ -279,8 +279,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     assert missing_bootstrap.returncode == 1
     assert "dialog_shown=true" in result_file.read_text(encoding="utf-8")
     assert "bootstrap script is missing" in "\n".join(
-        path.read_text(encoding="utf-8")
-        for path in (owner_root / "logs").glob("startup-*.log")
+        path.read_text(encoding="utf-8") for path in (owner_root / "logs").glob("startup-*.log")
     )
 
     bootstrap = release_runtime / "tools/dev/owner_packlab_bootstrap.py"
@@ -317,56 +316,37 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     (descendant_release / "tools/dev/owner_packlab_bootstrap.py").write_text(
         "# fixture\n", encoding="utf-8"
     )
-    studio_window = descendant_python.parent / "studio-window.exe"
-    studio_source = tmp_path / "studio_window.cs"
-    studio_source.write_text(
+    wrapper_source = tmp_path / "pythonw_wrapper.cs"
+    wrapper_source.write_text(
         """
 using System;
+using System.Diagnostics;
+using System.IO;
 using System.Windows.Forms;
-internal static class StudioWindow {
-    [STAThread] private static void Main() {
+internal static class PythonwWrapper {
+    [STAThread] private static void Main(string[] args) {
+        if (args.Length > 0 && args[0] == "studio") {
         Form window = new Form(); window.Text = "PackLab Studio";
         Timer timer = new Timer(); timer.Interval = 12000;
         timer.Tick += delegate { timer.Stop(); window.Close(); }; timer.Start();
         Application.Run(window);
-    }
-}
-""",
-        encoding="utf-8",
-    )
-    compile_window = subprocess.run(
-        [
-            str(csc),
-            "/nologo",
-            "/target:winexe",
-            f"/out:{studio_window}",
-            "/reference:System.Windows.Forms.dll",
-            str(studio_source),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    assert compile_window.returncode == 0, compile_window.stdout + compile_window.stderr
-    wrapper_source = tmp_path / "pythonw_wrapper.cs"
-    wrapper_source.write_text(
-        """
-using System.Diagnostics;
-using System.IO;
-internal static class PythonwWrapper {
-    private static int Main() {
-        string window = Path.Combine(
-            Path.GetDirectoryName(Process.GetCurrentProcess().MainModule.FileName),
-            "studio-window.exe");
-        Process.Start(window);
-        return 0;
+        } else {
+            Process.Start(new ProcessStartInfo(Process.GetCurrentProcess().MainModule.FileName, "studio"));
+        }
     }
 }
 """,
         encoding="utf-8",
     )
     compile_wrapper = subprocess.run(
-        [str(csc), "/nologo", "/target:winexe", f"/out:{descendant_python}", str(wrapper_source)],
+        [
+            str(csc),
+            "/nologo",
+            "/target:winexe",
+            f"/out:{descendant_python}",
+            "/reference:System.Windows.Forms.dll",
+            str(wrapper_source),
+        ],
         check=False,
         capture_output=True,
         text=True,
@@ -470,9 +450,7 @@ def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert sentinel.read_text() == "previous runtime stays intact"
-    assert list((owner_root / "releases").glob("a" * 40 + "-*")) == [
-        existing_release
-    ]
+    assert list((owner_root / "releases").glob("a" * 40 + "-*")) == [existing_release]
 
 
 def test_compatibility_current_runtime_switch_preserves_releases(tmp_path: Path) -> None:
