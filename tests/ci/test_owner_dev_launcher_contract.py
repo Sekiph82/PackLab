@@ -31,7 +31,16 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "ls-tree -r --name-only $sha" in deploy
     assert "Copy-Item -LiteralPath $source -Destination $destination -Force" in deploy
     assert "reconstruction-work|reconstruction-output|packlab-work" in deploy
-    assert "Move-Item -LiteralPath $stage -Destination $current" in deploy
+    assert "OWNER_DEV_RUNTIME_READY" in deploy and "releases" in deploy
+    assert "Move-Item -LiteralPath $stage -Destination $current" not in deploy
+    current_refresh = (ROOT / "tools/dev/update_owner_dev_current_junction.ps1").read_text(
+        encoding="utf-8"
+    )
+    post = (ROOT / "tools/dev/post_codex_owner_dev_refresh.ps1").read_text(encoding="utf-8")
+    assert "New-Item -ItemType Junction" in current_refresh
+    assert post.index("refresh_owner_packlab_shortcuts.ps1") < post.index(
+        "update_owner_dev_current_junction.ps1"
+    )
     assert "sourcePathsBase64" in deploy and "base64.b64decode" in deploy
     assert "owner_packlab_bootstrap.py" in launcher
     assert '"pythonw.exe"' in launcher
@@ -42,6 +51,7 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "/target:winexe" in build and "/win32icon" in build
     assert "OWNER_DEV_LAUNCHER_BUILT" in build and "GUI_ICON_OK" in build
     assert "OWNER_DEV_LAUNCHER_REUSED" in build and "PackLab.build.json" in build
+    assert "ExpectedSourceCommit" in launcher and "runtime_id" in launcher
     assert "OWNER_DEV_EXE_READY" in shortcuts
     assert "MoveFileEx" in shortcuts and "PackLab.lnk" in shortcuts
     assert "--no-install-project" in deploy
@@ -80,9 +90,14 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
         csc = Path(os.environ["WINDIR"]) / "Microsoft.NET/Framework/v4.0.30319/csc.exe"
     assert csc.is_file(), "V09 requires an already-installed Windows C# compiler"
     owner_root = tmp_path / "owner runtime with spaces"
-    icon = owner_root / "current/apps/windows-studio/assets/branding/PackLab.ico"
+    runtime_id = "a" * 40 + "-" + "b" * 32
+    release = owner_root / "releases" / runtime_id
+    icon = release / "apps/windows-studio/assets/branding/PackLab.ico"
     icon.parent.mkdir(parents=True)
     icon.write_bytes((ROOT / "apps/windows-studio/assets/branding/PackLab.ico").read_bytes())
+    lock_bytes = b"test locked dependencies\n"
+    (release / "uv.lock").write_bytes(lock_bytes)
+    lock_digest = hashlib.sha256(lock_bytes).hexdigest()
     build = subprocess.run(
         [
             "powershell.exe",
@@ -93,6 +108,10 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
             str(ROOT),
             "-OwnerRoot",
             str(owner_root),
+            "-SourceCommit",
+            "a" * 40,
+            "-RuntimeId",
+            runtime_id,
         ],
         check=False,
         capture_output=True,
@@ -113,6 +132,10 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
             str(ROOT),
             "-OwnerRoot",
             str(owner_root),
+            "-SourceCommit",
+            "a" * 40,
+            "-RuntimeId",
+            runtime_id,
         ],
         check=False,
         capture_output=True,
@@ -122,10 +145,12 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     assert "OWNER_DEV_LAUNCHER_REUSED" in repeated_build.stdout
     assert launcher.read_bytes() == first_launcher
     digest = hashlib.sha256(icon.read_bytes()).hexdigest()
-    (owner_root / "current/owner-dev-runtime.json").write_text(
+    (release / "owner-dev-runtime.json").write_text(
         json.dumps(
             {
                 "source_commit": "a" * 40,
+                "runtime_id": runtime_id,
+                "uv_lock_sha256": lock_digest,
                 "studio_version": "0.1.0",
                 "python_version": "Python 3.12.10",
                 "smoke_status": "PASS",
@@ -152,6 +177,8 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
             str(ROOT / "tools/dev/refresh_owner_packlab_shortcuts.ps1"),
             "-OwnerRoot",
             str(owner_root),
+            "-RuntimeId",
+            runtime_id,
         ],
         check=False,
         capture_output=True,
@@ -163,10 +190,18 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     assert desktop_exe.read_bytes() == launcher.read_bytes()
     assert not obsolete.exists()
     assert unrelated.read_bytes() == b"unrelated shortcut"
-    assert "OWNER_DEV_EXE_READY " + "a" * 40 in deployed.stdout
+    assert "OWNER_DEV_EXE_READY " + "a" * 40 + " " + runtime_id in deployed.stdout
     assert (programs / "PackLab/PackLab.lnk").is_file()
 
     test_launcher = tmp_path / "launcher with spaces.exe"
+    test_source = tmp_path / "PackLabOwnerLauncher.test.cs"
+    test_source.write_text(
+        (ROOT / "tools/dev/PackLabOwnerLauncher.cs")
+        .read_text(encoding="utf-8")
+        .replace("__PACKLAB_SOURCE_COMMIT__", "a" * 40)
+        .replace("__PACKLAB_RUNTIME_ID__", runtime_id),
+        encoding="utf-8",
+    )
     compile_test = subprocess.run(
         [
             str(csc),
@@ -176,7 +211,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
             f"/out:{test_launcher}",
             f"/win32icon:{ROOT / 'apps/windows-studio/assets/branding/PackLab.ico'}",
             "/reference:System.Windows.Forms.dll",
-            str(ROOT / "tools/dev/PackLabOwnerLauncher.cs"),
+            str(test_source),
         ],
         check=False,
         capture_output=True,
@@ -184,7 +219,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     )
     assert compile_test.returncode == 0, compile_test.stdout + compile_test.stderr
 
-    local_app_data = tmp_path / "Local AppData with spaces"
+    local_app_data = tmp_path / "la"
     result_file = tmp_path / "native error dialog result.txt"
     environment = os.environ.copy()
     environment["LOCALAPPDATA"] = str(local_app_data)
@@ -195,8 +230,11 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     logs = list((local_app_data / "PackLab/OwnerDev/logs").glob("startup-*.log"))
     assert logs and "reason=launcher_failure" in logs[0].read_text(encoding="utf-8")
 
-    current = local_app_data / "PackLab/OwnerDev/current"
-    pythonw = current / ".venv/Scripts/pythonw.exe"
+    runtime_id = "a" * 40 + "-" + "b" * 32
+    release_runtime = local_app_data / "PackLab/OwnerDev/releases" / runtime_id
+    release_runtime.mkdir(parents=True, exist_ok=True)
+    (release_runtime / "uv.lock").write_bytes(lock_bytes)
+    pythonw = release_runtime / ".venv/Scripts/pythonw.exe"
     pythonw.parent.mkdir(parents=True)
     fake_child_source = tmp_path / "early_exit.cs"
     fake_child_source.write_text(
@@ -210,8 +248,17 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
         text=True,
     )
     assert fake_child.returncode == 0, fake_child.stdout + fake_child.stderr
-    (current / "owner-dev-runtime.json").write_text(
-        json.dumps({"source_commit": "a" * 40, "studio_version": "0.1.0", "smoke_status": "PASS"}),
+    # Test launcher constants are replaced in a temporary source copy below.
+    (release_runtime / "owner-dev-runtime.json").write_text(
+        json.dumps(
+            {
+                "source_commit": "a" * 40,
+                "runtime_id": runtime_id,
+                "uv_lock_sha256": lock_digest,
+                "studio_version": "0.1.0",
+                "smoke_status": "PASS",
+            }
+        ),
         encoding="utf-8",
     )
     result_file.unlink()
@@ -225,7 +272,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
         for path in (local_app_data / "PackLab/OwnerDev/logs").glob("startup-*.log")
     )
 
-    bootstrap = current / "tools/dev/owner_packlab_bootstrap.py"
+    bootstrap = release_runtime / "tools/dev/owner_packlab_bootstrap.py"
     bootstrap.parent.mkdir(parents=True)
     bootstrap.write_text("# fixture\n", encoding="utf-8")
     result_file.unlink()
@@ -266,9 +313,9 @@ def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:
         subprocess.run(command, check=True, capture_output=True, text=True)
 
     local_app_data = tmp_path / "Local AppData"
-    current = local_app_data / "PackLab/OwnerDev/current"
-    current.mkdir(parents=True)
-    sentinel = current / "known-good.txt"
+    existing_release = local_app_data / "PackLab/OwnerDev/releases" / ("a" * 40 + "-" + "c" * 32)
+    existing_release.mkdir(parents=True)
+    sentinel = existing_release / "known-good.txt"
     sentinel.write_text("previous runtime stays intact")
     fake_uv = tmp_path / "uv fails.cmd"
     fake_uv.write_text("@echo off\r\nexit /b 97\r\n")
@@ -292,4 +339,66 @@ def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert sentinel.read_text() == "previous runtime stays intact"
-    assert not list((local_app_data / "PackLab/OwnerDev").glob("stage-*"))
+    assert list((local_app_data / "PackLab/OwnerDev/releases").glob("a" * 40 + "-*")) == [
+        existing_release
+    ]
+
+
+def test_compatibility_current_junction_switch_preserves_releases(tmp_path: Path) -> None:
+    if not shutil.which("powershell.exe"):
+        return
+    owner_root = tmp_path / "owner runtime with spaces"
+    first_id = "a" * 40 + "-" + "b" * 32
+    second_id = "c" * 40 + "-" + "d" * 32
+    first_release = owner_root / "releases" / first_id
+    second_release = owner_root / "releases" / second_id
+    first_release.mkdir(parents=True)
+    second_release.mkdir(parents=True)
+    for release, runtime_id, source_sha in (
+        (first_release, first_id, "a" * 40),
+        (second_release, second_id, "c" * 40),
+    ):
+        (release / "owner-dev-runtime.json").write_text(
+            json.dumps(
+                {
+                    "runtime_id": runtime_id,
+                    "source_commit": source_sha,
+                    "smoke_status": "PASS",
+                }
+            ),
+            encoding="utf-8",
+        )
+    current = owner_root / "current"
+    current.mkdir(parents=True)
+    (current / "preserved.txt").write_text("keep prior owner runtime")
+
+    def switch(runtime_id: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-File",
+                str(ROOT / "tools/dev/update_owner_dev_current_junction.ps1"),
+                "-OwnerRoot",
+                str(owner_root),
+                "-RuntimeId",
+                runtime_id,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+    first = switch(first_id)
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert Path(os.path.realpath(current)) == first_release
+    preserved = list(owner_root.glob("previous-*"))
+    assert (
+        len(preserved) == 1
+        and (preserved[0] / "preserved.txt").read_text() == "keep prior owner runtime"
+    )
+
+    second = switch(second_id)
+    assert second.returncode == 0, second.stdout + second.stderr
+    assert Path(os.path.realpath(current)) == second_release
+    assert (first_release / "owner-dev-runtime.json").is_file()

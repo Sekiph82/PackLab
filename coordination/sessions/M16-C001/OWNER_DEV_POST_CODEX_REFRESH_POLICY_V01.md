@@ -11,17 +11,23 @@ equal, the Codex implementation actor runs:
 tools/dev/post_codex_owner_dev_refresh.ps1 -AllowPublishedCommit
 ```
 
-The script builds a new runtime from that exact clean published commit and runs locked dependency sync plus a bounded
-source-mode smoke before replacing the prior runtime. It verifies the canonical icon at
+The script builds a new immutable runtime release from that exact clean published commit under
+`%LOCALAPPDATA%\PackLab\OwnerDev\releases\<source-commit>-<release-id>` and runs locked dependency sync plus a bounded
+source-mode smoke before publishing a native launcher bound to that release. Existing releases remain in place so an
+older Desktop EXE continues to resolve its matching runtime throughout the refresh. After the new native EXE is
+atomically installed, the historic `current` path is switched to a compatibility junction for diagnostics and older
+OWNER DEV helpers; the new native EXE never resolves its runtime through that mutable junction. It verifies the canonical icon at
 `%LOCALAPPDATA%\PackLab\OwnerDev\branding\PackLab.ico`, builds the checked-in Windows GUI launcher source with an
 already-installed compiler, and embeds that exact icon in
 `%LOCALAPPDATA%\PackLab\OwnerDev\launcher\PackLab.exe`. It atomically copies the verified launcher to the real
 Desktop known folder as `PackLab.exe`, removes only the obsolete owner-created `PackLab.lnk` after that copy passes
 hash, PE GUI-subsystem, and Shell icon checks, then recreates the Start Menu shortcut against the stable native EXE.
-The launcher runs the runtime's `pythonw.exe` and bootstrap directly, without PowerShell, and monitors child startup
-for ten seconds. OWNER DEV-only Python tracebacks and native launcher failures remain in the LocalAppData logs.
+The native EXE embeds the exact published source SHA and immutable runtime ID, verifies both against the release
+manifest, then runs that release's `pythonw.exe` and bootstrap directly without PowerShell. The runtime manifest also
+records the exact `uv.lock` SHA-256; the release venv is created and smoke-tested in its final immutable directory.
+OWNER DEV-only Python tracebacks and native launcher failures remain in the LocalAppData logs.
 
-The post-refresh command prints `OWNER_DEV_EXE_READY <full_sha> <desktop_exe> <launcher_exe>` only after runtime SHA,
+The post-refresh command prints `OWNER_DEV_EXE_READY <full_sha> <runtime_id> <desktop_exe> <launcher_exe>` only after runtime SHA,
 canonical icon, EXE hashes, GUI subsystem, Shell icon extraction, Desktop `.lnk` absence, and native Start Menu target
 checks pass. The Desktop executable is byte-identical to the stable launcher and never captures a Codex worktree.
 This owner-local source runtime does not satisfy PL-0350 redistribution or PL-0351 clean-install acceptance.

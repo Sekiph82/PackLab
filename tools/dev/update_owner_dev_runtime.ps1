@@ -20,11 +20,11 @@ if ($AllowPublishedCommit) {
 }
 
 $ownerRoot = Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'
-New-Item -ItemType Directory -Force -Path $ownerRoot | Out-Null
-$stage = Join-Path $ownerRoot ('stage-' + [guid]::NewGuid().ToString('N'))
-$current = Join-Path $ownerRoot 'current'
-$backup = Join-Path $ownerRoot ('previous-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
-New-Item -ItemType Directory -Path $stage | Out-Null
+$releases = Join-Path $ownerRoot 'releases'
+New-Item -ItemType Directory -Force -Path $ownerRoot, $releases | Out-Null
+$runtimeId = $sha + '-' + [guid]::NewGuid().ToString('N')
+$runtimeRoot = Join-Path $releases $runtimeId
+New-Item -ItemType Directory -Path $runtimeRoot | Out-Null
 
 function Get-Sha256([string]$Path) {
     $algorithm = [Security.Cryptography.SHA256]::Create()
@@ -44,22 +44,22 @@ try {
         $source = Join-Path $root $relativePath
         $sourceItem = Get-Item -LiteralPath $source -Force -ErrorAction Stop
         if (($sourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Refusing a reparse point in runtime source: $relativePath" }
-        $destination = Join-Path $stage $relativePath
+        $destination = Join-Path $runtimeRoot $relativePath
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
         Copy-Item -LiteralPath $source -Destination $destination -Force
     }
     $uv = if ($UvPath) { (Resolve-Path -LiteralPath $UvPath).Path } else { (Get-Command uv -ErrorAction Stop).Source }
-    & $uv sync --locked --no-install-project --project $stage
+    & $uv sync --locked --no-install-project --project $runtimeRoot
     if ($LASTEXITCODE -ne 0) { throw "uv sync --locked failed with exit $LASTEXITCODE." }
-    $python = Join-Path $stage '.venv\Scripts\python.exe'
+    $python = Join-Path $runtimeRoot '.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $python)) { throw 'uv sync did not create the runtime Python executable.' }
-    $sourcePaths = ConvertTo-Json -InputObject @((Join-Path $stage 'core\src'), (Join-Path $stage 'apps\windows-studio\src')) -Compress
+    $sourcePaths = ConvertTo-Json -InputObject @((Join-Path $runtimeRoot 'core\src'), (Join-Path $runtimeRoot 'apps\windows-studio\src')) -Compress
     $sourcePathsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sourcePaths))
     $smoke = "import base64,json,sys; sys.path[:0]=json.loads(base64.b64decode('$sourcePathsBase64')); from PySide6.QtCore import QTimer; from packlab_studio.app import create_application; from packlab_studio.shell import StudioMainWindow; app=create_application(['PackLab owner runtime smoke']); window=StudioMainWindow(); window.show(); app.processEvents(); assert not window.windowIcon().isNull(), 'canonical icon did not load'; QTimer.singleShot(250, app.quit); raise SystemExit(app.exec())"
     & $python -c $smoke
     $smokeExit = $LASTEXITCODE
     if ($smokeExit -ne 0) { throw "Source-mode Studio smoke failed with exit $smokeExit." }
-    $icon = Join-Path $stage 'apps\windows-studio\assets\branding\PackLab.ico'
+    $icon = Join-Path $runtimeRoot 'apps\windows-studio\assets\branding\PackLab.ico'
     $iconHash = Get-Sha256 $icon
     $versionCode = "import base64,json,sys; sys.path[:0]=json.loads(base64.b64decode('$sourcePathsBase64')); from packlab_studio import __version__; print(__version__)"
     $version = (& $python -c $versionCode).Trim()
@@ -68,23 +68,18 @@ try {
     $manifest = [ordered]@{
         schema_version = 1
         source_commit = $sha
+        runtime_id = $runtimeId
+        uv_lock_sha256 = (Get-Sha256 (Join-Path $runtimeRoot 'uv.lock'))
         studio_version = $version
         python_version = $pythonVersion
         icon_sha256 = $iconHash
         refreshed_utc = [DateTime]::UtcNow.ToString('o')
         smoke_status = 'PASS'
     } | ConvertTo-Json
-    [IO.File]::WriteAllText((Join-Path $stage 'owner-dev-runtime.json'), $manifest + "`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $runtimeRoot 'owner-dev-runtime.json'), $manifest + "`n", [Text.UTF8Encoding]::new($false))
 
-    if (Test-Path -LiteralPath $current) { Move-Item -LiteralPath $current -Destination $backup }
-    try {
-        Move-Item -LiteralPath $stage -Destination $current
-    } catch {
-        if (Test-Path -LiteralPath $backup) { Move-Item -LiteralPath $backup -Destination $current }
-        throw
-    }
-    Write-Output "OWNER_DEV_RUNTIME_UPDATED $sha $current"
+    Write-Output "OWNER_DEV_RUNTIME_READY $sha $runtimeId $runtimeRoot"
 } catch {
-    if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+    if (Test-Path -LiteralPath $runtimeRoot) { Remove-Item -LiteralPath $runtimeRoot -Recurse -Force }
     throw
 }

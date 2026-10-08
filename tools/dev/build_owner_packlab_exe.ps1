@@ -1,12 +1,14 @@
 [CmdletBinding()]
 param(
     [string]$RepositoryRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
-    [string]$OwnerRoot = (Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev')
+    [string]$OwnerRoot = (Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'),
+    [Parameter(Mandatory=$true)][string]$SourceCommit,
+    [Parameter(Mandatory=$true)][string]$RuntimeId
 )
 
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path -LiteralPath $RepositoryRoot).Path
-$runtime = Join-Path $OwnerRoot 'current'
+$runtime = Join-Path (Join-Path $OwnerRoot 'releases') $RuntimeId
 $canonicalIcon = Join-Path $runtime 'apps\windows-studio\assets\branding\PackLab.ico'
 $stableIcon = Join-Path $OwnerRoot 'branding\PackLab.ico'
 $source = Join-Path $root 'tools\dev\PackLabOwnerLauncher.cs'
@@ -55,6 +57,7 @@ public static class PackLabLauncherShellProbe {
 }
 '@
 
+if ($SourceCommit -notmatch '^[0-9a-f]{40}$' -or $RuntimeId -notmatch ('^' + [regex]::Escape($SourceCommit) + '-[0-9a-f]{32}$')) { throw 'Launcher source/runtime identity is invalid.' }
 if (-not (Test-Path -LiteralPath $canonicalIcon -PathType Leaf)) { throw 'Canonical runtime ICO is missing.' }
 if ((Get-Sha256 $canonicalIcon) -ne $expectedIconHash) { throw 'Canonical repository ICO digest does not match the frozen icon hash.' }
 if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw 'Checked-in native launcher source is missing.' }
@@ -87,15 +90,19 @@ $reuseExisting = $false
 if ((Test-Path -LiteralPath $stableExe -PathType Leaf) -and (Test-Path -LiteralPath $fingerprintPath -PathType Leaf)) {
     try {
         $fingerprint = Get-Content -LiteralPath $fingerprintPath -Raw | ConvertFrom-Json
-        $reuseExisting = ($fingerprint.source_sha256 -eq $sourceHash -and $fingerprint.icon_sha256 -eq $iconHash -and $fingerprint.compiler_path -eq $compiler)
+        $reuseExisting = ($fingerprint.source_sha256 -eq $sourceHash -and $fingerprint.source_commit -eq $SourceCommit -and $fingerprint.runtime_id -eq $RuntimeId -and $fingerprint.icon_sha256 -eq $iconHash -and $fingerprint.compiler_path -eq $compiler)
         if ($reuseExisting) { Assert-GuiExecutable $stableExe; Assert-EmbeddedIcon $stableExe }
     } catch { $reuseExisting = $false }
 }
 
 if (-not $reuseExisting) {
     $tempExe = Join-Path $launcherDir ('PackLab-' + [guid]::NewGuid().ToString('N') + '.exe')
+    $tempSource = Join-Path $launcherDir ('PackLab-' + [guid]::NewGuid().ToString('N') + '.cs')
     try {
-        & $compiler /nologo /target:winexe /platform:anycpu /optimize+ /out:$tempExe /win32icon:$stableIcon /reference:System.Windows.Forms.dll $source
+        $launcherSource = [IO.File]::ReadAllText($source)
+        $launcherSource = $launcherSource.Replace('__PACKLAB_SOURCE_COMMIT__', $SourceCommit).Replace('__PACKLAB_RUNTIME_ID__', $RuntimeId)
+        [IO.File]::WriteAllText($tempSource, $launcherSource, [Text.UTF8Encoding]::new($false))
+        & $compiler /nologo /target:winexe /platform:anycpu /optimize+ /out:$tempExe /win32icon:$stableIcon /reference:System.Windows.Forms.dll $tempSource
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempExe -PathType Leaf)) { throw "C# launcher compilation failed with exit $LASTEXITCODE." }
         Assert-GuiExecutable $tempExe
         Assert-EmbeddedIcon $tempExe
@@ -103,6 +110,7 @@ if (-not $reuseExisting) {
         if (-not [PackLabLauncherShellProbe]::MoveFileEx($tempExe, $stableExe, $flags)) { throw "Could not atomically publish stable launcher: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())" }
     } finally {
         if (Test-Path -LiteralPath $tempExe) { Remove-Item -LiteralPath $tempExe -Force }
+        if (Test-Path -LiteralPath $tempSource) { Remove-Item -LiteralPath $tempSource -Force }
     }
 }
 
@@ -110,7 +118,7 @@ Assert-GuiExecutable $stableExe
 Assert-EmbeddedIcon $stableExe
 $hash = Get-Sha256 $stableExe
 $bytes = (Get-Item -LiteralPath $stableExe).Length
-$fingerprint = [ordered]@{ source_sha256 = $sourceHash; icon_sha256 = $iconHash; compiler_path = $compiler; exe_sha256 = $hash; exe_bytes = $bytes } | ConvertTo-Json
+$fingerprint = [ordered]@{ source_sha256 = $sourceHash; source_commit = $SourceCommit; runtime_id = $RuntimeId; icon_sha256 = $iconHash; compiler_path = $compiler; exe_sha256 = $hash; exe_bytes = $bytes } | ConvertTo-Json
 $fingerprintTemp = Join-Path $launcherDir ('PackLab.build-' + [guid]::NewGuid().ToString('N') + '.json')
 [IO.File]::WriteAllText($fingerprintTemp, $fingerprint + "`n", [Text.UTF8Encoding]::new($false))
 if (-not [PackLabLauncherShellProbe]::MoveFileEx($fingerprintTemp, $fingerprintPath, (0x1 -bor 0x8))) {
@@ -118,4 +126,4 @@ if (-not [PackLabLauncherShellProbe]::MoveFileEx($fingerprintTemp, $fingerprintP
     throw "Could not atomically publish launcher fingerprint: $([Runtime.InteropServices.Marshal]::GetLastWin32Error())"
 }
 $result = if ($reuseExisting) { 'OWNER_DEV_LAUNCHER_REUSED' } else { 'OWNER_DEV_LAUNCHER_BUILT' }
-Write-Output "$result $compiler $stableExe $hash $bytes GUI_ICON_OK"
+Write-Output "$result $SourceCommit $RuntimeId $compiler $stableExe $hash $bytes GUI_ICON_OK"

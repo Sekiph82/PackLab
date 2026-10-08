@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -8,6 +9,8 @@ using System.Windows.Forms;
 
 internal static class PackLabOwnerLauncher
 {
+    private const string ExpectedSourceCommit = "__PACKLAB_SOURCE_COMMIT__";
+    private const string RuntimeId = "__PACKLAB_RUNTIME_ID__";
     private const int StartupStabilitySeconds = 10;
 
     [STAThread]
@@ -15,7 +18,7 @@ internal static class PackLabOwnerLauncher
     {
         string localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
         string ownerRoot = Path.Combine(localAppData ?? String.Empty, "PackLab", "OwnerDev");
-        string runtimeRoot = Path.Combine(ownerRoot, "current");
+        string runtimeRoot = Path.Combine(ownerRoot, "releases", RuntimeId);
         string logRoot = Path.Combine(ownerRoot, "logs");
         string startupLog = Path.Combine(logRoot, "startup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".log");
         string deployedSha = "unknown";
@@ -34,8 +37,17 @@ internal static class PackLabOwnerLauncher
             string manifest = File.ReadAllText(manifestPath, Encoding.UTF8);
             deployedSha = ReadManifestValue(manifest, "source_commit");
             studioVersion = ReadManifestValue(manifest, "studio_version");
+            string manifestRuntimeId = ReadManifestValue(manifest, "runtime_id");
+            string lockSha256 = ReadManifestValue(manifest, "uv_lock_sha256");
             string smokeStatus = ReadManifestValue(manifest, "smoke_status");
-            if (!Regex.IsMatch(deployedSha, "^[0-9a-f]{40}$") || smokeStatus != "PASS")
+            string actualLockSha256;
+            using (SHA256 sha256 = SHA256.Create())
+            using (FileStream lockStream = File.OpenRead(Path.Combine(runtimeRoot, "uv.lock")))
+                actualLockSha256 = BitConverter.ToString(sha256.ComputeHash(lockStream)).Replace("-", "").ToLowerInvariant();
+            if (deployedSha != ExpectedSourceCommit || manifestRuntimeId != RuntimeId ||
+                !Regex.IsMatch(deployedSha, "^[0-9a-f]{40}$") ||
+                !Regex.IsMatch(lockSha256, "^[0-9a-f]{64}$") || actualLockSha256 != lockSha256 ||
+                smokeStatus != "PASS")
                 throw new InvalidDataException("Owner runtime manifest is invalid or has no successful smoke result.");
             if (!Regex.IsMatch(studioVersion, "^\\d+\\.\\d+\\.\\d+"))
                 throw new InvalidDataException("Owner runtime manifest has an invalid Studio version.");
@@ -51,6 +63,7 @@ internal static class PackLabOwnerLauncher
             start.EnvironmentVariables["PACKLAB_OWNERDEV_STARTUP_LOG"] = startupLog;
             start.EnvironmentVariables["PACKLAB_OWNERDEV_SOURCE_SHA"] = deployedSha;
             start.EnvironmentVariables["PACKLAB_OWNERDEV_STUDIO_VERSION"] = studioVersion;
+            start.EnvironmentVariables["PACKLAB_OWNERDEV_RUNTIME_ID"] = RuntimeId;
 
             using (Process child = Process.Start(start))
             {

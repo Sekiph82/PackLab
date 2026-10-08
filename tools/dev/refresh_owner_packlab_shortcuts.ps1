@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$OwnerRoot = (Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'))
+param([string]$OwnerRoot = (Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'), [Parameter(Mandatory=$true)][string]$RuntimeId)
 
 $ErrorActionPreference = 'Stop'
 
@@ -25,14 +25,14 @@ public static class PackLabOwnerExeRefreshShell {
 }
 '@
 
-$current = Join-Path $OwnerRoot 'current'
-$manifestPath = Join-Path $current 'owner-dev-runtime.json'
+$runtimeRoot = Join-Path (Join-Path $OwnerRoot 'releases') $RuntimeId
+$manifestPath = Join-Path $runtimeRoot 'owner-dev-runtime.json'
 $stableIcon = Join-Path $OwnerRoot 'branding\PackLab.ico'
 $launcher = Join-Path $OwnerRoot 'launcher\PackLab.exe'
 $canonicalIconHash = 'a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $sha = [string]$manifest.source_commit
-if ($sha -notmatch '^[0-9a-f]{40}$' -or $manifest.smoke_status -ne 'PASS') { throw 'Current runtime manifest is not valid.' }
+if ($sha -notmatch '^[0-9a-f]{40}$' -or $manifest.runtime_id -ne $RuntimeId -or $manifest.smoke_status -ne 'PASS') { throw 'Runtime release manifest is not valid.' }
 if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw 'Stable native owner launcher is missing.' }
 if (-not (Test-Path -LiteralPath $stableIcon -PathType Leaf) -or (Get-Sha256 $stableIcon) -ne $canonicalIconHash) { throw 'Stable canonical ICO verification failed.' }
 
@@ -69,7 +69,7 @@ $shell = New-Object -ComObject WScript.Shell
 if (Test-Path -LiteralPath $startMenuPath -PathType Leaf) { Remove-Item -LiteralPath $startMenuPath -Force }
 $shortcut = $shell.CreateShortcut($startMenuPath)
 $shortcut.TargetPath = $launcher
-$shortcut.WorkingDirectory = $current
+$shortcut.WorkingDirectory = $runtimeRoot
 $shortcut.IconLocation = "$launcher,0"
 $shortcut.Description = "PackLab Studio OWNER DEV $($sha.Substring(0, 8))"
 $shortcut.Save()
@@ -85,4 +85,4 @@ $launcherHash = Get-Sha256 $launcher
 $desktopHash = Get-Sha256 $desktopExe
 $launcherLength = (Get-Item -LiteralPath $launcher).Length
 $desktopLength = (Get-Item -LiteralPath $desktopExe).Length
-Write-Output "OWNER_DEV_EXE_READY $sha $desktopExe $launcher $launcherHash $launcherLength $desktopHash $desktopLength"
+Write-Output "OWNER_DEV_EXE_READY $sha $RuntimeId $desktopExe $launcher $launcherHash $launcherLength $desktopHash $desktopLength"
