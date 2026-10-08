@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$OwnerRoot = (Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'),
+    [string]$OwnerRoot = (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'PackLab\OwnerDev'),
     [Parameter(Mandatory=$true)][string]$RuntimeId
 )
 

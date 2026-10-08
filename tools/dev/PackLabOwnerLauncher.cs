@@ -11,13 +11,13 @@ internal static class PackLabOwnerLauncher
 {
     private const string ExpectedSourceCommit = "__PACKLAB_SOURCE_COMMIT__";
     private const string RuntimeId = "__PACKLAB_RUNTIME_ID__";
+    private const string OwnerRoot = "__PACKLAB_OWNER_ROOT__";
     private const int StartupStabilitySeconds = 10;
 
     [STAThread]
     private static int Main()
     {
-        string localAppData = Environment.GetEnvironmentVariable("LOCALAPPDATA");
-        string ownerRoot = Path.Combine(localAppData ?? String.Empty, "PackLab", "OwnerDev");
+        string ownerRoot = OwnerRoot;
         string runtimeRoot = Path.Combine(ownerRoot, "releases", RuntimeId);
         string logRoot = Path.Combine(ownerRoot, "logs");
         string startupLog = Path.Combine(logRoot, "startup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".log");

@@ -1,8 +1,7 @@
 [CmdletBinding()]
-param()
+param([string]$OwnerRoot = (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'PackLab\OwnerDev'))
 
 $ErrorActionPreference = 'Stop'
-$ownerRoot = Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'
 $runtimeRoot = Join-Path $ownerRoot 'current'
 $manifestPath = Join-Path $runtimeRoot 'owner-dev-runtime.json'
 $pythonw = Join-Path $runtimeRoot '.venv\Scripts\pythonw.exe'
@@ -20,7 +19,9 @@ try {
     if ($manifest.studio_version -notmatch '^\d+\.\d+\.\d+') { throw 'Runtime manifest has an invalid Studio version.' }
     if (-not (Test-Path -LiteralPath $pythonw -PathType Leaf)) { throw 'PackLab Python runtime is missing.' }
     if (-not (Test-Path -LiteralPath $studioSource -PathType Container) -or -not (Test-Path -LiteralPath $coreSource -PathType Container)) { throw 'PackLab source modules are missing.' }
-    $bootstrap = "import os,sys,runpy;sys.path[:0]=[os.path.join(os.environ['LOCALAPPDATA'],'PackLab','OwnerDev','current','core','src'),os.path.join(os.environ['LOCALAPPDATA'],'PackLab','OwnerDev','current','apps','windows-studio','src')];runpy.run_module('packlab_studio',run_name='__main__')"
+    $sourcePaths = ConvertTo-Json -InputObject @($coreSource, $studioSource) -Compress
+    $sourcePathsBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sourcePaths))
+    $bootstrap = "import base64,json,sys,runpy;sys.path[:0]=json.loads(base64.b64decode('$sourcePathsBase64'));runpy.run_module('packlab_studio',run_name='__main__')"
     New-Item -ItemType Directory -Force -Path $logRoot | Out-Null
     $previousDiagnosticMode = $env:PACKLAB_OWNERDEV_DIAGNOSTICS
     $previousStartupLog = $env:PACKLAB_OWNERDEV_STARTUP_LOG

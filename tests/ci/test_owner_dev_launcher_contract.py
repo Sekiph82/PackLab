@@ -43,6 +43,9 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     )
     assert "sourcePathsBase64" in deploy and "base64.b64decode" in deploy
     assert "owner_packlab_bootstrap.py" in launcher
+    assert "__PACKLAB_OWNER_ROOT__" in launcher
+    assert "LOCALAPPDATA" not in launcher
+    assert "DesktopDirectory" in build and "DesktopDirectory" in post
     assert '"pythonw.exe"' in launcher
     assert 'run_module("packlab_studio"' in bootstrap
     assert "WaitForExit(200)" in launcher and "StartupStabilitySeconds = 10" in launcher
@@ -201,7 +204,8 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
         (ROOT / "tools/dev/PackLabOwnerLauncher.cs")
         .read_text(encoding="utf-8")
         .replace("__PACKLAB_SOURCE_COMMIT__", "a" * 40)
-        .replace("__PACKLAB_RUNTIME_ID__", runtime_id),
+        .replace("__PACKLAB_RUNTIME_ID__", runtime_id)
+        .replace("__PACKLAB_OWNER_ROOT__", str(owner_root).replace("\\", "\\\\")),
         encoding="utf-8",
     )
     compile_test = subprocess.run(
@@ -221,7 +225,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     )
     assert compile_test.returncode == 0, compile_test.stdout + compile_test.stderr
 
-    local_app_data = tmp_path / "la"
+    local_app_data = tmp_path / "Local AppData decoy"
     result_file = tmp_path / "native error dialog result.txt"
     environment = os.environ.copy()
     environment["LOCALAPPDATA"] = str(local_app_data)
@@ -229,11 +233,11 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     missing = subprocess.run([str(test_launcher)], env=environment, check=False, timeout=5)
     assert missing.returncode == 1
     assert "dialog_shown=true" in result_file.read_text(encoding="utf-8")
-    logs = list((local_app_data / "PackLab/OwnerDev/logs").glob("startup-*.log"))
+    logs = list((owner_root / "logs").glob("startup-*.log"))
     assert logs and "reason=launcher_failure" in logs[0].read_text(encoding="utf-8")
 
     runtime_id = "a" * 40 + "-" + "b" * 32
-    release_runtime = local_app_data / "PackLab/OwnerDev/releases" / runtime_id
+    release_runtime = owner_root / "releases" / runtime_id
     release_runtime.mkdir(parents=True, exist_ok=True)
     (release_runtime / "uv.lock").write_bytes(lock_bytes)
     pythonw = release_runtime / ".venv/Scripts/pythonw.exe"
@@ -271,7 +275,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     assert "dialog_shown=true" in result_file.read_text(encoding="utf-8")
     assert "bootstrap script is missing" in "\n".join(
         path.read_text(encoding="utf-8")
-        for path in (local_app_data / "PackLab/OwnerDev/logs").glob("startup-*.log")
+        for path in (owner_root / "logs").glob("startup-*.log")
     )
 
     bootstrap = release_runtime / "tools/dev/owner_packlab_bootstrap.py"
@@ -282,7 +286,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     assert early.returncode == 1
     diagnostic = result_file.read_text(encoding="utf-8")
     assert "dialog_shown=true" in diagnostic and "exit_code=29" in diagnostic
-    logs = list((local_app_data / "PackLab/OwnerDev/logs").glob("startup-*.log"))
+    logs = list((owner_root / "logs").glob("startup-*.log"))
     assert any("reason=early_child_exit" in path.read_text(encoding="utf-8") for path in logs)
 
 
@@ -315,7 +319,8 @@ def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:
         subprocess.run(command, check=True, capture_output=True, text=True)
 
     local_app_data = tmp_path / "Local AppData"
-    existing_release = local_app_data / "PackLab/OwnerDev/releases" / ("a" * 40 + "-" + "c" * 32)
+    owner_root = local_app_data / "PackLab/OwnerDev"
+    existing_release = owner_root / "releases" / ("a" * 40 + "-" + "c" * 32)
     existing_release.mkdir(parents=True)
     sentinel = existing_release / "known-good.txt"
     sentinel.write_text("previous runtime stays intact")
@@ -331,6 +336,8 @@ def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:
             str(ROOT / "tools/dev/update_owner_dev_runtime.ps1"),
             "-RepositoryRoot",
             str(repository),
+            "-OwnerRoot",
+            str(owner_root),
             "-UvPath",
             str(fake_uv),
         ],
@@ -341,7 +348,7 @@ def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert sentinel.read_text() == "previous runtime stays intact"
-    assert list((local_app_data / "PackLab/OwnerDev/releases").glob("a" * 40 + "-*")) == [
+    assert list((owner_root / "releases").glob("a" * 40 + "-*")) == [
         existing_release
     ]
 

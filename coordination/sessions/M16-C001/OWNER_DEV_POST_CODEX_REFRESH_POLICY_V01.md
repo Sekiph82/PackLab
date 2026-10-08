@@ -12,20 +12,20 @@ tools/dev/post_codex_owner_dev_refresh.ps1 -AllowPublishedCommit
 ```
 
 The script builds a new immutable runtime release from that exact clean published commit under
-`%LOCALAPPDATA%\PackLab\OwnerDev\releases\<source-commit>-<release-id>` and runs locked dependency sync plus a bounded
+`<Desktop>\PackLab\OwnerDev\releases\<source-commit>-<release-id>` and runs locked dependency sync plus a bounded
 source-mode smoke before publishing a native launcher bound to that release. Existing releases remain in place so an
 older Desktop EXE continues to resolve its matching runtime throughout the refresh. After the new native EXE is
 atomically installed, the historic `current` path is updated from a staged, verified copy for diagnostics and older
 OWNER DEV helpers; the new native EXE never resolves its runtime through that mutable path. It verifies the canonical icon at
-`%LOCALAPPDATA%\PackLab\OwnerDev\branding\PackLab.ico`, builds the checked-in Windows GUI launcher source with an
+`<Desktop>\PackLab\OwnerDev\branding\PackLab.ico`, builds the checked-in Windows GUI launcher source with an
 already-installed compiler, and embeds that exact icon in
-`%LOCALAPPDATA%\PackLab\OwnerDev\launcher\PackLab.exe`. It atomically copies the verified launcher to the real
+`<Desktop>\PackLab\OwnerDev\launcher\PackLab.exe`. It atomically copies the verified launcher to the real
 Desktop known folder as `PackLab.exe`, removes only the obsolete owner-created `PackLab.lnk` after that copy passes
 hash, PE GUI-subsystem, and Shell icon checks, then recreates the Start Menu shortcut against the stable native EXE.
 The native EXE embeds the exact published source SHA and immutable runtime ID, verifies both against the release
 manifest, then runs that release's `pythonw.exe` and bootstrap directly without PowerShell. The runtime manifest also
 records the exact `uv.lock` SHA-256; the release venv is created and smoke-tested in its final immutable directory.
-OWNER DEV-only Python tracebacks and native launcher failures remain in the LocalAppData logs.
+OWNER DEV-only Python tracebacks and native launcher failures remain in `<Desktop>\PackLab\OwnerDev\logs`.
 
 The post-refresh command prints `OWNER_DEV_EXE_READY <full_sha> <runtime_id> <desktop_exe> <launcher_exe>` only after runtime SHA,
 canonical icon, EXE hashes, GUI subsystem, Shell icon extraction, Desktop `.lnk` absence, and native Start Menu target
@@ -40,7 +40,7 @@ remote parity is verified. The active prompt may explicitly define a different f
 ## Boundaries
 
 - `TASKS.md` and ChatGPT audit verdicts remain ChatGPT-owned.
-- The runtime is path-private under LocalAppData and contains no PackLab project data, Codex logs, tests, credentials,
+- The runtime is local to the Desktop PackLab project under `OwnerDev` and contains no PackLab project data, Codex logs, tests, credentials,
   or Git metadata.
 - Launch uses `pythonw.exe`, does not download or update dependencies, and does not write to repository source.
 - Taskbar pinning uses only a legitimate Windows shell verb if one is exposed. Never edit Taskband registry state or

@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$RepositoryRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
-    [string]$OwnerRoot = (Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'),
+    [string]$OwnerRoot = (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'PackLab\OwnerDev'),
     [Parameter(Mandatory=$true)][string]$SourceCommit,
     [Parameter(Mandatory=$true)][string]$RuntimeId
 )
@@ -90,7 +90,7 @@ $reuseExisting = $false
 if ((Test-Path -LiteralPath $stableExe -PathType Leaf) -and (Test-Path -LiteralPath $fingerprintPath -PathType Leaf)) {
     try {
         $fingerprint = Get-Content -LiteralPath $fingerprintPath -Raw | ConvertFrom-Json
-        $reuseExisting = ($fingerprint.source_sha256 -eq $sourceHash -and $fingerprint.source_commit -eq $SourceCommit -and $fingerprint.runtime_id -eq $RuntimeId -and $fingerprint.icon_sha256 -eq $iconHash -and $fingerprint.compiler_path -eq $compiler)
+        $reuseExisting = ($fingerprint.source_sha256 -eq $sourceHash -and $fingerprint.source_commit -eq $SourceCommit -and $fingerprint.runtime_id -eq $RuntimeId -and $fingerprint.owner_root -eq $OwnerRoot -and $fingerprint.icon_sha256 -eq $iconHash -and $fingerprint.compiler_path -eq $compiler)
         if ($reuseExisting) { Assert-GuiExecutable $stableExe; Assert-EmbeddedIcon $stableExe }
     } catch { $reuseExisting = $false }
 }
@@ -100,7 +100,8 @@ if (-not $reuseExisting) {
     $tempSource = Join-Path $launcherDir ('PackLab-' + [guid]::NewGuid().ToString('N') + '.cs')
     try {
         $launcherSource = [IO.File]::ReadAllText($source)
-        $launcherSource = $launcherSource.Replace('__PACKLAB_SOURCE_COMMIT__', $SourceCommit).Replace('__PACKLAB_RUNTIME_ID__', $RuntimeId)
+        $ownerRootLiteral = $OwnerRoot.Replace('\', '\\').Replace('"', '\"')
+        $launcherSource = $launcherSource.Replace('__PACKLAB_SOURCE_COMMIT__', $SourceCommit).Replace('__PACKLAB_RUNTIME_ID__', $RuntimeId).Replace('__PACKLAB_OWNER_ROOT__', $ownerRootLiteral)
         [IO.File]::WriteAllText($tempSource, $launcherSource, [Text.UTF8Encoding]::new($false))
         & $compiler /nologo /target:winexe /platform:anycpu /optimize+ /out:$tempExe /win32icon:$stableIcon /reference:System.Windows.Forms.dll $tempSource
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $tempExe -PathType Leaf)) { throw "C# launcher compilation failed with exit $LASTEXITCODE." }
@@ -118,7 +119,7 @@ Assert-GuiExecutable $stableExe
 Assert-EmbeddedIcon $stableExe
 $hash = Get-Sha256 $stableExe
 $bytes = (Get-Item -LiteralPath $stableExe).Length
-$fingerprint = [ordered]@{ source_sha256 = $sourceHash; source_commit = $SourceCommit; runtime_id = $RuntimeId; icon_sha256 = $iconHash; compiler_path = $compiler; exe_sha256 = $hash; exe_bytes = $bytes } | ConvertTo-Json
+$fingerprint = [ordered]@{ source_sha256 = $sourceHash; source_commit = $SourceCommit; runtime_id = $RuntimeId; owner_root = $OwnerRoot; icon_sha256 = $iconHash; compiler_path = $compiler; exe_sha256 = $hash; exe_bytes = $bytes } | ConvertTo-Json
 $fingerprintTemp = Join-Path $launcherDir ('PackLab.build-' + [guid]::NewGuid().ToString('N') + '.json')
 [IO.File]::WriteAllText($fingerprintTemp, $fingerprint + "`n", [Text.UTF8Encoding]::new($false))
 if (-not [PackLabLauncherShellProbe]::MoveFileEx($fingerprintTemp, $fingerprintPath, (0x1 -bor 0x8))) {

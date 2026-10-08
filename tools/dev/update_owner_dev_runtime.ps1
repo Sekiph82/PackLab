@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$RepositoryRoot = (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)),
+    [string]$OwnerRoot = (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'PackLab\OwnerDev'),
     [switch]$AllowPublishedCommit,
     [string]$UvPath
 )
@@ -19,9 +20,8 @@ if ($AllowPublishedCommit) {
     if ($LASTEXITCODE -ne 0 -or $published -ne $sha) { throw 'HEAD does not exactly match origin/main.' }
 }
 
-$ownerRoot = Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'
-$releases = Join-Path $ownerRoot 'releases'
-New-Item -ItemType Directory -Force -Path $ownerRoot, $releases | Out-Null
+$releases = Join-Path $OwnerRoot 'releases'
+New-Item -ItemType Directory -Force -Path $OwnerRoot, $releases | Out-Null
 $runtimeId = $sha + '-' + [guid]::NewGuid().ToString('N')
 $runtimeRoot = Join-Path $releases $runtimeId
 New-Item -ItemType Directory -Path $runtimeRoot | Out-Null

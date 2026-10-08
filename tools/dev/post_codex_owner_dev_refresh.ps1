@@ -12,7 +12,8 @@ if ($AllowPublishedCommit) {
 }
 $sha = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $sha -notmatch '^[0-9a-f]{40}$') { throw 'Could not resolve exact published source HEAD.' }
-$deployArgs = @{ RepositoryRoot = $root }
+$ownerRoot = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'PackLab\OwnerDev'
+$deployArgs = @{ RepositoryRoot = $root; OwnerRoot = $ownerRoot }
 if ($AllowPublishedCommit) { $deployArgs.AllowPublishedCommit = $true }
 $runtimeOutput = @(& (Join-Path $PSScriptRoot 'update_owner_dev_runtime.ps1') @deployArgs)
 if ($LASTEXITCODE -ne 0) { throw 'Owner runtime deployment failed.' }
@@ -24,7 +25,6 @@ $runtimeSha = $runtimeFields[1]
 $runtimeId = $runtimeFields[2]
 if ($runtimeSha -notmatch '^[0-9a-f]{40}$' -or $runtimeId -notmatch ('^' + [regex]::Escape($runtimeSha) + '-[0-9a-f]{32}$')) { throw 'Owner runtime release identity is invalid.' }
 if ($runtimeSha -ne $sha) { throw 'Owner runtime release differs from source HEAD.' }
-$ownerRoot = Join-Path $env:LOCALAPPDATA 'PackLab\OwnerDev'
 & (Join-Path $PSScriptRoot 'build_owner_packlab_exe.ps1') -RepositoryRoot $root -OwnerRoot $ownerRoot -SourceCommit $sha -RuntimeId $runtimeId
 if ($LASTEXITCODE -ne 0) { throw 'Native owner launcher build/deployment failed.' }
 $refreshOutput = & (Join-Path $PSScriptRoot 'refresh_owner_packlab_shortcuts.ps1') -OwnerRoot $ownerRoot -RuntimeId $runtimeId
