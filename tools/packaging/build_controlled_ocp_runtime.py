@@ -21,6 +21,7 @@ OCP_SOURCE_ID = "ocp-source-7.9.3.1.1"
 OCP_PYWRAP_SOURCE_ID = "ocp-pywrap-source-9251940"
 OCCT_SOURCE_ID = "occt-source-7.9.3"
 SOURCE_IDS = (OCP_SOURCE_ID, OCP_PYWRAP_SOURCE_ID, OCCT_SOURCE_ID)
+WINDOWS_SDK_VERSION = "10.0.26100.0"
 SYSTEM_DLLS = {
     "advapi32.dll",
     "bcrypt.dll",
@@ -92,14 +93,16 @@ def sha256(path: Path) -> str:
 
 
 def windows_sdk_gl_include_dir() -> tuple[Path, str]:
-    sdk_root = os.environ.get("WindowsSdkDir")
-    sdk_version = os.environ.get("WindowsSDKVersion", "").strip("\\/")
-    if not sdk_root or not sdk_version:
-        raise RuntimeError("The exact Windows SDK root/version is unavailable to the OCP build")
-    include_dir = Path(sdk_root) / "Include" / sdk_version / "um"
+    sdk_root = os.environ.get("CMAKE_WINDOWS_KITS_10_DIR")
+    if not sdk_root:
+        program_files_x86 = os.environ.get("ProgramFiles(x86)")
+        if not program_files_x86:
+            raise RuntimeError("The Windows Kits root is unavailable to the OCP build")
+        sdk_root = str(Path(program_files_x86) / "Windows Kits" / "10")
+    include_dir = Path(sdk_root) / "Include" / WINDOWS_SDK_VERSION / "um"
     if not (include_dir / "gl" / "GL.h").is_file():
         raise RuntimeError("The selected Windows SDK does not contain the OpenGL GL.h header")
-    return include_dir, sdk_version
+    return include_dir, WINDOWS_SDK_VERSION
 
 
 def is_external_runtime(name: str) -> bool:
@@ -153,6 +156,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             generator,
             "-A",
             "x64",
+            f"-DCMAKE_SYSTEM_VERSION={WINDOWS_SDK_VERSION}",
             f"-DCMAKE_INSTALL_PREFIX={occt_prefix}",
             "-DBUILD_LIBRARY_TYPE=Shared",
             "-DBUILD_DOC_Overview=OFF",
@@ -199,6 +203,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             generator,
             "-A",
             "x64",
+            f"-DCMAKE_SYSTEM_VERSION={WINDOWS_SDK_VERSION}",
             f"-DOCCT_LIB_DIR={occt_dll_directory}",
             f"-DCMAKE_PREFIX_PATH={occt_prefix}",
             f"-DPython_EXECUTABLE={sys.executable}",

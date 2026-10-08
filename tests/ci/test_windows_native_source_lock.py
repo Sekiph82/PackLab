@@ -48,8 +48,7 @@ def test_windows_sdk_gl_include_dir_requires_exact_sdk_header(
     gl_header = sdk_include / "gl" / "GL.h"
     gl_header.parent.mkdir(parents=True)
     gl_header.write_text("// test header", encoding="utf-8")
-    monkeypatch.setenv("WindowsSdkDir", str(tmp_path))
-    monkeypatch.setenv("WindowsSDKVersion", "10.0.26100.0\\")
+    monkeypatch.setenv("CMAKE_WINDOWS_KITS_10_DIR", str(tmp_path))
 
     include_dir, version = windows_sdk_gl_include_dir()
 
@@ -60,8 +59,7 @@ def test_windows_sdk_gl_include_dir_requires_exact_sdk_header(
 def test_windows_sdk_gl_include_dir_fails_closed_without_gl_header(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setenv("WindowsSdkDir", str(tmp_path))
-    monkeypatch.setenv("WindowsSDKVersion", "10.0.26100.0")
+    monkeypatch.setenv("CMAKE_WINDOWS_KITS_10_DIR", str(tmp_path))
 
     with pytest.raises(RuntimeError, match="GL.h"):
         windows_sdk_gl_include_dir()
