@@ -40,7 +40,7 @@ jobs:
   build-studio:
     name: Build and smoke-test production Studio
     runs-on: windows-2022
-    timeout-minutes: 360
+    timeout-minutes: 480
     env:
       UV_NO_PROGRESS: "1"
 

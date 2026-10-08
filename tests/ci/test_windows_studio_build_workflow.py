@@ -10,7 +10,7 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
 
     assert "runs-on: windows-2022" in workflow
-    assert "timeout-minutes: 360" in workflow
+    assert "timeout-minutes: 480" in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "persist-credentials: false" in workflow
     assert "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0" in workflow

@@ -252,13 +252,21 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
         "internal static class EarlyExit { private static int Main() { return 29; } }",
         encoding="utf-8",
     )
+    fake_child_build = tmp_path / "early_exit.exe"
     fake_child = subprocess.run(
-        [str(csc), "/nologo", "/target:winexe", f"/out:{pythonw}", str(fake_child_source)],
+        [
+            str(csc),
+            "/nologo",
+            "/target:winexe",
+            f"/out:{fake_child_build}",
+            str(fake_child_source),
+        ],
         check=False,
         capture_output=True,
         text=True,
     )
     assert fake_child.returncode == 0, fake_child.stdout + fake_child.stderr
+    shutil.copyfile(fake_child_build, pythonw)
     # Test launcher constants are replaced in a temporary source copy below.
     (release_runtime / "owner-dev-runtime.json").write_text(
         json.dumps(
