@@ -40,7 +40,7 @@ jobs:
   build-studio:
     name: Build and smoke-test production Studio
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     env:
       UV_NO_PROGRESS: "1"
 
@@ -81,6 +81,49 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv sync --locked --all-groups
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run --locked python tools/packaging/validate_windows_native_source_lock.py `
+            --verify-build-lock --verify-conda-lock --verify-uv-lock
+          if ($LASTEXITCODE -ne 0) { throw "Windows native source or package lock validation failed." }
+
+      - name: Create exact OCP source-build environment
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3.2.1
+        with:
+          environment-file: tools/packaging/packlab-ocp-bindings-win.lock
+          environment-name: packlab-ocp-bindings
+          micromamba-version: "2.0.5-0"
+          init-shell: powershell
+          cache-environment: false
+          post-cleanup: "shell-init"
+
+      - name: Fetch and verify every locked corresponding source
+        shell: micromamba-shell {0}
+        run: |
+          $sourceRoot = Join-Path $env:RUNNER_TEMP "packlab-native-sources"
+          $sourceEvidence = Join-Path $env:RUNNER_TEMP "packlab-native-source-evidence.json"
+          uv run --locked python tools/packaging/fetch_verify_windows_native_sources.py `
+            --download-dir $sourceRoot `
+            --evidence $sourceEvidence
+          if ($LASTEXITCODE -ne 0) { throw "A locked corresponding-source archive failed SHA-256 verification." }
+          "PACKLAB_NATIVE_SOURCE_ROOT=$sourceRoot" >> $env:GITHUB_ENV
+          "PACKLAB_NATIVE_SOURCE_EVIDENCE=$sourceEvidence" >> $env:GITHUB_ENV
+          Get-Content -LiteralPath $sourceEvidence | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Build and overlay the controlled OCP/OCCT runtime
+        shell: micromamba-shell {0}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          $sitePackages = (uv run --locked python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
+          if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The locked production Python site-packages path could not be resolved." }
+          $buildRoot = Join-Path $env:RUNNER_TEMP "packlab-controlled-ocp-build"
+          $manifest = Join-Path $env:RUNNER_TEMP "windows-ocp-controlled-runtime-manifest.json"
+          python tools/packaging/build_controlled_ocp_runtime.py `
+            --source-root $env:PACKLAB_NATIVE_SOURCE_ROOT `
+            --build-root $buildRoot `
+            --site-packages $sitePackages `
+            --manifest $manifest
+          if ($LASTEXITCODE -ne 0) { throw "The exact-source controlled OCP/OCCT runtime build failed." }
+          "PACKLAB_CONTROLLED_OCP_MANIFEST=$manifest" >> $env:GITHUB_ENV
 
       - name: Create path-free build provenance
         shell: pwsh
@@ -206,6 +249,15 @@ jobs:
             "- Redistribution: NOT CLEARED; PL-0350 owns native/runtime inventory and notice review. The staging output is not uploaded or a release."
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      - name: Validate bidirectional controlled OCP manifest
+        shell: pwsh
+        run: |
+          $appDirectory = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio"
+          uv run --locked python tools/packaging/validate_controlled_ocp_manifest.py `
+            --manifest $env:PACKLAB_CONTROLLED_OCP_MANIFEST `
+            --stage $appDirectory
+          if ($LASTEXITCODE -ne 0) { throw "Staged OCP native files do not match the exact controlled-runtime manifest." }
+
       - name: Inventory exact hosted staging tree
         id: inventory
         continue-on-error: true
@@ -226,10 +278,13 @@ jobs:
             --analysis-toc $analysisMatches[0].FullName `
             --project-root $env:GITHUB_WORKSPACE `
             --registry tools/packaging/windows_component_license_registry.json `
+            --ocp-manifest $env:PACKLAB_CONTROLLED_OCP_MANIFEST `
             --output-dir $evidencePath `
             --build-revision $env:PACKLAB_BUILD_REVISION `
             --studio-version $env:PACKLAB_STUDIO_VERSION
           $inventoryExit = $LASTEXITCODE
+          Copy-Item -LiteralPath $env:PACKLAB_NATIVE_SOURCE_EVIDENCE -Destination $evidencePath
+          Copy-Item -LiteralPath $env:PACKLAB_CONTROLLED_OCP_MANIFEST -Destination $evidencePath
           "PACKLAB_COMPLIANCE_EVIDENCE=$evidencePath" >> $env:GITHUB_ENV
           exit $inventoryExit
 
@@ -282,10 +337,13 @@ jobs:
             --collect-toc $collect --analysis-toc $analysis `
             --project-root $env:GITHUB_WORKSPACE `
             --registry tools/packaging/windows_component_license_registry.json `
+            --ocp-manifest $env:PACKLAB_CONTROLLED_OCP_MANIFEST `
             --output-dir $evidencePath `
             --build-revision $env:PACKLAB_BUILD_REVISION `
             --studio-version $env:PACKLAB_STUDIO_VERSION
           if ($LASTEXITCODE -ne 0) { throw "Final installer input redistribution inventory is unresolved." }
+          Copy-Item -LiteralPath $env:PACKLAB_NATIVE_SOURCE_EVIDENCE -Destination $evidencePath
+          Copy-Item -LiteralPath $env:PACKLAB_CONTROLLED_OCP_MANIFEST -Destination $evidencePath
           "PACKLAB_FINAL_COMPLIANCE_EVIDENCE=$evidencePath" >> $env:GITHUB_ENV
 
       - name: Upload final text-only compliance evidence

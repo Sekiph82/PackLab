@@ -18,6 +18,20 @@ def test_windows_studio_build_is_pinned_and_limited_to_staging() -> None:
     assert "actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9" in workflow
     assert "uv lock --check" in workflow
     assert "uv sync --locked --all-groups" in workflow
+    assert "--verify-build-lock --verify-conda-lock --verify-uv-lock" in workflow
+    assert "mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39" in workflow
+    assert "environment-file: tools/packaging/packlab-ocp-bindings-win.lock" in workflow
+    assert 'micromamba-version: "2.0.5-0"' in workflow
+    assert "fetch_verify_windows_native_sources.py" in workflow
+    assert workflow.index("Fetch and verify every locked corresponding source") < workflow.index(
+        "Build and overlay the controlled OCP/OCCT runtime"
+    )
+    assert "build_controlled_ocp_runtime.py" in workflow
+    assert "validate_controlled_ocp_manifest.py" in workflow
+    assert workflow.index("Build and overlay the controlled OCP/OCCT runtime") < workflow.index(
+        "Build one-directory production Studio staging output"
+    )
+    assert "--ocp-manifest $env:PACKLAB_CONTROLLED_OCP_MANIFEST" in workflow
     assert '"tools/packaging/packlab_studio.spec"' in workflow
     assert '"--noupx"' not in workflow
     assert "Assert staged Qt module surface" in workflow

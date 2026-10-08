@@ -1,0 +1,289 @@
+{
+  "schema_version": 1,
+  "lock_id": "packlab-windows-native-source-lock-v1",
+  "target": {
+    "operating_system": "Windows",
+    "architecture": "x86_64",
+    "python": "3.12.15"
+  },
+  "build_environment_lock": {
+    "path": "tools/packaging/packlab-ocp-bindings-win.lock",
+    "sha256": "38e8c0a4d4b8ad1284f5595eb33f9196d124271c63da9c1395afa083028d3867",
+    "platform": "win-64"
+  },
+  "records": [
+    {
+      "id": "ocp-source-7.9.3.1.1",
+      "component": "OCP",
+      "version": "7.9.3.1.1",
+      "revision": "d69b064a3a604ebf245b1f3b14fb54c835a3a571",
+      "build": "source-commit-d69b064a3a604ebf245b1f3b14fb54c835a3a571",
+      "url": "https://github.com/CadQuery/OCP/archive/d69b064a3a604ebf245b1f3b14fb54c835a3a571.tar.gz",
+      "sha256": "a5153cef9f4a3a3dbbb1d498a971206a6c35dc4d829e7e011f96e0539c22e616",
+      "license_identifier": "Apache-2.0",
+      "license_notice_source": "https://github.com/CadQuery/OCP/blob/d69b064a3a604ebf245b1f3b14fb54c835a3a571/LICENSE",
+      "source_availability_role": "SOURCE_BUILD_INPUT",
+      "production_purpose": "Generate the PackLab-required OCP Python binding modules from the exact upstream source revision.",
+      "retained_runtime_surface": [
+        "OCP/OCP*.pyd"
+      ]
+    },
+    {
+      "id": "occt-source-7.9.3",
+      "component": "OCCT",
+      "version": "7.9.3",
+      "revision": "a016080bf6738d6aeae020badee4e888ad1540a5",
+      "build": "source-commit-a016080bf6738d6aeae020badee4e888ad1540a5",
+      "url": "https://github.com/Open-Cascade-SAS/OCCT/archive/a016080bf6738d6aeae020badee4e888ad1540a5.tar.gz",
+      "sha256": "c533f2667b59921bd6bd40ce82e7b9900b0289ccc731af5fdeeba097de80ef0f",
+      "license_identifier": "LGPL-2.1-only WITH OCCT-exception",
+      "license_notice_source": "https://github.com/Open-Cascade-SAS/OCCT/blob/a016080bf6738d6aeae020badee4e888ad1540a5/LICENSE_LGPL_21.txt",
+      "source_availability_role": "SOURCE_BUILD_INPUT",
+      "production_purpose": "Build the controlled OCCT 7.9.3 runtime for PackLab CAD, tessellation, and engineering export capability.",
+      "retained_runtime_surface": [
+        "OCP/TK*.dll"
+      ]
+    },
+    {
+      "id": "pyside-source-6.11.2",
+      "component": "PySide6 and Shiboken6 source",
+      "version": "6.11.2",
+      "revision": "24627cd36e1593adf22eb1f2950e4248e7bcc1ec",
+      "build": "official-source-archive-6.11.2",
+      "url": "https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.11.2-src/pyside-setup-everywhere-src-6.11.2.tar.xz",
+      "sha256": "cba47efbaad1bedd529725cbc14e21f156c7a19366f07b3edfbb076ffd7afdf8",
+      "license_identifier": "LGPL-3.0-only",
+      "license_notice_source": "https://github.com/pyside/pyside-setup/tree/24627cd36e1593adf22eb1f2950e4248e7bcc1ec/LICENSES",
+      "source_availability_role": "CORRESPONDING_SOURCE_AND_NOTICES",
+      "production_purpose": "Corresponding source and notice evidence for the retained official PySide6 and Shiboken6 6.11.2 binaries.",
+      "retained_runtime_surface": [
+        "PySide6/QtCore.pyd",
+        "PySide6/QtGui.pyd",
+        "PySide6/QtWidgets.pyd",
+        "PySide6/QtSvg.pyd",
+        "PySide6/QtPdf.pyd",
+        "shiboken6/*.pyd"
+      ]
+    },
+    {
+      "id": "qtbase-source-6.11.2",
+      "component": "Qt Base",
+      "version": "6.11.2",
+      "revision": "7a59d906fb765eb85759d4d3cae45d3f295f6359",
+      "build": "official-source-archive-6.11.2",
+      "url": "https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtbase-everywhere-src-6.11.2.tar.xz",
+      "sha256": "5b2e00eccaf5a4d8c14134ffa0ea8dfd0a35ae1ffc7f8d87fa4305a1ed23cf22",
+      "license_identifier": "LGPL-3.0-only",
+      "license_notice_source": "https://github.com/qt/qtbase/tree/v6.11.2/LICENSES",
+      "source_availability_role": "CORRESPONDING_SOURCE_AND_NOTICES",
+      "production_purpose": "Corresponding Qt Base source and notices for retained Qt Core, Gui, Widgets, and Network runtime files.",
+      "retained_runtime_surface": [
+        "PySide6/QtCore.pyd",
+        "PySide6/QtGui.pyd",
+        "PySide6/QtWidgets.pyd",
+        "PySide6/QtNetwork.pyd",
+        "Qt6Core.dll",
+        "Qt6Gui.dll",
+        "Qt6Widgets.dll",
+        "Qt6Network.dll"
+      ]
+    },
+    {
+      "id": "qtsvg-source-6.11.2",
+      "component": "Qt SVG",
+      "version": "6.11.2",
+      "revision": "7f649404bccad7c8364ef08d72c60b836d3f753a",
+      "build": "official-source-archive-6.11.2",
+      "url": "https://download.qt.io/official_releases/qt/6.11/6.11.2/submodules/qtsvg-everywhere-src-6.11.2.tar.xz",
+      "sha256": "d594337feca84c26fb67fe87b85e6a5c12fda404b611d905f9d138210c311876",
+      "license_identifier": "LGPL-3.0-only",
+      "license_notice_source": "https://github.com/qt/qtsvg/tree/v6.11.2/LICENSES",
+      "source_availability_role": "CORRESPONDING_SOURCE_AND_NOTICES",
+      "production_purpose": "Corresponding Qt SVG source and notices for retained QtSvg modules and SVG plugins.",
+      "retained_runtime_surface": [
+        "PySide6/QtSvg.pyd",
+        "Qt6Svg.dll",
+        "plugins/imageformats/qsvg.dll",
+        "plugins/iconengines/qsvgicon.dll"
+      ]
+    },
+    {
+      "id": "qtpdf-pdfium-source-6.11.2",
+      "component": "Qt PDF and PDFium",
+      "version": "6.11.2",
+      "revision": "2cf9913d3d6f044f5b002f6895469904235acd3b",
+      "build": "official-qtwebengine-source-archive-6.11.2",
+      "url": "https://download.qt.io/archive/qt/6.11/6.11.2/submodules/qtwebengine-everywhere-src-6.11.2.tar.xz",
+      "sha256": "6101c1aa00ff933d1b65ee5d167f76e8d71b9ac5b378b0111277723ebda7c163",
+      "license_identifier": "LGPL-3.0-only",
+      "license_notice_source": "https://github.com/qt/qtwebengine/tree/v6.11.2/src/pdf",
+      "source_availability_role": "CORRESPONDING_SOURCE_AND_THIRD_PARTY_INVENTORY",
+      "production_purpose": "Corresponding QtPdf source plus the exact PDFium and QtWebEngine third-party notice/SBOM surface.",
+      "retained_runtime_surface": [
+        "PySide6/QtPdf.pyd",
+        "Qt6Pdf.dll"
+      ]
+    },
+    {
+      "id": "open3d-source-0.20.0",
+      "component": "Open3D",
+      "version": "0.20.0",
+      "revision": "b6c5e196384ad71e75b6e6f9c5da22d046221f1d",
+      "build": "official-source-commit-b6c5e196384ad71e75b6e6f9c5da22d046221f1d",
+      "url": "https://github.com/isl-org/Open3D/archive/b6c5e196384ad71e75b6e6f9c5da22d046221f1d.tar.gz",
+      "sha256": "981ddc23bb3aa484986694d5190f0c26e2681774dc95f897ad98a5779cbad9e5",
+      "license_identifier": "MIT",
+      "license_notice_source": "https://github.com/isl-org/Open3D/blob/b6c5e196384ad71e75b6e6f9c5da22d046221f1d/3rdparty/README.md",
+      "source_availability_role": "CORRESPONDING_SOURCE_AND_THIRD_PARTY_INVENTORY",
+      "production_purpose": "Corresponding source and component inventory for the retained official Open3D Windows CPython 3.12 wheel.",
+      "retained_runtime_surface": [
+        "open3d/pybind*.pyd",
+        "open3d/*.dll"
+      ]
+    },
+    {
+      "id": "onetbb-source-2021.12.0",
+      "component": "oneTBB",
+      "version": "2021.12.0",
+      "revision": "9afd759b72c0c233cd5ea3c3c06b0894c9da9c54",
+      "build": "source-commit-9afd759b72c0c233cd5ea3c3c06b0894c9da9c54",
+      "url": "https://github.com/oneapi-src/oneTBB/archive/9afd759b72c0c233cd5ea3c3c06b0894c9da9c54.tar.gz",
+      "sha256": "7254f0215f756bd9dca3534055e64c271e4fc472e4a5bb7899d6e1bafefec2c0",
+      "license_identifier": "Apache-2.0",
+      "license_notice_source": "https://github.com/oneapi-src/oneTBB/blob/9afd759b72c0c233cd5ea3c3c06b0894c9da9c54/LICENSE.txt",
+      "source_availability_role": "CORRESPONDING_SOURCE_AND_NOTICE",
+      "production_purpose": "Exact source and license evidence for Open3D's staged tbb12.dll runtime dependency.",
+      "retained_runtime_surface": [
+        "open3d/tbb12.dll"
+      ]
+    },
+    {
+      "id": "open3d-wheel-0.20.0-win-cp312",
+      "component": "Open3D Windows CPython 3.12 wheel",
+      "version": "0.20.0",
+      "build": "cp312-cp312-win_amd64",
+      "url": "https://files.pythonhosted.org/packages/e9/b8/b3091989d7f928eb19d1b961544da70b0bf10dedcfc91a53410f8f86ad6f/open3d-0.20.0-cp312-cp312-win_amd64.whl",
+      "sha256": "60010f21d44f13557ba007893bc13a69827faa4dc49eedd923d1397096c20d92",
+      "license_identifier": "MIT",
+      "license_notice_source": "https://github.com/isl-org/Open3D/blob/b6c5e196384ad71e75b6e6f9c5da22d046221f1d/LICENSE",
+      "source_availability_role": "PROJECT_OFFICIAL_BINARY",
+      "package_name": "open3d",
+      "production_purpose": "Retained exact Open3D 0.20.0 Windows CPython 3.12 runtime wheel.",
+      "corresponding_source_ids": [
+        "open3d-source-0.20.0",
+        "onetbb-source-2021.12.0"
+      ],
+      "retained_runtime_surface": [
+        "open3d/pybind*.pyd",
+        "open3d/*.dll"
+      ]
+    },
+    {
+      "id": "pyside6-addons-wheel-6.11.2-win-abi3",
+      "component": "PySide6 Addons Windows wheel",
+      "version": "6.11.2",
+      "build": "cp310-abi3-win_amd64",
+      "url": "https://files.pythonhosted.org/packages/fb/c1/08bf6594101b42fc88834009f1dac59a983c5b6805c62c5081f077d09b4a/pyside6_addons-6.11.2-cp310-abi3-win_amd64.whl",
+      "sha256": "f449ea4431da20e7b86752cca8d166f93434516fe417f981c27e5f8e1b554407",
+      "license_identifier": "LGPL-3.0-only",
+      "license_notice_source": "https://github.com/pyside/pyside-setup/tree/24627cd36e1593adf22eb1f2950e4248e7bcc1ec/LICENSES",
+      "source_availability_role": "PROJECT_OFFICIAL_BINARY",
+      "package_name": "pyside6-addons",
+      "production_purpose": "Retained PySide6 Addons 6.11.2 wheel providing the bounded Qt SVG and PDF modules.",
+      "corresponding_source_ids": [
+        "pyside-source-6.11.2",
+        "qtbase-source-6.11.2",
+        "qtsvg-source-6.11.2",
+        "qtpdf-pdfium-source-6.11.2"
+      ],
+      "retained_runtime_surface": [
+        "PySide6/QtSvg.pyd",
+        "PySide6/QtPdf.pyd",
+        "plugins/imageformats/qsvg.dll",
+        "plugins/iconengines/qsvgicon.dll"
+      ]
+    },
+    {
+      "id": "pyside6-essentials-wheel-6.11.2-win-abi3",
+      "component": "PySide6 Essentials Windows wheel",
+      "version": "6.11.2",
+      "build": "cp310-abi3-win_amd64",
+      "url": "https://files.pythonhosted.org/packages/dc/09/d2662684aee4d3f027ff9b1e965f22301bc28ffc5b7f167658508e4475dc/pyside6_essentials-6.11.2-cp310-abi3-win_amd64.whl",
+      "sha256": "c8a29def77032773a30879f7f24415b5395ad08592d147c170824ef4c735dfc1",
+      "license_identifier": "LGPL-3.0-only",
+      "license_notice_source": "https://github.com/pyside/pyside-setup/tree/24627cd36e1593adf22eb1f2950e4248e7bcc1ec/LICENSES",
+      "source_availability_role": "PROJECT_OFFICIAL_BINARY",
+      "package_name": "pyside6-essentials",
+      "production_purpose": "Retained PySide6 Essentials 6.11.2 wheel providing the bounded Qt Core, Gui, Widgets, Svg, Pdf, and Network modules.",
+      "corresponding_source_ids": [
+        "pyside-source-6.11.2",
+        "qtbase-source-6.11.2",
+        "qtsvg-source-6.11.2",
+        "qtpdf-pdfium-source-6.11.2"
+      ],
+      "retained_runtime_surface": [
+        "PySide6/QtCore.pyd",
+        "PySide6/QtGui.pyd",
+        "PySide6/QtWidgets.pyd",
+        "PySide6/QtNetwork.pyd",
+        "Qt6Core.dll",
+        "Qt6Gui.dll",
+        "Qt6Widgets.dll",
+        "Qt6Network.dll"
+      ]
+    },
+    {
+      "id": "shiboken6-wheel-6.11.2-win-abi3",
+      "component": "Shiboken6 Windows wheel",
+      "version": "6.11.2",
+      "build": "cp310-abi3-win_amd64",
+      "url": "https://files.pythonhosted.org/packages/ce/6b/fee1b4814317e4664e318644c9c007676c65a71e5b2b9d3ac4121a94dc0a/shiboken6-6.11.2-cp310-abi3-win_amd64.whl",
+      "sha256": "6ab0eba1c904455df621f9a6df3ca2bb896bab8670572d2bc4e37804ae91f19a",
+      "license_identifier": "LGPL-3.0-only",
+      "license_notice_source": "https://github.com/pyside/pyside-setup/tree/24627cd36e1593adf22eb1f2950e4248e7bcc1ec/LICENSES",
+      "source_availability_role": "PROJECT_OFFICIAL_BINARY",
+      "package_name": "shiboken6",
+      "production_purpose": "Retained exact Shiboken6 6.11.2 Windows runtime wheel required by the official PySide6 bindings.",
+      "corresponding_source_ids": [
+        "pyside-source-6.11.2"
+      ],
+      "retained_runtime_surface": [
+        "shiboken6/*.pyd"
+      ]
+    }
+  ],
+  "required_source_ids": [
+    "ocp-source-7.9.3.1.1",
+    "occt-source-7.9.3",
+    "pyside-source-6.11.2",
+    "qtbase-source-6.11.2",
+    "qtsvg-source-6.11.2",
+    "qtpdf-pdfium-source-6.11.2",
+    "open3d-source-0.20.0",
+    "onetbb-source-2021.12.0",
+    "open3d-wheel-0.20.0-win-cp312",
+    "pyside6-addons-wheel-6.11.2-win-abi3",
+    "pyside6-essentials-wheel-6.11.2-win-abi3",
+    "shiboken6-wheel-6.11.2-win-abi3"
+  ],
+  "production_components": {
+    "controlled-ocp-occt-runtime": [
+      "ocp-source-7.9.3.1.1",
+      "occt-source-7.9.3"
+    ],
+    "retained-qt-pyside-runtime": [
+      "pyside-source-6.11.2",
+      "qtbase-source-6.11.2",
+      "qtsvg-source-6.11.2",
+      "qtpdf-pdfium-source-6.11.2",
+      "pyside6-addons-wheel-6.11.2-win-abi3",
+      "pyside6-essentials-wheel-6.11.2-win-abi3",
+      "shiboken6-wheel-6.11.2-win-abi3"
+    ],
+    "retained-open3d-runtime": [
+      "open3d-source-0.20.0",
+      "onetbb-source-2021.12.0",
+      "open3d-wheel-0.20.0-win-cp312"
+    ]
+  }
+}

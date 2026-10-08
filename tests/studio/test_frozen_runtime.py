@@ -10,6 +10,7 @@ def test_register_frozen_native_directories_keeps_handles_and_skips_missing_dirs
 ) -> None:
     (tmp_path / "PySide6").mkdir()
     (tmp_path / "shiboken6").mkdir()
+    (tmp_path / "OCP").mkdir()
     registered: list[str] = []
     handles: list[object] = []
 
@@ -27,8 +28,12 @@ def test_register_frozen_native_directories_keeps_handles_and_skips_missing_dirs
 
     result = frozen_runtime.register_frozen_native_directories()
 
-    assert result == ("PySide6", "shiboken6")
-    assert registered == [str(tmp_path / "PySide6"), str(tmp_path / "shiboken6")]
+    assert result == ("PySide6", "shiboken6", "OCP")
+    assert registered == [
+        str(tmp_path / "PySide6"),
+        str(tmp_path / "shiboken6"),
+        str(tmp_path / "OCP"),
+    ]
     assert frozen_runtime._DLL_DIRECTORY_HANDLES == handles
 
 

@@ -1,0 +1,24 @@
+name: packlab-ocp-bindings-win
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12.15
+  - pybind11=2.13.6
+  - cmake=3.31.8
+  - ninja=1.13.2
+  - clangdev=21.1.8
+  - python-clang=21.1.8
+  - vtk=9.6.1
+  - rapidjson=1.1.0.post20250205
+  - joblib
+  - toml
+  - click
+  - jinja2
+  - logzero
+  - pandas
+  - path
+  - pyparsing
+  - schema
+  - tqdm
+  - toposort
+  - py-lief=0.17.6

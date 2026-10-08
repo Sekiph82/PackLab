@@ -16,12 +16,18 @@ from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from tools.packaging.validate_controlled_ocp_manifest import (
+    load_and_validate_manifest,
+    validate_staged_tree,
+)
+
 SCHEMA_VERSION = 1
 PE_SUFFIXES = {".dll", ".exe", ".pyd"}
 TEXT_LICENSE_SUFFIXES = {".txt", ".md", ".json", ".html"}
 LICENSE_NAME = re.compile(r"(?:license|licence|copying|notice|copyright)", re.IGNORECASE)
 BUILD_REVISION = re.compile(r"^[0-9a-f]{40}$")
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def canonical_json(path: Path, value: object) -> None:
@@ -305,6 +311,7 @@ def license_rows(
                         "version": None,
                         "license_identifier": rule.get("license_identifier"),
                         "license_status": "UNRESOLVED",
+                        "provenance_class": rule.get("provenance_class"),
                         "unresolved_reason": rule.get("reason")
                         or "This exact native/system component requires a reviewed redistribution mapping.",
                         "source_evidence_required": True,
@@ -316,7 +323,9 @@ def license_rows(
             elif supplemental_owner:
                 metadata_name = owner
                 version_match = re.search(r"\d+(?:\.\d+)+", owner)
-                version = version_match.group(0) if version_match else None
+                version = supplemental_owner.get("version") or (
+                    version_match.group(0) if version_match else None
+                )
                 license_id = supplemental_owner.get("license_identifier")
                 files = []
                 supplement = supplemental_owner
@@ -429,6 +438,14 @@ def license_rows(
                 "version": version,
                 "license_identifier": license_id,
                 "license_status": status,
+                "provenance_class": (
+                    (supplement or {}).get("provenance_class")
+                    or (
+                        "PROJECT_OFFICIAL_BINARY"
+                        if distribution is not None or owner == "cpython-runtime"
+                        else None
+                    )
+                ),
                 "unresolved_reason": reason,
                 "license_mapping_evidence": (
                     supplement.get("license_mapping_evidence")
@@ -440,7 +457,13 @@ def license_rows(
                 ),
                 "source_evidence": supplement.get("source_evidence") if supplement else None,
                 "source_evidence_required": bool(
-                    (supplement and supplement.get("native_unresolved_reason"))
+                    (
+                        supplement
+                        and (
+                            supplement.get("native_unresolved_reason")
+                            or supplement.get("source_evidence")
+                        )
+                    )
                     or (owner in native_review)
                 ),
                 "notice_files": [row["path"] for row in copied],
@@ -459,6 +482,7 @@ def build_inventory(
     studio_version: str,
     registry_path: Path,
     evidence_root: Path,
+    ocp_manifest_path: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     if not BUILD_REVISION.fullmatch(revision) or not SEMVER.fullmatch(studio_version):
         raise ValueError("Build revision or semantic Studio version is invalid")
@@ -476,6 +500,46 @@ def build_inventory(
     if any(evidence_root.iterdir()):
         raise ValueError("The compliance evidence directory must be empty")
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    controlled_ocp: dict[str, dict[str, Any]] = {}
+    controlled_ocp_owner_by_name: dict[str, str] = {}
+    if ocp_manifest_path is not None:
+        source_lock_path = project_root / "tools" / "packaging" / "windows_native_source_lock.json"
+        manifest = load_and_validate_manifest(ocp_manifest_path, source_lock_path)
+        validate_staged_tree(stage_root, manifest)
+        source_records = {
+            record["id"]: record
+            for record in json.loads(source_lock_path.read_text(encoding="utf-8")).get(
+                "records", []
+            )
+        }
+        for item in manifest.get("files", []):
+            relative = safe_posix_path(item.get("relative_path"))
+            digest = item.get("sha256")
+            source_id = item.get("source_package_id")
+            if (
+                relative is None
+                or not relative.startswith("OCP/")
+                or not SHA256_RE.fullmatch(digest or "")
+                or source_id not in {"ocp-source-7.9.3.1.1", "occt-source-7.9.3"}
+            ):
+                raise ValueError("Controlled OCP manifest contains an invalid native-file record")
+            source_record = source_records.get(source_id)
+            if (
+                source_record is None
+                or item.get("version") != source_record.get("version")
+                or item.get("build_revision") != source_record.get("revision")
+                or item.get("license_identifier") != source_record.get("license_identifier")
+                or item.get("license_notice_source") != source_record.get("license_notice_source")
+            ):
+                raise ValueError(
+                    "Controlled OCP manifest source identity differs from the exact lock"
+                )
+            if relative in controlled_ocp:
+                raise ValueError("Controlled OCP manifest contains a duplicate relative path")
+            controlled_ocp[relative] = item
+            controlled_ocp_owner_by_name[Path(relative).name.casefold()] = (
+                "packlab-controlled-ocp" if source_id == "ocp-source-7.9.3.1.1" else "occt-7.9.3"
+            )
     toc = toc_destinations(read_toc(toc_path), contents_dir, stage_root)
     analysis_sources = analysis_source_paths(analysis_path)
     distributions = list(importlib.metadata.distributions())
@@ -487,6 +551,24 @@ def build_inventory(
     )
     if not all_paths:
         raise ValueError("The staging directory is empty")
+    staged_ocp: dict[str, Path] = {}
+    for path in all_paths:
+        relative = path.relative_to(stage_root).as_posix()
+        lowered = relative.casefold()
+        if "/ocp/" in f"/{lowered}" and path.suffix.casefold() in {".pyd", ".dll"}:
+            manifest_key = f"OCP/{path.name}"
+            if manifest_key in controlled_ocp:
+                if sha256_file(path) != controlled_ocp[manifest_key]["sha256"]:
+                    raise ValueError(
+                        "A staged controlled OCP native file hash differs from its manifest"
+                    )
+                if manifest_key in staged_ocp:
+                    raise ValueError("A controlled OCP manifest file was staged more than once")
+                staged_ocp[manifest_key] = path
+            elif path.suffix.casefold() == ".pyd":
+                raise ValueError("An OCP Python extension is staged without controlled provenance")
+    if controlled_ocp and set(staged_ocp) != set(controlled_ocp):
+        raise ValueError("The controlled OCP manifest and exact staged native files differ")
     records: list[dict[str, Any]] = []
     package_owners: set[str] = set()
     unresolved_items: set[str] = set()
@@ -496,8 +578,17 @@ def build_inventory(
         source = Path(raw_source)
         key = norm_source(source)
         matches = source_owners.get(key, [])
+        in_ocp_package = source.parent.name.casefold() == "ocp"
         for match in matches:
             owner = normalized_distribution_name(match.metadata.get("Name", "unknown"))
+            if ocp_manifest_path is not None and in_ocp_package:
+                if source.suffix.casefold() in {".py", ".pyc"}:
+                    analysis_component_owners.add("packlab-controlled-ocp")
+                elif source.name.casefold() in controlled_ocp_owner_by_name:
+                    analysis_component_owners.add(
+                        controlled_ocp_owner_by_name[source.name.casefold()]
+                    )
+                continue
             if owner == "pyinstaller-hooks-contrib":
                 if is_pyinstaller_hooks_contrib_runtime_hook(source):
                     analysis_component_owners.add("pyinstaller-hooks-contrib-runtime-2026.8")
@@ -532,6 +623,16 @@ def build_inventory(
                 or generated.get("status") != "PASS"
             ):
                 unresolved_reason = "Generated runtime evidence is absent, not passing, or not bound to this build revision/version."
+        elif any(path == staged_path for staged_path in staged_ocp.values()):
+            source_id = next(key for key, stage_path in staged_ocp.items() if stage_path == path)
+            source_record = controlled_ocp[source_id]
+            owner_id = (
+                "packlab-controlled-ocp"
+                if source_record["source_package_id"] == "ocp-source-7.9.3.1.1"
+                else "occt-7.9.3"
+            )
+            owner_ids.add(owner_id)
+            mapping_evidence = "controlled_ocp_manifest_and_exact_staged_sha256"
         elif row is not None:
             raw_source, toc_kind = row
             toc_seen.add(relative)
@@ -634,6 +735,7 @@ def build_inventory(
                 "pe_metadata": read_pe_metadata(path),
                 "license_identifier": None,
                 "license_status": "PENDING_COMPONENT_REVIEW",
+                "provenance_class": None,
                 "required_notice_files": [],
                 "unresolved_reason": unresolved_reason,
             }
@@ -655,8 +757,6 @@ def build_inventory(
     }
     if "pyinstaller-bootloader" in owners_to_review:
         owners_to_review.add("pyinstaller")
-    if "cadquery-ocp-novtk" in owners_to_review:
-        owners_to_review.add("occt-7.9.3")
     component_rows, notice_rows, component_unresolved = license_rows(
         owners_to_review, by_name, registry, evidence_root
     )
@@ -689,6 +789,33 @@ def build_inventory(
         file_record["required_notice_files"] = sorted(
             {path for row in mapped_components for path in row["notice_files"]}
         )
+        mapped_classes = {
+            row["provenance_class"] for row in mapped_components if row.get("provenance_class")
+        }
+        if (
+            "packlab-application" in file_record["component_ids"]
+            and Path(file_record["relative_path"]).suffix.casefold() == ".exe"
+        ):
+            file_record["provenance_class"] = "PACKLAB_OWNED"
+        elif len(mapped_classes) == 1:
+            file_record["provenance_class"] = next(iter(mapped_classes))
+        elif len(mapped_classes) > 1:
+            file_record["provenance_class"] = "UNRESOLVED"
+        if Path(file_record["relative_path"]).suffix.casefold() in PE_SUFFIXES and (
+            file_record["provenance_class"]
+            not in {
+                "PACKLAB_CONTROLLED_BUILD",
+                "PROJECT_OFFICIAL_BINARY",
+                "EXTERNAL_SYSTEM_PREREQUISITE",
+                "PACKLAB_OWNED",
+            }
+        ):
+            file_record["provenance_class"] = "UNRESOLVED"
+            file_record["unresolved_reason"] = (
+                file_record["unresolved_reason"]
+                or "This shipped native file has no accepted explicit provenance class."
+            )
+            unresolved_items.add(f"file:{file_record['relative_path']}:provenance")
         if file_record["license_status"] == "UNRESOLVED" and not file_record["unresolved_reason"]:
             file_record["unresolved_reason"] = (
                 "At least one mapped component lacks complete license/notice evidence."
@@ -802,6 +929,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analysis-toc", type=Path, required=True)
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--registry", type=Path, required=True)
+    parser.add_argument("--ocp-manifest", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--build-revision", required=True)
     parser.add_argument("--studio-version", required=True)
@@ -822,6 +950,7 @@ def main() -> int:
             args.studio_version,
             args.registry,
             args.output_dir,
+            args.ocp_manifest,
         )
         validation = evidence[0]
         canonical_json(args.output_dir / "windows-redistribution-inventory.json", inventory)

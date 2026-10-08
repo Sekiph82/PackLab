@@ -11,9 +11,9 @@ _DLL_DIRECTORY_HANDLES: list[object] = []
 _NATIVE_DIRECTORY_NAMES = (
     "PySide6",
     "shiboken6",
+    "OCP",
     "open3d",
     "numpy.libs",
-    "cadquery_ocp_novtk.libs",
 )
 
 
