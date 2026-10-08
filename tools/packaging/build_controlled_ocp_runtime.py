@@ -91,6 +91,17 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def windows_sdk_gl_include_dir() -> tuple[Path, str]:
+    sdk_root = os.environ.get("WindowsSdkDir")
+    sdk_version = os.environ.get("WindowsSDKVersion", "").strip("\\/")
+    if not sdk_root or not sdk_version:
+        raise RuntimeError("The exact Windows SDK root/version is unavailable to the OCP build")
+    include_dir = Path(sdk_root) / "Include" / sdk_version / "um"
+    if not (include_dir / "gl" / "GL.h").is_file():
+        raise RuntimeError("The selected Windows SDK does not contain the OpenGL GL.h header")
+    return include_dir, sdk_version
+
+
 def is_external_runtime(name: str) -> bool:
     if name in SYSTEM_DLLS or name.startswith(("api-ms-win-", "ext-ms-win-")):
         return True
@@ -122,6 +133,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
     # Populate that exact pinned submodule path before configuring CMake.
     shutil.rmtree(ocp_source / "pywrap", ignore_errors=True)
     shutil.copytree(pywrap_source, ocp_source / "pywrap")
+    windows_gl_include, windows_sdk_version = windows_sdk_gl_include_dir()
     occt_prefix = args.build_root / "occt-install"
     occt_build = args.build_root / "occt-build"
     ocp_build = args.build_root / "ocp-build"
@@ -190,6 +202,11 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             f"-DOCCT_LIB_DIR={occt_dll_directory}",
             f"-DCMAKE_PREFIX_PATH={occt_prefix}",
             f"-DPython_EXECUTABLE={sys.executable}",
+            # CMake 3.31's FindOpenGL leaves OPENGL_INCLUDE_DIR empty on
+            # Windows even though GL/gl.h is supplied by the selected SDK.
+            # OCP's pinned CMakeLists interpolates OPENGL_INCLUDE_DIRS into
+            # repeated pywrap -i options, so bind the exact SDK include path.
+            f"-DOPENGL_INCLUDE_DIR={windows_gl_include}",
         ]
     )
     run(["cmake", "--build", str(ocp_build), "--config", "Release", "--parallel", "2"])
@@ -284,6 +301,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             "python": sys.version.split()[0],
             "cmake": cmake_version,
             "compiler": compiler_version,
+            "windows_sdk": windows_sdk_version,
         },
         "external_runtime_dependencies": sorted(external_runtime_names),
         "files": file_records,

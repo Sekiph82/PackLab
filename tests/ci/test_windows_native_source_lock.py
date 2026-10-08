@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tools.packaging.build_controlled_ocp_runtime import windows_sdk_gl_include_dir
 from tools.packaging.validate_windows_native_source_lock import (
     SourceLockError,
     validate_source_lock,
@@ -38,6 +39,32 @@ def test_controlled_ocp_lock_binds_exact_pywrap_submodule() -> None:
     assert pywrap["sha256"] == "b88b0f2b9c7d2ae72a7399efc44951659fb1a28ea607d962ba1f507ce754ba48"
     assert pywrap["id"] in lock["required_source_ids"]
     assert pywrap["id"] in lock["production_components"]["controlled-ocp-occt-runtime"]
+
+
+def test_windows_sdk_gl_include_dir_requires_exact_sdk_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sdk_include = tmp_path / "Include" / "10.0.26100.0" / "um"
+    gl_header = sdk_include / "gl" / "GL.h"
+    gl_header.parent.mkdir(parents=True)
+    gl_header.write_text("// test header", encoding="utf-8")
+    monkeypatch.setenv("WindowsSdkDir", str(tmp_path))
+    monkeypatch.setenv("WindowsSDKVersion", "10.0.26100.0\\")
+
+    include_dir, version = windows_sdk_gl_include_dir()
+
+    assert include_dir == sdk_include
+    assert version == "10.0.26100.0"
+
+
+def test_windows_sdk_gl_include_dir_fails_closed_without_gl_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WindowsSdkDir", str(tmp_path))
+    monkeypatch.setenv("WindowsSDKVersion", "10.0.26100.0")
+
+    with pytest.raises(RuntimeError, match="GL.h"):
+        windows_sdk_gl_include_dir()
 
 
 def test_source_record_requires_sha256(valid_lock: dict[str, object]) -> None:
