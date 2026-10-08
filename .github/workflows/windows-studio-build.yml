@@ -111,7 +111,7 @@ jobs:
           post-cleanup: "shell-init"
 
       - name: Fetch and verify every locked corresponding source
-        shell: micromamba-shell {0}
+        shell: pwsh
         run: |
           $sourceRoot = Join-Path $env:RUNNER_TEMP "packlab-native-sources"
           $sourceEvidence = Join-Path $env:RUNNER_TEMP "packlab-native-source-evidence.json"
@@ -124,15 +124,15 @@ jobs:
           Get-Content -LiteralPath $sourceEvidence | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Build and overlay the controlled OCP/OCCT runtime
-        shell: micromamba-shell {0}
+        shell: pwsh
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          $sitePackages = (uv run --locked python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
+          $sitePackages = (& micromamba run -n packlab-ocp-bindings python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
           if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The locked production Python site-packages path could not be resolved." }
           $buildRoot = Join-Path $env:RUNNER_TEMP "packlab-controlled-ocp-build"
           $manifest = Join-Path $env:RUNNER_TEMP "windows-ocp-controlled-runtime-manifest.json"
-          python tools/packaging/build_controlled_ocp_runtime.py `
+          & micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_ocp_runtime.py `
             --source-root $env:PACKLAB_NATIVE_SOURCE_ROOT `
             --build-root $buildRoot `
             --site-packages $sitePackages `
