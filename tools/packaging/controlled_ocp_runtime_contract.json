@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "workflow_build_contract_version": 1,
+  "target": {
+    "operating_system": "Windows",
+    "runner_image": "windows-2022",
+    "architecture": "x86_64",
+    "python_minor": "3.12",
+    "python_version": "3.12.15"
+  },
+  "ocp_bindgen_workers": 4,
+  "cmake_parallel": 4,
+  "windows_sdk_version": "10.0.26100.0",
+  "cmake_generator": "Visual Studio 17 2022",
+  "toolchain": {
+    "cmake": "cmake version 3.31.8",
+    "compiler": "MSVC 19.44.35229.0"
+  }
+}

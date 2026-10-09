@@ -32,48 +32,53 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: windows-studio-build-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  build-studio:
-    name: Build and smoke-test production Studio
+  controlled-ocp-runtime:
+    name: Produce and validate controlled OCP runtime
     runs-on: windows-2022
     timeout-minutes: 480
+    concurrency:
+      group: controlled-ocp-runtime-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: false
     env:
       UV_NO_PROGRESS: "1"
-
+    outputs:
+      bundle-artifact-name: ${{ steps.runtime_identity.outputs.artifact_name }}
+      bundle-artifact-bytes: ${{ steps.runtime_identity.outputs.artifact_bytes }}
+      cache-key: ${{ steps.controlled_cache.outputs.cache-primary-key }}
+      manifest-sha256: ${{ steps.runtime_identity.outputs.manifest_sha256 }}
+      source-lock-sha256: ${{ steps.runtime_identity.outputs.source_lock_sha256 }}
+      bundle-content-sha256: ${{ steps.runtime_identity.outputs.bundle_content_sha256 }}
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
-
+      - name: Record controlled-runtime producer start
+        shell: pwsh
+        run: |
+          $started = [DateTimeOffset]::UtcNow
+          "PACKLAB_RUNTIME_JOB_START_UTC=$($started.ToString('o'))" >> $env:GITHUB_ENV
       - name: Set up Python 3.12
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-
       - name: Install pinned uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           version: "0.11.26"
           enable-cache: false
-
       - name: Restore exact uv dependency cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/uv-cache
           key: ${{ runner.os }}-${{ runner.arch }}-python-3.12-uv-0.11.26-${{ hashFiles('uv.lock') }}
-
       - name: Configure uv dependency cache directory
         shell: pwsh
         run: |
           $uvCacheDir = Join-Path $env:RUNNER_TEMP "uv-cache"
           "UV_CACHE_DIR=$uvCacheDir" >> $env:GITHUB_ENV
-
       - name: Validate lock and install pinned build environment
         shell: pwsh
         run: |
@@ -84,7 +89,6 @@ jobs:
           uv run --locked python tools/packaging/validate_windows_native_source_lock.py `
             --verify-build-lock --verify-conda-lock --verify-uv-lock
           if ($LASTEXITCODE -ne 0) { throw "Windows native source or package lock validation failed." }
-
       - name: Render hash-pinned OCP explicit package lock
         id: render_ocp_lock
         shell: pwsh
@@ -99,7 +103,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not render the exact Windows package lock." }
           if (-not (Test-Path -LiteralPath $lockPath)) { throw "Rendered explicit package lock is missing." }
           "path=$lockPath" >> $env:GITHUB_OUTPUT
-
       - name: Create exact OCP source-build environment
         uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3.2.1
         with:
@@ -109,8 +112,40 @@ jobs:
           init-shell: powershell
           cache-environment: false
           post-cleanup: "shell-init"
+      - name: Restore exact controlled OCP runtime cache
+        id: controlled_cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/controlled-ocp-runtime
+          key: ${{ runner.os }}-${{ runner.arch }}-controlled-ocp-py3.12-v1-${{ hashFiles('tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/build_controlled_ocp_runtime.py', 'tools/packaging/controlled_ocp_runtime_bundle.py', 'tools/packaging/validate_controlled_ocp_manifest.py', 'tools/packaging/validate_windows_native_source_lock.py', 'tools/packaging/fetch_verify_windows_native_sources.py', 'tools/packaging/controlled_ocp_runtime_contract.json') }}
+
+      - name: Fail-closed validate restored controlled runtime
+        id: bundle_cache_check
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          $bundle = Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime"
+          $cacheValid = "false"
+          if ("${{ steps.controlled_cache.outputs.cache-hit }}" -eq "true") {
+            & uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py validate `
+              --bundle $bundle `
+              --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
+            $validationExit = $LASTEXITCODE
+            if ($validationExit -eq 0) {
+              $cacheValid = "true"
+              "CONTROLLED_OCP_CACHE_HIT_VALIDATED" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            } else {
+              Write-Warning "Restored runtime cache failed validation; discarding it and rebuilding from exact sources."
+              Remove-Item -LiteralPath $bundle -Recurse -Force -ErrorAction SilentlyContinue
+              New-Item -ItemType Directory -Path $bundle -Force | Out-Null
+              "CONTROLLED_OCP_CACHE_REJECTED_REBUILD" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            }
+          }
+          "valid=$cacheValid" >> $env:GITHUB_OUTPUT
 
       - name: Fetch and verify every locked corresponding source
+        if: steps.bundle_cache_check.outputs.valid != 'true'
         shell: pwsh
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -125,7 +160,20 @@ jobs:
           "PACKLAB_NATIVE_SOURCE_EVIDENCE=$sourceEvidence" >> $env:GITHUB_ENV
           Get-Content -LiteralPath $sourceEvidence | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-      - name: Build and overlay the controlled OCP/OCCT runtime
+      - name: Record controlled-runtime source and environment setup timing
+        shell: pwsh
+        run: |
+          $started = [DateTimeOffset]::Parse($env:PACKLAB_RUNTIME_JOB_START_UTC)
+          $ended = [DateTimeOffset]::UtcNow
+          $duration = [Math]::Round(($ended - $started).TotalSeconds, 3)
+          @(
+            "## Controlled-runtime timing",
+            "",
+            "- Source/environment setup: $duration seconds (post-checkout through lock validation, micromamba setup, cache restore, and any exact-source fetch)."
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Build controlled OCP/OCCT runtime on cache miss
+        if: steps.bundle_cache_check.outputs.valid != 'true'
         shell: pwsh
         env:
           PYTHONPATH: ${{ github.workspace }}
@@ -135,14 +183,211 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The locked production Python site-packages path could not be resolved." }
           $buildRoot = Join-Path $env:RUNNER_TEMP "packlab-controlled-ocp-build"
           $manifest = Join-Path $env:RUNNER_TEMP "windows-ocp-controlled-runtime-manifest.json"
+          $timings = Join-Path $env:RUNNER_TEMP "controlled-ocp-build-timings.json"
+          $bundle = Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime"
           & micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_ocp_runtime.py `
             --source-root $env:PACKLAB_NATIVE_SOURCE_ROOT `
             --build-root $buildRoot `
             --site-packages $sitePackages `
-            --manifest $manifest
+            --manifest $manifest `
+            --build-contract tools/packaging/controlled_ocp_runtime_contract.json `
+            --bindgen-workers 4 `
+            --cmake-parallel 4 `
+            --timings $timings
           if ($LASTEXITCODE -ne 0) { throw "The exact-source controlled OCP/OCCT runtime build failed." }
-          "PACKLAB_CONTROLLED_OCP_MANIFEST=$manifest" >> $env:GITHUB_ENV
+          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py seal `
+            --site-packages $sitePackages `
+            --manifest $manifest `
+            --source-evidence $env:PACKLAB_NATIVE_SOURCE_EVIDENCE `
+            --bundle $bundle `
+            --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
+          if ($LASTEXITCODE -ne 0) { throw "The controlled runtime bundle could not be sealed." }
+          Get-Content -LiteralPath $timings | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      - name: Start controlled-runtime validation and transfer timing
+        shell: pwsh
+        run: |
+          "PACKLAB_RUNTIME_TRANSFER_START_UTC=$([DateTimeOffset]::UtcNow.ToString('o'))" >> $env:GITHUB_ENV
+
+      - name: Validate sealed controlled runtime bundle
+        id: validate_bundle
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          $bundle = Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime"
+          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py validate `
+            --bundle $bundle `
+            --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
+          if ($LASTEXITCODE -ne 0) { throw "The controlled OCP runtime bundle failed final provenance validation." }
+
+      - name: Install and smoke-test controlled runtime in producer environment
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          $sitePackages = (& micromamba run -n packlab-ocp-bindings python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
+          if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The locked runtime site-packages path could not be resolved." }
+          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py install `
+            --bundle (Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime") `
+            --site-packages $sitePackages `
+            --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
+          if ($LASTEXITCODE -ne 0) { throw "The controlled runtime could not be installed in the producer environment." }
+          & micromamba run -n packlab-ocp-bindings python tools/packaging/controlled_ocp_runtime_bundle.py smoke
+          if ($LASTEXITCODE -ne 0) { throw "The controlled runtime OCP/CAD smoke failed." }
+
+      - name: Record exact runtime artifact identity
+        id: runtime_identity
+        shell: pwsh
+        run: |
+          $bundle = Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime"
+          $metadataPath = Join-Path $bundle "controlled-runtime-metadata.json"
+          $manifestPath = Join-Path $bundle "windows-ocp-controlled-runtime-manifest.json"
+          $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+          $manifestSha = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $artifactBytes = (Get-ChildItem -LiteralPath $bundle -File -Recurse | Measure-Object -Property Length -Sum).Sum
+          $cacheStatus = "${{ steps.bundle_cache_check.outputs.valid }}"
+          $artifactName = "packlab-controlled-ocp-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
+          "artifact_bytes=$artifactBytes" >> $env:GITHUB_OUTPUT
+          "manifest_sha256=$manifestSha" >> $env:GITHUB_OUTPUT
+          "source_lock_sha256=$($metadata.source_lock_sha256)" >> $env:GITHUB_OUTPUT
+          "bundle_content_sha256=$($metadata.bundle_content_sha256)" >> $env:GITHUB_OUTPUT
+          @(
+            "## Controlled OCP runtime producer",
+            "",
+            "- Cache key: ``${{ steps.controlled_cache.outputs.cache-primary-key }}``",
+            "- Cache result: ``${{ steps.controlled_cache.outputs.cache-hit }}``",
+            "- Same-run artifact: ``$artifactName``",
+            "- Source lock SHA-256: ``$($metadata.source_lock_sha256)``",
+            "- Runtime manifest SHA-256: ``$manifestSha``",
+            "- Bundle content SHA-256: ``$($metadata.bundle_content_sha256)``",
+            "- Same-run artifact bytes: $artifactBytes",
+            "- Runtime files: $($metadata.runtime_file_count)",
+            "- OCP bindgen workers: $($metadata.ocp_bindgen_workers)",
+            "- Build timings: ``$((ConvertTo-Json -InputObject $metadata.build_timings -Compress))``",
+            "- Pywrap build this run: $(if ($cacheStatus -eq 'true') { 'not run; validated cache hit' } else { 'run on cache miss or rejected cache' })"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Save verified controlled runtime cache
+        if: steps.controlled_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/controlled-ocp-runtime
+          key: ${{ runner.os }}-${{ runner.arch }}-controlled-ocp-py3.12-v1-${{ hashFiles('tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/build_controlled_ocp_runtime.py', 'tools/packaging/controlled_ocp_runtime_bundle.py', 'tools/packaging/validate_controlled_ocp_manifest.py', 'tools/packaging/validate_windows_native_source_lock.py', 'tools/packaging/fetch_verify_windows_native_sources.py', 'tools/packaging/controlled_ocp_runtime_contract.json') }}
+
+      - name: Upload same-run verified controlled runtime
+        id: runtime_upload
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: ${{ steps.runtime_identity.outputs.artifact_name }}
+          path: ${{ runner.temp }}/controlled-ocp-runtime/**
+          if-no-files-found: error
+          retention-days: 1
+      - name: Record controlled-runtime validation and transfer timing
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:PACKLAB_RUNTIME_TRANSFER_START_UTC) {
+            $started = [DateTimeOffset]::Parse($env:PACKLAB_RUNTIME_TRANSFER_START_UTC)
+            $ended = [DateTimeOffset]::UtcNow
+            $duration = [Math]::Round(($ended - $started).TotalSeconds, 3)
+            "- Bundle validation, cache save, and same-run artifact upload: $duration seconds; upload outcome: ${{ steps.runtime_upload.outcome }}." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          } else {
+            "- Bundle validation/upload timing: not reached." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+
+  build-studio:
+    name: Package and smoke-test production Studio
+    needs: controlled-ocp-runtime
+    runs-on: windows-2022
+    timeout-minutes: 360
+    concurrency:
+      group: windows-studio-package-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    env:
+      UV_NO_PROGRESS: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record packaging job start
+        shell: pwsh
+        run: |
+          "PACKLAB_PACKAGE_JOB_START_UTC=$([DateTimeOffset]::UtcNow.ToString('o'))" >> $env:GITHUB_ENV
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.26"
+          enable-cache: false
+      - name: Restore exact uv dependency cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/uv-cache
+          key: ${{ runner.os }}-${{ runner.arch }}-python-3.12-uv-0.11.26-${{ hashFiles('uv.lock') }}
+      - name: Configure uv dependency cache directory
+        shell: pwsh
+        run: |
+          $uvCacheDir = Join-Path $env:RUNNER_TEMP "uv-cache"
+          "UV_CACHE_DIR=$uvCacheDir" >> $env:GITHUB_ENV
+      - name: Validate lock and install pinned build environment
+        shell: pwsh
+        run: |
+          uv lock --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv sync --locked --all-groups
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv run --locked python tools/packaging/validate_windows_native_source_lock.py `
+            --verify-build-lock --verify-conda-lock --verify-uv-lock
+          if ($LASTEXITCODE -ne 0) { throw "Windows native source or package lock validation failed." }
+      - name: Download exact same-run controlled runtime
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.controlled-ocp-runtime.outputs.bundle-artifact-name }}
+          path: ${{ runner.temp }}/controlled-ocp-runtime
+
+      - name: Validate and install exact controlled runtime artifact
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          $bundle = Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime"
+          $cacheKey = "${{ needs.controlled-ocp-runtime.outputs.cache-key }}"
+          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py validate `
+            --bundle $bundle `
+            --cache-key $cacheKey
+          if ($LASTEXITCODE -ne 0) { throw "The same-run controlled runtime artifact failed independent packaging-job validation." }
+          $artifactBytes = (Get-ChildItem -LiteralPath $bundle -File -Recurse | Measure-Object -Property Length -Sum).Sum
+          if ($artifactBytes -ne [long]"${{ needs.controlled-ocp-runtime.outputs.bundle-artifact-bytes }}") {
+            throw "The downloaded same-run controlled runtime artifact byte size differs from the producer output."
+          }
+          $sitePackages = (uv run --locked python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
+          if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The packaging environment site-packages path could not be resolved." }
+          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py install `
+            --bundle $bundle `
+            --site-packages $sitePackages `
+            --cache-key $cacheKey
+          if ($LASTEXITCODE -ne 0) { throw "The verified controlled runtime artifact could not be installed." }
+          $manifest = Join-Path $bundle "windows-ocp-controlled-runtime-manifest.json"
+          $sourceEvidence = Join-Path $bundle "windows-native-source-evidence.json"
+          "PACKLAB_CONTROLLED_OCP_MANIFEST=$manifest" >> $env:GITHUB_ENV
+          "PACKLAB_NATIVE_SOURCE_EVIDENCE=$sourceEvidence" >> $env:GITHUB_ENV
+          $metadata = Get-Content -LiteralPath (Join-Path $bundle "controlled-runtime-metadata.json") -Raw | ConvertFrom-Json
+          $manifestSha = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($manifestSha -ne "${{ needs.controlled-ocp-runtime.outputs.manifest-sha256 }}" -or
+              $metadata.bundle_content_sha256 -ne "${{ needs.controlled-ocp-runtime.outputs.bundle-content-sha256 }}" -or
+              $metadata.source_lock_sha256 -ne "${{ needs.controlled-ocp-runtime.outputs.source-lock-sha256 }}") {
+            throw "The downloaded runtime artifact differs from the exact producer job outputs."
+          }
+          "PACKLAB_CONTROLLED_OCP_ARTIFACT_SHA256=$manifestSha" >> $env:GITHUB_ENV
+          "- Downloaded bundle bytes: $artifactBytes (matches producer job output)." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
       - name: Create path-free build provenance
         shell: pwsh
         run: |
@@ -412,3 +657,15 @@ jobs:
           path: ${{ runner.temp }}/packlab-installer/**
           if-no-files-found: error
           retention-days: 1
+      - name: Record packaging job duration
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:PACKLAB_PACKAGE_JOB_START_UTC) {
+            $started = [DateTimeOffset]::Parse($env:PACKLAB_PACKAGE_JOB_START_UTC)
+            $ended = [DateTimeOffset]::UtcNow
+            $duration = [Math]::Round(($ended - $started).TotalSeconds, 3)
+            "## Packaging job timing`n`n- Total duration from post-checkout start: $duration seconds." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          } else {
+            "## Packaging job timing`n`n- Duration unavailable because checkout/start marker was not reached." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }

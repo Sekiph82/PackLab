@@ -11,7 +11,9 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 from collections import deque
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -22,6 +24,8 @@ OCP_PYWRAP_SOURCE_ID = "ocp-pywrap-source-9251940"
 OCCT_SOURCE_ID = "occt-source-7.9.3"
 SOURCE_IDS = (OCP_SOURCE_ID, OCP_PYWRAP_SOURCE_ID, OCCT_SOURCE_ID)
 WINDOWS_SDK_VERSION = "10.0.26100.0"
+DEFAULT_BINDGEN_WORKERS = 4
+DEFAULT_CMAKE_PARALLEL = 4
 SYSTEM_DLLS = {
     "advapi32.dll",
     "bcrypt.dll",
@@ -54,6 +58,40 @@ def run(command: list[str], *, cwd: Path | None = None) -> None:
     result = subprocess.run(command, cwd=cwd, check=False)
     if result.returncode:
         raise RuntimeError(f"Build command failed with exit code {result.returncode}")
+
+
+def timed_run(
+    phase: str,
+    command: list[str],
+    timings: list[dict[str, Any]],
+    *,
+    cwd: Path | None = None,
+    workers: int | None = None,
+) -> None:
+    started = datetime.now(UTC)
+    start = time.monotonic()
+    worker_detail = f" workers={workers}" if workers is not None else ""
+    print(
+        f"CONTROLLED_OCP_PHASE_START phase={phase}{worker_detail} utc={started.isoformat()}",
+        flush=True,
+    )
+    run(command, cwd=cwd)
+    ended = datetime.now(UTC)
+    elapsed = time.monotonic() - start
+    timings.append(
+        {
+            "phase": phase,
+            "started_utc": started.isoformat(),
+            "ended_utc": ended.isoformat(),
+            "duration_seconds": round(elapsed, 3),
+            "worker_count": workers,
+        }
+    )
+    print(
+        f"CONTROLLED_OCP_PHASE_END phase={phase}{worker_detail} "
+        f"utc={ended.isoformat()} duration_seconds={elapsed:.3f}",
+        flush=True,
+    )
 
 
 def extract_archive(archive: Path, destination: Path) -> Path:
@@ -113,9 +151,15 @@ def is_external_runtime(name: str) -> bool:
 
 
 def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
+    contract = json.loads(args.build_contract.read_text(encoding="utf-8"))
+    if contract.get("ocp_bindgen_workers") != args.bindgen_workers:
+        raise ValueError("The bindgen worker count differs from the checked-in build contract")
+    if contract.get("cmake_parallel") != args.cmake_parallel:
+        raise ValueError("CMake parallelism differs from the checked-in build contract")
     lock_path = args.lock.resolve()
     lock = load_source_lock(lock_path)
     records = {record["id"]: record for record in lock["records"]}
+    timings: list[dict[str, Any]] = []
     if any(source_id not in records for source_id in SOURCE_IDS):
         raise ValueError("The controlled OCP source records are missing from the source lock")
     archive_paths = {
@@ -179,7 +223,20 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             "-DBUILD_USE_PCH=OFF",
         ]
     )
-    run(["cmake", "--build", str(occt_build), "--config", "Release", "--parallel", "2"])
+    timed_run(
+        "occt_native_build",
+        [
+            "cmake",
+            "--build",
+            str(occt_build),
+            "--config",
+            "Release",
+            "--parallel",
+            str(args.cmake_parallel),
+        ],
+        timings,
+        workers=args.cmake_parallel,
+    )
     run(["cmake", "--install", str(occt_build), "--config", "Release"])
 
     occt_dlls = [path for path in occt_prefix.rglob("*.dll") if path.is_file()]
@@ -207,6 +264,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             f"-DOCCT_LIB_DIR={occt_dll_directory}",
             f"-DCMAKE_PREFIX_PATH={occt_prefix}",
             f"-DPython_EXECUTABLE={sys.executable}",
+            f"-DN_PROC={args.bindgen_workers}",
             # CMake 3.31's FindOpenGL leaves OPENGL_INCLUDE_DIR empty on
             # Windows even though GL/gl.h is supplied by the selected SDK.
             # OCP's pinned CMakeLists interpolates OPENGL_INCLUDE_DIRS into
@@ -214,7 +272,36 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             f"-DOPENGL_INCLUDE_DIR={windows_gl_include}",
         ]
     )
-    run(["cmake", "--build", str(ocp_build), "--config", "Release", "--parallel", "2"])
+    timed_run(
+        "pywrap_generation",
+        [
+            "cmake",
+            "--build",
+            str(ocp_build),
+            "--config",
+            "Release",
+            "--target",
+            "pywrap",
+            "--parallel",
+            str(args.cmake_parallel),
+        ],
+        timings,
+        workers=args.bindgen_workers,
+    )
+    timed_run(
+        "ocp_native_compile_link",
+        [
+            "cmake",
+            "--build",
+            str(ocp_build),
+            "--config",
+            "Release",
+            "--parallel",
+            str(args.cmake_parallel),
+        ],
+        timings,
+        workers=args.cmake_parallel,
+    )
 
     generated_packages = [path for path in ocp_build.rglob("OCP") if path.is_dir()]
     generated_packages = [path for path in generated_packages if any(path.glob("*.pyd"))]
@@ -275,6 +362,14 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("The exact OCCT compiler ID/version could not be identified")
     compiler_version = f"{compiler_id.group(1)} {compiler_version_match.group(1)}"
     cmake_version = subprocess.check_output(["cmake", "--version"], text=True).splitlines()[0]
+    if (
+        cmake_version != contract["toolchain"]["cmake"]
+        or compiler_version != contract["toolchain"]["compiler"]
+        or windows_sdk_version != contract["windows_sdk_version"]
+        or sys.version.split()[0] != contract["target"]["python_version"]
+        or generator != contract["cmake_generator"]
+    ):
+        raise ValueError("The native build toolchain differs from the checked-in runtime contract")
 
     file_records = []
     for path in sorted(package_target.iterdir()):
@@ -307,7 +402,11 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             "cmake": cmake_version,
             "compiler": compiler_version,
             "windows_sdk": windows_sdk_version,
+            "ocp_bindgen_workers": args.bindgen_workers,
+            "cmake_parallel": args.cmake_parallel,
+            "cmake_generator": generator,
         },
+        "build_timings": timings,
         "external_runtime_dependencies": sorted(external_runtime_names),
         "files": file_records,
     }
@@ -331,8 +430,25 @@ def main() -> int:
     parser.add_argument("--build-root", type=Path, required=True)
     parser.add_argument("--site-packages", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument(
+        "--build-contract",
+        type=Path,
+        default=Path("tools/packaging/controlled_ocp_runtime_contract.json"),
+    )
+    parser.add_argument("--bindgen-workers", type=int, default=DEFAULT_BINDGEN_WORKERS)
+    parser.add_argument("--cmake-parallel", type=int, default=DEFAULT_CMAKE_PARALLEL)
+    parser.add_argument("--timings", type=Path)
     args = parser.parse_args()
-    build_runtime(args)
+    if args.bindgen_workers != DEFAULT_BINDGEN_WORKERS:
+        raise ValueError("The controlled runtime contract requires exactly four pywrap workers")
+    if args.cmake_parallel != DEFAULT_CMAKE_PARALLEL:
+        raise ValueError("The controlled runtime contract requires CMake parallelism of four")
+    manifest = build_runtime(args)
+    if args.timings:
+        args.timings.parent.mkdir(parents=True, exist_ok=True)
+        args.timings.write_text(
+            json.dumps(manifest["build_timings"], indent=2) + "\n", encoding="utf-8"
+        )
     return 0
 
 
