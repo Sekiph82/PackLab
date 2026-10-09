@@ -29,8 +29,9 @@ def test_disk_hygiene_helper_is_allowlisted_dry_run_and_fail_safe() -> None:
     assert "$script:MaximumDisposableBytes = 8GB" in helper
     assert "Get-DisposablePackLabPaths" in helper
     assert "Remove-OwnerDevSuperseded" in helper
-    assert "Remove-ObsoleteAppDataOwnerDev" in helper
-    assert "[switch]$RemoveLegacyAppDataOwnerDev" in helper
+    assert "Test-OwnerDevPathActive" in helper
+    assert "Remove-ObsoleteAppDataOwnerDev" not in helper
+    assert "RemoveLegacyAppDataOwnerDev" not in helper
     assert "Test-DesktopOwnerDevBinding" in helper
     assert "ownerdev_superseded_release" in helper
 
@@ -44,7 +45,14 @@ def test_full_test_wrapper_owns_basetemp_and_cleans_in_finally() -> None:
     assert "$maxBaseTempBytes = 4GB" in wrapper
     assert "$maxFixtureBytes = 2GB" in wrapper
     assert "$maxDisposableBytes = 8GB" in wrapper
-    assert "Get-TempTreeStats $baseTemp" in wrapper
+    assert "Get-DiskSnapshot" in wrapper
+    assert "Get-PackLabDisposableRoots" in wrapper
+    assert "$maxMeasurementMilliseconds = 2000" in wrapper
+    assert "$maxMeasurementEntries = 100000" in wrapper
+    assert "PACKLAB_DISPOSABLE_MEASUREMENT_FAILED" in wrapper
+    assert "Where-Object { $null -ne $_ }" in wrapper
+    assert "WaitAny([System.Threading.Tasks.Task[]]$tasks" in wrapper
+    assert "WaitAny([System.Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)" not in wrapper
     assert "PYTEST_DISK_BUDGET_EXCEEDED" in wrapper
     assert "TEST_FIXTURE_DISK_BUDGET_EXCEEDED" in wrapper
     assert "taskkill.exe /PID $proc.Id /T /F" in wrapper
@@ -56,6 +64,16 @@ def test_full_test_wrapper_owns_basetemp_and_cleans_in_finally() -> None:
     assert "-Mode post-test -RunTempPath $runRoot -Apply" in wrapper
     assert "$exitCode = $proc.ExitCode" in wrapper
     assert "exit $exitCode" in wrapper
+
+
+def test_runner_contract_mode_only_allows_tiny_bounded_limits() -> None:
+    wrapper = TEST_WRAPPER.read_text(encoding="utf-8")
+    assert "[switch]$ContractTestMode" in wrapper
+    assert "ContractMaxBaseTempBytes -gt $maxBaseTempBytes" in wrapper
+    assert "ContractMaxFixtureBytes -gt $maxFixtureBytes" in wrapper
+    assert "ContractMaxDisposableBytes -gt $maxDisposableBytes" in wrapper
+    assert "runner-contract" in wrapper
+    assert "packlab_test_runner_child.py" in wrapper
 
 
 def test_disk_hygiene_policy_protects_owner_data_and_sets_space_floor() -> None:

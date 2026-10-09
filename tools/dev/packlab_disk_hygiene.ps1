@@ -13,8 +13,7 @@ param(
     [switch]$MeasureInventoryBytes,
     [switch]$Apply,
     [switch]$PruneUv,
-    [switch]$CleanupOwnerDev,
-    [switch]$RemoveLegacyAppDataOwnerDev
+    [switch]$CleanupOwnerDev
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,7 +57,7 @@ function Get-TreeBytes([string]$Path) {
         try { $entries = [System.IO.Directory]::EnumerateFileSystemEntries($directory) }
         catch {
             $script:Summary.locked_paths += $directory
-            continue
+            throw "DISK_MEASUREMENT_FAILED path=$directory reason=$($_.Exception.Message)"
         }
         foreach ($entry in $entries) {
             try {
@@ -66,8 +65,13 @@ function Get-TreeBytes([string]$Path) {
                 if (($attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
                 if (($attributes -band [System.IO.FileAttributes]::Directory) -ne 0) { $pending.Push($entry) }
                 else { $total += [long]([System.IO.FileInfo]::new($entry)).Length }
+            } catch [System.IO.FileNotFoundException] {
+                continue
+            } catch [System.IO.DirectoryNotFoundException] {
+                continue
             } catch {
                 $script:Summary.locked_paths += $entry
+                throw "DISK_MEASUREMENT_FAILED path=$entry reason=$($_.Exception.Message)"
             }
         }
     }
@@ -331,63 +335,6 @@ function Remove-OwnerDevSuperseded([string]$OwnerRoot) {
     }
 }
 
-function Remove-ObsoleteAppDataOwnerDev {
-    $appRoot = Join-Path $env:LOCALAPPDATA "PackLab\OwnerDev"
-    $desktopRoot = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) "PackLab\OwnerDev"
-    if (-not (Test-Path -LiteralPath $appRoot -PathType Container)) { return }
-    $desktopCurrent = Get-OwnerDevManifest (Join-Path $desktopRoot "current")
-    $desktopLauncher = Join-Path $desktopRoot "launcher\PackLab.exe"
-    $desktopBuild = Join-Path $desktopRoot "launcher\PackLab.build.json"
-    $desktopExe = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) "PackLab.exe"
-    if ($null -eq $desktopCurrent -or -not (Test-Path -LiteralPath $desktopLauncher -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $desktopBuild -PathType Leaf) -or -not (Test-Path -LiteralPath $desktopExe -PathType Leaf)) {
-        Write-Host "legacy_appdata_ownerdev=RETAINED_DESKTOP_OWNERDEV_NOT_VERIFIED"
-        $script:Summary.retained_paths += $appRoot
-        return
-    }
-    $fingerprint = Get-Content -LiteralPath $desktopBuild -Raw | ConvertFrom-Json
-    $hash = (Get-FileHash -LiteralPath $desktopLauncher -Algorithm SHA256).Hash.ToLowerInvariant()
-    $desktopExeHash = (Get-FileHash -LiteralPath $desktopExe -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($fingerprint.runtime_id -ne $desktopCurrent.runtime_id -or $fingerprint.exe_sha256 -ne $hash -or $hash -ne $desktopExeHash) {
-        Write-Host "legacy_appdata_ownerdev=RETAINED_DESKTOP_OWNERDEV_IDENTITY_MISMATCH"
-        $script:Summary.retained_paths += $appRoot
-        return
-    }
-    $programs = [Environment]::GetFolderPath('Programs')
-    $shell = New-Object -ComObject WScript.Shell
-    $shortcuts = @(Get-ChildItem -LiteralPath (Join-Path $programs "PackLab") -Filter "*.lnk" -File -ErrorAction SilentlyContinue)
-    $targets = @($shortcuts | ForEach-Object { $shell.CreateShortcut($_.FullName).TargetPath })
-    if ($targets -notcontains $desktopLauncher) {
-        Write-Host "legacy_appdata_ownerdev=RETAINED_ACTIVE_SHORTCUT_NOT_VERIFIED"
-        $script:Summary.retained_paths += $appRoot
-        return
-    }
-    if ((Test-OwnerDevPathActive $appRoot).Count -gt 0) {
-        Write-Host "legacy_appdata_ownerdev=RETAINED_ACTIVE_PROCESS"
-        $script:Summary.retained_paths += $appRoot
-        return
-    }
-    $allowedNames = @("branding", "current", "launcher", "logs", "releases", "staging", "temp")
-    $unexpected = @(Get-ChildItem -LiteralPath $appRoot -Force | Where-Object { $_.Name -notin $allowedNames -and $_.Name -notmatch '^(previous-|current-stage-|stage-|refresh-)' })
-    if ($unexpected.Count -gt 0) {
-        $unexpected | ForEach-Object { Write-Host "legacy_appdata_ownerdev=RETAINED_UNEXPECTED_CHILD path=$($_.FullName)" }
-        $script:Summary.retained_paths += $appRoot
-        return
-    }
-    $item = Get-Item -LiteralPath $appRoot -Force
-    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        Write-Host "legacy_appdata_ownerdev=RETAINED_REPARSE_POINT"
-        $script:Summary.retained_paths += $appRoot
-        return
-    }
-    $bytes = Get-TreeBytes $appRoot
-    $removed = Remove-ExactCandidate $appRoot (Join-Path $env:LOCALAPPDATA "PackLab") $bytes
-    $reclaimed += $removed
-    $script:Summary.cleanup_categories.legacy_appdata_ownerdev = [long]$script:Summary.cleanup_categories.legacy_appdata_ownerdev + $removed
-    $script:Summary.candidates += [ordered]@{ path = $appRoot; bytes = $bytes; category = "legacy_appdata_ownerdev"; action = $(if ($removed -gt 0) { "REMOVED" } else { "RETAINED_OR_EMPTY" }) }
-    if ($removed -eq 0 -and (Test-Path -LiteralPath $appRoot)) { $script:Summary.retained_paths += $appRoot }
-}
-
 $freeBefore = Get-CDriveFreeBytes
 $script:Summary.disk_free_before_bytes = $freeBefore
 Write-Output "mode=$Mode"
@@ -475,14 +422,25 @@ if ($Mode -eq "post-task") {
     if ($CleanupOwnerDev) {
         $desktopOwnerRoot = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) "PackLab\OwnerDev"
         Remove-OwnerDevSuperseded $desktopOwnerRoot
-        if ($RemoveLegacyAppDataOwnerDev) {
-            Remove-ObsoleteAppDataOwnerDev
-        }
     }
 
     if ($Apply) {
+        $appDataOwnerRoot = Join-Path $env:LOCALAPPDATA "PackLab\OwnerDev"
+        $desktopOwnerRoot = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) "PackLab\OwnerDev"
+        $activeAppDataOwner = @(Test-OwnerDevPathActive $appDataOwnerRoot)
+        $activeDesktopOwner = @(Test-OwnerDevPathActive $desktopOwnerRoot)
         foreach ($root in @((Join-Path $env:TEMP "PackLab\staging"), (Join-Path $env:LOCALAPPDATA "PackLab\OwnerDev\staging"), (Join-Path $env:LOCALAPPDATA "PackLab\OwnerDev\temp"), (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) "PackLab\OwnerDev\staging"), (Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) "PackLab\OwnerDev\temp"))) {
             if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+            if ((Test-PathWithin $root $appDataOwnerRoot) -and $activeAppDataOwner.Count -gt 0) {
+                $activeAppDataOwner | ForEach-Object { Write-Host "retained_active_appdata_owner_pid=$($_.ProcessId)" }
+                $script:Summary.retained_paths += $root
+                continue
+            }
+            if ((Test-PathWithin $root $desktopOwnerRoot) -and $activeDesktopOwner.Count -gt 0) {
+                $activeDesktopOwner | ForEach-Object { Write-Host "retained_active_desktop_owner_pid=$($_.ProcessId)" }
+                $script:Summary.retained_paths += $root
+                continue
+            }
             foreach ($candidate in Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue) {
                 $markerPath = Join-Path $candidate.FullName ".packlab-disposable.json"
                 if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) {
