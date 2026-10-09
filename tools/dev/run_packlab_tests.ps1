@@ -17,6 +17,7 @@ $summaryRoot = Join-Path $repoRoot "reports\_local\disk-hygiene"
 $summaryPath = Join-Path $summaryRoot "$runId.json"
 $maxBaseTempBytes = 4GB
 $maxFixtureBytes = 2GB
+$maxDisposableBytes = 8GB
 $exitCode = 1
 $quotaTriggered = $false
 $quotaMessage = ""
@@ -87,15 +88,35 @@ function Get-TempTreeStats([string]$Path) {
 }
 
 function Get-FixedPackLabDisposableBytes {
+    $desktopOwnerRoot = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) "PackLab\OwnerDev"
+    $appDataOwnerRoot = Join-Path $env:LOCALAPPDATA "PackLab\OwnerDev"
     $roots = @(
         (Join-Path $repoRoot "build"),
         (Join-Path $repoRoot "dist"),
         (Join-Path $repoRoot "staging"),
-        (Join-Path $repoRoot "reports\_local\pytest")
+        (Join-Path $repoRoot "reports\_local\pytest"),
+        (Join-Path $env:TEMP "PackLab\staging"),
+        (Join-Path $desktopOwnerRoot "staging"),
+        (Join-Path $desktopOwnerRoot "temp"),
+        (Join-Path $appDataOwnerRoot "staging"),
+        (Join-Path $appDataOwnerRoot "temp")
     )
     $total = [long]0
     foreach ($path in $roots) { $total += Get-TempTreeBytes $path }
     return $total
+}
+
+function Stop-PytestTree {
+    if (-not $proc -or $proc.HasExited) { return }
+    & taskkill.exe /PID $proc.Id /T 2>&1 | ForEach-Object { Write-Output $_ }
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    while (-not $proc.HasExited -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 250 }
+    if (-not $proc.HasExited) {
+        Write-Output "pytest_tree_graceful_stop_timeout=true"
+        & taskkill.exe /PID $proc.Id /T /F 2>&1 | ForEach-Object { Write-Output $_ }
+        try { if (-not $proc.HasExited) { $proc.Kill() } } catch { }
+    }
+    try { $proc.WaitForExit(10000) | Out-Null } catch { }
 }
 
 function Show-LargestTempEntries([string]$Path) {
@@ -174,8 +195,8 @@ try {
             $exitCode = 42
             $quotaMessage = "PYTEST_DISK_BUDGET_EXCEEDED basetemp_bytes=$currentBytes maximum_bytes=$maxBaseTempBytes"
             Write-Output $quotaMessage
-            & taskkill.exe /PID $proc.Id /T /F 2>&1 | ForEach-Object { Write-Output $_ }
-            try { if (-not $proc.HasExited) { $proc.Kill() } } catch { }
+            Show-LargestTempEntries $baseTemp
+            Stop-PytestTree
             break
         }
         if ($stats.LargestFixtureBytes -gt $maxFixtureBytes) {
@@ -183,8 +204,17 @@ try {
             $exitCode = 43
             $quotaMessage = "TEST_FIXTURE_DISK_BUDGET_EXCEEDED fixture_path=$($stats.LargestFixturePath) fixture_bytes=$($stats.LargestFixtureBytes) maximum_bytes=$maxFixtureBytes"
             Write-Output $quotaMessage
-            & taskkill.exe /PID $proc.Id /T /F 2>&1 | ForEach-Object { Write-Output $_ }
-            try { if (-not $proc.HasExited) { $proc.Kill() } } catch { }
+            Show-LargestTempEntries $baseTemp
+            Stop-PytestTree
+            break
+        }
+        if ($disposableBytes -gt $maxDisposableBytes) {
+            $quotaTriggered = $true
+            $exitCode = 44
+            $quotaMessage = "PACKLAB_DISPOSABLE_DISK_BUDGET_EXCEEDED disposable_bytes=$disposableBytes maximum_bytes=$maxDisposableBytes"
+            Write-Output $quotaMessage
+            Show-LargestTempEntries $baseTemp
+            Stop-PytestTree
             break
         }
     }
@@ -208,6 +238,13 @@ try {
             $quotaTriggered = $true
             $exitCode = 43
             $quotaMessage = "TEST_FIXTURE_DISK_BUDGET_EXCEEDED fixture_path=$peakFixturePath fixture_bytes=$peakFixtureBytes maximum_bytes=$maxFixtureBytes"
+            Write-Output $quotaMessage
+            Show-LargestTempEntries $baseTemp
+        }
+        if ($peakDisposableBytes -gt $maxDisposableBytes) {
+            $quotaTriggered = $true
+            $exitCode = 44
+            $quotaMessage = "PACKLAB_DISPOSABLE_DISK_BUDGET_EXCEEDED disposable_bytes=$peakDisposableBytes maximum_bytes=$maxDisposableBytes"
             Write-Output $quotaMessage
             Show-LargestTempEntries $baseTemp
         }
@@ -242,7 +279,7 @@ try {
     $exitCode = 1
 } finally {
     if ($proc -and -not $proc.HasExited) {
-        try { & taskkill.exe /PID $proc.Id /T /F | Out-Null } catch { try { $proc.Kill() } catch { } }
+        try { Stop-PytestTree } catch { try { $proc.Kill() } catch { } }
     }
     $ownerPath = Join-Path $runRoot ".packlab-run.json"
     if (Test-Path -LiteralPath $ownerPath -PathType Leaf) {

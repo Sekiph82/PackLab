@@ -26,6 +26,12 @@ def test_disk_hygiene_helper_is_allowlisted_dry_run_and_fail_safe() -> None:
     assert "JsonSummaryPath" in helper and "ConvertTo-Json -Depth 8" in helper
     assert "Get-PackLabInventory" in helper
     assert "MeasureInventoryBytes" in helper
+    assert "$script:MaximumDisposableBytes = 8GB" in helper
+    assert "Get-DisposablePackLabPaths" in helper
+    assert "Remove-OwnerDevSuperseded" in helper
+    assert "Remove-ObsoleteAppDataOwnerDev" in helper
+    assert "Test-DesktopOwnerDevBinding" in helper
+    assert "ownerdev_superseded_release" in helper
 
 
 def test_full_test_wrapper_owns_basetemp_and_cleans_in_finally() -> None:
@@ -36,10 +42,13 @@ def test_full_test_wrapper_owns_basetemp_and_cleans_in_finally() -> None:
     assert "Do not pass --basetemp" in wrapper
     assert "$maxBaseTempBytes = 4GB" in wrapper
     assert "$maxFixtureBytes = 2GB" in wrapper
+    assert "$maxDisposableBytes = 8GB" in wrapper
     assert "Get-TempTreeStats $baseTemp" in wrapper
     assert "PYTEST_DISK_BUDGET_EXCEEDED" in wrapper
     assert "TEST_FIXTURE_DISK_BUDGET_EXCEEDED" in wrapper
     assert "taskkill.exe /PID $proc.Id /T /F" in wrapper
+    assert "Stop-PytestTree" in wrapper
+    assert "PACKLAB_DISPOSABLE_DISK_BUDGET_EXCEEDED" in wrapper
     assert "Show-LargestTempEntries $baseTemp" in wrapper
     assert "try {" in wrapper
     assert "finally {" in wrapper
