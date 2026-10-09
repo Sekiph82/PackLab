@@ -12,7 +12,7 @@ Phase 0 disk hygiene is implemented and published. PL-0350 V07 was not started b
 - Branch: `main`; required actor: `CODEX`.
 - Starting fetched `origin/main`: `9cbb3b9117bbd0609bf9214d931ccb160416d196`.
 - Starting canonical `TASKS.md` blob: `1b7e6cd81574edd8bdcdcc0d237c9ba6b3dafb22`.
-- Final published `origin/main` and local `HEAD`: `49e1e165cd3b28faba021c5e788a2fe704e8aa25`.
+- Implementation/evidence publication `origin/main` and local `HEAD` before this master-log commit: `49e1e165cd3b28faba021c5e788a2fe704e8aa25`.
 - `git show origin/main:TASKS.md` authorized M16-C001-R08 and V15: Current Milestone `M16`, Current Task `M16-C001-R08`, status `CHANGES_REQUIRED`, Required Actor `CODEX`, with V15 and its audit criteria as the next action.
 - The V15 prompt and matching criteria existed on fetched `origin/main`. Prompt: [V15 continuation prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_AUTHORITY_HARD_DISK_BUDGET_PL0350_V07_CONTINUATION_CODEX_PROMPT_V15.md). Criteria: [V15 audit criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/MASTER_PL0350_V07_CONTINUATION_CHATGPT_AUDIT_CRITERIA_V15.md).
 - Result: `AUTHORITY_SYNC_PASS`.
@@ -80,7 +80,7 @@ After implementation parity, `tools/dev/post_codex_owner_dev_refresh.ps1 -AllowP
 
 - Implementation commit: [7d9db2f](https://github.com/Sekiph82/PackLab/commit/7d9db2ff14cbb94532b9703e04c9ea4dd708575f).
 - Safety-adjustment commit: [49e1e16](https://github.com/Sekiph82/PackLab/commit/49e1e165cd3b28faba021c5e788a2fe704e8aa25).
-- `git push origin HEAD:main` succeeded for both commits. A final fetch verified local `HEAD` and `origin/main` both equal `49e1e165cd3b28faba021c5e788a2fe704e8aa25`.
+- `git push origin HEAD:main` succeeded for both implementation/evidence commits. The master-log-only commit [eb0f560](https://github.com/Sekiph82/PackLab/commit/eb0f56030da1f7e041c6dd7ee98b3f3fe6ca9f92) was then pushed; a final fetch verified local `HEAD` and `origin/main` both equal `eb0f56030da1f7e041c6dd7ee98b3f3fe6ca9f92`.
 - Privacy/secrets review: changed files contain no credentials, signing material, private scans, confidential supplier files, or local runtime/cache payloads. Ignored local disk-hygiene JSON summaries were not staged.
 - No ChatGPT audit file or root `TASKS.md` change was created.
 
