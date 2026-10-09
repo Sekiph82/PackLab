@@ -143,6 +143,17 @@ def windows_sdk_gl_include_dir() -> tuple[Path, str]:
     return include_dir, WINDOWS_SDK_VERSION
 
 
+def find_generated_binding(ocp_build: Path, native_build: Path) -> tuple[Path, Path]:
+    """Return pywrap's generated sources and the separately built extension."""
+    generated_package = ocp_build / "OCP"
+    if not generated_package.is_dir() or not any(generated_package.glob("*.cpp")):
+        raise ValueError("The pinned pywrap target did not produce generated OCP C++ sources")
+    bindings = sorted(path for path in native_build.rglob("OCP*.pyd") if path.is_file())
+    if len(bindings) != 1 or not bindings[0].stem.startswith("OCP."):
+        raise ValueError("The generated OCP project did not produce one unambiguous Python binding")
+    return generated_package, bindings[0]
+
+
 def is_external_runtime(name: str) -> bool:
     if name in SYSTEM_DLLS or name.startswith(("api-ms-win-", "ext-ms-win-")):
         return True
@@ -184,7 +195,8 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
     occt_prefix = args.build_root / "occt-install"
     occt_build = args.build_root / "occt-build"
     ocp_build = args.build_root / "ocp-build"
-    for path in (occt_prefix, occt_build, ocp_build):
+    native_build = args.build_root / "ocp-native-build"
+    for path in (occt_prefix, occt_build, ocp_build, native_build):
         if path.exists():
             shutil.rmtree(path)
 
@@ -288,14 +300,35 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         timings,
         workers=args.bindgen_workers,
     )
+    generated_cmake = ocp_build / "OCP" / "CMakeLists.txt"
+    if not generated_cmake.is_file():
+        raise ValueError("The pinned pywrap target did not produce its OCP CMake project")
+    run(
+        [
+            "cmake",
+            "-S",
+            str(generated_cmake.parent),
+            "-B",
+            str(native_build),
+            "-G",
+            generator,
+            "-A",
+            "x64",
+            f"-DCMAKE_SYSTEM_VERSION={WINDOWS_SDK_VERSION}",
+            f"-DOpenCASCADE_DIR={occt_prefix / 'cmake'}",
+            f"-DPython_EXECUTABLE={sys.executable}",
+        ]
+    )
     timed_run(
         "ocp_native_compile_link",
         [
             "cmake",
             "--build",
-            str(ocp_build),
+            str(native_build),
             "--config",
             "Release",
+            "--target",
+            "OCP",
             "--parallel",
             str(args.cmake_parallel),
         ],
@@ -303,15 +336,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         workers=args.cmake_parallel,
     )
 
-    generated_packages = [path for path in ocp_build.rglob("OCP") if path.is_dir()]
-    generated_packages = [path for path in generated_packages if any(path.glob("*.pyd"))]
-    if len(generated_packages) != 1:
-        raise ValueError("The controlled OCP build did not produce one unambiguous Python package")
-    generated_package = generated_packages[0]
-    binding_extensions = list(generated_package.glob("*.pyd"))
-    if len(binding_extensions) != 1 or binding_extensions[0].stem.split(".", 1)[0] != "OCP":
-        raise ValueError("The pinned OCP build must produce its single monolithic Python binding")
-    binding_extension = binding_extensions[0]
+    generated_package, binding_extension = find_generated_binding(ocp_build, native_build)
 
     required_occt_dll_names: set[str] = set()
     external_runtime_names: set[str] = set()

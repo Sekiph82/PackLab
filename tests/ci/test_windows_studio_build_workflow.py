@@ -141,7 +141,7 @@ def test_windows_studio_build_keeps_quality_and_privacy_contracts() -> None:
     assert '"ocp_pywrap_source_revision"' in ocp_builder
     assert '"-DOPENGL_INCLUDE_DIR={windows_gl_include}"' in ocp_builder
     assert 'WINDOWS_SDK_VERSION = "10.0.26100.0"' in ocp_builder
-    assert ocp_builder.count('f"-DCMAKE_SYSTEM_VERSION={WINDOWS_SDK_VERSION}"') == 2
+    assert ocp_builder.count('f"-DCMAKE_SYSTEM_VERSION={WINDOWS_SDK_VERSION}"') == 3
     assert '"windows_sdk": windows_sdk_version' in ocp_builder
     assert 'f"-DPython_EXECUTABLE={sys.executable}"' in ocp_builder
     assert '"-DPLATFORM=Windows"' not in ocp_builder
