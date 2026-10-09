@@ -13,7 +13,8 @@ param(
     [switch]$MeasureInventoryBytes,
     [switch]$Apply,
     [switch]$PruneUv,
-    [switch]$CleanupOwnerDev
+    [switch]$CleanupOwnerDev,
+    [switch]$RemoveLegacyAppDataOwnerDev
 )
 
 $ErrorActionPreference = "Stop"
@@ -474,7 +475,9 @@ if ($Mode -eq "post-task") {
     if ($CleanupOwnerDev) {
         $desktopOwnerRoot = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) "PackLab\OwnerDev"
         Remove-OwnerDevSuperseded $desktopOwnerRoot
-        Remove-ObsoleteAppDataOwnerDev
+        if ($RemoveLegacyAppDataOwnerDev) {
+            Remove-ObsoleteAppDataOwnerDev
+        }
     }
 
     if ($Apply) {

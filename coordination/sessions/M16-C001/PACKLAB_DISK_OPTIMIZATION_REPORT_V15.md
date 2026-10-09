@@ -40,7 +40,7 @@ Worktree review found no safe retirement candidate: the Desktop checkout is dirt
 
 ## Changes made
 
-- Extended the allowlisted hygiene helper to enforce the aggregate 8 GiB limit, account for the disposable roots, retain only manifest-verified OWNER DEV identities, and remove the exact obsolete LocalAppData OWNER DEV tree only after verifying the active Desktop launcher/shortcut and process ownership.
+- Extended the allowlisted hygiene helper to enforce the aggregate 8 GiB limit, account for the disposable roots, and retain only manifest-verified OWNER DEV identities. Legacy LocalAppData OWNER DEV removal now requires its own explicit `-RemoveLegacyAppDataOwnerDev` opt-in in addition to the standard owner cleanup flag, because the previously targeted tree reappeared with ambiguous contents.
 - Extended the test wrapper to enforce the aggregate 8 GiB cap and request a graceful process-tree stop before forced termination.
 - Added static contract checks and updated the local disk-hygiene instructions.
 

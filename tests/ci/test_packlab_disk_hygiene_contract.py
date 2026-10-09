@@ -30,6 +30,7 @@ def test_disk_hygiene_helper_is_allowlisted_dry_run_and_fail_safe() -> None:
     assert "Get-DisposablePackLabPaths" in helper
     assert "Remove-OwnerDevSuperseded" in helper
     assert "Remove-ObsoleteAppDataOwnerDev" in helper
+    assert "[switch]$RemoveLegacyAppDataOwnerDev" in helper
     assert "Test-DesktopOwnerDevBinding" in helper
     assert "ownerdev_superseded_release" in helper
 
