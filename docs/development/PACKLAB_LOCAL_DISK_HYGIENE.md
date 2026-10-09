@@ -1,0 +1,17 @@
+# PackLab local disk hygiene
+
+PackLab development commands must leave owner files, active worktrees, and the stable OWNER DEV runtime intact. Reproducible test and build scratch belongs in the PackLab-owned temporary roots below and is removed as soon as its command finishes.
+
+## Test runs
+
+Run the full local suite with `tools/dev/run_packlab_tests.ps1`. It checks C: free space first and refuses a disk-heavy run below 40 GiB. Each invocation gets one unique marked directory below `%TEMP%\PackLab\pytest`; pytest receives that run's explicit `--basetemp`. The wrapper polls the basetemp while pytest runs, terminates the process tree if the run exceeds 4 GiB or one fixture exceeds 2 GiB, reports the largest files/directories, and fails with `PYTEST_DISK_BUDGET_EXCEEDED` or `TEST_FIXTURE_DISK_BUDGET_EXCEEDED`. It preserves pytest's exit code when the quotas are not hit, writes only the last 200 output lines to ignored `reports/_local/pytest` on failure, and removes the run directory in `finally`.
+
+Use `tools/dev/packlab_disk_hygiene.ps1 -Mode inventory` to inspect the PackLab temp roots, OWNER DEV roots, pytest leftovers, and uv cache. Inventory lists large cache roots without recursively walking them by default; add `-MeasureInventoryBytes` when a full file-size walk is needed. Use `-Mode preflight` before disk-heavy work and `-Mode post-task -Apply` after a validation batch. Add `-JsonSummaryPath <path>` for a machine-readable summary. The helper prints each deletion candidate, defaults to dry run, requires an explicit `-Apply`, checks its allowlisted root and owner marker, skips active test processes, and reports access/lock failures. Historical `%TEMP%\pytest-of-sekip\pytest-<number>` runs may be removed only by passing the individually verified numeric run IDs; the helper never scans and removes all system pytest runs on its own.
+
+## Build and cache data
+
+Put PackLab-only disposable builds, source extraction, and staging below explicitly named PackLab temp roots; remove them after retaining required compact evidence. Do not remove canonical source, project checkouts, active/dirty/ambiguous worktrees, owner data, the Desktop `PackLab.exe`, active or previous-good OWNER DEV runtimes, or unrelated caches. Retire a Codex worktree only with Git worktree commands after verifying it is clean, published/reachable, inactive, and not current M16 work.
+
+Keep total disposable PackLab temp/build/staging below 8 GiB during work, any single generated test tree below 2 GiB, and completed disposable data below 1 GiB at handoff. Prefer minimal fixtures over copying repositories, `.venv`, runtimes, or caches. After a major local validation batch, inspect C: and the uv cache, then use `uv cache prune` when no active process is running from the uv cache. Do not use routine `uv cache clean`. Inspect pip cache and only reduce it with pip's supported cache command if it exceeds 2 GiB. Never delete Python installations or active environments.
+
+Every implementation log records disk-free bytes before/after, reclaimed bytes by category, retained worktrees and the reason, and any locked paths. Personal files and Hugging Face, Puppeteer, browser, GPU, and Codex runtime/cache data are outside the automatic cleanup allowlist.

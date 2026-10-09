@@ -45,6 +45,11 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "sourcePathsBase64" in deploy and "base64.b64decode" in deploy
     assert "owner_packlab_bootstrap.py" in launcher
     assert "__PACKLAB_OWNER_ROOT__" in launcher
+    assert "ResolveOwnerRoot()" in launcher
+    assert 'Path.Combine(executableDirectory, "PackLab", "OwnerDev")' in launcher
+    assert "Directory.Exists(desktopOwnerRoot)" in launcher
+    assert 'Path.Combine(ownerRoot, "current")' in launcher
+    assert 'String.Equals(directoryName, "launcher"' in launcher
     assert "LOCALAPPDATA" not in launcher
     assert "DesktopDirectory" in build and "DesktopDirectory" in post
     assert "FindVisibleStudioDescendant" in launcher and "System.Management" in build
@@ -97,7 +102,9 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     if not csc.is_file():
         csc = Path(os.environ["WINDIR"]) / "Microsoft.NET/Framework/v4.0.30319/csc.exe"
     assert csc.is_file(), "V09 requires an already-installed Windows C# compiler"
-    owner_root = tmp_path / "owner runtime with spaces"
+    desktop = tmp_path / "Desktop with spaces"
+    owner_root = desktop / "PackLab" / "OwnerDev"
+    embedded_owner_root = tmp_path / "Local AppData decoy" / "PackLab" / "OwnerDev"
     runtime_id = "a" * 40 + "-" + "b" * 32
     release = owner_root / "releases" / runtime_id
     icon = release / "apps/windows-studio/assets/branding/PackLab.ico"
@@ -167,9 +174,8 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
         ),
         encoding="utf-8",
     )
-    desktop = tmp_path / "Desktop with spaces"
     programs = tmp_path / "Start Menu with spaces"
-    desktop.mkdir()
+    desktop.mkdir(exist_ok=True)
     obsolete = desktop / "PackLab.lnk"
     obsolete.write_bytes(b"obsolete owner shortcut")
     unrelated = desktop / "PackLab 3D.lnk"
@@ -201,14 +207,17 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     assert "OWNER_DEV_EXE_READY " + "a" * 40 + " " + runtime_id in deployed.stdout
     assert (programs / "PackLab/PackLab.lnk").is_file()
 
-    test_launcher = tmp_path / "launcher with spaces.exe"
+    test_launcher = desktop / "PackLab.exe"
     test_source = tmp_path / "PackLabOwnerLauncher.test.cs"
     test_source.write_text(
         (ROOT / "tools/dev/PackLabOwnerLauncher.cs")
         .read_text(encoding="utf-8")
         .replace("__PACKLAB_SOURCE_COMMIT__", "a" * 40)
         .replace("__PACKLAB_RUNTIME_ID__", runtime_id)
-        .replace("__PACKLAB_OWNER_ROOT__", str(owner_root).replace("\\", "\\\\")),
+        .replace(
+            "__PACKLAB_OWNER_ROOT__",
+            str(embedded_owner_root).replace("\\", "\\\\"),
+        ),
         encoding="utf-8",
     )
     compile_test = subprocess.run(
@@ -229,7 +238,7 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     )
     assert compile_test.returncode == 0, compile_test.stdout + compile_test.stderr
 
-    local_app_data = tmp_path / "Local AppData decoy"
+    local_app_data = embedded_owner_root.parents[1]
     result_file = tmp_path / "native error dialog result.txt"
     environment = os.environ.copy()
     environment["LOCALAPPDATA"] = str(local_app_data)
@@ -240,9 +249,10 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     logs = list((owner_root / "logs").glob("startup-*.log"))
     assert logs and "reason=launcher_failure" in logs[0].read_text(encoding="utf-8")
     assert str(owner_root) in logs[0].read_text(encoding="utf-8")
+    assert not (embedded_owner_root / "logs").exists()
 
     runtime_id = "a" * 40 + "-" + "b" * 32
-    release_runtime = owner_root / "releases" / runtime_id
+    release_runtime = owner_root / "current"
     release_runtime.mkdir(parents=True, exist_ok=True)
     (release_runtime / "uv.lock").write_bytes(lock_bytes)
     pythonw = release_runtime / ".venv/Scripts/pythonw.exe"
@@ -297,12 +307,18 @@ def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None
     early = subprocess.run([str(test_launcher)], env=environment, check=False, timeout=15)
     assert early.returncode == 1
     diagnostic = result_file.read_text(encoding="utf-8")
-    assert "dialog_shown=true" in diagnostic and "exit_code=29" in diagnostic
+    assert "dialog_shown=true" in diagnostic and "exit_code=29" in diagnostic, (
+        diagnostic
+        + "\n"
+        + "\n".join(
+            path.read_text(encoding="utf-8") for path in (owner_root / "logs").glob("startup-*.log")
+        )
+    )
     logs = list((owner_root / "logs").glob("startup-*.log"))
     assert any("reason=early_child_exit" in path.read_text(encoding="utf-8") for path in logs)
 
     descendant_runtime_id = "c" * 40 + "-" + "d" * 32
-    descendant_release = owner_root / "releases" / descendant_runtime_id
+    descendant_release = owner_root / "current"
     descendant_python = descendant_release / ".venv/Scripts/pythonw.exe"
     descendant_python.parent.mkdir(parents=True, exist_ok=True)
     (descendant_release / "uv.lock").write_bytes(lock_bytes)
@@ -362,14 +378,17 @@ internal static class PythonwWrapper {
     )
     assert compile_wrapper.returncode == 0, compile_wrapper.stdout + compile_wrapper.stderr
     shutil.copyfile(fake_wrapper_build, descendant_python)
-    descendant_launcher = tmp_path / "launcher with descendant.exe"
+    descendant_launcher = desktop / "launcher with descendant.exe"
     descendant_source = tmp_path / "PackLabOwnerLauncher.descendant.cs"
     descendant_source.write_text(
         (ROOT / "tools/dev/PackLabOwnerLauncher.cs")
         .read_text(encoding="utf-8")
         .replace("__PACKLAB_SOURCE_COMMIT__", "c" * 40)
         .replace("__PACKLAB_RUNTIME_ID__", descendant_runtime_id)
-        .replace("__PACKLAB_OWNER_ROOT__", str(owner_root).replace("\\", "\\\\")),
+        .replace(
+            "__PACKLAB_OWNER_ROOT__",
+            str(embedded_owner_root).replace("\\", "\\\\"),
+        ),
         encoding="utf-8",
     )
     compile_descendant_launcher = subprocess.run(

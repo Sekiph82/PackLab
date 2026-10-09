@@ -19,8 +19,8 @@ internal static class PackLabOwnerLauncher
     [STAThread]
     private static int Main()
     {
-        string ownerRoot = OwnerRoot;
-        string runtimeRoot = Path.Combine(ownerRoot, "releases", RuntimeId);
+        string ownerRoot = ResolveOwnerRoot();
+        string runtimeRoot = Path.Combine(ownerRoot, "current");
         string logRoot = Path.Combine(ownerRoot, "logs");
         string manifestPath = Path.Combine(runtimeRoot, "owner-dev-runtime.json");
         string startupLog = Path.Combine(logRoot, "startup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + ".log");
@@ -124,6 +124,26 @@ internal static class PackLabOwnerLauncher
             ShowStartupError("PackLab Studio could not start. Details: " + startupLog, startupLog, 1);
             return 1;
         }
+    }
+
+    private static string ResolveOwnerRoot()
+    {
+        string executablePath = Process.GetCurrentProcess().MainModule.FileName;
+        string executableDirectory = Path.GetDirectoryName(executablePath);
+        string directoryName = new DirectoryInfo(executableDirectory).Name;
+
+        // The stable launcher inside OwnerDev\launcher resolves its owner root
+        // from that layout. The Desktop copy resolves the project-local runtime
+        // beside it, so a previously embedded AppData path cannot win.
+        if (String.Equals(directoryName, "launcher", StringComparison.OrdinalIgnoreCase))
+            return Directory.GetParent(executableDirectory).FullName;
+
+        string desktopOwnerRoot = Path.Combine(executableDirectory, "PackLab", "OwnerDev");
+        if (Directory.Exists(desktopOwnerRoot)) return desktopOwnerRoot;
+
+        // Keep the compiled owner root for isolated launcher contract fixtures
+        // and non-Desktop deployments that do not use the Desktop project layout.
+        return OwnerRoot;
     }
 
     private static void RequireFile(string path, string message)
