@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -56,6 +57,8 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
     assert "manifest_path=" in launcher and "exception_path=" in launcher
     assert '"pythonw.exe"' in launcher
     assert 'run_module("packlab_studio"' in bootstrap
+    assert 'runtime_root.name == "current" and runtime_root.parent.name == "OwnerDev"' in bootstrap
+    assert "not (immutable_release or project_current)" in bootstrap
     assert "WaitForExit(200)" in launcher and "StartupStabilitySeconds = 10" in launcher
     assert "early_child_exit" in launcher and "MessageBox.Show" in launcher
     assert "powershell.exe" not in launcher.lower()
@@ -93,6 +96,48 @@ def test_runtime_manifest_contract_excludes_owner_local_paths() -> None:
         ]
         == 1
     )
+
+
+def test_owner_bootstrap_accepts_matching_project_current_runtime(tmp_path: Path) -> None:
+    owner_root = tmp_path / "OwnerDev"
+    runtime_root = owner_root / "current"
+    source_commit = "a" * 40
+    runtime_id = source_commit + "-" + "b" * 32
+    (runtime_root / "apps/windows-studio/src").mkdir(parents=True)
+    (runtime_root / "core/src").mkdir(parents=True)
+    bootstrap = ROOT / "tools/dev/owner_packlab_bootstrap.py"
+    (runtime_root / "tools/dev").mkdir(parents=True)
+    shutil.copyfile(bootstrap, runtime_root / "tools/dev/owner_packlab_bootstrap.py")
+    (runtime_root / "owner-dev-runtime.json").write_text(
+        json.dumps({"source_commit": source_commit, "runtime_id": runtime_id}),
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["PACKLAB_OWNERDEV_SOURCE_SHA"] = source_commit
+    env["PACKLAB_OWNERDEV_RUNTIME_ID"] = runtime_id
+    result = subprocess.run(
+        [sys.executable, "-S", str(runtime_root / "tools/dev/owner_packlab_bootstrap.py")],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "OWNER DEV launcher/runtime identity mismatch" not in result.stderr
+    assert "ImportError: No module named packlab_studio" in result.stderr
+
+    env["PACKLAB_OWNERDEV_RUNTIME_ID"] = "c" * 40 + "-" + "d" * 32
+    mismatch = subprocess.run(
+        [sys.executable, "-S", str(runtime_root / "tools/dev/owner_packlab_bootstrap.py")],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert mismatch.returncode != 0
+    assert "OWNER DEV launcher/runtime identity mismatch" in mismatch.stderr
 
 
 def test_native_launcher_build_and_runtime_failure_paths(tmp_path: Path) -> None:
