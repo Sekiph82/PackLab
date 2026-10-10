@@ -5,6 +5,16 @@ Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-
 
 **Acceptance is an actually working unsigned installer, not source strings, timeout increases or simulations.**
 
+## Mandatory R0 recovery/owner-go gate (supersedes automatic cold-run authorizations)
+
+- Inspect actual GitHub artifacts/cache and bounded known-runtime inventory, **without fresh native compile**, to establish whether completed OCCT and pywrap results are durably reusable. Three inspected prior runs (`37967978530`, `37951025064`, `37860820132`) expose zero run artifacts; repository logs by themselves are not reusable binaries. Check caches and any other eligible sources separately, never silently assume success or absence without inspection.
+- Read-only `PL-0350_R0_RECOVERY_INVENTORY.md` distinguishes exact-verified checkpoint, incomplete/opaque candidate, and only log/progress evidence; hashes/source locks/required files/size/timing/ownership for any candidate.
+- **NO rerun of OCCT or pywrap on a newly provisioned runner unless the owner expressly authorizes the exact necessary phases after recovery inventory.** No monolithic six-hour retry, no no-op cache simulation, no unapproved changes to official build provenance, no 65 GB local test build.
+- If a cryptographically verified reusable checkpoint allows later processing, continue only from the next required stage, preserving safety/packaging checks. If no appropriate checkpoint survives, stop and request decision (`OWNER_APPROVAL_REQUIRED_FOR_NATIVE_REBUILD`), not `AUDITED_PASS`.
+- This R0 HOLD overrides anything in the remaining numbered checklist which presumes a previously authorized cold run. The implementation may be prepared/tested using tiny mocks while held; real long builds must wait.
+
+
+
 1. Canonical origin/main TASKS authorizes this remediation. Dirty owner work, all active/unpublished worktrees, current and previous OwnerDev untouched. ChatGPT-only files not modified by Codex.
 2. Actual V07 canceled evidence used to define stage boundaries; preflight timed/size plan for all four hosted jobs exists before cold run. No job assumes >360 minutes, no unsupported worker-count increase.
 3. Job A really builds exact SHA-locked OCCT and produces a *portable minimal SDK checkpoint* with sealed artifact manifest, exact file hashes and pinned source/toolchain. No source/build-tree private debris in shipped runtime.
