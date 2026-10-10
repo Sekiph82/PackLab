@@ -1,6 +1,6 @@
 # PL-0350 V07-R01 — Codex Recovery Log
 
-Date: 2026-10-10  
+Date: 2026-10-10
 Status: **`OWNER_APPROVAL_REQUIRED_FOR_NATIVE_REBUILD` / `AWAITING_OWNER_DECISION`**
 
 ## Authority and synchronization
