@@ -258,10 +258,8 @@ def audit_dependencies(
             if source_matches:
                 if basename not in include_by_name:
                     missing_headers[normalized].add(unit.name)
-                for header in source_matches:
-                    relative = header.relative_to(source_root / "src")
-                    if relative.parts:
-                        required_toolkits.add("TK" + relative.parts[0])
+                if basename.startswith("opengl_") or basename == "opengl_context.hxx":
+                    required_toolkits.add("TKOpenGl")
             elif not include_by_name.get(basename) and not normalized.startswith(
                 ("pybind11/", "Python.h", "numpy/", "fmt/", "windows.h", "Windows.h")
             ):
@@ -284,8 +282,9 @@ def audit_dependencies(
     # by unrelated optional packages are not part of this consumer's closure.
     all_files = [path for path in sdk.rglob("*") if path.is_file() and not path.is_symlink()]
     file_names = {path.name.casefold() for path in all_files}
+    link_toolkits = required_toolkits | exported_toolkits
     missing_libraries, missing_runtimes = sdk_dependency_deficiencies(
-        missing_headers, required_toolkits | exported_toolkits, file_names
+        missing_headers, link_toolkits, file_names
     )
 
     result = {
@@ -300,6 +299,14 @@ def audit_dependencies(
         "sdk_installed_header_count": len(sdk_includes),
         "required_toolkits_from_includes": sorted(required_toolkits),
         "exported_toolkits": sorted(exported_toolkits),
+        "sdk_import_library_count": sum(path.suffix.casefold() == ".lib" for path in all_files),
+        "sdk_runtime_dll_count": sum(path.suffix.casefold() == ".dll" for path in all_files),
+        "present_exported_toolkits": sorted(
+            toolkit
+            for toolkit in link_toolkits
+            if f"{toolkit}.lib".casefold() in file_names
+            and f"{toolkit}.dll".casefold() in file_names
+        ),
         "missing_occt_headers": {
             key: sorted(value) for key, value in sorted(missing_headers.items())
         },
