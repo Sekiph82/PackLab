@@ -51,7 +51,7 @@ No full repository suite or local native compilation was run.
 
 Cold run: [38263302823](https://github.com/Sekiph82/PackLab/actions/runs/38263302823)
 Exact head: `4f064e2f44359a40298d13baece02dcb18fb01f7`
-Conclusion: **FAILURE**, 2h 5m 47s total.
+Conclusion: **FAILURE**, 2h 56m 37s total (OCP job: 2h 5m 47s).
 
 | Job | Result | Evidence |
 | --- | --- | --- |
