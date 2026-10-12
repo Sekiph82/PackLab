@@ -30,7 +30,10 @@ def test_native_workflow_is_manual_only_and_requires_exact_owner_inputs() -> Non
     assert "python -m tools.packaging.prepare_official_ocp_generated_sources --archive" in workflow
     assert "python -S -m tools.packaging.verify_windows_workflow_python_imports" in workflow
     assert "8 GiB free on the build volume" in workflow
-    assert "two authorized runs at most" in workflow
+    assert "two authorized runs under the" in workflow
+    assert "max-run-artifact-bytes" in workflow
+    assert "Math]::Floor(($twoRunArtifactCap - $artifactBytes) / 2)" in workflow
+    assert workflow.count("assert_actions_run_artifact_budget --max-bytes") >= 5
     assert "retention-days: 1" in workflow
     assert workflow.count("timeout-minutes: 330") == 3
     assert contract["schema_version"] == 2
@@ -124,6 +127,7 @@ def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
 
     modules = verify_workflow_imports(ROOT)
     assert set(modules) == {
+        "tools.packaging.assert_actions_run_artifact_budget",
         "tools.packaging.assert_staged_qt_surface",
         "tools.packaging.audit_controlled_occt_sdk_dependencies",
         "tools.packaging.build_controlled_occt_sdk",

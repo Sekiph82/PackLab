@@ -91,6 +91,8 @@ jobs:
       inputs.build_revision == github.sha
     runs-on: windows-2022
     timeout-minutes: 15
+    outputs:
+      max-run-artifact-bytes: ${{ steps.capacity.outputs.max-run-artifact-bytes }}
     permissions:
       actions: read
       contents: read
@@ -104,6 +106,7 @@ jobs:
         with:
           python-version: "3.12.10"
       - name: Measure disk, current Actions storage, and exact generated-source patch
+        id: capacity
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -112,7 +115,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !$bootstrapPython) { throw "The hosted preflight bootstrap Python is not the verified Windows 3.12.10 toolcache runtime." }
           python -S -m tools.packaging.verify_windows_workflow_python_imports
           if ($LASTEXITCODE -ne 0) { throw "Repository-local Windows workflow Python module imports failed." }
-          $runArtifactCap = 4GB
+          $maxSingleRunArtifactCap = 4GB
           $twoRunArtifactCap = 8GB
           $cacheCap = 10GB
           $projectedCacheCap = 4GB
@@ -126,7 +129,9 @@ jobs:
           $artifactBytes = [long](($artifacts.artifacts | Measure-Object -Property size_in_bytes -Sum).Sum)
           $cacheUsage = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/cache/usage"
           $cacheBytes = [long]$cacheUsage.active_caches_size_in_bytes
-          if ($artifactBytes + 2 * $runArtifactCap -gt $twoRunArtifactCap) { throw "Existing artifacts plus cold and warm run caps exceed the 8 GiB retained-artifact ceiling." }
+          $runArtifactCap = [Math]::Min([long]$maxSingleRunArtifactCap, [long][Math]::Floor(($twoRunArtifactCap - $artifactBytes) / 2))
+          if ($runArtifactCap -le 0) { throw "No retained-artifact budget remains for both the cold and warm run under the 8 GiB ceiling." }
+          "max-run-artifact-bytes=$runArtifactCap" >> $env:GITHUB_OUTPUT
           if ($cacheBytes + $projectedCacheCap -gt $cacheCap) { throw "Existing cache usage plus the 4 GiB exact-key cache budget exceeds GitHub's 10 GiB repository cache limit." }
           $archive = Join-Path $env:RUNNER_TEMP "OCP_src_stubs_Windows.zip"
           Invoke-WebRequest -Uri "https://github.com/CadQuery/OCP/releases/download/7.9.3.1.1/OCP_src_stubs_Windows.zip" -OutFile $archive
@@ -140,7 +145,7 @@ jobs:
           $patchedBytes = (Get-ChildItem -LiteralPath $patchRoot -File -Recurse | Measure-Object -Property Length -Sum).Sum
           $sourceLock = Get-Content -LiteralPath "tools/packaging/windows_native_source_lock.json" -Raw | ConvertFrom-Json
           $licenseSources = @($sourceLock.records | ForEach-Object { "$($_.component): $($_.license_notice_source)" }) -join "`n"
-          @("## Hosted capacity and exact input dry-run", "", "- Runner label: windows-2022 (standard public runner).", "- Bootstrap Python: $bootstrapPython.", "- Build volume free before native stages: $freeBytes bytes.", "- Existing Actions artifacts: $($artifacts.total_count) totaling $artifactBytes bytes.", "- Existing Actions cache: $($cacheUsage.active_caches_count) entries totaling $cacheBytes bytes; planned maximum additional cache: $projectedCacheCap bytes of the 10 GiB repository allowance.", "- Artifact policy: at most $runArtifactCap bytes per run, two authorized runs at most $twoRunArtifactCap bytes total, all artifacts retained for one day. The verified GitHub Free included shared-storage allowance is 500 MiB-month (0.488 GiB-month); the two-run cap at 24 hours is 0.267 GiB-month.", "- Stage artifact ceilings: A SDK plus source evidence <=1 GiB; B runtime <=1 GiB; C installer and compliance evidence <=2 GiB.", "- Official ZIP: $((Get-Item -LiteralPath $archive).Length) bytes; patched tree: $patchedBytes bytes; SHA-256: $($manifest.source_archive.sha256).", "- Generated modules: $($manifest.input_module_count) to $($manifest.output_module_count); retained registrations: $($manifest.registration_count).", "- OCCT timing basis: prior measured build 2,560.860 seconds; OCP compile cap 16,200 seconds plus 60 minutes for setup, validation, smoke, and upload; each native job timeout 330 minutes.", "- Locked license/source paths:", $licenseSources) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          @("## Hosted capacity and exact input dry-run", "", "- Runner label: windows-2022 (standard public runner).", "- Bootstrap Python: $bootstrapPython.", "- Build volume free before native stages: $freeBytes bytes.", "- Existing Actions artifacts: $($artifacts.total_count) totaling $artifactBytes bytes.", "- Existing Actions cache: $($cacheUsage.active_caches_count) entries totaling $cacheBytes bytes; planned maximum additional cache: $projectedCacheCap bytes of the 10 GiB repository allowance.", "- Artifact policy: at most $runArtifactCap bytes per run after reserving equal room for two authorized runs under the $twoRunArtifactCap-byte retained-artifact ceiling; all artifacts retained for one day. The verified GitHub Free included shared-storage allowance is 500 MiB-month (0.488 GiB-month); the two-run cap at 24 hours is 0.267 GiB-month.", "- Stage artifact ceilings: A SDK plus source evidence <=1 GiB; B runtime <=1 GiB; C installer and compliance evidence <=2 GiB.", "- Official ZIP: $((Get-Item -LiteralPath $archive).Length) bytes; patched tree: $patchedBytes bytes; SHA-256: $($manifest.source_archive.sha256).", "- Generated modules: $($manifest.input_module_count) to $($manifest.output_module_count); retained registrations: $($manifest.registration_count).", "- OCCT timing basis: prior measured build 2,560.860 seconds; OCP compile cap 16,200 seconds plus 60 minutes for setup, validation, smoke, and upload; each native job timeout 330 minutes.", "- Locked license/source paths:", $licenseSources) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   occt-sdk:
     name: Build and seal locked OCCT SDK checkpoint
@@ -153,7 +158,11 @@ jobs:
       inputs.build_revision == github.sha
     runs-on: windows-2022
     timeout-minutes: 330
+    permissions:
+      actions: read
+      contents: read
     outputs:
+      max-run-artifact-bytes: ${{ needs.capacity-preflight.outputs.max-run-artifact-bytes }}
       sdk-artifact-name: ${{ steps.sdk_identity.outputs.artifact_name }}
       sdk-payload-sha256: ${{ steps.sdk_identity.outputs.payload_sha256 }}
       sdk-byte-count: ${{ steps.sdk_identity.outputs.byte_count }}
@@ -251,6 +260,9 @@ jobs:
           $metadata = Get-Content -LiteralPath (Join-Path $sdk "occt-sdk-metadata.json") -Raw | ConvertFrom-Json
           $sourceEvidenceBytes = (Get-Item -LiteralPath $env:PACKLAB_NATIVE_SOURCE_EVIDENCE).Length
           if ([long]$metadata.byte_count + $sourceEvidenceBytes -gt 1GB) { throw "The OCCT SDK plus source evidence exceeds the 1 GiB stage-A artifact budget." }
+          $env:GH_TOKEN = "${{ github.token }}"
+          uv run --locked python -m tools.packaging.assert_actions_run_artifact_budget --max-bytes "${{ needs.capacity-preflight.outputs.max-run-artifact-bytes }}" --additional-bytes $([long]$metadata.byte_count)
+          if ($LASTEXITCODE -ne 0) { throw "The SDK upload would exceed this run's retained-artifact budget." }
           $artifactName = "packlab-occt-sdk-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $evidenceName = "packlab-native-source-evidence-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
@@ -274,6 +286,15 @@ jobs:
           if-no-files-found: error
           compression-level: 1
           retention-days: 1
+      - name: Check corresponding-source evidence artifact budget
+        shell: pwsh
+        # Check the cumulative run total after the SDK upload has completed.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $bytes = (Get-Item -LiteralPath $env:PACKLAB_NATIVE_SOURCE_EVIDENCE).Length
+          uv run --locked python -m tools.packaging.assert_actions_run_artifact_budget --max-bytes "${{ needs.capacity-preflight.outputs.max-run-artifact-bytes }}" --additional-bytes $bytes
+          if ($LASTEXITCODE -ne 0) { throw "The source-evidence upload would exceed this run's retained-artifact budget." }
       - name: Upload corresponding-source verification evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
@@ -293,12 +314,16 @@ jobs:
       inputs.build_revision == github.sha
     runs-on: windows-2022
     timeout-minutes: 330
+    permissions:
+      actions: read
+      contents: read
     concurrency:
       group: controlled-ocp-runtime-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: false
     env:
       UV_NO_PROGRESS: "1"
     outputs:
+      max-run-artifact-bytes: ${{ needs.occt-sdk.outputs.max-run-artifact-bytes }}
       bundle-artifact-name: ${{ steps.runtime_identity.outputs.artifact_name }}
       bundle-artifact-bytes: ${{ steps.runtime_identity.outputs.artifact_bytes }}
       cache-key: ${{ steps.runtime_identity.outputs.cache_key }}
@@ -458,6 +483,9 @@ jobs:
           $manifestSha = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
           $artifactBytes = (Get-ChildItem -LiteralPath $bundle -File -Recurse | Measure-Object -Property Length -Sum).Sum
           if ([long]$artifactBytes -gt 1GB) { throw "The validated OCP runtime exceeds the 1 GiB stage-B artifact budget." }
+          $env:GH_TOKEN = "${{ github.token }}"
+          uv run --locked python -m tools.packaging.assert_actions_run_artifact_budget --max-bytes "${{ needs.occt-sdk.outputs.max-run-artifact-bytes }}" --additional-bytes $([long]$artifactBytes)
+          if ($LASTEXITCODE -ne 0) { throw "The OCP runtime upload would exceed this run's retained-artifact budget." }
           $artifactName = "packlab-controlled-ocp-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           "artifact_name=$artifactName" >> $env:GITHUB_OUTPUT
           "artifact_bytes=$artifactBytes" >> $env:GITHUB_OUTPUT
@@ -491,6 +519,9 @@ jobs:
       inputs.build_revision == github.sha
     runs-on: windows-2022
     timeout-minutes: 330
+    permissions:
+      actions: read
+      contents: read
     concurrency:
       group: windows-studio-package-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
@@ -747,6 +778,9 @@ jobs:
           $evidence = Join-Path $env:RUNNER_TEMP "packlab-compliance-preclearance"
           $bytes = [long]((Get-ChildItem -LiteralPath $evidence -File -Recurse | Measure-Object -Property Length -Sum).Sum)
           if ($bytes -gt 100MB) { throw "Text-only pre-clearance evidence exceeds its 100 MiB artifact budget." }
+          $env:GH_TOKEN = "${{ github.token }}"
+          uv run --locked python -m tools.packaging.assert_actions_run_artifact_budget --max-bytes "${{ needs.controlled-ocp-runtime.outputs.max-run-artifact-bytes }}" --additional-bytes $bytes
+          if ($LASTEXITCODE -ne 0) { throw "Pre-clearance evidence would exceed this run's retained-artifact budget." }
           "byte_count=$bytes" >> $env:GITHUB_OUTPUT
       - name: Upload text-only pre-clearance evidence
         if: always() && steps.inventory.outcome != 'skipped' && steps.preclearance_size.outcome == 'success'
@@ -814,6 +848,9 @@ jobs:
           $evidence = Join-Path $env:RUNNER_TEMP "packlab-compliance-final"
           $bytes = [long]((Get-ChildItem -LiteralPath $evidence -File -Recurse | Measure-Object -Property Length -Sum).Sum)
           if ($bytes -gt 100MB) { throw "Final text-only compliance evidence exceeds its 100 MiB artifact budget." }
+          $env:GH_TOKEN = "${{ github.token }}"
+          uv run --locked python -m tools.packaging.assert_actions_run_artifact_budget --max-bytes "${{ needs.controlled-ocp-runtime.outputs.max-run-artifact-bytes }}" --additional-bytes $bytes
+          if ($LASTEXITCODE -ne 0) { throw "Final compliance evidence would exceed this run's retained-artifact budget." }
           "byte_count=$bytes" >> $env:GITHUB_OUTPUT
       - name: Upload final text-only compliance evidence
         if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success' && steps.final_compliance_size.outcome == 'success'
@@ -854,6 +891,10 @@ jobs:
           if ([long]$bytes -gt 1800MB) { throw "The unsigned installer exceeds the 1,800 MiB installer budget." }
           $metadata = [ordered]@{ installer = ($name + ".exe"); studio_version = $env:PACKLAB_STUDIO_VERSION; build_revision = $env:PACKLAB_BUILD_REVISION; sha256 = $hash; byte_length = $bytes; signing = "unsigned"; inno_setup_version = "6.7.3" } | ConvertTo-Json -Compress
           [System.IO.File]::WriteAllText((Join-Path $output "installer-metadata.json"), $metadata + "`n", [System.Text.UTF8Encoding]::new($false))
+          $artifactBytes = [long]((Get-ChildItem -LiteralPath $output -File -Recurse | Measure-Object -Property Length -Sum).Sum)
+          $env:GH_TOKEN = "${{ github.token }}"
+          uv run --locked python -m tools.packaging.assert_actions_run_artifact_budget --max-bytes "${{ needs.controlled-ocp-runtime.outputs.max-run-artifact-bytes }}" --additional-bytes $artifactBytes
+          if ($LASTEXITCODE -ne 0) { throw "The installer upload would exceed this run's retained-artifact budget." }
           "PACKLAB_INSTALLER_DIR=$output" >> $env:GITHUB_ENV
 
       - name: Upload cleared versioned installer
