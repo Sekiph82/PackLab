@@ -1,0 +1,25 @@
+# PL-0350 setup-python Bootstrap R01 — ChatGPT Independent Audit Criteria
+
+Date: 2026-10-12
+Prompt: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_SETUP_PYTHON_BOOTSTRAP_R01_CODEX_PROMPT.md
+Parent independent audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_NOVTK_315_HOSTED_BUILD_CHATGPT_AUDIT_V01.md
+Owner-approved native route: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_OWNER_APPROVAL_HOSTED_BUILD_315_NOVTK.md
+
+**Verdict scope:** only real hosted PL-0350 installer+validation qualifies parent PASS. Successful Python setup repair alone is an intermediate partial pass.
+
+1. **Accurate root cause and primary lock split:** official `actions/python-versions` manifest has NO Windows x64 `3.12.15` toolcache artifact and DOES have Windows x64 `3.12.10`. Original hosted job `114782149441` exited at `actions/setup-python 3.12.15` before capacity. Correct **three** Windows job bootstrap pins; do not downgrade native conda Python/build-source lock `3.12.15` or alter OCP/OCCT source revisions or CPython minor. The separate 3.12.15 conda lock is SHA-pinned and still required for real C++ build.
+2. **True native Python identity:** OCCT/OCP native jobs after micromamba setup actually execute Python `3.12.15` in `packlab-ocp-bindings`, assert `sys.version_info == (3,12,15)`, and Python headers/executable used for OCP CMake come from this environment. `actions/setup-python 3.12.10` is for workflow bootstrap only. Wrong compiled/runtime Python or CMake path FAILS.
+3. **No unintended native build:** Windows native workflow remains manual-only with affirmative `run_native_build=true`, exact main SHA, no automatic main push/PR path that spawns OCCT, and pin full SHA actions. New `preflight_only=true` must RUN capacity job but SKIP OCCT/OCP/Studio jobs. Tests must assert these conditions. Other quality workflow remains enabled.
+4. **Changed code quality:** focused unit/negative fixture tests, YAML parser, Ruff/format/mypy/compileall appropriate, disk wrapper controls and exact code diffs; record real counts. Correct old skipped/canceled job proof; do not represent local suite/quality as hosted native smoke.
+5. **First diagnostic proof:** an actual new hosted `preflight_only=true` workflow run has exact implementation SHA, bootstrap 3.12.10, real setup success, storage measurement and official ZIP 319->315 patch checks; all 3 native/package jobs explicitly skipped. If that diagnostic fails, no native cold dispatch authorized by this prompt.
+6. **Cold native continuation:** only after preflight success, ONE separately manually dispatched `preflight_only=false` cold source-build run using exact same SHA. Job A source-pinned OCCT 7.9.3 SDK installed/sealed, job B real 315 OCP generated C++ compiled without pywrap or opaque PyPI binaries, job C native Package/QtPdf/STEP/DXF/Open3D full source/license/notice engineering clearance and unsigned installer. Every stage actually success or correctly stopped with full evidence. Per-job cap <six hours including transfers.
+7. **Artifact integrity:** each completed A/B stage fully hashed file manifests, exact schema and pinned source/toolchain identity, same-run artifact transfer and exact caches; no directory traversal/tampered extras; even failed downstream keeps successful stage checkpoint. Verify true package/installer SHA, bytes, artifact ID and smoke logs; no claims of success without actual downloaded/result proof.
+8. **Warm HIT proof:** only if first cold job fully green, exactly ONE real warm run validates reusable exact runtime/source artifacts and no repeats of expensive native build; if impossible, stop and report incomplete acceptance, don't fabricate. No redundant 5h pywrap regen under any scenario.
+9. **Full release safety:** every actual shipped OCP native DLL/copyright/source mapping justified, old 79-opaque-wheel blocker not forged closed, Qt/OCCT/Open3D/PDFium notices fully reconciled, ZERO unresolved items and forbidden Qt modules. `CLEARED_FOR_PL0350_ENGINEERING_PACKAGING` only with true evidence; `legal_review_required=true` and `public_release_authorized=false` retained. Installer unsigned; NO public release/tag/signing.
+10. **Owner boundaries and tracker:** no owner Desktop/native compile/65GB temp, shared cache deletion, force-reset, or previous-good loss. Root TASKS.md / ChatGPT audits only changed by ChatGPT, not Codex. PL-0351, PL-0368 and M17 unstarted. GitHub full HTTPS links and real origin/main parity reported.
+
+If all gates 1-10 PASS with real installer and real cold/HIT runs: `AUDITED_PASS` for PL-0350.
+
+If bootstrap setup and preflight pass but later hosted native/packager blocker: `AUDITED_PARTIAL_CHANGES_REQUIRED` with exact first hard stop, no arbitrary retries.
+
+If first diagnostic fails, source identities altered, auto CI producer reenabled, source-built 315 module contract broken, or wrong Python used for CMake: `AUDITED_FAIL` on unsafe issue or partial changes required depending severity. Never mark PL-0350 complete on a setup fix alone.
