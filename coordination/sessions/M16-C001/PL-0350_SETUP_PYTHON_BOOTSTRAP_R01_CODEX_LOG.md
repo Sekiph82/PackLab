@@ -8,7 +8,7 @@ Stop code: `OCCT_SOURCE_FETCH_FAILED_TO_IMPORT_TOOLS`
 
 - Starting canonical revision: `da30586a0912a05d5122aeba81f42c3bb2c8d839`.
 - Implementation revision: `fe87cd03ba5455eda6bf6d2851335e6eae93d47b`.
-- This evidence-only commit follows the implementation revision; record its final SHA after publication.
+- Evidence log/report publication was committed separately from product implementation and pushed to canonical `main` after the cold-run stop.
 - Clean managed worktree: `C:\Users\sekip\.codex\worktrees\pl0350-hosted-315-novtk\PackLab`.
 - Fetched `origin/main`, confirmed the worktree had no local changes/divergence, and fast-forwarded it to the authorized start revision. After implementation publication and fetch, local `HEAD` and `origin/main` were both `fe87cd03ba5455eda6bf6d2851335e6eae93d47b`; trees matched and the worktree was clean.
 - The owner Desktop checkout's pre-existing modified `geometry_adapter.py` and untracked `scan_design_heatmap.py` files were left untouched.
