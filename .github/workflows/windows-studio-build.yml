@@ -13,6 +13,11 @@ on:
         required: false
         default: false
         type: boolean
+      inspect_retained_sdk:
+        description: "Inspect and validate the immutable PL-0350 R02 OCCT SDK artifact without compiling"
+        required: false
+        default: false
+        type: boolean
       build_revision:
         description: "Exact main commit SHA to build"
         required: true
@@ -22,6 +27,37 @@ permissions:
   contents: read
 
 jobs:
+  retained-sdk-inspection:
+    name: Inspect retained PL-0350 OCCT SDK checkpoint
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.inspect_retained_sdk == true &&
+      inputs.preflight_only == true &&
+      github.ref == 'refs/heads/main' &&
+      inputs.build_revision == github.sha
+    runs-on: windows-2022
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.10"
+      - name: Download, authenticate, and inventory the retained SDK
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $env:PYTHONPATH = $env:GITHUB_WORKSPACE
+          python -m tools.packaging.inspect_retained_occt_sdk --scratch (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection")
+          if ($LASTEXITCODE -ne 0) { throw "Retained OCCT SDK verification or inventory failed." }
+
   capacity-preflight:
     name: Measure hosted storage and build inputs
     if: >-

@@ -22,6 +22,10 @@ def test_native_workflow_is_manual_only_and_requires_exact_owner_inputs() -> Non
     assert "github.ref == 'refs/heads/main'" in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "capacity-preflight:" in workflow
+    assert "retained-sdk-inspection:" in workflow
+    assert "inspect_retained_sdk == true" in workflow
+    assert "inputs.preflight_only == true" in workflow
+    assert "inspect_retained_occt_sdk" in workflow
     assert "actions: read" in workflow
     assert "python -m tools.packaging.prepare_official_ocp_generated_sources --archive" in workflow
     assert "python -S -m tools.packaging.verify_windows_workflow_python_imports" in workflow
@@ -51,7 +55,7 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
         ROOT / "tools/packaging/build_controlled_ocp_from_generated_sources.py"
     ).read_text(encoding="utf-8")
 
-    preflight = workflow.split("  occt-sdk:\n", 1)[0]
+    preflight = workflow.split("  capacity-preflight:\n", 1)[1].split("  occt-sdk:\n", 1)[0]
     sdk = workflow.split("  occt-sdk:\n", 1)[1].split("  controlled-ocp-runtime:\n", 1)[0]
     ocp = workflow.split("  controlled-ocp-runtime:\n", 1)[1].split("  build-studio:\n", 1)[0]
     studio = workflow.split("  build-studio:\n", 1)[1]
@@ -62,7 +66,7 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     assert 'python-version: "3.12.10"' in preflight
     assert 'python-version: "3.12.10"' in sdk
     assert 'python-version: "3.12.10"' in ocp
-    assert workflow.count('python-version: "3.12.10"') == 3
+    assert workflow.count('python-version: "3.12.10"') == 4
     assert 'python-version: "3.12.15"' not in workflow
     assert 'python-version: "3.12"' in studio
     assert workflow.count("inputs.preflight_only != true") == 3
@@ -111,6 +115,7 @@ def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
         "tools.packaging.build_controlled_ocp_runtime",
         "tools.packaging.controlled_ocp_runtime_bundle",
         "tools.packaging.fetch_verify_windows_native_sources",
+        "tools.packaging.inspect_retained_occt_sdk",
         "tools.packaging.prepare_official_ocp_generated_sources",
         "tools.packaging.validate_controlled_occt_sdk",
         "tools.packaging.validate_controlled_ocp_manifest",
