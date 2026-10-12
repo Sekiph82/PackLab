@@ -54,9 +54,9 @@ No secrets, credentials, Apple signing materials, private scans, supplier data, 
 ## Commit and push
 
 - Initial report/log content commit: `0b479b115212c3e5fd8cdd6f952f8e75b3082928` (`docs(PL-0350): record no-VTK 315 preflight`).
-- A docs-only follow-up removes Markdown trailing whitespace and finalizes this publication record; the same two coordination files are the only paths in the publication.
-- `git diff --check` is rerun on the follow-up before commit. Push `HEAD:main` only after confirming the diff remains limited to these two docs-only coordination paths and all workflow filters still exclude them.
-- Fetch `origin/main` after push and verify it equals the final local HEAD. No Actions dispatch or native-build trigger is permitted; any unexpected filter match or parity failure is a stop condition.
+- Report whitespace cleanup commit: `923d20484f8d9d9a1a7390f3a1e12f098ec2b9c2`.
+- This commit finalizes the publication evidence. All commits touch only the two authorized coordination report/log paths.
+- Publish with `git push origin HEAD:main`; then fetch `origin main` and compare `git rev-parse HEAD` with `git rev-parse origin/main`. Record the matching final revision in the handoff. The changed paths were rechecked against every workflow push filter; no Actions dispatch or native-build trigger is permitted.
 ## Handoff
 
 `PREFLIGHT_STATIC_CONTRACT_PASS / NATIVE_BUILD_NOT_AUTHORIZED`
