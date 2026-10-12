@@ -1,7 +1,7 @@
 # PL-0350 315-Module no-VTK Preflight — Codex Log
 
-Date: 2026-10-12  
-Actor: Codex implementation/preflight  
+Date: 2026-10-12
+Actor: Codex implementation/preflight
 Disposition: `AWAITING_INDEPENDENT_AUDIT / NATIVE_BUILD_OWNER_APPROVAL_REQUIRED`
 
 ## Revisions and synchronization
@@ -53,9 +53,11 @@ No secrets, credentials, Apple signing materials, private scans, supplier data, 
 
 ## Commit and push
 
-Pending until the report/log pass `git diff --check` and are committed. Publish only these two coordination paths to `main`, then fetch/read back and verify exact `origin/main` parity. Any pre-push trigger mismatch or push failure is a stop condition.
-
+- Initial report/log content commit: `0b479b115212c3e5fd8cdd6f952f8e75b3082928` (`docs(PL-0350): record no-VTK 315 preflight`).
+- A docs-only follow-up removes Markdown trailing whitespace and finalizes this publication record; the same two coordination files are the only paths in the publication.
+- `git diff --check` is rerun on the follow-up before commit. Push `HEAD:main` only after confirming the diff remains limited to these two docs-only coordination paths and all workflow filters still exclude them.
+- Fetch `origin/main` after push and verify it equals the final local HEAD. No Actions dispatch or native-build trigger is permitted; any unexpected filter match or parity failure is a stop condition.
 ## Handoff
 
-`PREFLIGHT_STATIC_CONTRACT_PASS / NATIVE_BUILD_NOT_AUTHORIZED`  
+`PREFLIGHT_STATIC_CONTRACT_PASS / NATIVE_BUILD_NOT_AUTHORIZED`
 `AWAITING_INDEPENDENT_AUDIT / NATIVE_BUILD_OWNER_APPROVAL_REQUIRED`
