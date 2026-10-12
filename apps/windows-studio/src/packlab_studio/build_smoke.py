@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ from packlab_core.cad_adapter import (
     tessellate_cad_shape,
 )
 from packlab_core.cad_brep import revolve_design_model_to_brep
+from packlab_core.cad_step_export import export_design_model_step
 from packlab_core.design_model import (
     DesignModelFeatureReference,
     FeatureKind,
@@ -137,6 +140,38 @@ def run_frozen_capability_smoke() -> dict[str, object]:
         generated_at_utc=FIXED_UTC,
     )
     vectors = export_technical_drawing_vectors(views, (), dimensions, title)
+    with tempfile.TemporaryDirectory(prefix="packlab-build-smoke-") as scratch:
+        step_path = Path(scratch) / "capability.step"
+        step_export = export_design_model_step(
+            model,
+            representation,
+            step_path,
+            part_name="PackLab Build Smoke",
+        )
+        _required(step_path.is_file() and step_path.stat().st_size > 0, "step_export_file_missing")
+        _required(
+            step_export.round_trip_validation.solid_count == 1,
+            "step_round_trip_solid_count_invalid",
+        )
+        dxf_path = Path(scratch) / "capability.dxf"
+        dxf_path.write_bytes(vectors.dxf_bytes)
+        dxf_contents = dxf_path.read_bytes()
+        _required(
+            b"AC1015" in dxf_contents and b"EOF" in dxf_contents, "dxf_export_content_invalid"
+        )
+        step_smoke = {
+            "status": "PASS",
+            "sha256": step_export.artifact_sha256,
+            "byte_length": step_export.artifact_size_bytes,
+            "round_trip_status": "PASS",
+            "solid_count": step_export.round_trip_validation.solid_count,
+        }
+        dxf_smoke = {
+            "status": "PASS",
+            "sha256": hashlib.sha256(dxf_contents).hexdigest(),
+            "byte_length": len(dxf_contents),
+            "format": "R2000 ASCII",
+        }
     pdf = export_technical_drawing_pdf(vectors)
     _required(pdf.manifest.get("parsed_by_qtpdf") is True, "qt_pdf_parse_failed")
     _required(pdf.manifest.get("page_count") == 1, "qt_pdf_page_count_failed")
@@ -190,6 +225,20 @@ def run_frozen_capability_smoke() -> dict[str, object]:
             "kernel_version": diagnostics.kernel_version,
             "smoke_operation": "one PackLab revolve, six-value precise bounds, bounded tessellation",
             "status": "PASS",
+            "network": "NONE",
+        },
+        "step_io": {
+            "expected_module": "PackLab CAD STEP writer and round-trip reader",
+            "observed_module": "packlab_core.cad_step_export",
+            "smoke_operation": "write, reopen, and validate one exported solid",
+            **step_smoke,
+            "network": "NONE",
+        },
+        "dxf_export": {
+            "expected_module": "PackLab R2000 ASCII DXF exporter",
+            "observed_module": "packlab_core.technical_drawing_export",
+            "smoke_operation": "write and validate generated DXF bytes",
+            **dxf_smoke,
             "network": "NONE",
         },
         "open3d_geometry": {

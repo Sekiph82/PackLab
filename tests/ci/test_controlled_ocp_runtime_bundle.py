@@ -15,6 +15,7 @@ from tools.packaging.controlled_ocp_runtime_bundle import (
     seal_bundle,
     validate_bundle,
 )
+from tools.packaging.prepare_official_ocp_generated_sources import ARCHIVE_ROOT
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_LOCK = ROOT / "tools/packaging/windows_native_source_lock.json"
@@ -59,9 +60,47 @@ def sealed_bundle(tmp_path: Path) -> tuple[Path, str, Path]:
         )
     revisions = {
         "ocp_source_revision": records["ocp-source-7.9.3.1.1"]["revision"],
-        "ocp_pywrap_source_revision": records["ocp-pywrap-source-9251940"]["revision"],
         "occt_source_revision": records["occt-source-7.9.3"]["revision"],
     }
+    retained_modules = [f"Module{index:03}" for index in range(315)]
+    module_suffixes = (".cpp", "_pre.cpp", "_tmpl.hxx")
+    source_paths = [
+        f"{ARCHIVE_ROOT}/{module}{suffix}"
+        for module in [*retained_modules, "IVtk", "IVtkOCC", "IVtkTools", "IVtkVTK"]
+        for suffix in module_suffixes
+    ]
+    before_patch_files = [
+        {"relative_path": path, "byte_length": 1, "sha256": "0" * 64}
+        for path in [*source_paths, f"{ARCHIVE_ROOT}/OCP.cpp", f"{ARCHIVE_ROOT}/CMakeLists.txt"]
+    ]
+    after_patch_files = [
+        {"relative_path": path, "byte_length": 1, "sha256": "0" * 64}
+        for path in [
+            *(
+                f"{ARCHIVE_ROOT}/{module}{suffix}"
+                for module in retained_modules
+                for suffix in module_suffixes
+            ),
+            f"{ARCHIVE_ROOT}/OCP.cpp",
+            f"{ARCHIVE_ROOT}/CMakeLists.txt",
+        ]
+    ]
+    after_patch_files[-2]["sha256"] = "1" * 64
+    after_patch_files[-1]["sha256"] = "2" * 64
+    patch_manifest = {
+        "schema_version": 1,
+        "status": "PASS",
+        "input_module_count": 319,
+        "output_module_count": 315,
+        "removed_modules": ["IVtk", "IVtkOCC", "IVtkTools", "IVtkVTK"],
+        "retained_modules": retained_modules,
+        "patched_ocp_cpp_sha256": "1" * 64,
+        "patched_cmake_sha256": "2" * 64,
+        "pre_patch_files": before_patch_files,
+        "post_patch_files": after_patch_files,
+    }
+    patch_manifest_path = tmp_path / "patch-manifest.json"
+    patch_manifest_path.write_text(json.dumps(patch_manifest), encoding="utf-8")
     manifest = {
         "schema_version": 1,
         "status": "PASS",
@@ -72,9 +111,23 @@ def sealed_bundle(tmp_path: Path) -> tuple[Path, str, Path]:
             "cmake": "cmake version 3.31.8",
             "compiler": "MSVC 19.44.35229.0",
             "windows_sdk": "10.0.26100.0",
-            "ocp_bindgen_workers": 4,
             "cmake_parallel": 4,
             "cmake_generator": "Visual Studio 17 2022",
+            "source_generation": "official-generated-windows-zip",
+            "ocp_runtime_reported_version": "7.9.3.1",
+            "ocp_release_version": "7.9.3.1.1",
+        },
+        "source_method": "official-generated-source-zip-no-pywrap",
+        "generated_source": {
+            "archive_sha256": "290941ef2d34e7b10b7b6bde4577c5d5d0e703342f934c29a55660caaed8dd5b",
+            "archive_byte_length": 6481047,
+            "input_module_count": 319,
+            "output_module_count": 315,
+            "removed_modules": ["IVtk", "IVtkOCC", "IVtkTools", "IVtkVTK"],
+            "retained_modules": retained_modules,
+            "patch_manifest_sha256": digest(patch_manifest_path.read_bytes()),
+            "runtime_reported_version": "7.9.3.1",
+            "pywrap_generation_invoked": False,
         },
         "build_timings": [
             {
@@ -86,7 +139,6 @@ def sealed_bundle(tmp_path: Path) -> tuple[Path, str, Path]:
             }
             for phase in (
                 "occt_native_build",
-                "pywrap_generation",
                 "ocp_native_compile_link",
             )
         ],
@@ -133,15 +185,19 @@ def sealed_bundle(tmp_path: Path) -> tuple[Path, str, Path]:
             cache_key=cache_key,
             conda_lock=CONDA_LOCK,
             manifest=manifest_path,
+            patch_manifest=patch_manifest_path,
             site_packages=package.parent,
             source_evidence=source_evidence_path,
             source_lock=SOURCE_LOCK,
         )
     )
     assert metadata["runtime_file_count"] == 3
-    assert {MANIFEST_NAME, METADATA_NAME, SOURCE_EVIDENCE_NAME} <= {
-        path.name for path in bundle.iterdir()
-    }
+    assert {
+        MANIFEST_NAME,
+        METADATA_NAME,
+        SOURCE_EVIDENCE_NAME,
+        "generated-source-patch-manifest.json",
+    } <= {path.name for path in bundle.iterdir()}
     return bundle, cache_key, tmp_path
 
 
@@ -151,7 +207,7 @@ def test_controlled_runtime_bundle_validates_every_runtime_file(sealed_bundle) -
     metadata = validate_bundle(bundle, SOURCE_LOCK, CONDA_LOCK, BUILD_CONTRACT, cache_key)
 
     assert metadata["runtime_file_count"] == 3
-    assert metadata["ocp_bindgen_workers"] == 4
+    assert metadata["cmake_parallel"] == 4
     assert metadata["source_revisions"]["ocp"] == "d69b064a3a604ebf245b1f3b14fb54c835a3a571"
 
 

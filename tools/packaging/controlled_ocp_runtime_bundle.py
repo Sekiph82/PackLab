@@ -7,24 +7,35 @@ import hashlib
 import json
 import re
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from tools.packaging.prepare_official_ocp_generated_sources import (
+    ARCHIVE_ROOT,
+    REMOVED_MODULES,
+    _assert_non_vtk_sources_preserved,
+    _module_ids,
+)
 from tools.packaging.validate_controlled_ocp_manifest import (
     load_and_validate_manifest,
     validate_staged_tree,
 )
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
 
-BUNDLE_SCHEMA_VERSION = 1
+BUNDLE_SCHEMA_VERSION = 2
 METADATA_NAME = "controlled-runtime-metadata.json"
 MANIFEST_NAME = "windows-ocp-controlled-runtime-manifest.json"
 SOURCE_EVIDENCE_NAME = "windows-native-source-evidence.json"
+PATCH_MANIFEST_NAME = "generated-source-patch-manifest.json"
 MANIFEST_VALIDATOR = Path(__file__).with_name("validate_controlled_ocp_manifest.py")
 SOURCE_LOCK_VALIDATOR = Path(__file__).with_name("validate_windows_native_source_lock.py")
 SOURCE_FETCHER = Path(__file__).with_name("fetch_verify_windows_native_sources.py")
-BUILDER = Path(__file__).with_name("build_controlled_ocp_runtime.py")
+NATIVE_BUILDER = Path(__file__).with_name("build_controlled_ocp_from_generated_sources.py")
+GENERATED_SOURCE_PATCHER = Path(__file__).with_name("prepare_official_ocp_generated_sources.py")
+OCCT_SDK_BUILDER = Path(__file__).with_name("build_controlled_occt_sdk.py")
+OCCT_SDK_VALIDATOR = Path(__file__).with_name("validate_controlled_occt_sdk.py")
 RUNNER_PATH_RE = re.compile(r"(?i)(?<![a-z])[a-z]:[\\/]|/(?:home|runner)/")
 
 
@@ -146,7 +157,6 @@ def expected_source_revisions(source_lock_path: Path) -> dict[str, str]:
     records = {row["id"]: row for row in load_source_lock(source_lock_path)["records"]}
     return {
         "ocp": records["ocp-source-7.9.3.1.1"]["revision"],
-        "pywrap": records["ocp-pywrap-source-9251940"]["revision"],
         "occt": records["occt-source-7.9.3"]["revision"],
     }
 
@@ -158,30 +168,109 @@ def expected_contract_digests(
         "source_lock_sha256": sha256(source_lock),
         "build_environment_lock_sha256": sha256(conda_lock),
         "build_contract_sha256": sha256(contract),
-        "builder_sha256": sha256(BUILDER),
+        "native_builder_sha256": sha256(NATIVE_BUILDER),
         "bundle_validator_sha256": sha256(Path(__file__)),
         "ocp_manifest_validator_sha256": sha256(MANIFEST_VALIDATOR),
         "source_lock_validator_sha256": sha256(SOURCE_LOCK_VALIDATOR),
         "source_fetcher_sha256": sha256(SOURCE_FETCHER),
+        "generated_source_patcher_sha256": sha256(GENERATED_SOURCE_PATCHER),
+        "occt_sdk_builder_sha256": sha256(OCCT_SDK_BUILDER),
+        "occt_sdk_validator_sha256": sha256(OCCT_SDK_VALIDATOR),
     }
+
+
+def validate_generated_source_patch(
+    patch_manifest: dict[str, Any], generated: dict[str, Any], actual_patch_sha256: str
+) -> None:
+    pre_patch_files = patch_manifest.get("pre_patch_files")
+    post_patch_files = patch_manifest.get("post_patch_files")
+    if (
+        patch_manifest.get("status") != "PASS"
+        or patch_manifest.get("input_module_count") != 319
+        or patch_manifest.get("output_module_count") != 315
+        or patch_manifest.get("retained_modules") != generated.get("retained_modules")
+        or patch_manifest.get("removed_modules") != list(REMOVED_MODULES)
+        or patch_manifest.get("patch_manifest_sha256") not in {None, actual_patch_sha256}
+        or generated.get("patch_manifest_sha256") != actual_patch_sha256
+        or not isinstance(pre_patch_files, list)
+        or not isinstance(post_patch_files, list)
+    ):
+        raise ValueError("Generated-source patch evidence does not match the OCP runtime manifest")
+    for records in (pre_patch_files, post_patch_files):
+        if not records:
+            raise ValueError("Generated-source pre/post file inventories cannot be empty")
+        seen: set[str] = set()
+        for record in records:
+            if (
+                not isinstance(record, dict)
+                or not isinstance(record.get("relative_path"), str)
+                or not isinstance(record.get("byte_length"), int)
+                or record["byte_length"] < 0
+                or not isinstance(record.get("sha256"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", record["sha256"])
+                or record["relative_path"].casefold() in seen
+            ):
+                raise ValueError(
+                    "Generated-source file inventory has an unsafe or duplicate record"
+                )
+            seen.add(record["relative_path"].casefold())
+    _assert_non_vtk_sources_preserved(pre_patch_files, post_patch_files)
+    pre_paths = {item["relative_path"] for item in pre_patch_files}
+    post_paths = {item["relative_path"] for item in post_patch_files}
+    input_modules = _module_ids(pre_paths)
+    output_modules = _module_ids(post_paths)
+    if (
+        input_modules != set(generated["retained_modules"]) | set(REMOVED_MODULES)
+        or output_modules != set(generated["retained_modules"])
+        or len(input_modules) != 319
+        or len(output_modules) != 315
+        or not any(
+            item["relative_path"] == f"{ARCHIVE_ROOT}/OCP.cpp"
+            and item["sha256"] == patch_manifest.get("patched_ocp_cpp_sha256")
+            for item in post_patch_files
+        )
+        or not any(
+            item["relative_path"] == f"{ARCHIVE_ROOT}/CMakeLists.txt"
+            and item["sha256"] == patch_manifest.get("patched_cmake_sha256")
+            for item in post_patch_files
+        )
+    ):
+        raise ValueError("Generated-source pre/post hashes do not prove the exact No-VTK patch")
 
 
 def seal_bundle(args: argparse.Namespace) -> dict[str, Any]:
     contract = read_json(args.build_contract, "Controlled-runtime build contract")
-    if (
-        contract.get("schema_version") != 1
-        or contract.get("ocp_bindgen_workers") != 4
-        or contract.get("cmake_parallel") != 4
-    ):
+    if contract.get("schema_version") != 2 or contract.get("cmake_parallel") != 4:
         raise ValueError("Unsupported controlled-runtime build contract schema")
     manifest = load_and_validate_manifest(args.manifest, args.source_lock)
     evidence = validate_source_evidence(args.source_evidence, args.source_lock)
     if manifest.get("input_lock_sha256") != sha256(args.source_lock):
         raise ValueError("The OCP manifest is not bound to the current source lock")
+    generated = manifest.get("generated_source")
+    contract_source = contract.get("official_generated_source", {})
+    if (
+        manifest.get("source_method") != "official-generated-source-zip-no-pywrap"
+        or not isinstance(generated, dict)
+        or generated.get("archive_sha256") != contract_source.get("archive_sha256")
+        or generated.get("archive_byte_length") != contract_source.get("archive_byte_length")
+        or generated.get("input_module_count") != 319
+        or generated.get("output_module_count") != 315
+        or generated.get("removed_modules") != contract_source.get("removed_modules")
+        or generated.get("runtime_reported_version") != "7.9.3.1"
+        or generated.get("pywrap_generation_invoked") is not False
+        or not isinstance(generated.get("retained_modules"), list)
+        or len(generated["retained_modules"]) != 315
+        or len(set(generated["retained_modules"])) != 315
+        or set(generated.get("removed_modules", [])) != {"IVtk", "IVtkOCC", "IVtkTools", "IVtkVTK"}
+    ):
+        raise ValueError(
+            "The OCP manifest does not prove the exact 315-module generated-source route"
+        )
+    patch_manifest = read_json(args.patch_manifest, "Generated-source patch manifest")
+    validate_generated_source_patch(patch_manifest, generated, sha256(args.patch_manifest))
     toolchain = manifest.get("toolchain", {})
     if (
-        toolchain.get("ocp_bindgen_workers") != contract.get("ocp_bindgen_workers")
-        or toolchain.get("cmake_parallel") != contract.get("cmake_parallel")
+        toolchain.get("cmake_parallel") != contract.get("cmake_parallel")
         or toolchain.get("windows_sdk") != contract.get("windows_sdk_version")
         or toolchain.get("cmake_generator") != contract.get("cmake_generator")
         or toolchain.get("python") != contract.get("target", {}).get("python_version")
@@ -195,7 +284,6 @@ def seal_bundle(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("The controlled runtime Python version differs from the target contract")
     if {
         "ocp": manifest.get("ocp_source_revision"),
-        "pywrap": manifest.get("ocp_pywrap_source_revision"),
         "occt": manifest.get("occt_source_revision"),
     } != expected_source_revisions(args.source_lock):
         raise ValueError(
@@ -204,11 +292,14 @@ def seal_bundle(args: argparse.Namespace) -> dict[str, Any]:
     timings = manifest.get("build_timings")
     required_phases = {
         "occt_native_build": contract.get("cmake_parallel"),
-        "pywrap_generation": contract.get("ocp_bindgen_workers"),
         "ocp_native_compile_link": contract.get("cmake_parallel"),
     }
     if not isinstance(timings, list):
         raise ValueError("The controlled runtime is missing build timing evidence")
+    if any(
+        isinstance(entry, dict) and entry.get("phase") == "pywrap_generation" for entry in timings
+    ):
+        raise ValueError("The approved generated-source route must not invoke pywrap generation")
     for phase, worker_count in required_phases.items():
         matches = [
             entry for entry in timings if isinstance(entry, dict) and entry.get("phase") == phase
@@ -238,6 +329,7 @@ def seal_bundle(args: argparse.Namespace) -> dict[str, Any]:
     shutil.copytree(source_package, args.bundle / "OCP", symlinks=True)
     shutil.copy2(args.manifest, args.bundle / MANIFEST_NAME)
     shutil.copy2(args.source_evidence, args.bundle / SOURCE_EVIDENCE_NAME)
+    shutil.copy2(args.patch_manifest, args.bundle / PATCH_MANIFEST_NAME)
     runtime_files = runtime_inventory(args.bundle / "OCP")
     inventory_files = runtime_files + [
         {
@@ -250,6 +342,11 @@ def seal_bundle(args: argparse.Namespace) -> dict[str, Any]:
             "sha256": sha256(args.bundle / SOURCE_EVIDENCE_NAME),
             "byte_length": (args.bundle / SOURCE_EVIDENCE_NAME).stat().st_size,
         },
+        {
+            "relative_path": PATCH_MANIFEST_NAME,
+            "sha256": sha256(args.bundle / PATCH_MANIFEST_NAME),
+            "byte_length": (args.bundle / PATCH_MANIFEST_NAME).stat().st_size,
+        },
     ]
     digests = expected_contract_digests(args.source_lock, args.conda_lock, args.build_contract)
     metadata = {
@@ -259,12 +356,10 @@ def seal_bundle(args: argparse.Namespace) -> dict[str, Any]:
         **digests,
         "source_revisions": {
             "ocp": manifest["ocp_source_revision"],
-            "pywrap": manifest["ocp_pywrap_source_revision"],
             "occt": manifest["occt_source_revision"],
         },
         "target": contract["target"],
         "toolchain": toolchain,
-        "ocp_bindgen_workers": contract["ocp_bindgen_workers"],
         "cmake_parallel": contract["cmake_parallel"],
         "runtime_file_count": len(runtime_files),
         "runtime_files": runtime_files,
@@ -298,10 +393,24 @@ def validate_bundle(
     metadata_path = bundle / METADATA_NAME
     manifest_path = bundle / MANIFEST_NAME
     evidence_path = bundle / SOURCE_EVIDENCE_NAME
+    patch_manifest_path = bundle / PATCH_MANIFEST_NAME
     metadata = read_json(metadata_path, "Controlled-runtime metadata")
     manifest = load_and_validate_manifest(manifest_path, source_lock)
     evidence = validate_source_evidence(evidence_path, source_lock)
-    reject_runner_paths([manifest_path, evidence_path, metadata_path])
+    patch_manifest = read_json(patch_manifest_path, "Generated-source patch manifest")
+    generated = manifest.get("generated_source", {})
+    if (
+        manifest.get("source_method") != "official-generated-source-zip-no-pywrap"
+        or not isinstance(generated.get("retained_modules"), list)
+        or len(generated["retained_modules"]) != 315
+        or len(set(generated["retained_modules"])) != 315
+        or any("IVtk" in name for name in generated["retained_modules"])
+    ):
+        raise ValueError(
+            "Generated-source patch evidence does not validate against the runtime manifest"
+        )
+    validate_generated_source_patch(patch_manifest, generated, sha256(patch_manifest_path))
+    reject_runner_paths([manifest_path, evidence_path, metadata_path, patch_manifest_path])
     contract = read_json(build_contract, "Controlled-runtime build contract")
     expected_digests = expected_contract_digests(source_lock, conda_lock, build_contract)
     if (
@@ -309,10 +418,8 @@ def validate_bundle(
         or metadata.get("status") != "SEALED"
         or metadata.get("cache_key") != cache_key
         or metadata.get("target") != contract.get("target")
-        or contract.get("schema_version") != 1
-        or contract.get("ocp_bindgen_workers") != 4
+        or contract.get("schema_version") != 2
         or contract.get("cmake_parallel") != 4
-        or metadata.get("ocp_bindgen_workers") != 4
         or metadata.get("cmake_parallel") != 4
     ):
         raise ValueError(
@@ -325,7 +432,6 @@ def validate_bundle(
     if (
         not isinstance(toolchain, dict)
         or toolchain != manifest.get("toolchain")
-        or toolchain.get("ocp_bindgen_workers") != 4
         or toolchain.get("cmake_parallel") != 4
         or toolchain.get("windows_sdk") != contract.get("windows_sdk_version")
         or toolchain.get("cmake_generator") != contract.get("cmake_generator")
@@ -339,7 +445,6 @@ def validate_bundle(
         or metadata.get("source_revisions")
         != {
             "ocp": manifest.get("ocp_source_revision"),
-            "pywrap": manifest.get("ocp_pywrap_source_revision"),
             "occt": manifest.get("occt_source_revision"),
         }
         or not str(toolchain.get("python", "")).startswith(
@@ -355,7 +460,7 @@ def validate_bundle(
         raise ValueError("Controlled-runtime metadata file count is incorrect")
     expected_bundle_paths = {
         f"OCP/{entry['relative_path'].removeprefix('OCP/')}" for entry in runtime_files
-    } | {METADATA_NAME, MANIFEST_NAME, SOURCE_EVIDENCE_NAME}
+    } | {METADATA_NAME, MANIFEST_NAME, SOURCE_EVIDENCE_NAME, PATCH_MANIFEST_NAME}
     actual_bundle_paths: set[str] = set()
     actual_bundle_dirs: set[str] = set()
     for path in bundle.rglob("*"):
@@ -385,6 +490,11 @@ def validate_bundle(
             "relative_path": SOURCE_EVIDENCE_NAME,
             "sha256": sha256(evidence_path),
             "byte_length": evidence_path.stat().st_size,
+        },
+        {
+            "relative_path": PATCH_MANIFEST_NAME,
+            "sha256": sha256(patch_manifest_path),
+            "byte_length": patch_manifest_path.stat().st_size,
         },
     ]
     if metadata.get("bundle_content_sha256") != canonical_digest(inventory_files):
@@ -420,13 +530,77 @@ def install_bundle(args: argparse.Namespace) -> None:
 
 
 def smoke_test() -> None:
+    import importlib
+
+    import OCP
     from OCP.BRepCheck import BRepCheck_Analyzer
     from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPControl import (
+        STEPControl_AsIs,
+        STEPControl_Controller,
+        STEPControl_Reader,
+        STEPControl_Writer,
+    )
 
+    if getattr(OCP, "__version__", None) != "7.9.3.1":
+        raise ValueError(
+            "The compiled OCP runtime version differs from generated source identity 7.9.3.1"
+        )
+    required_modules = (
+        "BRep",
+        "BRepAdaptor",
+        "BRepAlgoAPI",
+        "BRepBndLib",
+        "BRepBuilderAPI",
+        "BRepCheck",
+        "BRepClass",
+        "BRepLProp",
+        "BRepMesh",
+        "BRepOffsetAPI",
+        "BRepPrimAPI",
+        "BRepTools",
+        "Bnd",
+        "GeomAbs",
+        "HLRAlgo",
+        "HLRBRep",
+        "IFSelect",
+        "Interface",
+        "STEPControl",
+        "StlAPI",
+        "TColStd",
+        "TopAbs",
+        "TopExp",
+        "TopLoc",
+        "TopTools",
+        "TopoDS",
+        "gp",
+    )
+    for module in required_modules:
+        importlib.import_module(f"OCP.{module}")
     shape = BRepPrimAPI_MakeBox(10.0, 20.0, 30.0).Shape()
     if not BRepCheck_Analyzer(shape).IsValid():
         raise ValueError("The controlled OCP CAD smoke produced an invalid box")
-    print("CONTROLLED_OCP_SMOKE_PASS import=OCP CAD=valid-box", flush=True)
+    if not STEPControl_Controller.Init_s():
+        raise ValueError("The controlled OCP STEP controller failed to initialize")
+    with tempfile.TemporaryDirectory(prefix="packlab-ocp-step-smoke-") as scratch:
+        step_path = Path(scratch) / "box.step"
+        writer = STEPControl_Writer()
+        if writer.Transfer(shape, STEPControl_AsIs) != IFSelect_RetDone:
+            raise ValueError("The controlled OCP STEP transfer failed")
+        if writer.Write(str(step_path)) != IFSelect_RetDone or not step_path.is_file():
+            raise ValueError("The controlled OCP STEP write failed")
+        reader = STEPControl_Reader()
+        if reader.ReadFile(str(step_path)) != IFSelect_RetDone or reader.TransferRoots() <= 0:
+            raise ValueError("The controlled OCP STEP read/transfer failed")
+        reopened = reader.OneShape()
+        if not BRepCheck_Analyzer(reopened).IsValid():
+            raise ValueError("The controlled OCP STEP round-trip shape is invalid")
+    print(
+        f"CONTROLLED_OCP_SMOKE_PASS version={OCP.__version__} imports={len(required_modules)} "
+        "CAD=valid-box STEP=round-trip",
+        flush=True,
+    )
 
 
 def add_bundle_inputs(parser: argparse.ArgumentParser) -> None:
@@ -452,6 +626,7 @@ def main() -> int:
     seal_parser.add_argument("--site-packages", type=Path, required=True)
     seal_parser.add_argument("--manifest", type=Path, required=True)
     seal_parser.add_argument("--source-evidence", type=Path, required=True)
+    seal_parser.add_argument("--patch-manifest", type=Path, required=True)
     seal_parser.add_argument("--bundle", type=Path, required=True)
     seal_parser.add_argument(
         "--source-lock", type=Path, default=Path("tools/packaging/windows_native_source_lock.json")

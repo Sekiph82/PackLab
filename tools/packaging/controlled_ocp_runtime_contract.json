@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "workflow_build_contract_version": 1,
+  "schema_version": 2,
+  "workflow_build_contract_version": 2,
   "target": {
     "operating_system": "Windows",
     "runner_image": "windows-2022",
@@ -8,8 +8,18 @@
     "python_minor": "3.12",
     "python_version": "3.12.15"
   },
-  "ocp_bindgen_workers": 4,
   "cmake_parallel": 4,
+  "official_generated_source": {
+    "release_version": "7.9.3.1.1",
+    "source_revision": "d69b064a3a604ebf245b1f3b14fb54c835a3a571",
+    "archive_name": "OCP_src_stubs_Windows.zip",
+    "archive_byte_length": 6481047,
+    "archive_sha256": "290941ef2d34e7b10b7b6bde4577c5d5d0e703342f934c29a55660caaed8dd5b",
+    "input_modules": 319,
+    "output_modules": 315,
+    "removed_modules": ["IVtk", "IVtkOCC", "IVtkTools", "IVtkVTK"],
+    "pywrap_generation": false
+  },
   "windows_sdk_version": "10.0.26100.0",
   "cmake_generator": "Visual Studio 17 2022",
   "toolchain": {
