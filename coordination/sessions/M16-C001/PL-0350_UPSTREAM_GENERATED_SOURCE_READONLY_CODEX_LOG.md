@@ -37,8 +37,8 @@ Status: **AWAITING_INDEPENDENT_AUDIT / OWNER_BUILD_APPROVAL_REQUIRED**
 
 ## Publication boundary and handoff
 
-- Implementation/evidence commit: recorded in Git history at publication; it contains only this report and this log.
-- Post-publication result must be verified against GitHub `main`; this log does not claim independent audit acceptance or self-close PL-0350.
+- Report/log evidence publication commit: [`fa6beeaa57ca8cf43fd5de23c51e6efe618c7247`](https://github.com/Sekiph82/PackLab/commit/fa6beeaa57ca8cf43fd5de23c51e6efe618c7247). It contains only this report and the initial matching log. GitHub `main` visibility and `0 0` local/remote parity were verified after that publication.
+- This log does not claim independent audit acceptance or self-close PL-0350. The final log update is separately visible in its GitHub file history.
 - Matching [prompt](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_UPSTREAM_GENERATED_SOURCE_READONLY_PROMPT.md), [criteria](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_UPSTREAM_GENERATED_SOURCE_READONLY_AUDIT_CRITERIA.md), [report](https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_UPSTREAM_GENERATED_SOURCE_READONLY_REPORT.md), [upstream release](https://github.com/CadQuery/OCP/releases/tag/7.9.3.1.1), and [upstream recipe run](https://github.com/CadQuery/ocp-build-system/actions/runs/26501389469) are the review references.
 
 **AWAITING_INDEPENDENT_AUDIT / OWNER_BUILD_APPROVAL_REQUIRED**
