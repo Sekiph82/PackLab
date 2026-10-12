@@ -1,33 +1,17 @@
 name: PackLab Studio Windows Build
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/windows-studio-build.yml"
-      - "apps/windows-studio/**"
-      - "core/**"
-      - "docs/architecture/DEPENDENCY_LICENSE_REGISTER.md"
-      - "pyproject.toml"
-      - "schemas/**"
-      - "tests/ci/**"
-      - "tests/studio/**"
-      - "tools/packaging/**"
-      - "uv.lock"
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/windows-studio-build.yml"
-      - "apps/windows-studio/**"
-      - "core/**"
-      - "docs/architecture/DEPENDENCY_LICENSE_REGISTER.md"
-      - "pyproject.toml"
-      - "schemas/**"
-      - "tests/ci/**"
-      - "tests/studio/**"
-      - "tools/packaging/**"
-      - "uv.lock"
   workflow_dispatch:
+    inputs:
+      run_native_build:
+        description: "Affirmatively authorize the single controlled native build attempt"
+        required: true
+        default: false
+        type: boolean
+      build_revision:
+        description: "Exact main commit SHA to build"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -35,8 +19,13 @@ permissions:
 jobs:
   controlled-ocp-runtime:
     name: Produce and validate controlled OCP runtime
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.run_native_build == true &&
+      github.ref == 'refs/heads/main' &&
+      inputs.build_revision == github.sha
     runs-on: windows-2022
-    timeout-minutes: 480
+    timeout-minutes: 330
     concurrency:
       group: controlled-ocp-runtime-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: false
