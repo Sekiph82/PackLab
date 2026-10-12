@@ -248,7 +248,7 @@ def audit_dependencies(
 
     missing_headers: dict[str, set[str]] = defaultdict(set)
     required_toolkits: set[str] = set()
-    non_occt_unresolved: dict[str, set[str]] = defaultdict(set)
+    non_occt_unresolved: set[str] = set()
     for unit in units:
         text = unit.read_text(encoding="utf-8", errors="replace")
         for included in INCLUDE.findall(text):
@@ -267,7 +267,7 @@ def audit_dependencies(
             ):
                 # Keep third-party and platform includes visible in the report; they are
                 # resolved by the locked OCP environment or Windows SDK, not by OCCT.
-                non_occt_unresolved[normalized].add(unit.name)
+                non_occt_unresolved.add(normalized)
 
     if "OpenGl_Context.hxx" in {key.split("/")[-1] for key in missing_headers}:
         required_toolkits.add("TKOpenGl")
@@ -305,9 +305,7 @@ def audit_dependencies(
         },
         "missing_import_libraries": missing_libraries,
         "missing_runtime_dlls": missing_runtimes,
-        "unresolved_non_occt_includes_review": {
-            key: sorted(value) for key, value in sorted(non_occt_unresolved.items())
-        },
+        "unresolved_non_occt_includes_review": sorted(non_occt_unresolved),
         "open_gl_header_present": any(
             path.name.casefold() == "opengl_context.hxx" for path in sdk_includes
         ),

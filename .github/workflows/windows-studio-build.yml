@@ -79,8 +79,12 @@ jobs:
           $auditExit = $LASTEXITCODE
           if ($auditExit -eq 2) {
             $audit = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
-            if (!$audit.missing_occt_headers.'OpenGl_Context.hxx' -or !$audit.missing_import_libraries.Contains("TKOpenGl.lib") -or !$audit.missing_runtime_dlls.Contains("TKOpenGl.dll")) { throw "Dependency audit failed without proving the expected OpenGL SDK incompatibility." }
-            @("## Retained SDK dependency audit", "", "- Result: actual compatibility check correctly rejected the retained OpenGL-disabled SDK before any native compile.", "- Generated modules and translation units: $($audit.generated_modules) / $($audit.translation_units_including_OCP_cpp).", "- Missing OCCT headers: $((@($audit.missing_occt_headers.PSObject.Properties.Name) | Sort-Object) -join ', ').", "- Missing import libraries: $($audit.missing_import_libraries -join ', ').", "- Missing runtime DLLs: $($audit.missing_runtime_dlls -join ', ').", "- Full machine-readable deficiency report: $report") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            $missingHeaders = @($audit.missing_occt_headers.PSObject.Properties.Name)
+            $missingLibraries = @($audit.missing_import_libraries)
+            $missingRuntimes = @($audit.missing_runtime_dlls)
+            $hasExpectedOpenGlGap = ($missingHeaders -contains "OpenGl_Context.hxx") -and ($missingLibraries -contains "TKOpenGl.lib") -and ($missingRuntimes -contains "TKOpenGl.dll")
+            if (!$hasExpectedOpenGlGap) { throw "Dependency audit failed without proving the expected OpenGL SDK incompatibility." }
+            @("## Retained SDK dependency audit", "", "- Result: actual compatibility check correctly rejected the retained OpenGL-disabled SDK before any native compile.", "- Generated modules and translation units: $($audit.generated_modules) / $($audit.translation_units_including_OCP_cpp).", "- Missing OCCT headers ($($missingHeaders.Count)): $($missingHeaders -join ', ').", "- Missing import libraries: $($missingLibraries -join ', ').", "- Missing runtime DLLs: $($missingRuntimes -join ', ').", "- Full machine-readable deficiency report: $report") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           } elseif ($auditExit -ne 0) { throw "Generated source-to-SDK dependency audit failed unexpectedly (exit $auditExit)." }
           else { Get-Content -LiteralPath $report -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
 
