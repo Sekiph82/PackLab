@@ -50,6 +50,8 @@ jobs:
         run: |
           $bootstrapPython = (& python -c "import sys; assert sys.version_info[:3] == (3,12,10), sys.version; print(f'{sys.version.split()[0]} | {sys.executable}')").Trim()
           if ($LASTEXITCODE -ne 0 -or !$bootstrapPython) { throw "The hosted preflight bootstrap Python is not the verified Windows 3.12.10 toolcache runtime." }
+          python -S -m tools.packaging.verify_windows_workflow_python_imports
+          if ($LASTEXITCODE -ne 0) { throw "Repository-local Windows workflow Python module imports failed." }
           $runArtifactCap = 4GB
           $twoRunArtifactCap = 8GB
           $cacheCap = 10GB
@@ -71,7 +73,7 @@ jobs:
           $patchRoot = Join-Path $env:RUNNER_TEMP "ocp-generated-source-preflight"
           $patchManifest = Join-Path $env:RUNNER_TEMP "ocp-generated-source-preflight-manifest.json"
           $env:PYTHONPATH = $env:GITHUB_WORKSPACE
-          python tools/packaging/prepare_official_ocp_generated_sources.py --archive $archive --destination $patchRoot --manifest $patchManifest
+          python -m tools.packaging.prepare_official_ocp_generated_sources --archive $archive --destination $patchRoot --manifest $patchManifest
           if ($LASTEXITCODE -ne 0) { throw "The official generated-source dry-run patch failed." }
           $manifest = Get-Content -LiteralPath $patchManifest -Raw | ConvertFrom-Json
           if ($manifest.input_module_count -ne 319 -or $manifest.output_module_count -ne 315 -or $manifest.registration_count -ne 630) { throw "The dry-run generated-source inventory differs from the frozen 319-to-315 contract." }
@@ -121,7 +123,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv sync --locked --all-groups
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          uv run --locked python tools/packaging/validate_windows_native_source_lock.py --verify-build-lock --verify-conda-lock --verify-uv-lock
+          uv run --locked python -m tools.packaging.validate_windows_native_source_lock --verify-build-lock --verify-conda-lock --verify-uv-lock
           if ($LASTEXITCODE -ne 0) { throw "Native source and package locks are invalid." }
       - name: Render hash-pinned OCP build environment lock
         id: render_ocp_lock
@@ -158,7 +160,7 @@ jobs:
         run: |
           $sourceRoot = Join-Path $env:RUNNER_TEMP "packlab-native-sources"
           $sourceEvidence = Join-Path $env:RUNNER_TEMP "windows-native-source-evidence.json"
-          uv run --locked python tools/packaging/fetch_verify_windows_native_sources.py --download-dir $sourceRoot --evidence $sourceEvidence
+          uv run --locked python -m tools.packaging.fetch_verify_windows_native_sources --download-dir $sourceRoot --evidence $sourceEvidence
           if ($LASTEXITCODE -ne 0) { throw "A locked corresponding-source archive failed verification." }
           "PACKLAB_NATIVE_SOURCE_ROOT=$sourceRoot" >> $env:GITHUB_ENV
           "PACKLAB_NATIVE_SOURCE_EVIDENCE=$sourceEvidence" >> $env:GITHUB_ENV
@@ -171,14 +173,14 @@ jobs:
           $cacheKey = "${{ steps.sdk_cache.outputs.cache-primary-key }}"
           $evidence = Join-Path $env:RUNNER_TEMP "occt-sdk-metadata.json"
           if ("${{ steps.sdk_cache.outputs.cache-hit }}" -eq "true") {
-            uv run --locked python tools/packaging/validate_controlled_occt_sdk.py --sdk $sdk --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key $cacheKey --republish-cache
+            uv run --locked python -m tools.packaging.validate_controlled_occt_sdk --sdk $sdk --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key $cacheKey --republish-cache
             if ($LASTEXITCODE -ne 0) { throw "The restored OCCT SDK cache failed validation." }
           } else {
             $source = Get-ChildItem -LiteralPath $env:PACKLAB_NATIVE_SOURCE_ROOT -Filter "occt-source-7.9.3--*" -File | Select-Object -First 1
             if (!$source) { throw "Verified OCCT source archive is missing." }
-            & micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_occt_sdk.py --source-archive $source.FullName --build-root (Join-Path $env:RUNNER_TEMP "packlab-occt-sdk-build") --output $sdk --metadata (Join-Path $sdk "occt-sdk-metadata.json") --cache-key $cacheKey
+            & micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_occt_sdk --source-archive $source.FullName --build-root (Join-Path $env:RUNNER_TEMP "packlab-occt-sdk-build") --output $sdk --metadata (Join-Path $sdk "occt-sdk-metadata.json") --cache-key $cacheKey
             if ($LASTEXITCODE -ne 0) { throw "The locked OCCT SDK build failed." }
-            uv run --locked python tools/packaging/validate_controlled_occt_sdk.py --sdk $sdk --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key $cacheKey
+            uv run --locked python -m tools.packaging.validate_controlled_occt_sdk --sdk $sdk --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key $cacheKey
             if ($LASTEXITCODE -ne 0) { throw "The newly built OCCT SDK failed content validation." }
           }
       - name: Record SDK checkpoint identity and disk budget
@@ -265,7 +267,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv sync --locked --all-groups
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          uv run --locked python tools/packaging/validate_windows_native_source_lock.py --verify-build-lock --verify-conda-lock --verify-uv-lock
+          uv run --locked python -m tools.packaging.validate_windows_native_source_lock --verify-build-lock --verify-conda-lock --verify-uv-lock
           if ($LASTEXITCODE -ne 0) { throw "Native source and package locks are invalid." }
       - name: Render hash-pinned OCP build environment lock
         id: render_ocp_lock
@@ -304,7 +306,7 @@ jobs:
       - name: Validate SDK artifact producer, manifest, and hashes
         shell: pwsh
         run: |
-          uv run --locked python tools/packaging/validate_controlled_occt_sdk.py --sdk (Join-Path $env:RUNNER_TEMP "occt-sdk") --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key "${{ needs.occt-sdk.outputs.sdk-cache-key }}"
+          uv run --locked python -m tools.packaging.validate_controlled_occt_sdk --sdk (Join-Path $env:RUNNER_TEMP "occt-sdk") --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key "${{ needs.occt-sdk.outputs.sdk-cache-key }}"
           if ($LASTEXITCODE -ne 0) { throw "Same-run OCCT SDK checkpoint failed validation." }
           $sdkMetadata = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP "occt-sdk\occt-sdk-metadata.json") -Raw | ConvertFrom-Json
           if ($sdkMetadata.payload_sha256 -ne "${{ needs.occt-sdk.outputs.sdk-payload-sha256 }}" -or $sdkMetadata.byte_count -ne [long]"${{ needs.occt-sdk.outputs.sdk-byte-count }}") { throw "Downloaded SDK bytes differ from the producer outputs." }
@@ -330,7 +332,7 @@ jobs:
           $bundle = Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime"
           $valid = "false"
           if ("${{ steps.controlled_cache.outputs.cache-hit }}" -eq "true") {
-            uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py validate --bundle $bundle --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
+            uv run --locked python -m tools.packaging.controlled_ocp_runtime_bundle validate --bundle $bundle --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
             if ($LASTEXITCODE -eq 0) {
               $runtimeManifest = Get-Content -LiteralPath (Join-Path $bundle "windows-ocp-controlled-runtime-manifest.json") -Raw | ConvertFrom-Json
               $sdkMetadata = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP "occt-sdk\occt-sdk-metadata.json") -Raw | ConvertFrom-Json
@@ -358,9 +360,9 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The locked Python site-packages path could not be resolved." }
           $sourceEvidence = Join-Path $env:RUNNER_TEMP "source-evidence\windows-native-source-evidence.json"
           $manifest = Join-Path $env:RUNNER_TEMP "windows-ocp-controlled-runtime-manifest.json"
-          & micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_ocp_from_generated_sources.py --generated-source-zip $env:PACKLAB_OCP_GENERATED_ZIP --occt-sdk (Join-Path $env:RUNNER_TEMP "occt-sdk") --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key "${{ needs.occt-sdk.outputs.sdk-cache-key }}" --expected-source-lock-sha256 (python -c "import hashlib,pathlib; print(hashlib.sha256(pathlib.Path('tools/packaging/windows_native_source_lock.json').read_bytes()).hexdigest())") --build-root (Join-Path $env:RUNNER_TEMP "packlab-ocp-generated-build") --site-packages $sitePackages --manifest $manifest --compile-timeout-seconds 16200
+          & micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_ocp_from_generated_sources --generated-source-zip $env:PACKLAB_OCP_GENERATED_ZIP --occt-sdk (Join-Path $env:RUNNER_TEMP "occt-sdk") --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key "${{ needs.occt-sdk.outputs.sdk-cache-key }}" --expected-source-lock-sha256 (python -c "import hashlib,pathlib; print(hashlib.sha256(pathlib.Path('tools/packaging/windows_native_source_lock.json').read_bytes()).hexdigest())") --build-root (Join-Path $env:RUNNER_TEMP "packlab-ocp-generated-build") --site-packages $sitePackages --manifest $manifest --compile-timeout-seconds 16200
           if ($LASTEXITCODE -ne 0) { throw "The official generated-source OCP compile failed or exceeded its 270-minute budget." }
-          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py seal --site-packages $sitePackages --manifest $manifest --source-evidence $sourceEvidence --patch-manifest (Join-Path $env:RUNNER_TEMP "packlab-ocp-generated-build\generated-source-patch-manifest.json") --bundle (Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime") --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
+          uv run --locked python -m tools.packaging.controlled_ocp_runtime_bundle seal --site-packages $sitePackages --manifest $manifest --source-evidence $sourceEvidence --patch-manifest (Join-Path $env:RUNNER_TEMP "packlab-ocp-generated-build\generated-source-patch-manifest.json") --bundle (Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime") --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
           if ($LASTEXITCODE -ne 0) { throw "The controlled 315-module runtime failed sealing validation." }
       - name: Validate runtime checkpoint against this run's OCCT payload
         id: validate_bundle
@@ -369,7 +371,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: |
           $bundle = Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime"
-          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py validate --bundle $bundle --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
+          uv run --locked python -m tools.packaging.controlled_ocp_runtime_bundle validate --bundle $bundle --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
           if ($LASTEXITCODE -ne 0) { throw "The controlled runtime failed final provenance validation." }
           $runtimeManifest = Get-Content -LiteralPath (Join-Path $bundle "windows-ocp-controlled-runtime-manifest.json") -Raw | ConvertFrom-Json
           $sdkMetadata = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP "occt-sdk\occt-sdk-metadata.json") -Raw | ConvertFrom-Json
@@ -379,9 +381,9 @@ jobs:
         run: |
           $sitePackages = (& micromamba run -n packlab-ocp-bindings python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
           if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The locked runtime site-packages path could not be resolved." }
-          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py install --bundle (Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime") --site-packages $sitePackages --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
+          uv run --locked python -m tools.packaging.controlled_ocp_runtime_bundle install --bundle (Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime") --site-packages $sitePackages --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
           if ($LASTEXITCODE -ne 0) { throw "The validated OCP runtime could not be installed." }
-          & micromamba run -n packlab-ocp-bindings python tools/packaging/controlled_ocp_runtime_bundle.py smoke
+          & micromamba run -n packlab-ocp-bindings python -m tools.packaging.controlled_ocp_runtime_bundle smoke
           if ($LASTEXITCODE -ne 0) { throw "Native OCP BREP smoke failed." }
       - name: Record exact OCP runtime artifact identity
         id: runtime_identity
@@ -467,7 +469,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           uv sync --locked --all-groups
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          uv run --locked python tools/packaging/validate_windows_native_source_lock.py `
+          uv run --locked python -m tools.packaging.validate_windows_native_source_lock `
             --verify-build-lock --verify-conda-lock --verify-uv-lock
           if ($LASTEXITCODE -ne 0) { throw "Windows native source or package lock validation failed." }
       - name: Download exact same-run controlled runtime
@@ -483,7 +485,7 @@ jobs:
         run: |
           $bundle = Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime"
           $cacheKey = "${{ needs.controlled-ocp-runtime.outputs.cache-key }}"
-          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py validate `
+          uv run --locked python -m tools.packaging.controlled_ocp_runtime_bundle validate `
             --bundle $bundle `
             --cache-key $cacheKey
           if ($LASTEXITCODE -ne 0) { throw "The same-run controlled runtime artifact failed independent packaging-job validation." }
@@ -493,7 +495,7 @@ jobs:
           }
           $sitePackages = (uv run --locked python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
           if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The packaging environment site-packages path could not be resolved." }
-          uv run --locked python tools/packaging/controlled_ocp_runtime_bundle.py install `
+          uv run --locked python -m tools.packaging.controlled_ocp_runtime_bundle install `
             --bundle $bundle `
             --site-packages $sitePackages `
             --cache-key $cacheKey
@@ -568,7 +570,7 @@ jobs:
         run: |
           $appDirectory = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio"
           $assertionPath = Join-Path $appDirectory "qt-staged-surface.json"
-          uv run --locked python tools/packaging/assert_staged_qt_surface.py `
+          uv run --locked python -m tools.packaging.assert_staged_qt_surface `
             --stage $appDirectory `
             --contract tools/packaging/qt_module_contract.json `
             --output $assertionPath `
@@ -639,7 +641,7 @@ jobs:
         shell: pwsh
         run: |
           $appDirectory = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio"
-          uv run --locked python tools/packaging/validate_controlled_ocp_manifest.py `
+          uv run --locked python -m tools.packaging.validate_controlled_ocp_manifest `
             --manifest $env:PACKLAB_CONTROLLED_OCP_MANIFEST `
             --stage $appDirectory
           if ($LASTEXITCODE -ne 0) { throw "Staged OCP native files do not match the exact controlled-runtime manifest." }
@@ -658,7 +660,7 @@ jobs:
           }
           $evidencePath = Join-Path $env:RUNNER_TEMP "packlab-compliance-preclearance"
           New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
-          uv run --locked python tools/packaging/windows_redistribution_inventory.py `
+          uv run --locked python -m tools.packaging.windows_redistribution_inventory `
             --staging-dir $appDirectory `
             --collect-toc $collectMatches[0].FullName `
             --analysis-toc $analysisMatches[0].FullName `
@@ -727,7 +729,7 @@ jobs:
           $analysis = (Get-ChildItem -LiteralPath $workPath -Filter "Analysis-00.toc" -File -Recurse | Select-Object -First 1).FullName
           $evidencePath = Join-Path $env:RUNNER_TEMP "packlab-compliance-final"
           New-Item -ItemType Directory -Path $evidencePath -Force | Out-Null
-          uv run --locked python tools/packaging/windows_redistribution_inventory.py `
+          uv run --locked python -m tools.packaging.windows_redistribution_inventory `
             --staging-dir (Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio") `
             --collect-toc $collect --analysis-toc $analysis `
             --project-root $env:GITHUB_WORKSPACE `

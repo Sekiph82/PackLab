@@ -23,7 +23,8 @@ def test_native_workflow_is_manual_only_and_requires_exact_owner_inputs() -> Non
     assert "permissions:\n  contents: read" in workflow
     assert "capacity-preflight:" in workflow
     assert "actions: read" in workflow
-    assert "prepare_official_ocp_generated_sources.py --archive" in workflow
+    assert "python -m tools.packaging.prepare_official_ocp_generated_sources --archive" in workflow
+    assert "python -S -m tools.packaging.verify_windows_workflow_python_imports" in workflow
     assert "8 GiB free on the build volume" in workflow
     assert "two authorized runs at most" in workflow
     assert "retention-days: 1" in workflow
@@ -90,13 +91,42 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     assert 'f"-DPython_EXECUTABLE={sys.executable}"' in ocp_builder
     assert 'f"-DCMAKE_PREFIX_PATH={args.occt_sdk};{sys.prefix}"' in ocp_builder
     assert (
-        "& micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_occt_sdk.py"
+        "& micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_occt_sdk"
         in sdk
     )
     assert (
-        "& micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_ocp_from_generated_sources.py"
+        "& micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_ocp_from_generated_sources"
         in ocp
     )
+
+
+def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
+    from tools.packaging.verify_windows_workflow_python_imports import verify_workflow_imports
+
+    modules = verify_workflow_imports(ROOT)
+    assert set(modules) == {
+        "tools.packaging.assert_staged_qt_surface",
+        "tools.packaging.build_controlled_occt_sdk",
+        "tools.packaging.build_controlled_ocp_from_generated_sources",
+        "tools.packaging.build_controlled_ocp_runtime",
+        "tools.packaging.controlled_ocp_runtime_bundle",
+        "tools.packaging.fetch_verify_windows_native_sources",
+        "tools.packaging.prepare_official_ocp_generated_sources",
+        "tools.packaging.validate_controlled_occt_sdk",
+        "tools.packaging.validate_controlled_ocp_manifest",
+        "tools.packaging.validate_windows_native_source_lock",
+        "tools.packaging.verify_windows_workflow_python_imports",
+        "tools.packaging.windows_redistribution_inventory",
+    }
+
+
+def test_windows_workflow_rejects_repository_script_file_path_invocations() -> None:
+    from tools.packaging.verify_windows_workflow_python_imports import SCRIPT_CALL
+
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert SCRIPT_CALL.findall(workflow) == []
+    assert SCRIPT_CALL.findall("python tools/packaging/example.py") == ["example"]
+    assert SCRIPT_CALL.findall("python.exe -S .\\tools\\packaging\\example.py") == ["example"]
 
 
 def test_native_pipeline_seals_same_run_occt_and_generated_ocp_stages() -> None:
@@ -118,9 +148,9 @@ def test_native_pipeline_seals_same_run_occt_and_generated_ocp_stages() -> None:
     assert "OCP_src_stubs_Windows.zip" in ocp
     assert "prepare_official_ocp_generated_sources.py" in ocp
     assert "build_controlled_ocp_from_generated_sources.py" in ocp
-    assert "controlled_ocp_runtime_bundle.py seal" in ocp
+    assert "python -m tools.packaging.controlled_ocp_runtime_bundle seal" in ocp
     assert "generated-source-patch-manifest.json" in ocp
-    assert "controlled_ocp_runtime_bundle.py smoke" in ocp
+    assert "python -m tools.packaging.controlled_ocp_runtime_bundle smoke" in ocp
     assert "pywrap_generation" not in ocp
     assert "1 GiB stage-B artifact budget" in ocp
     assert "restore-keys:" not in workflow
