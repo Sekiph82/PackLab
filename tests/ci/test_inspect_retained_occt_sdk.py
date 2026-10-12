@@ -77,3 +77,14 @@ def test_dependency_audit_accepts_complete_opengl_sdk_entries() -> None:
 
     assert libraries == []
     assert runtimes == []
+
+
+def test_dependency_audit_rejects_other_required_occt_header_and_toolkit() -> None:
+    missing_headers = {"BRep_Builder.hxx": {"BRep.cpp"}}
+    libraries, runtimes = sdk_dependency_deficiencies(missing_headers, {"TKBRep"}, set())
+
+    assert libraries == ["TKBRep.lib"]
+    assert runtimes == ["TKBRep.dll"]
+    with pytest.raises(DependencyAuditError) as error:
+        ensure_sdk_dependencies_complete(missing_headers, libraries, runtimes)
+    assert "BRep_Builder.hxx" in error.value.report["missing_occt_headers"]
