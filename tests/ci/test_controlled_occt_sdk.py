@@ -81,3 +81,33 @@ def test_sdk_checkpoint_rejects_another_producer_run(tmp_path: Path) -> None:
     _sealed_fixture(tmp_path)
     with pytest.raises(ValueError, match="identity"):
         validate_sdk(tmp_path, "99999", "1", "sdk-key-v1")
+
+
+def test_sdk_checkpoint_rejects_source_lock_and_manifest_tampering(tmp_path: Path) -> None:
+    _sealed_fixture(tmp_path)
+    metadata_path = tmp_path / METADATA_NAME
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["source_lock_sha256"] = "0" * 64
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    with pytest.raises(ValueError, match="identity"):
+        validate_sdk(tmp_path, "12345", "1", "sdk-key-v1")
+
+    _sealed_fixture(tmp_path)
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["files"][0]["sha256"] = "0" * 64
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    with pytest.raises(ValueError, match="hash/size"):
+        validate_sdk(tmp_path, "12345", "1", "sdk-key-v1")
+
+
+def test_sdk_checkpoint_rejects_a_partial_opengl_sdk(tmp_path: Path) -> None:
+    _sealed_fixture(tmp_path)
+    (tmp_path / "bin/TKernel.dll").unlink()
+    with pytest.raises(ValueError, match="file set"):
+        validate_sdk(tmp_path, "12345", "1", "sdk-key-v1")
+
+
+def test_legacy_sdk_cannot_satisfy_opengl_consumer_contract(tmp_path: Path) -> None:
+    _sealed_fixture(tmp_path)
+    with pytest.raises(ValueError, match="USE_OPENGL=ON"):
+        validate_sdk(tmp_path, "12345", "1", "sdk-key-v1", require_opengl=True)

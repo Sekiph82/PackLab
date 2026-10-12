@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from tools.packaging.audit_controlled_occt_sdk_dependencies import audit_dependencies
 from tools.packaging.build_controlled_ocp_runtime import (
     is_external_runtime,
     pe_imports,
@@ -88,6 +89,7 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
         args.expected_run_id,
         args.expected_attempt,
         args.expected_cache_key,
+        require_opengl=True,
     )
     if sdk["source_lock_sha256"] != sha256(LOCK):
         raise ValueError("the OCCT SDK checkpoint was produced from another source lock")
@@ -112,6 +114,16 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError(
             "one or more literal PackLab OCP imports are absent from the retained module set"
         )
+    dependency_audit = audit_dependencies(
+        args.occt_sdk,
+        args.generated_source_zip,
+        args.occt_source_archive,
+        args.build_root / "dependency-audit",
+        expected_run_id=args.expected_run_id,
+        expected_attempt=args.expected_attempt,
+        expected_cache_key=args.expected_cache_key,
+        require_opengl=True,
+    )
 
     occt_dlls = [path for path in args.occt_sdk.rglob("*.dll") if path.is_file()]
     occt_dlls_by_name = {path.name.casefold(): path for path in occt_dlls}
@@ -275,6 +287,7 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
             "byte_count": sdk["byte_count"],
             "file_count": sdk["file_count"],
         },
+        "occt_sdk_dependency_audit": dependency_audit,
         "toolchain": toolchain,
         "build_timings": [occt_timing, ocp_timing],
         "external_runtime_dependencies": sorted(external),
@@ -288,6 +301,7 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--generated-source-zip", required=True, type=Path)
+    parser.add_argument("--occt-source-archive", required=True, type=Path)
     parser.add_argument("--occt-sdk", required=True, type=Path)
     parser.add_argument("--expected-run-id", required=True)
     parser.add_argument("--expected-attempt", required=True)

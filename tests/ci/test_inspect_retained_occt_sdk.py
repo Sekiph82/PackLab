@@ -5,7 +5,11 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
+from tools.packaging.audit_controlled_occt_sdk_dependencies import (
+    DependencyAuditError,
+    ensure_sdk_dependencies_complete,
+    sdk_dependency_deficiencies,
+)
 from tools.packaging.inspect_retained_occt_sdk import safe_extract
 
 
@@ -51,3 +55,25 @@ def test_safe_extract_rejects_symbolic_link_entries(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unsafe or case-colliding"):
         safe_extract(archive, tmp_path / "out")
+
+
+def test_dependency_audit_rejects_missing_opengl_header_import_library_and_dll() -> None:
+    missing_headers = {"OpenGl_Context.hxx": {"OpenGl.cpp", "OpenGl_pre.cpp"}}
+    libraries, runtimes = sdk_dependency_deficiencies(missing_headers, {"TKOpenGl"}, set())
+
+    assert libraries == ["TKOpenGl.lib"]
+    assert runtimes == ["TKOpenGl.dll"]
+    with pytest.raises(DependencyAuditError) as error:
+        ensure_sdk_dependencies_complete(missing_headers, libraries, runtimes)
+    assert "OpenGl_Context.hxx" in error.value.report["missing_occt_headers"]
+    assert "TKOpenGl.lib" in error.value.report["missing_import_libraries"]
+    assert "TKOpenGl.dll" in error.value.report["missing_runtime_dlls"]
+
+
+def test_dependency_audit_accepts_complete_opengl_sdk_entries() -> None:
+    libraries, runtimes = sdk_dependency_deficiencies(
+        {}, {"TKOpenGl"}, {"tkopengl.lib", "tkopengl.dll"}
+    )
+
+    assert libraries == []
+    assert runtimes == []

@@ -60,9 +60,7 @@ def request_json(url: str, token: str) -> dict[str, Any]:
 
 
 def download_archive(token: str, destination: Path) -> None:
-    endpoint = (
-        f"https://api.github.com/repos/{REPOSITORY}/actions/artifacts/{ARTIFACT_ID}/zip"
-    )
+    endpoint = f"https://api.github.com/repos/{REPOSITORY}/actions/artifacts/{ARTIFACT_ID}/zip"
     request = urllib.request.Request(
         endpoint,
         headers={
@@ -79,7 +77,9 @@ def download_archive(token: str, destination: Path) -> None:
             raise
         location = error.headers.get("Location")
         if not location:
-            raise ValueError("GitHub artifact redirect did not provide a download location") from error
+            raise ValueError(
+                "GitHub artifact redirect did not provide a download location"
+            ) from error
         response = urllib.request.urlopen(location, timeout=60)
     total = 0
     with response, destination.open("xb") as output:
@@ -92,7 +92,9 @@ def download_archive(token: str, destination: Path) -> None:
                 raise ValueError("Retained SDK archive exceeds the bounded 60 MiB download limit")
             output.write(chunk)
     if total != ARCHIVE_BYTES or sha256_file(destination) != ARCHIVE_SHA256:
-        raise ValueError("Downloaded retained SDK outer ZIP size or SHA-256 differs from GitHub metadata")
+        raise ValueError(
+            "Downloaded retained SDK outer ZIP size or SHA-256 differs from GitHub metadata"
+        )
 
 
 def safe_extract(archive: Path, destination: Path) -> None:
@@ -152,11 +154,16 @@ def inventory(sdk: Path, metadata: dict[str, Any]) -> dict[str, Any]:
         interesting = [
             line.strip()
             for line in content.splitlines()
-            if any(token in line.casefold() for token in ("tkopengl", "opengl", "include_directories"))
+            if any(
+                token in line.casefold() for token in ("tkopengl", "opengl", "include_directories")
+            )
         ]
         if interesting:
             cmake_refs.append(
-                {"file": path.relative_to(sdk).as_posix(), "references": " | ".join(interesting[:20])}
+                {
+                    "file": path.relative_to(sdk).as_posix(),
+                    "references": " | ".join(interesting[:20]),
+                }
             )
     return {
         "OpenGl_Context.hxx": opengl_header,
@@ -192,7 +199,9 @@ def inspect(scratch: Path) -> dict[str, Any]:
         or workflow.get("head_branch") != "main"
         or workflow.get("head_sha") != PRODUCER_SHA
     ):
-        raise ValueError("Retained SDK producer run or source revision differs from the frozen identity")
+        raise ValueError(
+            "Retained SDK producer run or source revision differs from the frozen identity"
+        )
     archive = scratch / "retained-occt-sdk.zip"
     extracted = scratch / "sdk"
     download_archive(token, archive)

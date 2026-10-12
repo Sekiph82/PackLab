@@ -22,6 +22,27 @@ OCCT_ID = "occt-source-7.9.3"
 SDK_VERSION = "10.0.26100.0"
 PARALLELISM = 4
 GENERATOR = "Visual Studio 17 2022"
+OCCT_CMAKE_OPTIONS = {
+    "BUILD_LIBRARY_TYPE": "Shared",
+    "BUILD_DOC_Overview": False,
+    "BUILD_DOC_RefMan": False,
+    "BUILD_SAMPLES_MFC": False,
+    "BUILD_SAMPLES_QT": False,
+    "BUILD_Inspector": False,
+    "USE_TK": False,
+    "USE_VTK": False,
+    "USE_TBB": False,
+    "USE_FREETYPE": False,
+    "USE_FREEIMAGE": False,
+    "USE_OPENGL": True,
+    "USE_FFMPEG": False,
+    "USE_OPENVR": False,
+    "USE_RAPIDJSON": False,
+    "USE_DRACO": False,
+    "USE_EIGEN": False,
+    "BUILD_WITH_DEBUG": False,
+    "BUILD_USE_PCH": False,
+}
 CONTRACT = Path("tools/packaging/controlled_ocp_runtime_contract.json")
 LOCK = Path("tools/packaging/windows_native_source_lock.json")
 
@@ -105,25 +126,10 @@ def build_sdk(
             "x64",
             f"-DCMAKE_SYSTEM_VERSION={SDK_VERSION}",
             f"-DCMAKE_INSTALL_PREFIX={install}",
-            "-DBUILD_LIBRARY_TYPE=Shared",
-            "-DBUILD_DOC_Overview=OFF",
-            "-DBUILD_DOC_RefMan=OFF",
-            "-DBUILD_SAMPLES_MFC=OFF",
-            "-DBUILD_SAMPLES_QT=OFF",
-            "-DBUILD_Inspector=OFF",
-            "-DUSE_TK=OFF",
-            "-DUSE_VTK=OFF",
-            "-DUSE_TBB=OFF",
-            "-DUSE_FREETYPE=OFF",
-            "-DUSE_FREEIMAGE=OFF",
-            "-DUSE_OPENGL=OFF",
-            "-DUSE_FFMPEG=OFF",
-            "-DUSE_OPENVR=OFF",
-            "-DUSE_RAPIDJSON=OFF",
-            "-DUSE_DRACO=OFF",
-            "-DUSE_EIGEN=OFF",
-            "-DBUILD_WITH_DEBUG=OFF",
-            "-DBUILD_USE_PCH=OFF",
+            *[
+                f"-D{key}={'Shared' if value == 'Shared' else 'ON' if value is True else 'OFF'}"
+                for key, value in OCCT_CMAKE_OPTIONS.items()
+            ],
         ],
         check=True,
     )
@@ -162,16 +168,17 @@ def build_sdk(
     shutil.copytree(install, output)
     entries = _file_inventory(output)
     sdk_files = [entry["relative_path"].casefold() for entry in entries]
-    if (
-        not any(name.endswith(".dll") for name in sdk_files)
-        or not any(name.endswith(".lib") for name in sdk_files)
-        or not any("opencascadeconfig.cmake" in name for name in sdk_files)
-    ):
-        raise ValueError("OCCT install lacks required DLL, import library, or CMake package inputs")
+    required = {"inc/opengl_context.hxx", "lib/tkopengl.lib", "bin/tkopengl.dll"}
+    if not required <= set(sdk_files):
+        raise ValueError(
+            "OCCT install lacks the required OpenGL header, import library, or runtime DLL"
+        )
+    if not any("opencascadeconfig.cmake" in name for name in sdk_files):
+        raise ValueError("OCCT install lacks its exported CMake package")
     producer_run = os.environ.get("GITHUB_RUN_ID", "local-unset")
     producer_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "local-unset")
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "SEALED",
         "stage": "occt-sdk",
         "producer_job_id": "occt-sdk",
@@ -187,6 +194,7 @@ def build_sdk(
         "cmake": subprocess.check_output(["cmake", "--version"], text=True).splitlines()[0],
         "compiler": compiler,
         "parallelism": PARALLELISM,
+        "cmake_options": OCCT_CMAKE_OPTIONS,
         "build_started_utc": started.isoformat(),
         "build_ended_utc": ended.isoformat(),
         "build_duration_seconds": duration,

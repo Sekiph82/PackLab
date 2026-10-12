@@ -9,7 +9,13 @@ import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from tools.packaging.build_controlled_occt_sdk import LOCK, OCCT_ID, PARALLELISM, SDK_VERSION
+from tools.packaging.build_controlled_occt_sdk import (
+    LOCK,
+    OCCT_CMAKE_OPTIONS,
+    OCCT_ID,
+    PARALLELISM,
+    SDK_VERSION,
+)
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
 
 METADATA_NAME = "occt-sdk-metadata.json"
@@ -25,6 +31,8 @@ def validate_sdk(
     expected_run_id: str,
     expected_attempt: str,
     expected_cache_key: str,
+    *,
+    require_opengl: bool = False,
 ) -> dict[str, Any]:
     if not directory.is_dir() or directory.is_symlink():
         raise ValueError("OCCT SDK checkpoint directory is missing or unsafe")
@@ -33,7 +41,7 @@ def validate_sdk(
     lock = load_source_lock(LOCK)
     record = next(row for row in lock["records"] if row["id"] == OCCT_ID)
     if (
-        metadata.get("schema_version") != 1
+        metadata.get("schema_version") not in (1, 2)
         or metadata.get("status") != "SEALED"
         or metadata.get("stage") != "occt-sdk"
         or metadata.get("producer_job_id") != "occt-sdk"
@@ -53,6 +61,15 @@ def validate_sdk(
         raise ValueError(
             "OCCT SDK checkpoint identity differs from this run or the source/toolchain contract"
         )
+    if metadata.get("schema_version") == 2 and metadata.get("cmake_options") != OCCT_CMAKE_OPTIONS:
+        raise ValueError("OCCT SDK checkpoint CMake option contract differs from the pinned build")
+    if require_opengl and (
+        metadata.get("schema_version") != 2
+        or metadata.get("cmake_options") != OCCT_CMAKE_OPTIONS
+        or metadata["cmake_options"].get("USE_OPENGL") is not True
+        or metadata["cmake_options"].get("USE_VTK") is not False
+    ):
+        raise ValueError("OCCT SDK checkpoint must be sealed with USE_OPENGL=ON and USE_VTK=OFF")
     entries = metadata.get("files")
     if not isinstance(entries, list) or not entries:
         raise ValueError("OCCT SDK checkpoint manifest is empty")
@@ -95,6 +112,9 @@ def validate_sdk(
     if metadata.get("payload_sha256") != hashlib.sha256(payload).hexdigest():
         raise ValueError("OCCT SDK checkpoint payload digest differs from its file manifest")
     folded = {name.casefold() for name in observed}
+    required = {"inc/opengl_context.hxx", "lib/tkopengl.lib", "bin/tkopengl.dll"}
+    if not required <= folded and metadata.get("schema_version") == 2:
+        raise ValueError("OCCT SDK checkpoint lacks required OpenGL header, import library, or DLL")
     if (
         not any(name.endswith(".dll") for name in folded)
         or not any(name.endswith(".lib") for name in folded)

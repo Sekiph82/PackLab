@@ -51,6 +51,9 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     occt_builder = (ROOT / "tools/packaging/build_controlled_occt_sdk.py").read_text(
         encoding="utf-8"
     )
+    dependency_audit = (
+        ROOT / "tools/packaging/audit_controlled_occt_sdk_dependencies.py"
+    ).read_text(encoding="utf-8")
     ocp_builder = (
         ROOT / "tools/packaging/build_controlled_ocp_from_generated_sources.py"
     ).read_text(encoding="utf-8")
@@ -92,8 +95,20 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     assert "version: 3.12.15" in native_lock
     assert 'sys.version.split()[0] != contract["target"]["python_version"]' in occt_builder
     assert 'sys.version.split()[0] != contract["target"]["python_version"]' in ocp_builder
+    assert '"USE_OPENGL": True' in occt_builder
+    assert '"USE_VTK": False' in occt_builder
+    assert '"USE_OPENGL"' in occt_builder
+    assert "-D{key}=" in occt_builder
+    assert "Windows-x64-occt-sdk-v3-" in workflow
+    assert "controlled-ocp315-v3-" in workflow
+    assert "OpenGl_Context.hxx" in dependency_audit
+    assert "OpenCASCADE_LIBRARIES" in dependency_audit
+    assert "windows_opengl_prerequisites" in dependency_audit
     assert 'f"-DPython_EXECUTABLE={sys.executable}"' in ocp_builder
     assert 'f"-DCMAKE_PREFIX_PATH={args.occt_sdk};{sys.prefix}"' in ocp_builder
+    assert ocp_builder.index("dependency_audit = audit_dependencies(") < ocp_builder.index(
+        '"cmake",\n            "-S"'
+    )
     assert (
         "& micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_occt_sdk"
         in sdk
@@ -110,6 +125,7 @@ def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
     modules = verify_workflow_imports(ROOT)
     assert set(modules) == {
         "tools.packaging.assert_staged_qt_surface",
+        "tools.packaging.audit_controlled_occt_sdk_dependencies",
         "tools.packaging.build_controlled_occt_sdk",
         "tools.packaging.build_controlled_ocp_from_generated_sources",
         "tools.packaging.build_controlled_ocp_runtime",
