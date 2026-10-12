@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      preflight_only:
+        description: "Run hosted storage and source checks, skipping every native build job"
+        required: false
+        default: false
+        type: boolean
       build_revision:
         description: "Exact main commit SHA to build"
         required: true
@@ -37,12 +42,14 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.15"
+          python-version: "3.12.10"
       - name: Measure disk, current Actions storage, and exact generated-source patch
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $bootstrapPython = (& python -c "import sys; assert sys.version_info[:3] == (3,12,10), sys.version; print(f'{sys.version.split()[0]} | {sys.executable}')").Trim()
+          if ($LASTEXITCODE -ne 0 -or !$bootstrapPython) { throw "The hosted preflight bootstrap Python is not the verified Windows 3.12.10 toolcache runtime." }
           $runArtifactCap = 4GB
           $twoRunArtifactCap = 8GB
           $cacheCap = 10GB
@@ -71,7 +78,7 @@ jobs:
           $patchedBytes = (Get-ChildItem -LiteralPath $patchRoot -File -Recurse | Measure-Object -Property Length -Sum).Sum
           $sourceLock = Get-Content -LiteralPath "tools/packaging/windows_native_source_lock.json" -Raw | ConvertFrom-Json
           $licenseSources = @($sourceLock.records | ForEach-Object { "$($_.component): $($_.license_notice_source)" }) -join "`n"
-          @("## Hosted capacity and exact input dry-run", "", "- Runner label: windows-2022 (standard public runner).", "- Build volume free before native stages: $freeBytes bytes.", "- Existing Actions artifacts: $($artifacts.total_count) totaling $artifactBytes bytes.", "- Existing Actions cache: $($cacheUsage.active_caches_count) entries totaling $cacheBytes bytes; planned maximum additional cache: $projectedCacheCap bytes of the 10 GiB repository allowance.", "- Artifact policy: at most $runArtifactCap bytes per run, two authorized runs at most $twoRunArtifactCap bytes total, all artifacts retained for one day. The verified GitHub Free included shared-storage allowance is 500 MiB-month (0.488 GiB-month); the two-run cap at 24 hours is 0.267 GiB-month.", "- Stage artifact ceilings: A SDK plus source evidence <=1 GiB; B runtime <=1 GiB; C installer and compliance evidence <=2 GiB.", "- Official ZIP: $((Get-Item -LiteralPath $archive).Length) bytes; patched tree: $patchedBytes bytes; SHA-256: $($manifest.source_archive.sha256).", "- Generated modules: $($manifest.input_module_count) to $($manifest.output_module_count); retained registrations: $($manifest.registration_count).", "- OCCT timing basis: prior measured build 2,560.860 seconds; OCP compile cap 16,200 seconds plus 60 minutes for setup, validation, smoke, and upload; each native job timeout 330 minutes.", "- Locked license/source paths:", $licenseSources) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          @("## Hosted capacity and exact input dry-run", "", "- Runner label: windows-2022 (standard public runner).", "- Bootstrap Python: $bootstrapPython.", "- Build volume free before native stages: $freeBytes bytes.", "- Existing Actions artifacts: $($artifacts.total_count) totaling $artifactBytes bytes.", "- Existing Actions cache: $($cacheUsage.active_caches_count) entries totaling $cacheBytes bytes; planned maximum additional cache: $projectedCacheCap bytes of the 10 GiB repository allowance.", "- Artifact policy: at most $runArtifactCap bytes per run, two authorized runs at most $twoRunArtifactCap bytes total, all artifacts retained for one day. The verified GitHub Free included shared-storage allowance is 500 MiB-month (0.488 GiB-month); the two-run cap at 24 hours is 0.267 GiB-month.", "- Stage artifact ceilings: A SDK plus source evidence <=1 GiB; B runtime <=1 GiB; C installer and compliance evidence <=2 GiB.", "- Official ZIP: $((Get-Item -LiteralPath $archive).Length) bytes; patched tree: $patchedBytes bytes; SHA-256: $($manifest.source_archive.sha256).", "- Generated modules: $($manifest.input_module_count) to $($manifest.output_module_count); retained registrations: $($manifest.registration_count).", "- OCCT timing basis: prior measured build 2,560.860 seconds; OCP compile cap 16,200 seconds plus 60 minutes for setup, validation, smoke, and upload; each native job timeout 330 minutes.", "- Locked license/source paths:", $licenseSources) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   occt-sdk:
     name: Build and seal locked OCCT SDK checkpoint
@@ -79,6 +86,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       inputs.run_native_build == true &&
+      inputs.preflight_only != true &&
       github.ref == 'refs/heads/main' &&
       inputs.build_revision == github.sha
     runs-on: windows-2022
@@ -100,7 +108,7 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.15"
+          python-version: "3.12.10"
       - name: Install pinned uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
@@ -133,6 +141,12 @@ jobs:
           init-shell: powershell
           cache-environment: false
           post-cleanup: "shell-init"
+      - name: Assert native OCCT build Python 3.12.15
+        shell: pwsh
+        run: |
+          $nativePython = (& micromamba run -n packlab-ocp-bindings python -c "import sys; assert sys.version_info[:3] == (3,12,15), sys.version; print(sys.executable)").Trim()
+          if ($LASTEXITCODE -ne 0 -or !$nativePython) { throw "OCCT native build Python must be the locked micromamba 3.12.15 interpreter." }
+          "Native build Python: $nativePython" >> $env:GITHUB_STEP_SUMMARY
       - name: Restore exact OCCT SDK cache
         id: sdk_cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -212,6 +226,7 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' &&
       inputs.run_native_build == true &&
+      inputs.preflight_only != true &&
       github.ref == 'refs/heads/main' &&
       inputs.build_revision == github.sha
     runs-on: windows-2022
@@ -237,7 +252,7 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.12.15"
+          python-version: "3.12.10"
       - name: Install pinned uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
@@ -270,6 +285,12 @@ jobs:
           init-shell: powershell
           cache-environment: false
           post-cleanup: "shell-init"
+      - name: Assert native OCP compiler Python 3.12.15
+        shell: pwsh
+        run: |
+          $nativePython = (& micromamba run -n packlab-ocp-bindings python -c "import sys; assert sys.version_info[:3] == (3,12,15), sys.version; print(sys.executable)").Trim()
+          if ($LASTEXITCODE -ne 0 -or !$nativePython) { throw "OCP CMake must use the locked micromamba 3.12.15 interpreter and headers." }
+          "Native compiler Python: $nativePython" >> $env:GITHUB_STEP_SUMMARY
       - name: Download the same-run validated OCCT SDK checkpoint
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -397,6 +418,12 @@ jobs:
   build-studio:
     name: Package and smoke-test production Studio
     needs: controlled-ocp-runtime
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.run_native_build == true &&
+      inputs.preflight_only != true &&
+      github.ref == 'refs/heads/main' &&
+      inputs.build_revision == github.sha
     runs-on: windows-2022
     timeout-minutes: 330
     concurrency:

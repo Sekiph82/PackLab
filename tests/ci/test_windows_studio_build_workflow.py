@@ -35,6 +35,70 @@ def test_native_workflow_is_manual_only_and_requires_exact_owner_inputs() -> Non
     assert contract["official_generated_source"]["pywrap_generation"] is False
 
 
+def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_gated() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    contract = json.loads(
+        (ROOT / "tools/packaging/controlled_ocp_runtime_contract.json").read_text(encoding="utf-8")
+    )
+    native_lock = (ROOT / "tools/packaging/packlab-ocp-bindings-win.lock").read_text(
+        encoding="utf-8"
+    )
+    occt_builder = (ROOT / "tools/packaging/build_controlled_occt_sdk.py").read_text(
+        encoding="utf-8"
+    )
+    ocp_builder = (
+        ROOT / "tools/packaging/build_controlled_ocp_from_generated_sources.py"
+    ).read_text(encoding="utf-8")
+
+    preflight = workflow.split("  occt-sdk:\n", 1)[0]
+    sdk = workflow.split("  occt-sdk:\n", 1)[1].split("  controlled-ocp-runtime:\n", 1)[0]
+    ocp = workflow.split("  controlled-ocp-runtime:\n", 1)[1].split("  build-studio:\n", 1)[0]
+    studio = workflow.split("  build-studio:\n", 1)[1]
+
+    assert (
+        "default: false\n        type: boolean" in workflow.split("      preflight_only:\n", 1)[1]
+    )
+    assert 'python-version: "3.12.10"' in preflight
+    assert 'python-version: "3.12.10"' in sdk
+    assert 'python-version: "3.12.10"' in ocp
+    assert workflow.count('python-version: "3.12.10"') == 3
+    assert 'python-version: "3.12.15"' not in workflow
+    assert 'python-version: "3.12"' in studio
+    assert workflow.count("inputs.preflight_only != true") == 3
+    assert "inputs.preflight_only != true" not in preflight
+    for job in (sdk, ocp, studio):
+        condition = job.split("    if: >-\n", 1)[1].split("\n    runs-on:", 1)[0]
+        assert "inputs.preflight_only != true" in condition
+        assert "inputs.run_native_build == true" in condition
+        assert "github.ref == 'refs/heads/main'" in condition
+        assert "inputs.build_revision == github.sha" in condition
+
+    assert "Bootstrap Python: $bootstrapPython" in preflight
+    assert "sys.version_info[:3] == (3,12,10)" in preflight
+    native_assertion = "sys.version_info[:3] == (3,12,15)"
+    assert native_assertion in sdk and native_assertion in ocp
+    assert sdk.index("Assert native OCCT build Python 3.12.15") < sdk.index(
+        "build_controlled_occt_sdk.py"
+    )
+    assert ocp.index("Assert native OCP compiler Python 3.12.15") < ocp.index(
+        "build_controlled_ocp_from_generated_sources.py"
+    )
+    assert contract["target"]["python_version"] == "3.12.15"
+    assert "version: 3.12.15" in native_lock
+    assert 'sys.version.split()[0] != contract["target"]["python_version"]' in occt_builder
+    assert 'sys.version.split()[0] != contract["target"]["python_version"]' in ocp_builder
+    assert 'f"-DPython_EXECUTABLE={sys.executable}"' in ocp_builder
+    assert 'f"-DCMAKE_PREFIX_PATH={args.occt_sdk};{sys.prefix}"' in ocp_builder
+    assert (
+        "& micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_occt_sdk.py"
+        in sdk
+    )
+    assert (
+        "& micromamba run -n packlab-ocp-bindings python tools/packaging/build_controlled_ocp_from_generated_sources.py"
+        in ocp
+    )
+
+
 def test_native_pipeline_seals_same_run_occt_and_generated_ocp_stages() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     sdk = workflow.split("  occt-sdk:\n", 1)[1].split("  controlled-ocp-runtime:\n", 1)[0]
