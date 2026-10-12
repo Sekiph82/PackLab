@@ -75,18 +75,12 @@ jobs:
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath $occtArchive).Hash.ToLowerInvariant() -ne "c533f2667b59921bd6bd40ce82e7b9900b0289ccc731af5fdeeba097de80ef0f") { throw "Pinned OCCT source archive failed its source-lock SHA-256 check." }
           $sdkMetadata = Get-Content -LiteralPath (Join-Path $sdk "occt-sdk-metadata.json") -Raw | ConvertFrom-Json
           $report = Join-Path $scratch "retained-sdk-dependency-audit.json"
-          python -m tools.packaging.audit_controlled_occt_sdk_dependencies --sdk $sdk --generated-source-zip $generatedZip --occt-source-archive $occtArchive --work-root (Join-Path $scratch "dependency-audit") --expected-run-id "38263302823" --expected-attempt "1" --expected-cache-key $sdkMetadata.cache_key --report $report
+          python -m tools.packaging.audit_controlled_occt_sdk_dependencies --sdk $sdk --generated-source-zip $generatedZip --occt-source-archive $occtArchive --work-root (Join-Path $scratch "dependency-audit") --expected-run-id "38263302823" --expected-attempt "1" --expected-cache-key $sdkMetadata.cache_key --expect-incompatible --report $report
           $auditExit = $LASTEXITCODE
-          if ($auditExit -eq 2) {
-            $audit = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json -AsHashtable
-            $missingHeaders = @($audit.missing_occt_headers.Keys)
-            $missingLibraries = @($audit.missing_import_libraries)
-            $missingRuntimes = @($audit.missing_runtime_dlls)
-            $hasExpectedOpenGlGap = ($missingHeaders -contains "OpenGl_Context.hxx") -and ($missingLibraries -contains "TKOpenGl.lib") -and ($missingRuntimes -contains "TKOpenGl.dll")
-            if (!$hasExpectedOpenGlGap) { throw "Dependency audit exit $auditExit did not prove the expected OpenGL SDK incompatibility; headers=$($missingHeaders -join ', '); importlibs=$($missingLibraries -join ', '); runtimes=$($missingRuntimes -join ', ')." }
-            @("## Retained SDK dependency audit", "", "- Result: actual compatibility check correctly rejected the retained OpenGL-disabled SDK before any native compile.", "- Generated modules and translation units: $($audit.generated_modules) / $($audit.translation_units_including_OCP_cpp).", "- Missing OCCT headers ($($missingHeaders.Count)): $($missingHeaders -join ', ').", "- Missing import libraries: $($missingLibraries -join ', ').", "- Missing runtime DLLs: $($missingRuntimes -join ', ').", "- Full machine-readable deficiency report: $report") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          } elseif ($auditExit -ne 0) { throw "Generated source-to-SDK dependency audit failed unexpectedly (exit $auditExit)." }
-          else { Get-Content -LiteralPath $report -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
+          if ($auditExit -ne 0) { throw "Generated source-to-SDK dependency audit failed unexpectedly (exit $auditExit)." }
+          if (!(Select-String -LiteralPath $report -Pattern '"status": "EXPECTED_INCOMPATIBLE"' -Quiet)) { throw "The retained SDK unexpectedly passed the compatibility check; review this changed artifact state before any rebuild." }
+          @("## Retained SDK dependency audit", "", "- Result: the executable 315-module compatibility audit identified and rejected the retained OpenGL-disabled SDK before any native compile.", "- Full machine-readable deficiency report follows.", "") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Get-Content -LiteralPath $report -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   capacity-preflight:
     name: Measure hosted storage and build inputs

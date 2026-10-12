@@ -346,6 +346,7 @@ def main() -> int:
     parser.add_argument("--expected-attempt", required=True)
     parser.add_argument("--expected-cache-key", required=True)
     parser.add_argument("--require-opengl", action="store_true")
+    parser.add_argument("--expect-incompatible", action="store_true")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     try:
@@ -360,11 +361,23 @@ def main() -> int:
             require_opengl=args.require_opengl,
         )
     except DependencyAuditError as error:
+        if args.expect_incompatible:
+            headers = error.report.get("missing_occt_headers", {})
+            libraries = error.report.get("missing_import_libraries", [])
+            runtimes = error.report.get("missing_runtime_dlls", [])
+            if (
+                "OpenGl_Context.hxx" not in headers
+                or "TKOpenGl.lib" not in libraries
+                or "TKOpenGl.dll" not in runtimes
+            ):
+                print(json.dumps(error.report, indent=2, sort_keys=True))
+                return 2
+            error.report["status"] = "EXPECTED_INCOMPATIBLE"
         report = json.dumps(error.report, indent=2, sort_keys=True)
         if args.report:
             args.report.write_text(report + "\n", encoding="utf-8")
         print(report)
-        return 2
+        return 0 if args.expect_incompatible else 2
     print(json.dumps(result, indent=2, sort_keys=True))
     if args.report:
         args.report.write_text(
