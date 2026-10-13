@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -53,6 +54,39 @@ def installed_vc_runtime() -> tuple[tuple[int, ...], dict[str, int]]:
         fields["Rbld"],
     )
     return version, fields
+
+
+def resolve_windows_api_set_host(name: str, system32: Path) -> Path:
+    """Resolve a Windows API-set contract through the OS loader to its host DLL."""
+    if os.name != "nt":
+        raise ValueError("Windows API-set contracts can only be resolved on Windows")
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    load_library = kernel32.LoadLibraryW
+    load_library.argtypes = [wintypes.LPCWSTR]
+    load_library.restype = wintypes.HMODULE
+    get_module_file_name = kernel32.GetModuleFileNameW
+    get_module_file_name.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    get_module_file_name.restype = wintypes.DWORD
+    free_library = kernel32.FreeLibrary
+    free_library.argtypes = [wintypes.HMODULE]
+    free_library.restype = wintypes.BOOL
+
+    handle = load_library(name)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = get_module_file_name(handle, buffer, len(buffer))
+        if length == 0 or length >= len(buffer):
+            raise ctypes.WinError(ctypes.get_last_error())
+        host = Path(buffer.value).resolve(strict=True)
+    finally:
+        free_library(handle)
+    if host.parent != system32.resolve(strict=True) or not host.is_file():
+        raise ValueError(f"API-set contract {name} did not resolve to a System32 host DLL: {host}")
+    return host
 
 
 def validate_runtime(prefix: Path, fmt_probe: Path, stage: Path | None = None) -> dict[str, Any]:
@@ -118,11 +152,14 @@ def validate_runtime(prefix: Path, fmt_probe: Path, stage: Path | None = None) -
         )
     api_set_records = []
     for name in api_sets:
-        path = system32 / name
-        if not path.is_file():
-            raise ValueError(f"Windows 10/11 System32 API-set component is missing: {name}")
+        path = resolve_windows_api_set_host(name, system32)
         api_set_records.append(
-            {"name": name, "deployment_role": "WINDOWS_OS_COMPONENT", "sha256": sha256(path)}
+            {
+                "name": name,
+                "resolved_host": path.name,
+                "deployment_role": "WINDOWS_OS_COMPONENT",
+                "host_sha256": sha256(path),
+            }
         )
     version, fields = installed_vc_runtime()
     vc_installed = fields["Installed"] == 1

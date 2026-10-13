@@ -45,6 +45,16 @@ def test_runtime_classification_covers_os_and_vc_payloads() -> None:
     assert deployment_role("fmt") is None
 
 
+def test_api_set_policy_resolves_through_windows_os_loader() -> None:
+    validator = (ROOT / "tools/packaging/validate_windows_native_runtime_policy.py").read_text(
+        encoding="utf-8"
+    )
+    assert "LoadLibraryW" in validator
+    assert "GetModuleFileNameW" in validator
+    assert '"resolved_host": path.name' in validator
+    assert '"deployment_role": "WINDOWS_OS_COMPONENT"' in validator
+
+
 def test_prerequisite_gate_rejects_missing_wrong_arch_and_undersized() -> None:
     policy = json.loads(PREREQUISITE.read_text(encoding="utf-8"))
     minimum = minimum_runtime_version(policy)
