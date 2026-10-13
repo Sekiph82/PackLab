@@ -1,8 +1,8 @@
 # PL-0350 R05 Codex Implementation Log
 
-Date: 2026-10-13  
-Executor: Codex  
-Task: PL-0350 only  
+Date: 2026-10-13
+Executor: Codex
+Task: PL-0350 only
 Final status: **BATCH_STOPPED_AT_PL-0350 / FMT_PROVENANCE_REQUIRED / AWAITING_INDEPENDENT_AUDIT**
 
 ## Starting state and authority

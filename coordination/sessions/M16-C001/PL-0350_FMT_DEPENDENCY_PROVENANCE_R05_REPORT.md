@@ -1,6 +1,6 @@
 # PL-0350 R05 — fmt Dependency Provenance and Checkpoint Rescue Report
 
-Date: 2026-10-13  
+Date: 2026-10-13
 Status: **BATCH_STOPPED_AT_PL-0350 / FMT_PROVENANCE_REQUIRED / AWAITING_INDEPENDENT_AUDIT**
 
 ## Result
