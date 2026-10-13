@@ -891,7 +891,7 @@ def tessellate_cad_shape(
     face_explorer = top_exp.TopExp_Explorer(shape, top_abs.TopAbs_FACE)
     faces = []
     while face_explorer.More():
-        faces.append(topods.TopoDS.Face_s(face_explorer.Current()))
+        faces.append(topods.TopoDS.Face(face_explorer.Current()))
         if len(faces) > maximum_faces:
             raise CadAdapterError("cad_tessellation_face_work_bound_exceeded")
         face_explorer.Next()
@@ -919,7 +919,7 @@ def tessellate_cad_shape(
     vertex_indices: dict[tuple[float, float, float], int] = {}
     explorer = top_exp.TopExp_Explorer(copied_shape, top_abs.TopAbs_FACE)
     while explorer.More():
-        face = topods.TopoDS.Face_s(explorer.Current())
+        face = topods.TopoDS.Face(explorer.Current())
         location = top_loc.TopLoc_Location()
         triangulation = brep_tool.Triangulation_s(face, location)
         if triangulation is None:
@@ -1082,7 +1082,7 @@ def sample_cad_surface_regions(
     while explorer.More():
         if len(faces) >= maximum_faces:
             raise CadAdapterError("cad_surface_face_work_bound_exceeded")
-        faces.append(topods.TopoDS.Face_s(explorer.Current()))
+        faces.append(topods.TopoDS.Face(explorer.Current()))
         explorer.Next()
     if not faces:
         raise CadAdapterError("cad_surface_faces_required")
@@ -1674,7 +1674,7 @@ def _probe_tessellation() -> None:
     explorer = explorer_module.TopExp_Explorer(shape, topabs.TopAbs_FACE)
     triangle_count = 0
     while explorer.More():
-        face = topo_ds.TopoDS.Face_s(explorer.Current())
+        face = topo_ds.TopoDS.Face(explorer.Current())
         triangulation = brep.BRep_Tool.Triangulation_s(face, top_loc.TopLoc_Location())
         if triangulation is not None:
             triangle_count += triangulation.NbTriangles()
