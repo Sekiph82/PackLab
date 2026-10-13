@@ -73,6 +73,26 @@ def _cad_version_failure_code(diagnostics: CadRuntimeDiagnostics) -> str:
     )
 
 
+def _open3d_probe_failure_code(status: str, detail: str) -> str:
+    safe_detail = "unclassified"
+    if detail == "Open3D build configuration is unavailable":
+        safe_detail = "build_config_unavailable"
+    elif detail == "the pinned Open3D build is missing a required geometry conversion capability":
+        safe_detail = "geometry_capability_missing"
+    elif detail.startswith("Open3D import unavailable (") and detail.endswith(")"):
+        missing_module = detail.removeprefix("Open3D import unavailable (")[:-1]
+        if missing_module and all(part.isidentifier() for part in missing_module.split(".")):
+            safe_detail = f"module_unavailable_{missing_module.replace('.', '_')}"
+        else:
+            safe_detail = "module_unavailable"
+    elif detail.startswith("Open3D import failed (") and detail.endswith(")"):
+        error_type = detail.removeprefix("Open3D import failed (")[:-1]
+        safe_detail = (
+            f"import_failed_{error_type}" if error_type.isidentifier() else "import_failed"
+        )
+    return f"open3d_probe_failed:status={status};detail={safe_detail}"
+
+
 def _cad_fixture() -> tuple[Any, Any, Any]:
     features = (
         DesignModelFeatureReference(
@@ -210,7 +230,10 @@ def run_frozen_capability_smoke() -> dict[str, object]:
 
     open3d = Open3DGeometryAdapter()
     open3d_capability = open3d.probe()
-    _required(open3d_capability.status.value == "available", "open3d_probe_failed")
+    _required(
+        open3d_capability.status.value == "available",
+        _open3d_probe_failure_code(open3d_capability.status.value, open3d_capability.detail),
+    )
     _required(open3d_capability.observed_version == OPEN3D_VERSION, "open3d_version_mismatch")
     cloud = PointCloudData(((0.0, 0.0, 0.0), (1.0, 2.0, 3.0)))
     _required(open3d.round_trip_point_cloud(cloud) == cloud, "open3d_point_cloud_conversion_failed")

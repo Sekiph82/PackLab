@@ -54,6 +54,25 @@ def test_cad_version_failure_code_reports_safe_observation_statuses() -> None:
     )
 
 
+def test_open3d_probe_failure_code_classifies_path_free_import_detail() -> None:
+    assert (
+        build_smoke._open3d_probe_failure_code(
+            "UNAVAILABLE", "Open3D import unavailable (open3d.cpu.pybind)"
+        )
+        == "open3d_probe_failed:status=UNAVAILABLE;detail=module_unavailable_open3d_cpu_pybind"
+    )
+    assert (
+        build_smoke._open3d_probe_failure_code("UNKNOWN", "Open3D import failed (OSError)")
+        == "open3d_probe_failed:status=UNKNOWN;detail=import_failed_OSError"
+    )
+    assert (
+        build_smoke._open3d_probe_failure_code(
+            "UNKNOWN", "Open3D import unavailable (C:\\private\\cache)"
+        )
+        == "open3d_probe_failed:status=UNKNOWN;detail=module_unavailable"
+    )
+
+
 def test_app_build_smoke_constructs_and_closes_the_real_window(monkeypatch) -> None:
     events: list[str] = []
     created_argv: list[str] = []
