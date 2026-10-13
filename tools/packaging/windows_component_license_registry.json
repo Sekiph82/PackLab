@@ -347,12 +347,16 @@
     "microsoft-vc-runtime": {
       "status": "UNRESOLVED_IF_STAGED",
       "provenance_class": "EXTERNAL_SYSTEM_PREREQUISITE",
-      "reason": "A Microsoft runtime file requires exact source/build and redistribution evidence, not only PE company/version metadata."
+      "deployment_role": "MICROSOFT_SIGNED_PREREQUISITE",
+      "prerequisite_contract": "tools/packaging/windows-runtime-prerequisite.json",
+      "reason": "VC runtime DLLs must be omitted from the application payload; the installer requires an installed x64 Microsoft VC++ Redistributable meeting the prerequisite contract. A staged copy remains unresolved."
     },
     "microsoft-windows-runtime": {
       "status": "UNRESOLVED_IF_STAGED",
       "provenance_class": "EXTERNAL_SYSTEM_PREREQUISITE",
-      "reason": "A Microsoft Windows API-set or runtime file requires exact source/build and redistribution evidence, not only PE company/version metadata."
+      "deployment_role": "WINDOWS_OS_COMPONENT",
+      "target_os_contract": "Windows 10 or later, x64",
+      "reason": "Windows 10/11 services the Universal CRT and API-set forwarders as operating-system components. Such files must be omitted from the application payload; a staged copy remains unresolved."
     },
     "other-third-party-native": {
       "status": "UNRESOLVED_IF_STAGED",

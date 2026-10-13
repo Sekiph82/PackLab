@@ -21,9 +21,14 @@ from tools.packaging.build_controlled_ocp_runtime import (
 from tools.packaging.prepare_official_ocp_generated_sources import prepare_generated_sources
 from tools.packaging.validate_controlled_occt_sdk import validate_sdk
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
+from tools.packaging.windows_sdk_source_lock_compatibility import (
+    validate_sdk_source_lock_compatibility,
+    validate_sdk_toolchain_contract_compatibility,
+)
 
 LOCK = Path("tools/packaging/windows_native_source_lock.json")
 CONTRACT = Path("tools/packaging/controlled_ocp_runtime_contract.json")
+RUNTIME_POLICY = Path("tools/packaging/windows-runtime-prerequisite.json")
 PARALLELISM = 4
 GENERATOR = "Visual Studio 17 2022"
 SDK_VERSION = "10.0.26100.0"
@@ -80,6 +85,28 @@ def _compiler_version(sdk_manifest_path: Path) -> str:
 
 def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    runtime_policy = json.loads(RUNTIME_POLICY.read_text(encoding="utf-8"))
+    runtime_contract = contract.get("windows_runtime_deployment", {})
+    required_roles = {
+        "BUILD_ENV_CONDA_ONLY",
+        "WINDOWS_OS_COMPONENT",
+        "MICROSOFT_SIGNED_PREREQUISITE",
+        "APP_SHIPPED_THIRD_PARTY",
+        "OCCT_OWNED",
+        "OCP_SOURCE_BUILT",
+    }
+    if (
+        runtime_policy.get("deployment_role") != "MICROSOFT_SIGNED_PREREQUISITE"
+        or set(runtime_policy.get("deployment_roles", [])) != required_roles
+        or runtime_policy.get("automatic_download") is not False
+        or runtime_policy.get("minimum_version") != "14.44.35211.0"
+        or runtime_contract.get("policy_path") != RUNTIME_POLICY.as_posix()
+        or runtime_contract.get("policy_sha256") != sha256(RUNTIME_POLICY)
+        or runtime_contract.get("minimum_vc_runtime_version") != runtime_policy["minimum_version"]
+        or runtime_contract.get("deployment_roles") != runtime_policy["deployment_roles"]
+        or runtime_contract.get("automatic_download") is not False
+    ):
+        raise ValueError("Windows native runtime deployment policy is incomplete or unsupported")
     lock = load_source_lock(LOCK)
     records = {row["id"]: row for row in lock["records"]}
     if sha256(LOCK) != args.expected_source_lock_sha256:
@@ -91,8 +118,8 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
         args.expected_cache_key,
         require_opengl=True,
     )
-    if sdk["source_lock_sha256"] != sha256(LOCK):
-        raise ValueError("the OCCT SDK checkpoint was produced from another source lock")
+    sdk_source_lock_compatibility = validate_sdk_source_lock_compatibility(sdk, LOCK)
+    sdk_toolchain_compatibility = validate_sdk_toolchain_contract_compatibility(sdk, CONTRACT)
     if sys.version.split()[0] != contract["target"]["python_version"]:
         raise ValueError("OCP producer Python differs from the frozen Windows contract")
     cmake_version = subprocess.check_output(["cmake", "--version"], text=True).splitlines()[0]
@@ -183,6 +210,47 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
     ended = datetime.now(UTC)
     duration = round(time.monotonic() - monotonic_started, 3)
     extensions = [path for path in cmake_build.rglob("OCP*.pyd") if path.is_file()]
+    # Preserve the newly linked object before import-closure, packaging, or
+    # compliance checks can fail. This artifact is quarantined evidence only.
+    import shutil
+
+    if extensions:
+        args.quarantine_dir.mkdir(parents=True, exist_ok=False)
+    quarantined_files = []
+    for extension in extensions:
+        quarantined_extension = args.quarantine_dir / extension.name
+        shutil.copy2(extension, quarantined_extension)
+        quarantined_files.append(
+            {
+                "filename": quarantined_extension.name,
+                "sha256": sha256(quarantined_extension),
+                "byte_length": quarantined_extension.stat().st_size,
+            }
+        )
+    quarantine_manifest = {
+        "schema_version": 1,
+        "status": "QUARANTINED_NOT_REVIEWED_OR_DISTRIBUTABLE",
+        "artifact_role": "POST_LINK_RECOVERY_EVIDENCE_ONLY",
+        "linked_extension_count": len(quarantined_files),
+        "files": quarantined_files,
+        "python": sys.version.split()[0],
+        "python_abi": f"cp{sys.version_info.major}{sys.version_info.minor}-win_amd64",
+        "ocp_source_revision": records[OCP_ID]["revision"],
+        "occt_source_revision": records[OCCT_ID]["revision"],
+        "source_lock_sha256": sha256(LOCK),
+        "sdk_payload_sha256": sdk["payload_sha256"],
+        "sdk_source_lock_sha256": sdk["source_lock_sha256"],
+        "sdk_toolchain_contract_sha256": sdk["toolchain_contract_sha256"],
+    }
+    if extensions:
+        (args.quarantine_dir / "quarantine-manifest.json").write_text(
+            json.dumps(quarantine_manifest, indent=2) + "\n", encoding="utf-8"
+        )
+        print(
+            "OCP_POST_LINK_QUARANTINE_PASS "
+            f"files={len(quarantined_files)} status={quarantine_manifest['status']}",
+            flush=True,
+        )
     if len(extensions) != 1 or not extensions[0].stem.startswith("OCP."):
         raise ValueError("generated-source C++ build did not produce exactly one OCP extension")
 
@@ -204,8 +272,6 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
         required_dlls.add(name)
         seen.add(name)
         pending.extend(pe_imports(dependency))
-
-    import shutil
 
     args.site_packages.mkdir(parents=True, exist_ok=True)
     package = args.site_packages / "OCP"
@@ -290,8 +356,19 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
             "payload_sha256": sdk["payload_sha256"],
             "byte_count": sdk["byte_count"],
             "file_count": sdk["file_count"],
+            "source_lock_sha256": sdk["source_lock_sha256"],
+            "source_lock_compatibility": sdk_source_lock_compatibility,
+            "toolchain_contract_sha256": sdk["toolchain_contract_sha256"],
+            "toolchain_contract_compatibility": sdk_toolchain_compatibility,
         },
         "occt_sdk_dependency_audit": dependency_audit,
+        "windows_runtime_deployment": {
+            "policy_path": RUNTIME_POLICY.as_posix(),
+            "policy_sha256": sha256(RUNTIME_POLICY),
+            "deployment_roles": runtime_contract["deployment_roles"],
+            "minimum_vc_runtime_version": runtime_contract["minimum_vc_runtime_version"],
+            "automatic_download": runtime_contract["automatic_download"],
+        },
         "toolchain": toolchain,
         "build_timings": [occt_timing, ocp_timing],
         "external_runtime_dependencies": sorted(external),
@@ -314,6 +391,7 @@ def main() -> int:
     parser.add_argument("--build-root", required=True, type=Path)
     parser.add_argument("--site-packages", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
+    parser.add_argument("--quarantine-dir", required=True, type=Path)
     parser.add_argument("--compile-timeout-seconds", type=int, default=MAX_COMPILE_SECONDS)
     args = parser.parse_args()
     if args.compile_timeout_seconds <= 0 or args.compile_timeout_seconds > MAX_COMPILE_SECONDS:

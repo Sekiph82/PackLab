@@ -16,6 +16,10 @@ from tools.packaging.controlled_ocp_runtime_bundle import (
     validate_bundle,
 )
 from tools.packaging.prepare_official_ocp_generated_sources import ARCHIVE_ROOT
+from tools.packaging.windows_sdk_source_lock_compatibility import (
+    validate_sdk_source_lock_compatibility,
+    validate_sdk_toolchain_contract_compatibility,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_LOCK = ROOT / "tools/packaging/windows_native_source_lock.json"
@@ -105,6 +109,19 @@ def sealed_bundle(tmp_path: Path) -> tuple[Path, str, Path]:
         "schema_version": 1,
         "status": "PASS",
         "input_lock_sha256": digest(SOURCE_LOCK.read_bytes()),
+        "occt_sdk_checkpoint": {
+            "source_lock_sha256": digest(SOURCE_LOCK.read_bytes()),
+            "source_lock_compatibility": validate_sdk_source_lock_compatibility(
+                {"source_lock_sha256": digest(SOURCE_LOCK.read_bytes())}, SOURCE_LOCK
+            ),
+            "toolchain_contract_sha256": digest(BUILD_CONTRACT.read_bytes()),
+            "toolchain_contract_compatibility": validate_sdk_toolchain_contract_compatibility(
+                {"toolchain_contract_sha256": digest(BUILD_CONTRACT.read_bytes())}
+            ),
+        },
+        "windows_runtime_deployment": json.loads(BUILD_CONTRACT.read_text(encoding="utf-8"))[
+            "windows_runtime_deployment"
+        ],
         **revisions,
         "toolchain": {
             "python": "3.12.15",

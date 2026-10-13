@@ -13,6 +13,8 @@ import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from tools.packaging.windows_native_runtime_policy import deployment_role
+
 CONTRACT = Path("tools/packaging/fmt_dependency_contract.json")
 CONDA_LOCK = Path("tools/packaging/packlab-ocp-bindings-win.lock")
 SOURCE_LOCK = Path("tools/packaging/windows_native_source_lock.json")
@@ -324,13 +326,17 @@ def inspect_import_closure(
             continue
         seen.add(name)
         resolved = _find_dll(name, search_dirs)
-        if resolved is None and name.startswith(("api-ms-win-", "ext-ms-win-")):
-            closure.append({"name": name, "owner": "Windows API-set contract", "status": "PASS"})
-            continue
         if resolved is None:
-            closure.append(
-                {"name": name, "parent": parent.name, "owner": "UNKNOWN", "status": "BLOCKED"}
-            )
+            api_set = name.startswith(("api-ms-win-", "ext-ms-win-"))
+            item = {
+                "name": name,
+                "parent": parent.name,
+                "owner": "WINDOWS_API_SET_UNRESOLVED" if api_set else "UNKNOWN",
+                "status": "BLOCKED",
+            }
+            if api_set:
+                item["deployment_role"] = "WINDOWS_OS_COMPONENT"
+            closure.append(item)
             continue
         if any(resolved.is_relative_to(directory) for directory in system_dirs):
             closure.append(
@@ -361,6 +367,23 @@ def inspect_import_closure(
             if row.get("binary_package", {}).get("name", "").casefold() == locked_package["name"]
             and row.get("binary_package", {}).get("sha256") == locked_package["sha256"]
         ]
+        # These conda packages exist only to make the hosted compiler environment
+        # complete. They are not PackLab runtime payloads: UCRT is serviced by
+        # Windows 10/11 and the VC runtime is a separately detected prerequisite.
+        role = deployment_role(locked_package["name"])
+        if role is not None:
+            closure.append(
+                {
+                    "name": name,
+                    "path": relative,
+                    "package": locked_package,
+                    "owner": role,
+                    "deployment_role": role,
+                    "sha256": file_hash,
+                    "status": "PASS",
+                }
+            )
+            continue
         if len(source_matches) != 1:
             closure.append(
                 {

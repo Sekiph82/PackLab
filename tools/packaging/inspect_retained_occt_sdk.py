@@ -1,4 +1,4 @@
-"""Read-only, bounded inspection of the immutable PL-0350 R02 OCCT SDK artifact."""
+"""Authenticate and inspect the immutable, recovered PL-0350 R04 OCCT SDK."""
 
 from __future__ import annotations
 
@@ -14,17 +14,21 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from tools.packaging.validate_controlled_occt_sdk import validate_sdk
+from tools.packaging.windows_sdk_source_lock_compatibility import (
+    validate_sdk_source_lock_compatibility,
+    validate_sdk_toolchain_contract_compatibility,
+)
 
 REPOSITORY = "Sekiph82/PackLab"
-ARTIFACT_ID = 11755977987
-ARTIFACT_NAME = "packlab-occt-sdk-38263302823-1"
-PRODUCER_RUN_ID = "38263302823"
+ARTIFACT_ID = 11796717315
+ARTIFACT_NAME = "packlab-pl0350-r04-sdk-recovery-38366186522-1"
+PRODUCER_RUN_ID = "38366186522"
 PRODUCER_ATTEMPT = "1"
-PRODUCER_SHA = "4f064e2f44359a40298d13baece02dcb18fb01f7"
-ARCHIVE_BYTES = 56_405_631
-ARCHIVE_SHA256 = "1ad03b366958f0a81d98813fac313d85d0133e79db9e85f4844d783b0306d0ae"
-MAX_ARCHIVE_BYTES = 60 * 1024 * 1024
-MAX_EXTRACTED_BYTES = 512 * 1024 * 1024
+PRODUCER_SHA = "cfcbaa99621868e1238a3210e7113fe77a896d4d"
+ARCHIVE_BYTES = 114_366_551
+ARCHIVE_SHA256 = "3339c28cd99605c3c928f9c4f145245b39efb1f7ed99a19a17c1547d8e101c4e"
+MAX_ARCHIVE_BYTES = 120 * 1024 * 1024
+MAX_EXTRACTED_BYTES = 300 * 1024 * 1024
 MAX_ARCHIVE_ENTRIES = 100_000
 
 
@@ -217,9 +221,45 @@ def inspect(scratch: Path) -> dict[str, Any]:
     metadata_path = sdk / "occt-sdk-metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     cache_key = metadata.get("cache_key")
-    if not isinstance(cache_key, str) or not cache_key.startswith("Windows-x64-occt-sdk-v2-"):
-        raise ValueError("Retained SDK metadata has an unexpected producer cache key")
-    validated = validate_sdk(sdk, PRODUCER_RUN_ID, PRODUCER_ATTEMPT, cache_key)
+    lineage_path = extracted / "sdk-recovery-lineage.json"
+    if not lineage_path.is_file():
+        raise ValueError("Recovered SDK artifact is missing its immutable origin lineage")
+    lineage = json.loads(lineage_path.read_text(encoding="utf-8"))
+    expected_origin_artifacts = {
+        11790440856: "467b44ab0fb747343cb55e55e71a0dd4ecadb989fd7eed22d1e49fff3153ddf8",
+        11790585684: "091c391b8d6ccda19823f57eae891b1dd45383b164c117ca05928df6bafd2018",
+    }
+    if (
+        lineage.get("schema_version") != 1
+        or lineage.get("status") != "VERIFIED_ORIGINAL_BYTES_REPUBLISHED"
+        or str((lineage.get("recovery_run") or {}).get("run_id")) != PRODUCER_RUN_ID
+        or str((lineage.get("origin_run") or {}).get("run_id")) != "38346317865"
+        or (lineage.get("origin_run") or {}).get("head_sha")
+        != "a2805616c9c0dd665e48b1de82c8436ea64b0805"
+        or {int(row.get("id")): row.get("sha256") for row in lineage.get("origin_artifacts", [])}
+        != expected_origin_artifacts
+    ):
+        raise ValueError(
+            "Recovered SDK origin artifact/run lineage differs from the frozen evidence"
+        )
+    if (
+        not isinstance(cache_key, str)
+        or cache_key
+        != "Windows-x64-occt-sdk-v4-11b7a8319d065c3592f9bcaf6c39639a3de6bf623176cdd97319165b318775eb"
+    ):
+        raise ValueError("Recovered SDK metadata has an unexpected original producer cache key")
+    origin_metadata_sha = sha256_file(metadata_path)
+    if (lineage.get("sdk") or {}).get("original_metadata_sha256") != origin_metadata_sha:
+        raise ValueError("Recovered SDK metadata bytes differ from the recovery lineage")
+    validated = validate_sdk(sdk, "38346317865", "1", cache_key, require_opengl=True)
+    compatibility = validate_sdk_source_lock_compatibility(
+        validated, Path("tools/packaging/windows_native_source_lock.json")
+    )
+    toolchain_compatibility = validate_sdk_toolchain_contract_compatibility(validated)
+    if compatibility.get("mode") != "R04_ORIGIN_COMPATIBLE":
+        raise ValueError(
+            "Recovered SDK did not use the explicit R04 source-lock compatibility bridge"
+        )
     result = inventory(sdk, validated)
     return {
         "artifact_id": ARTIFACT_ID,
@@ -242,6 +282,9 @@ def inspect(scratch: Path) -> dict[str, Any]:
         "sealed_file_count": validated["file_count"],
         "sealed_byte_count": validated["byte_count"],
         "inner_payload_sha256": validated["payload_sha256"],
+        "source_lock_compatibility": compatibility,
+        "toolchain_contract_compatibility": toolchain_compatibility,
+        "recovery_lineage_sha256": sha256_file(lineage_path),
         **result,
     }
 
@@ -249,9 +292,14 @@ def inspect(scratch: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scratch", type=Path, required=True)
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     result = inspect(args.scratch)
-    print(json.dumps(result, indent=2, sort_keys=True))
+    payload = json.dumps(result, indent=2, sort_keys=True) + "\n"
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(payload, encoding="utf-8")
+    print(payload, end="")
     return 0
 
 

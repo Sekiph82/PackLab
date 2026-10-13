@@ -245,6 +245,10 @@ def seal_bundle(args: argparse.Namespace) -> dict[str, Any]:
     if contract.get("schema_version") != 2 or contract.get("cmake_parallel") != 4:
         raise ValueError("Unsupported controlled-runtime build contract schema")
     manifest = load_and_validate_manifest(args.manifest, args.source_lock)
+    if manifest.get("windows_runtime_deployment") != contract.get("windows_runtime_deployment"):
+        raise ValueError(
+            "Controlled-runtime manifest deployment policy differs from its build contract"
+        )
     evidence = validate_source_evidence(args.source_evidence, args.source_lock)
     if manifest.get("input_lock_sha256") != sha256(args.source_lock):
         raise ValueError("The OCP manifest is not bound to the current source lock")

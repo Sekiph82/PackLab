@@ -14,7 +14,7 @@ on:
         default: false
         type: boolean
       inspect_retained_sdk:
-        description: "Inspect and validate the immutable PL-0350 R02 OCCT SDK artifact without compiling"
+        description: "Run the bounded noncompiling PL-0350 R04 SDK/source/link preflight"
         required: false
         default: false
         type: boolean
@@ -28,15 +28,14 @@ permissions:
 
 jobs:
   retained-sdk-inspection:
-    name: Inspect retained PL-0350 OCCT SDK checkpoint
+    name: Restore and preflight retained PL-0350 R04 OCCT SDK
     if: >-
       github.event_name == 'workflow_dispatch' &&
       inputs.inspect_retained_sdk == true &&
-      inputs.preflight_only == true &&
       github.ref == 'refs/heads/main' &&
       inputs.build_revision == github.sha
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
@@ -49,15 +48,54 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12.10"
+      - name: Install pinned uv and test dependencies
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.26"
+          enable-cache: false
+      - name: Verify repository locks and install the locked test environment
+        shell: pwsh
+        run: |
+          uv lock --check
+          if ($LASTEXITCODE -ne 0) { throw "uv.lock differs from the checked-in project contract." }
+          uv sync --locked --only-group dev --no-install-project
+          if ($LASTEXITCODE -ne 0) { throw "Locked preflight test dependencies could not be installed." }
+          uv run --locked --no-sync python -m tools.packaging.validate_windows_native_source_lock --verify-build-lock --verify-conda-lock --verify-uv-lock
+          if ($LASTEXITCODE -ne 0) { throw "Native source and package lock checks failed." }
+      - name: Render locked native OCP build environment
+        shell: pwsh
+        run: |
+          $template = Join-Path $env:RUNNER_TEMP "packlab-ocp-{platform}.lock"
+          $lockPath = Join-Path $env:RUNNER_TEMP "packlab-ocp-win-64.lock"
+          uv tool run --from conda-lock==3.0.0 conda-lock render --platform win-64 --kind explicit --filename-template $template tools/packaging/packlab-ocp-bindings-win.lock
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $lockPath)) { throw "Could not render exact locked native OCP environment." }
+          "PACKLAB_OCP_ENV_LOCK=$lockPath" >> $env:GITHUB_ENV
+      - name: Install locked native OCP build environment
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3.2.1
+        with:
+          environment-file: ${{ runner.temp }}/packlab-ocp-win-64.lock
+          environment-name: packlab-ocp-bindings
+          micromamba-version: "2.0.5-0"
+          init-shell: powershell
+          cache-environment: false
+          post-cleanup: "shell-init"
+      - name: Confirm bootstrap and native Python versions
+        shell: pwsh
+        run: |
+          $bootstrap = (& python -S -c "import sys; print(sys.version.split()[0])").Trim()
+          if ($LASTEXITCODE -ne 0 -or $bootstrap -ne "3.12.10") { throw "Hosted bootstrap Python must be 3.12.10; observed $bootstrap." }
+          $native = (& micromamba run -n packlab-ocp-bindings python -c "import sys; print(sys.version.split()[0])").Trim()
+          if ($LASTEXITCODE -ne 0 -or $native -ne "3.12.15") { throw "Native build Python must be 3.12.15; observed $native." }
+          @("- Bootstrap Python: $bootstrap", "- Native conda Python: $native") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
       - name: Download, authenticate, and inventory the retained SDK
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $env:PYTHONPATH = $env:GITHUB_WORKSPACE
-          python -m tools.packaging.inspect_retained_occt_sdk --scratch (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection")
+          python -m tools.packaging.inspect_retained_occt_sdk --scratch (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection") --report (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection.json")
           if ($LASTEXITCODE -ne 0) { throw "Retained OCCT SDK verification or inventory failed." }
-      - name: Audit every generated source dependency against the retained SDK
+      - name: Audit generated 315-module includes, OpenGL link closure, and source compatibility
         shell: pwsh
         run: |
           $scratch = Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection"
@@ -75,12 +113,40 @@ jobs:
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath $occtArchive).Hash.ToLowerInvariant() -ne "c533f2667b59921bd6bd40ce82e7b9900b0289ccc731af5fdeeba097de80ef0f") { throw "Pinned OCCT source archive failed its source-lock SHA-256 check." }
           $sdkMetadata = Get-Content -LiteralPath (Join-Path $sdk "occt-sdk-metadata.json") -Raw | ConvertFrom-Json
           $report = Join-Path $scratch "retained-sdk-dependency-audit.json"
-          python -m tools.packaging.audit_controlled_occt_sdk_dependencies --sdk $sdk --generated-source-zip $generatedZip --occt-source-archive $occtArchive --work-root (Join-Path $scratch "dependency-audit") --expected-run-id "38263302823" --expected-attempt "1" --expected-cache-key $sdkMetadata.cache_key --expect-incompatible --report $report
-          $auditExit = $LASTEXITCODE
-          if ($auditExit -ne 0) { throw "Generated source-to-SDK dependency audit failed unexpectedly (exit $auditExit)." }
-          if (!(Select-String -LiteralPath $report -Pattern '"status": "EXPECTED_INCOMPATIBLE"' -Quiet)) { throw "The retained SDK unexpectedly passed the compatibility check; review this changed artifact state before any rebuild." }
-          @("## Retained SDK dependency audit", "", "- Result: the executable 315-module compatibility audit identified and rejected the retained OpenGL-disabled SDK before any native compile.", "- Full machine-readable deficiency report follows.", "") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          python -m tools.packaging.audit_controlled_occt_sdk_dependencies --sdk $sdk --generated-source-zip $generatedZip --occt-source-archive $occtArchive --work-root (Join-Path $scratch "dependency-audit") --expected-run-id "38346317865" --expected-attempt "1" --expected-cache-key $sdkMetadata.cache_key --require-opengl --report $report
+          if ($LASTEXITCODE -ne 0) { throw "Generated source-to-SDK dependency audit failed before any OCP compile." }
+          if (!(Select-String -LiteralPath $report -Pattern '"status": "PASS"' -Quiet)) { throw "The retained OpenGL-enabled SDK failed the 315-module include/link gate." }
+          @("## Retained SDK dependency audit", "", "- Result: the immutable R04 SDK passed full 315-module header/import-library/runtime dependency and OpenGL compile/link checks without compiling OCP.", "- Full machine-readable report follows.", "") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           Get-Content -LiteralPath $report -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          $generatedRoot = Join-Path $scratch "generated"
+          $patchManifest = Join-Path $scratch "generated-source-patch-manifest.json"
+          python -m tools.packaging.prepare_official_ocp_generated_sources --archive $generatedZip --destination $generatedRoot --manifest $patchManifest
+          if ($LASTEXITCODE -ne 0) { throw "Exact 319-to-315 source patch failed in the hosted diagnostic." }
+          $fmtReport = Join-Path $scratch "fmt-dependency-probe.json"
+          $nativePrefix = (& micromamba run -n packlab-ocp-bindings python -c "import sys; print(sys.prefix)").Trim()
+          if ($LASTEXITCODE -ne 0 -or !$nativePrefix) { throw "Native build prefix resolution failed." }
+          micromamba run -n packlab-ocp-bindings python -m tools.packaging.probe_fmt_dependency --prefix $nativePrefix --scratch (Join-Path $scratch "fmt-source-evidence") --generated-cmake (Join-Path $generatedRoot "CadQuery/OCP/CMakeLists.txt") --report $fmtReport --assert-pass
+          if ($LASTEXITCODE -ne 0) { throw "fmt ownership/source/import dependency gate failed." }
+          $runtimeReport = Join-Path $scratch "windows-native-runtime-policy.json"
+          micromamba run -n packlab-ocp-bindings python -m tools.packaging.validate_windows_native_runtime_policy --prefix $nativePrefix --fmt-probe $fmtReport --report $runtimeReport
+          if ($LASTEXITCODE -ne 0) { throw "OS API-set, VC prerequisite, or installer-policy gate failed." }
+      - name: Run bounded source, import, provenance, negative, and installer-policy tests
+        shell: pwsh
+        run: |
+          uv run --locked --no-sync python -m pytest tests/ci/test_windows_native_runtime_policy.py tests/ci/test_fmt_dependency_probe.py tests/ci/test_windows_controlled_ocp_manifest.py tests/ci/test_controlled_ocp_runtime_bundle.py tests/ci/test_windows_redistribution_inventory.py tests/ci/test_windows_studio_build_workflow.py -q
+          if ($LASTEXITCODE -ne 0) { throw "The pre-native PL-0350 regression/negative test matrix failed." }
+      - name: Upload noncompiling SDK and native runtime diagnostic evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-pl0350-precompile-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/pl0350-retained-sdk-inspection.json
+            ${{ runner.temp }}/pl0350-retained-sdk-inspection/retained-sdk-dependency-audit.json
+            ${{ runner.temp }}/pl0350-retained-sdk-inspection/fmt-dependency-probe.json
+            ${{ runner.temp }}/pl0350-retained-sdk-inspection/windows-native-runtime-policy.json
+            ${{ runner.temp }}/pl0350-retained-sdk-inspection/generated-source-patch-manifest.json
+          if-no-files-found: error
+          retention-days: 14
 
   capacity-preflight:
     name: Measure hosted storage and build inputs
@@ -152,7 +218,7 @@ jobs:
 
   occt-sdk:
     name: Build and seal locked OCCT SDK checkpoint
-    needs: capacity-preflight
+    needs: [capacity-preflight, retained-sdk-inspection]
     if: >-
       github.event_name == 'workflow_dispatch' &&
       inputs.run_native_build == true &&
@@ -170,6 +236,8 @@ jobs:
       sdk-payload-sha256: ${{ steps.sdk_identity.outputs.payload_sha256 }}
       sdk-byte-count: ${{ steps.sdk_identity.outputs.byte_count }}
       sdk-cache-key: ${{ steps.sdk_identity.outputs.cache_key }}
+      sdk-producer-run-id: ${{ steps.sdk_identity.outputs.producer_run_id }}
+      sdk-producer-attempt: ${{ steps.sdk_identity.outputs.producer_attempt }}
       source-evidence-artifact-name: ${{ steps.sdk_identity.outputs.source_evidence_artifact_name }}
     env:
       UV_NO_PROGRESS: "1"
@@ -233,7 +301,27 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/occt-sdk
-          key: Windows-x64-occt-sdk-v5-${{ hashFiles('tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/windows_occt_sdk_build_contract.json', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/windows_occt_sdk_layout.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py') }}
+          key: Windows-x64-occt-sdk-v5-${{ hashFiles('tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/windows_occt_sdk_build_contract.json', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/windows_occt_sdk_layout.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py', 'tools/packaging/windows_sdk_source_lock_compatibility.py', 'tools/packaging/windows_sdk_source_lock_compatibility.json') }}
+      - name: Restore and authenticate the owner-approved R04 SDK checkpoint
+        id: retained_sdk
+        if: steps.sdk_cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          $scratch = Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-restore"
+          python -m tools.packaging.inspect_retained_occt_sdk --scratch $scratch
+          if ($LASTEXITCODE -ne 0) { throw "The retained OpenGL SDK checkpoint failed artifact, lineage, source-lock compatibility, layout, or payload validation; OCCT rebuild is not an automatic fallback." }
+          $metadataFiles = @(Get-ChildItem -LiteralPath $scratch -Filter "occt-sdk-metadata.json" -File -Recurse)
+          if ($metadataFiles.Count -ne 1) { throw "Retained SDK extraction must contain exactly one sealed SDK metadata file." }
+          $sdk = Join-Path $env:RUNNER_TEMP "occt-sdk"
+          New-Item -ItemType Directory -Path $sdk -ErrorAction Stop | Out-Null
+          Get-ChildItem -LiteralPath $metadataFiles[0].Directory.FullName -Force | Copy-Item -Destination $sdk -Recurse -Force
+          $metadata = Get-Content -LiteralPath (Join-Path $sdk "occt-sdk-metadata.json") -Raw | ConvertFrom-Json
+          uv run --locked python -m tools.packaging.validate_controlled_occt_sdk --sdk $sdk --expected-run-id "38346317865" --expected-attempt "1" --expected-cache-key $metadata.cache_key
+          if ($LASTEXITCODE -ne 0) { throw "Recovered SDK failed its immutable metadata and file manifest validation." }
+          "restored=true" >> $env:GITHUB_OUTPUT
       - name: Fetch and verify locked corresponding-source archives
         shell: pwsh
         run: |
@@ -254,13 +342,11 @@ jobs:
           if ("${{ steps.sdk_cache.outputs.cache-hit }}" -eq "true") {
             uv run --locked python -m tools.packaging.validate_controlled_occt_sdk --sdk $sdk --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key $cacheKey --republish-cache
             if ($LASTEXITCODE -ne 0) { throw "The restored OCCT SDK cache failed validation." }
+          } elseif ("${{ steps.retained_sdk.outputs.restored }}" -eq "true") {
+            uv run --locked python -m tools.packaging.validate_controlled_occt_sdk --sdk $sdk --expected-run-id "38346317865" --expected-attempt "1" --expected-cache-key "Windows-x64-occt-sdk-v4-11b7a8319d065c3592f9bcaf6c39639a3de6bf623176cdd97319165b318775eb"
+            if ($LASTEXITCODE -ne 0) { throw "The retained SDK checkpoint failed final pre-OCP validation." }
           } else {
-            $source = Get-ChildItem -LiteralPath $env:PACKLAB_NATIVE_SOURCE_ROOT -Filter "occt-source-7.9.3--*" -File | Select-Object -First 1
-            if (!$source) { throw "Verified OCCT source archive is missing." }
-            & micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_occt_sdk --source-archive $source.FullName --build-root (Join-Path $env:RUNNER_TEMP "packlab-occt-sdk-build") --output $sdk --metadata (Join-Path $sdk "occt-sdk-metadata.json") --cache-key $cacheKey
-            if ($LASTEXITCODE -ne 0) { throw "The locked OCCT SDK build failed." }
-            uv run --locked python -m tools.packaging.validate_controlled_occt_sdk --sdk $sdk --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key $cacheKey
-            if ($LASTEXITCODE -ne 0) { throw "The newly built OCCT SDK failed content validation." }
+            throw "No exact compatible SDK cache or authenticated retained checkpoint is available. Do not start a new OCCT build from this assignment."
           }
       - name: Record SDK checkpoint identity and disk budget
         id: sdk_identity
@@ -279,15 +365,11 @@ jobs:
           "source_evidence_artifact_name=$evidenceName" >> $env:GITHUB_OUTPUT
           "payload_sha256=$($metadata.payload_sha256)" >> $env:GITHUB_OUTPUT
           "byte_count=$($metadata.byte_count)" >> $env:GITHUB_OUTPUT
-          "cache_key=${{ steps.sdk_cache.outputs.cache-primary-key }}" >> $env:GITHUB_OUTPUT
+          "cache_key=$($metadata.cache_key)" >> $env:GITHUB_OUTPUT
+          "producer_run_id=$($metadata.producer_run_id)" >> $env:GITHUB_OUTPUT
+          "producer_attempt=$($metadata.producer_run_attempt)" >> $env:GITHUB_OUTPUT
           $free = (Get-PSDrive C).Free
           @("## OCCT SDK checkpoint", "", "- Cache: `${{ steps.sdk_cache.outputs.cache-hit }}`", "- SDK files: $($metadata.file_count)", "- SDK payload bytes: $($metadata.byte_count)", "- SDK payload SHA-256: ``$($metadata.payload_sha256)``", "- C: free bytes before upload: $free", "- Source lock SHA-256: ``$($metadata.source_lock_sha256)``", "- Producer run/job: ``$env:GITHUB_RUN_ID/$env:GITHUB_JOB``") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-      - name: Save exact OCCT SDK cache after size validation
-        if: steps.sdk_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/occt-sdk
-          key: ${{ steps.sdk_cache.outputs.cache-primary-key }}
       - name: Upload validated OCCT SDK checkpoint
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
@@ -401,7 +483,7 @@ jobs:
       - name: Validate SDK artifact producer, manifest, and hashes
         shell: pwsh
         run: |
-          uv run --locked python -m tools.packaging.validate_controlled_occt_sdk --sdk (Join-Path $env:RUNNER_TEMP "occt-sdk") --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key "${{ needs.occt-sdk.outputs.sdk-cache-key }}"
+          uv run --locked python -m tools.packaging.validate_controlled_occt_sdk --sdk (Join-Path $env:RUNNER_TEMP "occt-sdk") --expected-run-id "${{ needs.occt-sdk.outputs.sdk-producer-run-id }}" --expected-attempt "${{ needs.occt-sdk.outputs.sdk-producer-attempt }}" --expected-cache-key "${{ needs.occt-sdk.outputs.sdk-cache-key }}"
           if ($LASTEXITCODE -ne 0) { throw "Same-run OCCT SDK checkpoint failed validation." }
           $sdkMetadata = Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP "occt-sdk\occt-sdk-metadata.json") -Raw | ConvertFrom-Json
           if ($sdkMetadata.payload_sha256 -ne "${{ needs.occt-sdk.outputs.sdk-payload-sha256 }}" -or $sdkMetadata.byte_count -ne [long]"${{ needs.occt-sdk.outputs.sdk-byte-count }}") { throw "Downloaded SDK bytes differ from the producer outputs." }
@@ -417,7 +499,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/controlled-ocp-runtime
-          key: Windows-x64-controlled-ocp315-v4-${{ needs.occt-sdk.outputs.sdk-payload-sha256 }}-${{ hashFiles('.github/workflows/windows-studio-build.yml', 'tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/controlled_ocp_runtime_contract.json', 'tools/packaging/prepare_official_ocp_generated_sources.py', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/build_controlled_ocp_from_generated_sources.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py', 'tools/packaging/controlled_ocp_runtime_bundle.py', 'tools/packaging/validate_controlled_ocp_manifest.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/windows_occt_sdk_layout.py', 'tools/packaging/validate_windows_native_source_lock.py', 'tools/packaging/fetch_verify_windows_native_sources.py') }}-290941ef2d34e7b10b7b6bde4577c5d5d0e703342f934c29a55660caaed8dd5b
+          key: Windows-x64-controlled-ocp315-v4-${{ needs.occt-sdk.outputs.sdk-payload-sha256 }}-${{ hashFiles('.github/workflows/windows-studio-build.yml', 'tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/controlled_ocp_runtime_contract.json', 'tools/packaging/windows-runtime-prerequisite.json', 'tools/packaging/windows_sdk_source_lock_compatibility.py', 'tools/packaging/windows_sdk_source_lock_compatibility.json', 'tools/packaging/windows_native_runtime_policy.py', 'tools/packaging/prepare_official_ocp_generated_sources.py', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/build_controlled_ocp_from_generated_sources.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py', 'tools/packaging/controlled_ocp_runtime_bundle.py', 'tools/packaging/validate_controlled_ocp_manifest.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/windows_occt_sdk_layout.py', 'tools/packaging/validate_windows_native_source_lock.py', 'tools/packaging/fetch_verify_windows_native_sources.py') }}-290941ef2d34e7b10b7b6bde4577c5d5d0e703342f934c29a55660caaed8dd5b
       - name: Fail-closed validate restored OCP runtime cache
         id: bundle_cache_check
         shell: pwsh
@@ -458,8 +540,27 @@ jobs:
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath $occtArchive).Hash.ToLowerInvariant() -ne "c533f2667b59921bd6bd40ce82e7b9900b0289ccc731af5fdeeba097de80ef0f") { throw "Pinned OCCT source archive failed its source-lock SHA-256 check." }
           $sourceEvidence = Join-Path $env:RUNNER_TEMP "source-evidence\windows-native-source-evidence.json"
           $manifest = Join-Path $env:RUNNER_TEMP "windows-ocp-controlled-runtime-manifest.json"
-          & micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_ocp_from_generated_sources --generated-source-zip $env:PACKLAB_OCP_GENERATED_ZIP --occt-source-archive $occtArchive --occt-sdk (Join-Path $env:RUNNER_TEMP "occt-sdk") --expected-run-id $env:GITHUB_RUN_ID --expected-attempt $env:GITHUB_RUN_ATTEMPT --expected-cache-key "${{ needs.occt-sdk.outputs.sdk-cache-key }}" --expected-source-lock-sha256 (python -c "import hashlib,pathlib; print(hashlib.sha256(pathlib.Path('tools/packaging/windows_native_source_lock.json').read_bytes()).hexdigest())") --build-root (Join-Path $env:RUNNER_TEMP "packlab-ocp-generated-build") --site-packages $sitePackages --manifest $manifest --compile-timeout-seconds 16200
+          & micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_ocp_from_generated_sources --generated-source-zip $env:PACKLAB_OCP_GENERATED_ZIP --occt-source-archive $occtArchive --occt-sdk (Join-Path $env:RUNNER_TEMP "occt-sdk") --expected-run-id "${{ needs.occt-sdk.outputs.sdk-producer-run-id }}" --expected-attempt "${{ needs.occt-sdk.outputs.sdk-producer-attempt }}" --expected-cache-key "${{ needs.occt-sdk.outputs.sdk-cache-key }}" --expected-source-lock-sha256 (python -c "import hashlib,pathlib; print(hashlib.sha256(pathlib.Path('tools/packaging/windows_native_source_lock.json').read_bytes()).hexdigest())") --build-root (Join-Path $env:RUNNER_TEMP "packlab-ocp-generated-build") --site-packages $sitePackages --manifest $manifest --quarantine-dir (Join-Path $env:RUNNER_TEMP "pl0350-quarantine") --compile-timeout-seconds 16200
           if ($LASTEXITCODE -ne 0) { throw "The official generated-source OCP compile failed or exceeded its 270-minute budget." }
+      - name: Upload post-link OCP quarantine before any downstream failure can discard it
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-pl0350-ocp-quarantine-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pl0350-quarantine/**
+          if-no-files-found: ignore
+          compression-level: 1
+          retention-days: 14
+      - name: Seal the newly built controlled OCP runtime
+        if: steps.bundle_cache_check.outputs.valid != 'true'
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          $sitePackages = (& micromamba run -n packlab-ocp-bindings python -c "import sysconfig; print(sysconfig.get_paths()['purelib'])").Trim()
+          if ($LASTEXITCODE -ne 0 -or !$sitePackages) { throw "The locked Python site-packages path could not be resolved for runtime sealing." }
+          $manifest = Join-Path $env:RUNNER_TEMP "windows-ocp-controlled-runtime-manifest.json"
+          $sourceEvidence = Join-Path $env:RUNNER_TEMP "source-evidence\windows-native-source-evidence.json"
           uv run --locked python -m tools.packaging.controlled_ocp_runtime_bundle seal --site-packages $sitePackages --manifest $manifest --source-evidence $sourceEvidence --patch-manifest (Join-Path $env:RUNNER_TEMP "packlab-ocp-generated-build\generated-source-patch-manifest.json") --bundle (Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime") --cache-key "${{ steps.controlled_cache.outputs.cache-primary-key }}"
           if ($LASTEXITCODE -ne 0) { throw "The controlled 315-module runtime failed sealing validation." }
       - name: Validate runtime checkpoint against this run's OCCT payload

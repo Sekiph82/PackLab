@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "accepted_origin_source_lock_sha256": "c6a32326c1463dce53a70366200e9739d853893030f0553739188d878b1bf277",
+  "accepted_origin_toolchain_contract_sha256": "45573da96fd6f0bb8b6066521c9cdebaad4bd3f808eb8a7dc328e603bd1b44df",
+  "sdk_toolchain_contract_projection_sha256": "c1ae4149edf939a52105a8a3e16140b96410d0e3df2ad5e839880a1aa80b7732",
+  "origin_evidence": "R04 SDK checkpoint metadata preserved by the audited R05 recovery; the historical source lock is the parent of the fmt-only source-lock addition.",
+  "allowed_post_origin_source_ids": ["fmt-source-12.1.0"],
+  "sdk_relevant_projection_sha256": "35421bc09da9160243c1f7a3f1b1d67cc46a2045430aaa8d5d9ecce315b0c323",
+  "compatibility_policy": "Accept only the exact R04 source-lock identity when the complete historical lock matches after removing only the audited R05 fmt addition. Never rewrite the SDK metadata source-lock digest."
+}

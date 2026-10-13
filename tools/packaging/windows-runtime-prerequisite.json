@@ -3,10 +3,24 @@
   "target_os": "Windows 10 or later, x64",
   "prerequisite": "Microsoft Visual C++ 2015-2022 Redistributable (x64)",
   "minimum_version": "14.44.35211.0",
-  "minimum_version_evidence": "Highest retained wheel-private VCRUNTIME140.dll PE FileVersion observed in the locked PySide6/Shiboken6 6.11.2 environment; final hosted stage must revalidate this value.",
-  "detection": "64-bit HKLM\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64 Installed, Major, Minor, and Bld registry values",
+  "minimum_version_evidence": "14.44.35211.0 is the exact redistributable baseline shipped with the final supported Visual Studio 2022 v17.14 toolset; the controlled OCP build uses MSVC 19.44.35229.0 and locked PySide6/Shiboken runtime evidence is rechecked on the hosted Windows target. Microsoft documents binary compatibility across MSVC 2015-2022 and recommends the latest supported v14 redistributable.",
+  "detection": "64-bit HKLM\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64 Installed, Major, Minor, Bld, and Rbld DWORD values; require x64 architecture and version >= minimum_version",
   "automatic_download": false,
+  "deployment_role": "MICROSOFT_SIGNED_PREREQUISITE",
+  "deployment_roles": [
+    "BUILD_ENV_CONDA_ONLY",
+    "WINDOWS_OS_COMPONENT",
+    "MICROSOFT_SIGNED_PREREQUISITE",
+    "APP_SHIPPED_THIRD_PARTY",
+    "OCCT_OWNED",
+    "OCP_SOURCE_BUILT"
+  ],
+  "build_environment_packages": ["vc14_runtime", "ucrt"],
+  "forbidden_application_payload_patterns": ["api-ms-win-*.dll", "ext-ms-win-*.dll", "ucrtbase.dll", "msvcp140*.dll", "vcruntime140*.dll", "concrt140.dll", "vcomp140.dll"],
+  "windows_os_component_policy": "Windows 10 and later provides the UCRT and API-set forwarders as OS components; do not ship conda copies or claim they are System32 files.",
   "official_reference": "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170",
   "redistribution_reference": "https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files?view=msvc-170",
-  "status": "PRELIMINARY_LOCAL_PE_EVIDENCE_HOSTED_REVALIDATION_REQUIRED"
+  "runtime_compatibility_reference": "https://learn.microsoft.com/en-us/cpp/porting/binary-compat-2015-2017?view=msvc-170",
+  "ucrt_reference": "https://learn.microsoft.com/en-us/cpp/windows/universal-crt-deployment?view=vs-2019",
+  "status": "HOSTED_REVALIDATION_REQUIRED"
 }

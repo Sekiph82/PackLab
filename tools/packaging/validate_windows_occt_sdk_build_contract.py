@@ -29,6 +29,8 @@ EXPECTED_CACHE_INPUTS = [
     "tools/packaging/validate_controlled_occt_sdk.py",
     "tools/packaging/windows_occt_sdk_layout.py",
     "tools/packaging/audit_controlled_occt_sdk_dependencies.py",
+    "tools/packaging/windows_sdk_source_lock_compatibility.py",
+    "tools/packaging/windows_sdk_source_lock_compatibility.json",
 ]
 
 

@@ -9,12 +9,18 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
+from tools.packaging.windows_native_runtime_policy import is_windows_runtime_dll
+from tools.packaging.windows_sdk_source_lock_compatibility import (
+    validate_sdk_source_lock_compatibility,
+    validate_sdk_toolchain_contract_compatibility,
+)
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_COMPONENTS = {
     "ocp-source-7.9.3.1.1": "OCP",
     "occt-source-7.9.3": "OCCT",
 }
+RUNTIME_POLICY = Path("tools/packaging/windows-runtime-prerequisite.json")
 
 
 def sha256(path: Path) -> str:
@@ -32,6 +38,32 @@ def load_and_validate_manifest(manifest_path: Path, source_lock_path: Path) -> d
         raise ValueError("Controlled OCP manifest is not passing")
     if manifest.get("input_lock_sha256") != sha256(source_lock_path):
         raise ValueError("Controlled OCP manifest is not bound to the checked-in source lock")
+    sdk_checkpoint = manifest.get("occt_sdk_checkpoint")
+    if not isinstance(sdk_checkpoint, dict):
+        raise ValueError("Controlled OCP manifest has no sealed OCCT SDK identity")
+    compatibility = validate_sdk_source_lock_compatibility(
+        {"source_lock_sha256": sdk_checkpoint.get("source_lock_sha256")}, source_lock_path
+    )
+    if sdk_checkpoint.get("source_lock_compatibility") != compatibility:
+        raise ValueError("Controlled OCP manifest changed the OCCT SDK source-lock lineage")
+    toolchain_compatibility = validate_sdk_toolchain_contract_compatibility(
+        {"toolchain_contract_sha256": sdk_checkpoint.get("toolchain_contract_sha256")}
+    )
+    if sdk_checkpoint.get("toolchain_contract_compatibility") != toolchain_compatibility:
+        raise ValueError("Controlled OCP manifest changed the OCCT SDK toolchain-contract lineage")
+    deployment = manifest.get("windows_runtime_deployment")
+    policy = json.loads(RUNTIME_POLICY.read_text(encoding="utf-8"))
+    if (
+        not isinstance(deployment, dict)
+        or deployment.get("policy_path") != RUNTIME_POLICY.as_posix()
+        or deployment.get("policy_sha256") != sha256(RUNTIME_POLICY)
+        or deployment.get("deployment_roles") != policy.get("deployment_roles")
+        or deployment.get("minimum_vc_runtime_version") != policy.get("minimum_version")
+        or deployment.get("automatic_download") is not False
+    ):
+        raise ValueError(
+            "Controlled OCP manifest is not bound to the Windows runtime deployment policy"
+        )
     records = {record["id"]: record for record in lock["records"]}
     entries = manifest.get("files")
     if not isinstance(entries, list) or not entries:
@@ -74,7 +106,13 @@ def validate_staged_tree(stage_root: Path, manifest: dict[str, Any]) -> None:
     expected = {entry["relative_path"]: entry for entry in manifest["files"]}
     observed: dict[str, Path] = {}
     for path in stage_root.rglob("*"):
-        if not path.is_file() or path.suffix.casefold() not in {".pyd", ".dll"}:
+        if not path.is_file():
+            continue
+        if is_windows_runtime_dll(path):
+            raise ValueError(
+                "A Windows OS or VC prerequisite runtime DLL is staged in the application payload"
+            )
+        if path.suffix.casefold() not in {".pyd", ".dll"}:
             continue
         relative = path.relative_to(stage_root).as_posix()
         lowered = relative.casefold()

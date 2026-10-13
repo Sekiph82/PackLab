@@ -9,6 +9,10 @@ from tools.packaging.validate_controlled_ocp_manifest import (
     load_and_validate_manifest,
     validate_staged_tree,
 )
+from tools.packaging.windows_sdk_source_lock_compatibility import (
+    validate_sdk_source_lock_compatibility,
+    validate_sdk_toolchain_contract_compatibility,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_LOCK = ROOT / "tools" / "packaging" / "windows_native_source_lock.json"
@@ -30,6 +34,29 @@ def controlled_manifest(tmp_path: Path) -> tuple[Path, dict[str, object], dict[s
         "schema_version": 1,
         "status": "PASS",
         "input_lock_sha256": digest(SOURCE_LOCK.read_bytes()),
+        "occt_sdk_checkpoint": {
+            "source_lock_sha256": digest(SOURCE_LOCK.read_bytes()),
+            "source_lock_compatibility": validate_sdk_source_lock_compatibility(
+                {"source_lock_sha256": digest(SOURCE_LOCK.read_bytes())}, SOURCE_LOCK
+            ),
+            "toolchain_contract_sha256": digest(
+                (ROOT / "tools" / "packaging" / "controlled_ocp_runtime_contract.json").read_bytes()
+            ),
+            "toolchain_contract_compatibility": validate_sdk_toolchain_contract_compatibility(
+                {
+                    "toolchain_contract_sha256": digest(
+                        (
+                            ROOT / "tools" / "packaging" / "controlled_ocp_runtime_contract.json"
+                        ).read_bytes()
+                    )
+                }
+            ),
+        },
+        "windows_runtime_deployment": json.loads(
+            (ROOT / "tools" / "packaging" / "controlled_ocp_runtime_contract.json").read_text(
+                encoding="utf-8"
+            )
+        )["windows_runtime_deployment"],
         "files": [],
     }
     for relative, content in files.items():
@@ -92,4 +119,20 @@ def test_controlled_ocp_manifest_rejects_missing_native_file(
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(content)
     with pytest.raises(ValueError, match="manifest and staged native files differ"):
+        validate_staged_tree(stage, manifest)
+
+
+def test_controlled_ocp_stage_rejects_windows_runtime_copy(
+    tmp_path: Path, controlled_manifest: tuple[Path, dict[str, object], dict[str, bytes]]
+) -> None:
+    manifest_path, _, files = controlled_manifest
+    manifest = load_and_validate_manifest(manifest_path, SOURCE_LOCK)
+    stage = tmp_path / "PackLabStudio"
+    for relative, content in files.items():
+        destination = stage / "_internal" / Path(relative)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+    (stage / "_internal" / "PySide6" / "vcruntime140.dll").parent.mkdir(parents=True)
+    (stage / "_internal" / "PySide6" / "vcruntime140.dll").write_bytes(b"runtime copy")
+    with pytest.raises(ValueError, match="Windows OS or VC prerequisite runtime DLL"):
         validate_staged_tree(stage, manifest)

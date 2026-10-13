@@ -24,7 +24,12 @@ def test_native_workflow_is_manual_only_and_requires_exact_owner_inputs() -> Non
     assert "capacity-preflight:" in workflow
     assert "retained-sdk-inspection:" in workflow
     assert "inspect_retained_sdk == true" in workflow
-    assert "inputs.preflight_only == true" in workflow
+    inspection = workflow.split("  retained-sdk-inspection:\n", 1)[1].split(
+        "  capacity-preflight:\n", 1
+    )[0]
+    sdk_job = workflow.split("  occt-sdk:\n", 1)[1].split("  controlled-ocp-runtime:\n", 1)[0]
+    assert "inputs.preflight_only == true" not in inspection
+    assert "needs: [capacity-preflight, retained-sdk-inspection]" in sdk_job
     assert "inspect_retained_occt_sdk" in workflow
     assert "actions: read" in workflow
     assert "python -m tools.packaging.prepare_official_ocp_generated_sources --archive" in workflow
@@ -91,7 +96,7 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     native_assertion = "sys.version_info[:3] == (3,12,15)"
     assert native_assertion in sdk and native_assertion in ocp
     assert sdk.index("Assert native OCCT build Python 3.12.15") < sdk.index(
-        "build_controlled_occt_sdk.py"
+        "Restore and authenticate the owner-approved R04 SDK checkpoint"
     )
     assert ocp.index("Assert native OCP compiler Python 3.12.15") < ocp.index(
         "build_controlled_ocp_from_generated_sources.py"
@@ -130,8 +135,10 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     )
     assert (
         "& micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_occt_sdk"
-        in sdk
+        not in sdk
     )
+    assert "Restore and authenticate the owner-approved R04 SDK checkpoint" in sdk
+    assert "Do not start a new OCCT build from this assignment" in sdk
     assert (
         "& micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_ocp_from_generated_sources"
         in ocp
@@ -158,6 +165,7 @@ def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
         "tools.packaging.recover_pl0350_sdk_artifacts",
         "tools.packaging.validate_controlled_occt_sdk",
         "tools.packaging.validate_controlled_ocp_manifest",
+        "tools.packaging.validate_windows_native_runtime_policy",
         "tools.packaging.validate_windows_native_source_lock",
         "tools.packaging.validate_windows_occt_sdk_build_contract",
         "tools.packaging.verify_windows_workflow_python_imports",
@@ -182,17 +190,23 @@ def test_native_pipeline_seals_same_run_occt_and_generated_ocp_stages() -> None:
 
     assert "build_controlled_occt_sdk.py" in sdk
     assert "validate_controlled_occt_sdk.py" in sdk
-    assert "actions/cache/restore@" in sdk and "actions/cache/save@" in sdk
+    assert "actions/cache/restore@" in sdk
+    assert "actions/cache/save@" not in sdk
     assert "actions/upload-artifact@" in sdk
     assert "1 GiB stage-A artifact budget" in sdk
     assert "retention-days: 1" in sdk
     assert "actions/download-artifact@" in ocp
     assert "needs: occt-sdk" in ocp
-    assert "expected-run-id $env:GITHUB_RUN_ID" in ocp
-    assert "expected-attempt $env:GITHUB_RUN_ATTEMPT" in ocp
+    assert "sdk-producer-run-id" in ocp
+    assert "sdk-producer-attempt" in ocp
     assert "OCP_src_stubs_Windows.zip" in ocp
     assert "prepare_official_ocp_generated_sources.py" in ocp
     assert "build_controlled_ocp_from_generated_sources.py" in ocp
+    assert "--quarantine-dir" in ocp
+    assert "OCP_POST_LINK_QUARANTINE_PASS" in (
+        ROOT / "tools/packaging/build_controlled_ocp_from_generated_sources.py"
+    ).read_text(encoding="utf-8")
+    assert "post-link OCP quarantine" in ocp
     assert "python -m tools.packaging.controlled_ocp_runtime_bundle seal" in ocp
     assert "generated-source-patch-manifest.json" in ocp
     assert "python -m tools.packaging.controlled_ocp_runtime_bundle smoke" in ocp

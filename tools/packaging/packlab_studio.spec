@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_dynamic_libs, copy_metadata
+from tools.packaging.windows_native_runtime_policy import is_windows_runtime_dll
 
 root = Path(SPECPATH).parents[1]
 entry = root / "tools" / "packaging" / "packlab_studio_entry.py"
@@ -95,13 +96,10 @@ analysis = Analysis(
 def keep_curated_qt_file(destination):
     normalized = destination.replace("\\", "/").casefold()
     base = Path(normalized).name
-    # Windows API-set/UCRT names are operating-system contracts, not app
-    # payloads. The installer declares the supported Windows/VC prerequisite.
-    # Keep wheel-private runtime copies in their package directories.
-    if "/" not in normalized and (
-        base.startswith(("api-ms-win-", "ext-ms-win-", "vcruntime"))
-        or base == "ucrtbase.dll"
-    ):
+    # Windows 10/11 services UCRT/API sets. MSVC CRT DLLs use the separately
+    # detected x64 VC++ Redistributable; never package conda or wheel-private
+    # copies, including copies nested under package directories.
+    if is_windows_runtime_dll(base):
         return False
     # These x64-suffixed OpenSSL files are unrelated Poppler PATH pollution;
     # CPython's own _ssl extension uses the un-suffixed DLLs from Python/DLLs.

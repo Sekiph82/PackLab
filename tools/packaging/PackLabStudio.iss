@@ -39,7 +39,7 @@ Filename: "{app}\PackLabStudio.exe"; Description: "Launch PackLab Studio"; Flags
 [Code]
 function HasSupportedVCRuntime: Boolean;
 var
-  Installed, Major, Minor, Build: Cardinal;
+  Installed, Major, Minor, Build, Revision: Cardinal;
 begin
   Result := False;
   if not RegQueryDWordValue(HKLM64,
@@ -51,10 +51,14 @@ begin
      not RegQueryDWordValue(HKLM64,
        'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Minor', Minor) or
      not RegQueryDWordValue(HKLM64,
-       'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Bld', Build) then
+       'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Bld', Build) or
+     not RegQueryDWordValue(HKLM64,
+       'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Rbld', Revision) then
     Exit;
   Result := (Major > 14) or
-    ((Major = 14) and ((Minor > 44) or ((Minor = 44) and (Build >= 35211))));
+    ((Major = 14) and ((Minor > 44) or
+      ((Minor = 44) and ((Build > 35211) or
+        ((Build = 35211) and (Revision >= 0))))));
 end;
 
 function InitializeSetup: Boolean;

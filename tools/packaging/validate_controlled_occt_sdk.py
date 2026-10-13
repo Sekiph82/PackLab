@@ -19,6 +19,10 @@ from tools.packaging.build_controlled_occt_sdk import (
 )
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
 from tools.packaging.windows_occt_sdk_layout import validate_windows_occt_sdk_layout
+from tools.packaging.windows_sdk_source_lock_compatibility import (
+    validate_sdk_source_lock_compatibility,
+    validate_sdk_toolchain_contract_compatibility,
+)
 
 METADATA_NAME = "occt-sdk-metadata.json"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -41,6 +45,8 @@ def validate_sdk(
     metadata_path = directory / METADATA_NAME
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     lock = load_source_lock(LOCK)
+    validate_sdk_source_lock_compatibility(metadata, LOCK)
+    validate_sdk_toolchain_contract_compatibility(metadata, CONTRACT)
     record = next(row for row in lock["records"] if row["id"] == OCCT_ID)
     if (
         metadata.get("schema_version") not in (1, 2)
@@ -50,8 +56,6 @@ def validate_sdk(
         or metadata.get("producer_run_id") != expected_run_id
         or metadata.get("producer_run_attempt") != expected_attempt
         or metadata.get("cache_key") != expected_cache_key
-        or metadata.get("source_lock_sha256") != digest(LOCK)
-        or metadata.get("toolchain_contract_sha256") != digest(CONTRACT)
         or metadata.get("occt_source_id") != OCCT_ID
         or metadata.get("occt_source_revision") != record["revision"]
         or metadata.get("occt_source_sha256") != record["sha256"]

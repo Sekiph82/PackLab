@@ -25,5 +25,19 @@
   "toolchain": {
     "cmake": "cmake version 3.31.8",
     "compiler": "MSVC 19.44.35229.0"
+  },
+  "windows_runtime_deployment": {
+    "policy_path": "tools/packaging/windows-runtime-prerequisite.json",
+    "policy_sha256": "6735debdcb48a614297a89b6c51c73abec3256c1d872a681cc679ea371028ee3",
+    "minimum_vc_runtime_version": "14.44.35211.0",
+    "deployment_roles": [
+      "BUILD_ENV_CONDA_ONLY",
+      "WINDOWS_OS_COMPONENT",
+      "MICROSOFT_SIGNED_PREREQUISITE",
+      "APP_SHIPPED_THIRD_PARTY",
+      "OCCT_OWNED",
+      "OCP_SOURCE_BUILT"
+    ],
+    "automatic_download": false
   }
 }

@@ -20,6 +20,7 @@ from tools.packaging.validate_controlled_ocp_manifest import (
     load_and_validate_manifest,
     validate_staged_tree,
 )
+from tools.packaging.windows_native_runtime_policy import is_windows_runtime_dll
 
 SCHEMA_VERSION = 1
 PE_SUFFIXES = {".dll", ".exe", ".pyd"}
@@ -111,8 +112,14 @@ def is_python_runtime_source(path: Path, stdlib_root: str) -> bool:
 
 
 def is_windows_api_runtime(path: Path) -> bool:
+    return is_windows_runtime_dll(path)
+
+
+def windows_runtime_component(path: Path) -> tuple[str, str]:
     name = path.name.casefold()
-    return name.startswith(("api-ms-win-", "ext-ms-win-", "vcruntime", "ucrtbase"))
+    if name.startswith(("api-ms-win-", "ext-ms-win-")) or name == "ucrtbase.dll":
+        return "microsoft-windows-runtime", "WINDOWS_OS_COMPONENT"
+    return "microsoft-vc-runtime", "MICROSOFT_SIGNED_PREREQUISITE"
 
 
 def is_pyinstaller_hooks_contrib_runtime_hook(path: Path) -> bool:
@@ -691,9 +698,13 @@ def build_inventory(
                 elif is_windows_api_runtime(source_path) and is_python_runtime_source(
                     source_path, runtime_root_norm
                 ):
-                    owner_ids.add("microsoft-windows-runtime")
+                    component_id, deployment_role = windows_runtime_component(source_path)
+                    owner_ids.add(component_id)
                     mapping_evidence = "pyinstaller_collect_toc_python_distribution_runtime_file"
-                    unresolved_reason = "Microsoft/system runtime redistribution evidence is not reviewed for this exact staged file."
+                    unresolved_reason = (
+                        f"This staged runtime file belongs to {deployment_role}; it must be omitted "
+                        "from the app payload and supplied by the Windows OS or detected x64 prerequisite."
+                    )
                 elif is_python_runtime_source(source_path, runtime_root_norm):
                     owner_ids.add("cpython-runtime")
                     mapping_evidence = "pyinstaller_collect_toc_python_runtime_source"
