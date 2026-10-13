@@ -483,6 +483,7 @@ def run_probe(prefix: Path, scratch: Path, generated_cmake: Path | None = None) 
             "installed": installed,
             "dll_path": contract["package"]["dll_relative_path"],
             "dll_sha256": dll_sha,
+            "dll_byte_length": dll.stat().st_size,
             "pe_machine": "IMAGE_FILE_MACHINE_AMD64",
         },
         "upstream_source_and_notice": source,

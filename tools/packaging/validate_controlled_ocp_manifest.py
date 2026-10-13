@@ -19,6 +19,7 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_COMPONENTS = {
     "ocp-source-7.9.3.1.1": "OCP",
     "occt-source-7.9.3": "OCCT",
+    "fmt-source-12.1.0": "fmt native dependency",
 }
 RUNTIME_POLICY = Path("tools/packaging/windows-runtime-prerequisite.json")
 
@@ -64,6 +65,17 @@ def load_and_validate_manifest(manifest_path: Path, source_lock_path: Path) -> d
         raise ValueError(
             "Controlled OCP manifest is not bound to the Windows runtime deployment policy"
         )
+    runtime_evidence = manifest.get("windows_runtime_policy_evidence")
+    if (
+        not isinstance(runtime_evidence, dict)
+        or runtime_evidence.get("status") != "PASS"
+        or runtime_evidence.get("prerequisite_policy_sha256") != sha256(RUNTIME_POLICY)
+        or runtime_evidence.get("vc_runtime", {}).get("deployment_role")
+        != "MICROSOFT_SIGNED_PREREQUISITE"
+        or runtime_evidence.get("negative_prerequisite_simulations")
+        != {"missing": False, "wrong_architecture": False, "below_minimum": False}
+    ):
+        raise ValueError("Controlled OCP manifest lacks passing hosted Windows runtime evidence")
     records = {record["id"]: record for record in lock["records"]}
     entries = manifest.get("files")
     if not isinstance(entries, list) or not entries:
@@ -98,6 +110,81 @@ def load_and_validate_manifest(manifest_path: Path, source_lock_path: Path) -> d
             or entry.get("license_notice_source") != record["license_notice_source"]
         ):
             raise ValueError("Controlled OCP file provenance differs from its exact source lock")
+        expected_role = {
+            "OCP": "OCP_SOURCE_BUILT",
+            "OCCT": "OCCT_OWNED",
+            "fmt native dependency": "APP_SHIPPED_THIRD_PARTY",
+        }[expected_component]
+        if entry.get("deployment_role") != expected_role:
+            raise ValueError("Controlled OCP file has an invalid deployment ownership role")
+        if expected_component == "fmt native dependency":
+            package = record.get("binary_package", {})
+            if (
+                relative.casefold() != "ocp/fmt.dll"
+                or entry.get("binary_sha256")
+                != "0d4edfe1411f4a7c5f57758239f0f1e6e1cff7f2d0ae5f9511a1dfacc08b388d"
+                or not isinstance(entry.get("binary_byte_length"), int)
+                or entry.get("binary_byte_length", 0) <= 0
+                or entry.get("binary_package") != package
+                or entry.get("recipe") != record.get("recipe")
+            ):
+                raise ValueError("fmt.dll is not bound to the exact locked package and recipe")
+    fmt_record = records["fmt-source-12.1.0"]
+    ownership = manifest.get("native_import_ownership")
+    fmt_ownership = ownership.get("fmt") if isinstance(ownership, dict) else None
+    if (
+        not isinstance(fmt_ownership, dict)
+        or fmt_ownership.get("source_package_id") != "fmt-source-12.1.0"
+        or fmt_ownership.get("deployment_role") != "APP_SHIPPED_THIRD_PARTY"
+        or fmt_ownership.get("binary_package") != fmt_record.get("binary_package")
+        or fmt_ownership.get("binary_sha256")
+        != "0d4edfe1411f4a7c5f57758239f0f1e6e1cff7f2d0ae5f9511a1dfacc08b388d"
+        or fmt_ownership.get("source_revision") != fmt_record.get("revision")
+        or fmt_ownership.get("license_identifier") != fmt_record.get("license_identifier")
+        or fmt_ownership.get("license_notice_source") != fmt_record.get("license_notice_source")
+        or fmt_ownership.get("license_notice_sha256") != fmt_record.get("license_notice_sha256")
+        or fmt_ownership.get("recipe") != fmt_record.get("recipe")
+        or "OCP/fmt.dll" not in seen
+    ):
+        raise ValueError("The final PE dependency graph does not carry exact fmt source ownership")
+    external = ownership.get("windows_os_and_vc_prerequisite_imports", [])
+    if not isinstance(external, list) or any(
+        not isinstance(item, str) or item.casefold() == "fmt.dll" for item in external
+    ):
+        raise ValueError(
+            "The final PE dependency graph has an invalid external-runtime classification"
+        )
+    resolved = ownership.get("resolved_external_imports")
+    if (
+        not isinstance(resolved, list)
+        or any(not isinstance(item, dict) for item in resolved)
+        or sorted(item.get("name", "").casefold() for item in resolved) != sorted(external)
+    ):
+        raise ValueError("The final PE external imports are not completely resolved to owners")
+    for item in resolved:
+        name = item.get("name", "").casefold()
+        role = item.get("deployment_role")
+        if name.startswith(("api-ms-win-", "ext-ms-win-")):
+            if (
+                role != "WINDOWS_OS_COMPONENT"
+                or not item.get("resolved_host")
+                or not SHA256_RE.fullmatch(item.get("host_sha256", ""))
+            ):
+                raise ValueError("A Windows API-set import lacks its resolved OS host identity")
+        elif name.startswith(("msvcp140", "vcruntime140", "concrt140", "vcomp140")):
+            if role != "MICROSOFT_SIGNED_PREREQUISITE" or item.get("minimum_version") != policy.get(
+                "minimum_version"
+            ):
+                raise ValueError("A Microsoft runtime import lacks the signed prerequisite gate")
+        elif role == "PYTHON_RUNTIME":
+            if name != "python312.dll" or item.get("resolved_path_class") != "native_python_prefix":
+                raise ValueError("A Python runtime import has an invalid owner identity")
+        elif (
+            role != "WINDOWS_OS_COMPONENT"
+            or item.get("resolved_path_class") != "System32"
+            or not SHA256_RE.fullmatch(item.get("resolved_sha256", ""))
+        ):
+            raise ValueError("A Windows system import lacks its hashed System32 owner identity")
     return manifest
 
 

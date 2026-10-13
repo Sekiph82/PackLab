@@ -143,8 +143,10 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     assert "windows_opengl_prerequisites" in dependency_audit
     assert 'f"-DPython_EXECUTABLE={sys.executable}"' in ocp_builder
     assert 'f"-DCMAKE_PREFIX_PATH={args.occt_sdk};{sys.prefix}"' in ocp_builder
-    assert ocp_builder.index("dependency_audit = audit_dependencies(") < ocp_builder.index(
-        '"cmake",\n            "-S"'
+    assert (
+        ocp_builder.index("dependency_audit = audit_dependencies(")
+        < ocp_builder.index("fmt_probe = run_fmt_probe(")
+        < ocp_builder.index("if args.prebuilt_extension:")
     )
     assert (
         "& micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_occt_sdk"
@@ -152,10 +154,13 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     )
     assert "Restore and authenticate the owner-approved R04 SDK checkpoint" in sdk
     assert "Do not start a new OCCT build from this assignment" in sdk
-    assert (
-        "& micromamba run -n packlab-ocp-bindings python -m tools.packaging.build_controlled_ocp_from_generated_sources"
-        in ocp
-    )
+    assert "& micromamba run -n packlab-ocp-bindings python @builderArgs" in ocp
+    assert "reuse_quarantined_ocp_run_id:" in workflow
+    assert "inputs.reuse_quarantined_ocp_run_id != ''" in ocp
+    assert '"38399051467"' in ocp
+    assert "c9db27bf7d3e95932a0ddb512c35bfe19a63e50394da0d9978355db28842fa29" in ocp
+    assert "--prebuilt-extension" in ocp_builder
+    assert "REUSED_QUARANTINED_EXTENSION" in ocp_builder
 
 
 def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:

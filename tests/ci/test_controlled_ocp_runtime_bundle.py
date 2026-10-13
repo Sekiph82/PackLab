@@ -40,14 +40,21 @@ def sealed_bundle(tmp_path: Path) -> tuple[Path, str, Path]:
     files = {
         "OCP.cp312-win_amd64.pyd": b"controlled binding fixture",
         "TKBRep.dll": b"controlled OCCT fixture",
+        "fmt.dll": b"controlled fmt fixture",
         "BRepPrimAPI.py": b"# controlled python wrapper fixture\n",
     }
     for name, content in files.items():
         (package / name).write_bytes(content)
 
     manifest_files = []
-    for name in ("OCP.cp312-win_amd64.pyd", "TKBRep.dll"):
-        source_id = "ocp-source-7.9.3.1.1" if name.endswith(".pyd") else "occt-source-7.9.3"
+    for name in ("OCP.cp312-win_amd64.pyd", "TKBRep.dll", "fmt.dll"):
+        source_id = (
+            "ocp-source-7.9.3.1.1"
+            if name.endswith(".pyd")
+            else "fmt-source-12.1.0"
+            if name == "fmt.dll"
+            else "occt-source-7.9.3"
+        )
         record = records[source_id]
         manifest_files.append(
             {
@@ -60,6 +67,23 @@ def sealed_bundle(tmp_path: Path) -> tuple[Path, str, Path]:
                 "license_identifier": record["license_identifier"],
                 "license_notice_source": record["license_notice_source"],
                 "production_purpose": "controlled-runtime bundle test",
+                "deployment_role": (
+                    "OCP_SOURCE_BUILT"
+                    if source_id == "ocp-source-7.9.3.1.1"
+                    else "APP_SHIPPED_THIRD_PARTY"
+                    if source_id == "fmt-source-12.1.0"
+                    else "OCCT_OWNED"
+                ),
+                **(
+                    {
+                        "binary_sha256": "0d4edfe1411f4a7c5f57758239f0f1e6e1cff7f2d0ae5f9511a1dfacc08b388d",
+                        "binary_byte_length": 187511,
+                        "binary_package": record["binary_package"],
+                        "recipe": record["recipe"],
+                    }
+                    if source_id == "fmt-source-12.1.0"
+                    else {}
+                ),
             }
         )
     revisions = {
@@ -160,6 +184,40 @@ def sealed_bundle(tmp_path: Path) -> tuple[Path, str, Path]:
             )
         ],
         "files": manifest_files,
+        "native_import_ownership": {
+            "fmt": {
+                "source_package_id": "fmt-source-12.1.0",
+                "deployment_role": "APP_SHIPPED_THIRD_PARTY",
+                "binary_package": records["fmt-source-12.1.0"]["binary_package"],
+                "binary_sha256": "0d4edfe1411f4a7c5f57758239f0f1e6e1cff7f2d0ae5f9511a1dfacc08b388d",
+                "source_revision": records["fmt-source-12.1.0"]["revision"],
+                "license_identifier": records["fmt-source-12.1.0"]["license_identifier"],
+                "license_notice_source": records["fmt-source-12.1.0"]["license_notice_source"],
+                "license_notice_sha256": records["fmt-source-12.1.0"]["license_notice_sha256"],
+                "recipe": records["fmt-source-12.1.0"]["recipe"],
+            },
+            "windows_os_and_vc_prerequisite_imports": ["api-ms-win-crt-runtime-l1-1-0.dll"],
+            "resolved_external_imports": [
+                {
+                    "name": "api-ms-win-crt-runtime-l1-1-0.dll",
+                    "deployment_role": "WINDOWS_OS_COMPONENT",
+                    "resolved_host": "ucrtbase.dll",
+                    "host_sha256": "a" * 64,
+                }
+            ],
+        },
+        "windows_runtime_policy_evidence": {
+            "status": "PASS",
+            "prerequisite_policy_sha256": digest(
+                (ROOT / "tools/packaging/windows-runtime-prerequisite.json").read_bytes()
+            ),
+            "vc_runtime": {"deployment_role": "MICROSOFT_SIGNED_PREREQUISITE"},
+            "negative_prerequisite_simulations": {
+                "missing": False,
+                "wrong_architecture": False,
+                "below_minimum": False,
+            },
+        },
     }
     manifest_path = tmp_path / "controlled-manifest.json"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
@@ -208,7 +266,7 @@ def sealed_bundle(tmp_path: Path) -> tuple[Path, str, Path]:
             source_lock=SOURCE_LOCK,
         )
     )
-    assert metadata["runtime_file_count"] == 3
+    assert metadata["runtime_file_count"] == 4
     assert {
         MANIFEST_NAME,
         METADATA_NAME,
@@ -223,7 +281,7 @@ def test_controlled_runtime_bundle_validates_every_runtime_file(sealed_bundle) -
 
     metadata = validate_bundle(bundle, SOURCE_LOCK, CONDA_LOCK, BUILD_CONTRACT, cache_key)
 
-    assert metadata["runtime_file_count"] == 3
+    assert metadata["runtime_file_count"] == 4
     assert metadata["cmake_parallel"] == 4
     assert metadata["source_revisions"]["ocp"] == "d69b064a3a604ebf245b1f3b14fb54c835a3a571"
 

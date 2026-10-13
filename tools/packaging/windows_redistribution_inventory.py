@@ -527,7 +527,12 @@ def build_inventory(
                 relative is None
                 or not relative.startswith("OCP/")
                 or not SHA256_RE.fullmatch(digest or "")
-                or source_id not in {"ocp-source-7.9.3.1.1", "occt-source-7.9.3"}
+                or source_id
+                not in {
+                    "ocp-source-7.9.3.1.1",
+                    "occt-source-7.9.3",
+                    "fmt-source-12.1.0",
+                }
             ):
                 raise ValueError("Controlled OCP manifest contains an invalid native-file record")
             source_record = source_records.get(source_id)
@@ -544,9 +549,11 @@ def build_inventory(
             if relative in controlled_ocp:
                 raise ValueError("Controlled OCP manifest contains a duplicate relative path")
             controlled_ocp[relative] = item
-            controlled_ocp_owner_by_name[Path(relative).name.casefold()] = (
-                "packlab-controlled-ocp" if source_id == "ocp-source-7.9.3.1.1" else "occt-7.9.3"
-            )
+            controlled_ocp_owner_by_name[Path(relative).name.casefold()] = {
+                "ocp-source-7.9.3.1.1": "packlab-controlled-ocp",
+                "occt-source-7.9.3": "occt-7.9.3",
+                "fmt-source-12.1.0": "fmt-12.1.0",
+            }[source_id]
     toc = toc_destinations(read_toc(toc_path), contents_dir, stage_root)
     analysis_sources = analysis_source_paths(analysis_path)
     distributions = list(importlib.metadata.distributions())
@@ -633,11 +640,11 @@ def build_inventory(
         elif any(path == staged_path for staged_path in staged_ocp.values()):
             source_id = next(key for key, stage_path in staged_ocp.items() if stage_path == path)
             source_record = controlled_ocp[source_id]
-            owner_id = (
-                "packlab-controlled-ocp"
-                if source_record["source_package_id"] == "ocp-source-7.9.3.1.1"
-                else "occt-7.9.3"
-            )
+            owner_id = {
+                "ocp-source-7.9.3.1.1": "packlab-controlled-ocp",
+                "occt-source-7.9.3": "occt-7.9.3",
+                "fmt-source-12.1.0": "fmt-12.1.0",
+            }[source_record["source_package_id"]]
             owner_ids.add(owner_id)
             mapping_evidence = "controlled_ocp_manifest_and_exact_staged_sha256"
         elif row is not None:
@@ -819,6 +826,7 @@ def build_inventory(
                 "PROJECT_OFFICIAL_BINARY",
                 "EXTERNAL_SYSTEM_PREREQUISITE",
                 "PACKLAB_OWNED",
+                "APP_SHIPPED_THIRD_PARTY",
             }
         ):
             file_record["provenance_class"] = "UNRESOLVED"

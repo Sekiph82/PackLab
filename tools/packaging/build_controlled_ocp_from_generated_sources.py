@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -19,8 +20,14 @@ from tools.packaging.build_controlled_ocp_runtime import (
     windows_sdk_gl_include_dir,
 )
 from tools.packaging.prepare_official_ocp_generated_sources import prepare_generated_sources
+from tools.packaging.probe_fmt_dependency import run_probe as run_fmt_probe
 from tools.packaging.validate_controlled_occt_sdk import validate_sdk
+from tools.packaging.validate_windows_native_runtime_policy import (
+    resolve_windows_api_set_host,
+    validate_runtime,
+)
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
+from tools.packaging.windows_native_runtime_policy import is_windows_runtime_dll
 from tools.packaging.windows_sdk_source_lock_compatibility import (
     validate_sdk_source_lock_compatibility,
     validate_sdk_toolchain_contract_compatibility,
@@ -151,6 +158,16 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
         expected_cache_key=args.expected_cache_key,
         require_opengl=True,
     )
+    fmt_probe = run_fmt_probe(
+        Path(sys.prefix),
+        args.build_root / "fmt-source-evidence",
+        generated_root / "OCP_src_stubs_Windows" / "CMakeLists.txt",
+    )
+    if fmt_probe.get("status") != "PASS":
+        raise ValueError("Pinned fmt source, package, notice, or import ownership probe failed")
+    fmt_probe_path = args.build_root / "fmt-dependency-probe.json"
+    fmt_probe_path.write_text(json.dumps(fmt_probe, indent=2) + "\n", encoding="utf-8")
+    runtime_policy_evidence = validate_runtime(Path(sys.prefix), fmt_probe_path)
 
     occt_dlls = [path for path in args.occt_sdk.rglob("*.dll") if path.is_file()]
     occt_dlls_by_name = {path.name.casefold(): path for path in occt_dlls}
@@ -172,44 +189,81 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
         import shutil
 
         shutil.rmtree(cmake_build)
-    _run(
-        [
-            "cmake",
-            "-S",
-            str(source_root),
-            "-B",
-            str(cmake_build),
-            "-G",
-            GENERATOR,
-            "-A",
-            "x64",
-            f"-DCMAKE_SYSTEM_VERSION={SDK_VERSION}",
-            f"-DOpenCASCADE_DIR={config_matches[0].parent}",
-            f"-DCMAKE_PREFIX_PATH={args.occt_sdk};{sys.prefix}",
-            f"-DOCCT_LIB_DIR={next(iter(dll_directories))}",
-            f"-DPython_EXECUTABLE={sys.executable}",
-            f"-DOPENGL_INCLUDE_DIR={gl_include}",
-        ]
-    )
-    started = datetime.now(UTC)
-    monotonic_started = time.monotonic()
-    _run(
-        [
-            "cmake",
-            "--build",
-            str(cmake_build),
-            "--config",
-            "Release",
-            "--target",
-            "OCP",
-            "--parallel",
-            str(PARALLELISM),
-        ],
-        timeout=args.compile_timeout_seconds,
-    )
-    ended = datetime.now(UTC)
-    duration = round(time.monotonic() - monotonic_started, 3)
-    extensions = [path for path in cmake_build.rglob("OCP*.pyd") if path.is_file()]
+    if args.prebuilt_extension:
+        quarantine_manifest_path = args.prebuilt_extension.parent / "quarantine-manifest.json"
+        quarantine = json.loads(quarantine_manifest_path.read_text(encoding="utf-8"))
+        expected_file = {
+            "filename": args.prebuilt_extension.name,
+            "sha256": sha256(args.prebuilt_extension),
+            "byte_length": args.prebuilt_extension.stat().st_size,
+        }
+        source_revision = records[OCP_ID]["revision"]
+        if (
+            quarantine.get("status") != "QUARANTINED_NOT_REVIEWED_OR_DISTRIBUTABLE"
+            or quarantine.get("artifact_role") != "POST_LINK_RECOVERY_EVIDENCE_ONLY"
+            or quarantine.get("linked_extension_count") != 1
+            or quarantine.get("files") != [expected_file]
+            or quarantine.get("python") != sys.version.split()[0]
+            or quarantine.get("python_abi")
+            != f"cp{sys.version_info.major}{sys.version_info.minor}-win_amd64"
+            or quarantine.get("ocp_source_revision") != source_revision
+            or quarantine.get("occt_source_revision") != records[OCCT_ID]["revision"]
+            or quarantine.get("sdk_payload_sha256") != sdk["payload_sha256"]
+            or quarantine.get("source_lock_sha256") != sha256(LOCK)
+        ):
+            raise ValueError(
+                "Prebuilt quarantine artifact does not match this source/ABI/SDK contract"
+            )
+        extensions = [args.prebuilt_extension]
+        started = datetime.fromisoformat(args.prebuilt_build_started_utc)
+        ended = datetime.fromisoformat(args.prebuilt_build_ended_utc)
+        duration = float(args.prebuilt_build_duration_seconds)
+        compile_evidence = {
+            "mode": "REUSED_QUARANTINED_EXTENSION",
+            "producer_run_id": args.prebuilt_producer_run_id,
+            "producer_revision": args.prebuilt_producer_revision,
+            "compiled_inputs_unchanged": True,
+        }
+    else:
+        _run(
+            [
+                "cmake",
+                "-S",
+                str(source_root),
+                "-B",
+                str(cmake_build),
+                "-G",
+                GENERATOR,
+                "-A",
+                "x64",
+                f"-DCMAKE_SYSTEM_VERSION={SDK_VERSION}",
+                f"-DOpenCASCADE_DIR={config_matches[0].parent}",
+                f"-DCMAKE_PREFIX_PATH={args.occt_sdk};{sys.prefix}",
+                f"-DOCCT_LIB_DIR={next(iter(dll_directories))}",
+                f"-DPython_EXECUTABLE={sys.executable}",
+                f"-DOPENGL_INCLUDE_DIR={gl_include}",
+            ]
+        )
+        started = datetime.now(UTC)
+        monotonic_started = time.monotonic()
+        _run(
+            [
+                "cmake",
+                "--build",
+                str(cmake_build),
+                "--config",
+                "Release",
+                "--target",
+                "OCP",
+                "--parallel",
+                str(PARALLELISM),
+            ],
+            timeout=args.compile_timeout_seconds,
+        )
+        ended = datetime.now(UTC)
+        duration = round(time.monotonic() - monotonic_started, 3)
+        extensions = [path for path in cmake_build.rglob("OCP*.pyd") if path.is_file()]
+        compile_evidence = {"mode": "COLD_NATIVE_COMPILE", "compiled_inputs_unchanged": True}
     # Preserve the newly linked object before import-closure, packaging, or
     # compliance checks can fail. This artifact is quarantined evidence only.
     import shutil
@@ -241,6 +295,15 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
         "sdk_payload_sha256": sdk["payload_sha256"],
         "sdk_source_lock_sha256": sdk["source_lock_sha256"],
         "sdk_toolchain_contract_sha256": sdk["toolchain_contract_sha256"],
+        "build_started_utc": started.isoformat(),
+        "build_ended_utc": ended.isoformat(),
+        "build_duration_seconds": duration,
+        "producer_run_id": args.expected_run_id
+        if not args.prebuilt_extension
+        else args.prebuilt_producer_run_id,
+        "producer_revision": args.expected_source_lock_sha256
+        if not args.prebuilt_extension
+        else args.prebuilt_producer_revision,
     }
     if extensions:
         (args.quarantine_dir / "quarantine-manifest.json").write_text(
@@ -254,8 +317,22 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
     if len(extensions) != 1 or not extensions[0].stem.startswith("OCP."):
         raise ValueError("generated-source C++ build did not produce exactly one OCP extension")
 
+    fmt_dll = Path(sys.prefix) / "Library" / "bin" / "fmt.dll"
+    fmt_record = records["fmt-source-12.1.0"]
+    fmt_lock = fmt_probe["package_lock"]
+    if (
+        fmt_lock.get("sha256") != fmt_record["binary_package"]["sha256"]
+        or fmt_lock.get("byte_length") != fmt_record["binary_package"]["byte_length"]
+        or fmt_lock.get("dll_sha256")
+        != "0d4edfe1411f4a7c5f57758239f0f1e6e1cff7f2d0ae5f9511a1dfacc08b388d"
+        or not fmt_dll.is_file()
+        or fmt_lock.get("dll_byte_length") != fmt_dll.stat().st_size
+        or sha256(fmt_dll) != fmt_lock.get("dll_sha256")
+    ):
+        raise ValueError("The actual fmt DLL differs from its exact locked conda package evidence")
     pending = list(pe_imports(extensions[0]))
     required_dlls: set[str] = set()
+    third_party_dlls: set[str] = set()
     external: set[str] = set()
     seen: set[str] = set()
     while pending:
@@ -265,6 +342,15 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
         if is_external_runtime(name):
             external.add(name)
             seen.add(name)
+            continue
+        if is_windows_runtime_dll(name):
+            external.add(name)
+            seen.add(name)
+            continue
+        if name == "fmt.dll":
+            third_party_dlls.add(name)
+            seen.add(name)
+            pending.extend(pe_imports(fmt_dll))
             continue
         dependency = occt_dlls_by_name.get(name)
         if dependency is None:
@@ -284,6 +370,47 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
     )
     for name in sorted(required_dlls):
         shutil.copy2(occt_dlls_by_name[name], package / name)
+    for name in sorted(third_party_dlls):
+        shutil.copy2(fmt_dll, package / name)
+    system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+    resolved_external_imports = []
+    for name in sorted(external):
+        if name.startswith(("api-ms-win-", "ext-ms-win-")):
+            host = resolve_windows_api_set_host(name, system32)
+            resolved_external_imports.append(
+                {
+                    "name": name,
+                    "deployment_role": "WINDOWS_OS_COMPONENT",
+                    "resolved_host": host.name,
+                    "host_sha256": sha256(host),
+                }
+            )
+        elif name.startswith(("msvcp140", "vcruntime140", "concrt140", "vcomp140")):
+            resolved_external_imports.append(
+                {
+                    "name": name,
+                    "deployment_role": "MICROSOFT_SIGNED_PREREQUISITE",
+                    "minimum_version": runtime_policy["minimum_version"],
+                }
+            )
+        else:
+            candidate = Path(sys.prefix) / name if name == "python312.dll" else system32 / name
+            if not candidate.is_file():
+                raise ValueError(
+                    f"External native import did not resolve to its declared owner: {name}"
+                )
+            resolved_external_imports.append(
+                {
+                    "name": name,
+                    "deployment_role": "PYTHON_RUNTIME"
+                    if name == "python312.dll"
+                    else "WINDOWS_OS_COMPONENT",
+                    "resolved_path_class": "native_python_prefix"
+                    if name == "python312.dll"
+                    else "System32",
+                    "resolved_sha256": sha256(candidate),
+                }
+            )
 
     compiler = _compiler_version(args.occt_sdk / "occt-sdk-metadata.json")
     toolchain = {
@@ -315,7 +442,13 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
     for path in sorted(package.iterdir()):
         if path.suffix.casefold() not in {".pyd", ".dll"}:
             continue
-        source_id = OCP_ID if path.suffix.casefold() == ".pyd" else OCCT_ID
+        source_id = (
+            OCP_ID
+            if path.suffix.casefold() == ".pyd"
+            else "fmt-source-12.1.0"
+            if path.name.casefold() == "fmt.dll"
+            else OCCT_ID
+        )
         source = records[source_id]
         file_records.append(
             {
@@ -328,6 +461,23 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
                 "license_identifier": source["license_identifier"],
                 "license_notice_source": source["license_notice_source"],
                 "production_purpose": "PackLab CAD binding or transitive OCCT runtime dependency",
+                "deployment_role": (
+                    "OCP_SOURCE_BUILT"
+                    if source_id == OCP_ID
+                    else "APP_SHIPPED_THIRD_PARTY"
+                    if source_id == "fmt-source-12.1.0"
+                    else "OCCT_OWNED"
+                ),
+                **(
+                    {
+                        "binary_package": fmt_record["binary_package"],
+                        "binary_sha256": fmt_lock["dll_sha256"],
+                        "binary_byte_length": fmt_lock["dll_byte_length"],
+                        "recipe": fmt_record["recipe"],
+                    }
+                    if source_id == "fmt-source-12.1.0"
+                    else {}
+                ),
             }
         )
     manifest = {
@@ -369,9 +519,26 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
             "minimum_vc_runtime_version": runtime_contract["minimum_vc_runtime_version"],
             "automatic_download": runtime_contract["automatic_download"],
         },
+        "windows_runtime_policy_evidence": runtime_policy_evidence,
         "toolchain": toolchain,
         "build_timings": [occt_timing, ocp_timing],
+        "compile_evidence": compile_evidence,
         "external_runtime_dependencies": sorted(external),
+        "native_import_ownership": {
+            "fmt": {
+                "source_package_id": "fmt-source-12.1.0",
+                "deployment_role": "APP_SHIPPED_THIRD_PARTY",
+                "binary_package": fmt_record["binary_package"],
+                "binary_sha256": fmt_lock["dll_sha256"],
+                "source_revision": fmt_record["revision"],
+                "license_identifier": fmt_record["license_identifier"],
+                "license_notice_source": fmt_record["license_notice_source"],
+                "license_notice_sha256": fmt_record["license_notice_sha256"],
+                "recipe": fmt_record["recipe"],
+            },
+            "windows_os_and_vc_prerequisite_imports": sorted(external),
+            "resolved_external_imports": resolved_external_imports,
+        },
         "files": file_records,
     }
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -392,8 +559,24 @@ def main() -> int:
     parser.add_argument("--site-packages", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--quarantine-dir", required=True, type=Path)
+    parser.add_argument("--prebuilt-extension", type=Path)
+    parser.add_argument("--prebuilt-producer-run-id")
+    parser.add_argument("--prebuilt-producer-revision")
+    parser.add_argument("--prebuilt-build-started-utc")
+    parser.add_argument("--prebuilt-build-ended-utc")
+    parser.add_argument("--prebuilt-build-duration-seconds", type=float)
     parser.add_argument("--compile-timeout-seconds", type=int, default=MAX_COMPILE_SECONDS)
     args = parser.parse_args()
+    if args.prebuilt_extension and not all(
+        (
+            args.prebuilt_producer_run_id,
+            args.prebuilt_producer_revision,
+            args.prebuilt_build_started_utc,
+            args.prebuilt_build_ended_utc,
+            args.prebuilt_build_duration_seconds,
+        )
+    ):
+        parser.error("prebuilt reuse requires run, revision, and original timing evidence")
     if args.compile_timeout_seconds <= 0 or args.compile_timeout_seconds > MAX_COMPILE_SECONDS:
         raise ValueError("native compile timeout exceeds the 270-minute safety budget")
     result = build_from_generated_sources(args)
