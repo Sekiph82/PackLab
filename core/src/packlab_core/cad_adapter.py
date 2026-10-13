@@ -1576,7 +1576,12 @@ def _probe_capability(name: str, probe: Callable[[], None]) -> CadCapability:
             name, CadCapabilityStatus.UNAVAILABLE, "capability_dependency_unavailable"
         )
     except Exception as error:
-        return CadCapability(name, CadCapabilityStatus.ERROR, type(error).__name__)
+        error_code = type(error).__name__
+        missing_attribute = getattr(error, "name", None)
+        if isinstance(error, AttributeError) and isinstance(missing_attribute, str):
+            if missing_attribute.isidentifier():
+                error_code = f"AttributeError:{missing_attribute}"
+        return CadCapability(name, CadCapabilityStatus.ERROR, error_code)
     return CadCapability(name, CadCapabilityStatus.AVAILABLE)
 
 

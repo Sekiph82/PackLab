@@ -219,6 +219,15 @@ def test_capability_failure_is_reported_independently(monkeypatch: pytest.Monkey
     )
 
 
+def test_attribute_capability_failure_reports_only_the_missing_identifier() -> None:
+    def fail_probe() -> None:
+        raise AttributeError("safe and path-free detail", name="Triangulation_s")
+
+    capability = cad_adapter._probe_capability("tessellation", fail_probe)
+
+    assert capability.error_code == "AttributeError:Triangulation_s"
+
+
 def test_selected_binding_reports_real_kernel_versions_and_capabilities() -> None:
     diagnostics = cad_adapter.probe_cad_runtime()
 
