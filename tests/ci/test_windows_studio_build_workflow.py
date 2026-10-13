@@ -266,3 +266,19 @@ def test_packaged_runtime_smoke_covers_cad_step_dxf_pdf_and_open3d() -> None:
     assert "STEP read/transfer failed" in bundle
     assert "OCP.IVtk" not in bundle
     assert "secrets." not in workflow
+
+
+def test_packaged_studio_smoke_diagnostics_are_retained_on_failure() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    packaging = workflow.split("  build-studio:\n", 1)[1]
+
+    assert '$smokeLog = Join-Path $env:RUNNER_TEMP "packlab-studio-smoke.log"' in packaging
+    assert '"PACKLAB_BUILD_SMOKE_LOG=$smokeLog" >> $env:GITHUB_ENV' in packaging
+    assert "- Sanitized diagnostic: $smokeDiagnostic" in packaging
+    assert "Upload packaged Studio smoke diagnostics\n        if: always()" in packaging
+    diagnostic_upload = packaging.split("Upload packaged Studio smoke diagnostics", 1)[1].split(
+        "Validate bidirectional controlled OCP manifest", 1
+    )[0]
+    assert "${{ runner.temp }}/packlab-studio-smoke.log" in diagnostic_upload
+    assert "windows-runtime-capabilities.json" in diagnostic_upload
+    assert "qt-staged-surface.json" in diagnostic_upload

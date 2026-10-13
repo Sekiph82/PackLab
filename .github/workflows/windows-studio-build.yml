@@ -856,16 +856,25 @@ jobs:
         run: |
           $studioExe = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio\PackLabStudio.exe"
           $runtimeManifest = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio\windows-runtime-capabilities.json"
-          $smokeLog = Join-Path $env:RUNNER_TEMP ("packlab-studio-smoke-" + [guid]::NewGuid().ToString("N") + ".log")
+          $smokeLog = Join-Path $env:RUNNER_TEMP "packlab-studio-smoke.log"
           $env:PACKLAB_BUILD_SMOKE_LOG = $smokeLog
           $env:PACKLAB_RUNTIME_CAPABILITIES_PATH = $runtimeManifest
+          "PACKLAB_BUILD_SMOKE_LOG=$smokeLog" >> $env:GITHUB_ENV
           $smokeProcess = Start-Process -FilePath $studioExe -ArgumentList "--packlab-build-smoke" -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru
           if (!$smokeProcess.WaitForExit(120000)) {
             $smokeProcess.Kill()
+            "## Packaged Studio smoke failed`n`n- Failure: process exceeded the 120-second bound." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             throw "Packaged Studio smoke did not exit within 120 seconds."
           }
           if ($smokeProcess.ExitCode -ne 0) {
-            throw "Packaged Studio capability smoke exited with code $($smokeProcess.ExitCode)."
+            $smokeDiagnostic = if (Test-Path -LiteralPath $smokeLog -PathType Leaf) { (Get-Content -LiteralPath $smokeLog -Raw).Trim() } else { "No sanitized smoke diagnostic was written." }
+            @(
+              "## Packaged Studio smoke failed",
+              "",
+              "- Exit code: $($smokeProcess.ExitCode)",
+              "- Sanitized diagnostic: $smokeDiagnostic"
+            ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            throw "Packaged Studio capability smoke exited with code $($smokeProcess.ExitCode): $smokeDiagnostic"
           }
           if (!(Test-Path -LiteralPath $runtimeManifest -PathType Leaf)) { throw "Runtime capability manifest is missing." }
           $capabilities = Get-Content -LiteralPath $runtimeManifest -Raw | ConvertFrom-Json
@@ -898,6 +907,18 @@ jobs:
             "- Runtime capability manifest: ``windows-runtime-capabilities.json``; Qt GUI/PDF, OCP CAD, STEP, DXF, and Open3D groups all PASS with no network.",
             "- Redistribution: NOT CLEARED; PL-0350 owns native/runtime inventory and notice review. The staging output is not uploaded or a release."
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload packaged Studio smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-studio-smoke-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/packlab-studio-smoke.log
+            build/windows-studio/PackLabStudio/windows-runtime-capabilities.json
+            build/windows-studio/PackLabStudio/qt-staged-surface.json
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Validate bidirectional controlled OCP manifest
         shell: pwsh
