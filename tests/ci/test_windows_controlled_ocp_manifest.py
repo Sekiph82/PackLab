@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
+import sys
+from types import ModuleType
 from pathlib import Path
 
 import pytest
 from tools.packaging.build_controlled_ocp_from_generated_sources import (
+    _package_init_source,
     _path_free_dependency_audit,
 )
 from tools.packaging.validate_controlled_ocp_manifest import (
@@ -23,6 +27,44 @@ SOURCE_LOCK = ROOT / "tools" / "packaging" / "windows_native_source_lock.json"
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def test_monolithic_extension_package_init_aliases_exact_retained_modules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modules = [f"Module{index:03}" for index in range(315)]
+    modules[0] = "BRepCheck"
+    source = _package_init_source(modules)
+
+    assert "'BRepCheck'" in source
+    assert "'Module314'" in source
+    assert "sys.modules[f'{__name__}.{_module_name}'] = _module" in source
+    assert "IVtk" not in source
+    assert source == _package_init_source(modules)
+
+    package_name = "packlab_test_ocp_adapters"
+    package = ModuleType(package_name)
+    package.__path__ = []
+    native = ModuleType(f"{package_name}.OCP")
+    native.__version__ = "7.9.3.1"
+    native.__all__ = []
+    for name in modules:
+        setattr(native, name, ModuleType(f"{native.__name__}.{name}"))
+    monkeypatch.setitem(sys.modules, package_name, package)
+    monkeypatch.setitem(sys.modules, native.__name__, native)
+
+    namespace = {"__name__": package_name, "__package__": package_name}
+    exec(compile(source, "<controlled OCP package init>", "exec"), namespace)
+
+    assert importlib.import_module(f"{package_name}.BRepCheck") is native.BRepCheck
+    assert namespace["__version__"] == "7.9.3.1"
+
+    with pytest.raises(ValueError, match="315 unique module names"):
+        _package_init_source(["BRepCheck"])
+    duplicated = list(modules)
+    duplicated[1] = "BRepCheck"
+    with pytest.raises(ValueError, match="315 unique module names"):
+        _package_init_source(duplicated)
 
 
 def test_dependency_audit_manifest_projection_omits_host_paths_and_logs() -> None:
