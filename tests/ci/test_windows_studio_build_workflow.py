@@ -145,7 +145,7 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     assert 'f"-DCMAKE_PREFIX_PATH={args.occt_sdk};{sys.prefix}"' in ocp_builder
     assert (
         ocp_builder.index("dependency_audit = audit_dependencies(")
-        < ocp_builder.index("fmt_probe = run_fmt_probe(")
+        < ocp_builder.index('"tools.packaging.probe_fmt_dependency"')
         < ocp_builder.index("if args.prebuilt_extension:")
     )
     assert (
@@ -161,6 +161,10 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     assert "c9db27bf7d3e95932a0ddb512c35bfe19a63e50394da0d9978355db28842fa29" in ocp
     assert "--prebuilt-extension" in ocp_builder
     assert "REUSED_QUARANTINED_EXTENSION" in ocp_builder
+    assert (
+        '"uv",\n            "run",\n            "--locked",\n            "--no-sync"' in ocp_builder
+    )
+    assert '"tools.packaging.probe_fmt_dependency"' in ocp_builder
 
 
 def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:

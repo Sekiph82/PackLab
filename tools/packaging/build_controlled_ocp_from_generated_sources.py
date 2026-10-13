@@ -20,7 +20,6 @@ from tools.packaging.build_controlled_ocp_runtime import (
     windows_sdk_gl_include_dir,
 )
 from tools.packaging.prepare_official_ocp_generated_sources import prepare_generated_sources
-from tools.packaging.probe_fmt_dependency import run_probe as run_fmt_probe
 from tools.packaging.validate_controlled_occt_sdk import validate_sdk
 from tools.packaging.validate_windows_native_runtime_policy import (
     resolve_windows_api_set_host,
@@ -158,15 +157,28 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
         expected_cache_key=args.expected_cache_key,
         require_opengl=True,
     )
-    fmt_probe = run_fmt_probe(
-        Path(sys.prefix),
-        args.build_root / "fmt-source-evidence",
-        generated_root / "OCP_src_stubs_Windows" / "CMakeLists.txt",
-    )
-    if fmt_probe.get("status") != "PASS":
-        raise ValueError("Pinned fmt source, package, notice, or import ownership probe failed")
     fmt_probe_path = args.build_root / "fmt-dependency-probe.json"
-    fmt_probe_path.write_text(json.dumps(fmt_probe, indent=2) + "\n", encoding="utf-8")
+    _run(
+        [
+            "uv",
+            "run",
+            "--locked",
+            "--no-sync",
+            "python",
+            "-m",
+            "tools.packaging.probe_fmt_dependency",
+            "--prefix",
+            str(Path(sys.prefix)),
+            "--scratch",
+            str(args.build_root / "fmt-source-evidence"),
+            "--generated-cmake",
+            str(generated_root / "OCP_src_stubs_Windows" / "CMakeLists.txt"),
+            "--report",
+            str(fmt_probe_path),
+            "--assert-pass",
+        ]
+    )
+    fmt_probe = json.loads(fmt_probe_path.read_text(encoding="utf-8"))
     runtime_policy_evidence = validate_runtime(Path(sys.prefix), fmt_probe_path)
 
     occt_dlls = [path for path in args.occt_sdk.rglob("*.dll") if path.is_file()]
