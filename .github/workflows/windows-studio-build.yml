@@ -661,7 +661,23 @@ jobs:
           "manifest_sha256=$manifestSha" >> $env:GITHUB_OUTPUT
           "source_lock_sha256=$($metadata.source_lock_sha256)" >> $env:GITHUB_OUTPUT
           "bundle_content_sha256=$($metadata.bundle_content_sha256)" >> $env:GITHUB_OUTPUT
-          @("## Controlled 315-module OCP runtime", "", "- Cache: `${{ steps.controlled_cache.outputs.cache-hit }}`", "- Bundle bytes: $artifactBytes", "- Bundle content SHA-256: ``$($metadata.bundle_content_sha256)``", "- Runtime manifest SHA-256: ``$manifestSha``", "- OCP runtime binary SHA-256: $((Get-FileHash -LiteralPath (Get-ChildItem -LiteralPath (Join-Path $bundle 'OCP') -Filter 'OCP*.pyd' -File | Select-Object -First 1).FullName -Algorithm SHA256).Hash.ToLowerInvariant())", "- Generated-source path: $($metadata.toolchain.source_generation); pywrap generation invoked: false", "- SDK checkpoint bytes: ${{ needs.occt-sdk.outputs.sdk-byte-count }}") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          $runtimeBinary = Get-ChildItem -LiteralPath (Join-Path $bundle "OCP") -Filter "OCP*.pyd" -File | Select-Object -First 1
+          if (!$runtimeBinary) { throw "The controlled OCP runtime binary is missing from the validated bundle." }
+          $runtimeBinarySha = (Get-FileHash -LiteralPath $runtimeBinary.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $cacheHit = "${{ steps.controlled_cache.outputs.cache-hit }}"
+          $sourceGeneration = $metadata.toolchain.source_generation
+          $sdkBytes = "${{ needs.occt-sdk.outputs.sdk-byte-count }}"
+          @(
+            "## Controlled 315-module OCP runtime",
+            "",
+            "- Cache: $cacheHit",
+            "- Bundle bytes: $artifactBytes",
+            "- Bundle content SHA-256: $($metadata.bundle_content_sha256)",
+            "- Runtime manifest SHA-256: $manifestSha",
+            "- OCP runtime binary SHA-256: $runtimeBinarySha",
+            "- Generated-source path: $sourceGeneration; pywrap generation invoked: false",
+            "- SDK checkpoint bytes: $sdkBytes"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
       - name: Save exact OCP runtime cache after size validation
         if: steps.bundle_cache_check.outputs.valid != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

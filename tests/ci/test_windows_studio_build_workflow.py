@@ -243,6 +243,14 @@ def test_native_pipeline_seals_same_run_occt_and_generated_ocp_stages() -> None:
     assert "100 MiB artifact budget" in packaging
     assert "1,800 MiB installer budget" in packaging
     assert "Upload cleared versioned installer" in packaging
+    runtime_identity = ocp.split("Record exact OCP runtime artifact identity", 1)[1].split(
+        "Save exact OCP runtime cache after size validation", 1
+    )[0]
+    assert (
+        "$runtimeBinarySha = (Get-FileHash -LiteralPath $runtimeBinary.FullName" in runtime_identity
+    )
+    assert '"- OCP runtime binary SHA-256: $runtimeBinarySha"' in runtime_identity
+    assert "Get-FileHash -LiteralPath (Get-ChildItem" not in runtime_identity
 
 
 def test_packaged_runtime_smoke_covers_cad_step_dxf_pdf_and_open3d() -> None:
