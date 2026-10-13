@@ -17,7 +17,7 @@ CONTRACT = Path("tools/packaging/fmt_dependency_contract.json")
 CONDA_LOCK = Path("tools/packaging/packlab-ocp-bindings-win.lock")
 SOURCE_LOCK = Path("tools/packaging/windows_native_source_lock.json")
 FMT_DLL_NAME = "fmt.dll"
-RECIPE_URL_TEMPLATE = "https://raw.githubusercontent.com/{repo}/{commit}/{path}"
+RECIPE_URL_TEMPLATE = "https://raw.githubusercontent.com/{repository}/{commit}/{path}"
 ANACONDA_API = "https://api.anaconda.org/package/conda-forge/fmt"
 
 

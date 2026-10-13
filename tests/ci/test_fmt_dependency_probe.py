@@ -186,6 +186,15 @@ def test_fmt_probe_rejects_changed_package_lock() -> None:
         probe.verify_pinned_identity(contract, probe.CONDA_LOCK)
 
 
+def test_fmt_recipe_url_uses_pinned_feedstock_repository() -> None:
+    contract = json.loads(probe.CONTRACT.read_text(encoding="utf-8"))
+
+    assert probe.RECIPE_URL_TEMPLATE.format(**contract["conda_forge_recipe"]) == (
+        "https://raw.githubusercontent.com/conda-forge/fmt-feedstock/"
+        "437ad8fba6cc830bd16eef7f98aeb2d76c9ff060/recipe/meta.yaml"
+    )
+
+
 def test_hosted_fmt_probe_is_manual_only_and_never_compiles_occt_or_ocp() -> None:
     workflow = (ROOT / ".github/workflows/pl0350-fmt-dependency-probe.yml").read_text(
         encoding="utf-8"
