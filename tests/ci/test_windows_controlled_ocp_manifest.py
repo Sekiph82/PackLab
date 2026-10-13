@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from tools.packaging.build_controlled_ocp_from_generated_sources import (
+    _package_init_source,
     _path_free_dependency_audit,
 )
 from tools.packaging.validate_controlled_ocp_manifest import (
@@ -23,6 +24,25 @@ SOURCE_LOCK = ROOT / "tools" / "packaging" / "windows_native_source_lock.json"
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def test_monolithic_extension_package_init_aliases_exact_retained_modules() -> None:
+    modules = [f"Module{index:03}" for index in range(315)]
+    modules[0] = "BRepCheck"
+    source = _package_init_source(modules)
+
+    assert "'BRepCheck'" in source
+    assert "'Module314'" in source
+    assert "sys.modules[f'{__name__}.{_module_name}'] = _module" in source
+    assert "IVtk" not in source
+    assert source == _package_init_source(modules)
+
+    with pytest.raises(ValueError, match="315 unique module names"):
+        _package_init_source(["BRepCheck"])
+    duplicated = list(modules)
+    duplicated[1] = "BRepCheck"
+    with pytest.raises(ValueError, match="315 unique module names"):
+        _package_init_source(duplicated)
 
 
 def test_dependency_audit_manifest_projection_omits_host_paths_and_logs() -> None:

@@ -74,6 +74,34 @@ REQUIRED_PACKLAB_MODULES = frozenset(
 )
 
 
+def _package_init_source(module_names: list[str]) -> str:
+    """Create the thin per-module import bridge for the monolithic OCP extension."""
+    if (
+        len(module_names) != 315
+        or len(set(module_names)) != 315
+        or any(not name.isidentifier() for name in module_names)
+    ):
+        raise ValueError("the controlled OCP adapter list must contain 315 unique module names")
+    rendered_modules = ",\n    ".join(repr(name) for name in sorted(module_names))
+    return (
+        '"""PackLab import adapters for the source-built monolithic OCP extension."""\n'
+        "from . import OCP as _native\n"
+        "from .OCP import *\n"
+        "from .OCP import __version__\n"
+        "import sys as _sys\n\n"
+        "_MODULE_NAMES = (\n    " + rendered_modules + "\n)\n"
+        "for _module_name in _MODULE_NAMES:\n"
+        "    try:\n"
+        "        _module = getattr(_native, _module_name)\n"
+        "    except AttributeError as error:\n"
+        "        raise ImportError(\n"
+        "            f'Controlled OCP extension is missing registered module {_module_name!r}'\n"
+        "        ) from error\n"
+        "    _sys.modules[f'{__name__}.{_module_name}'] = _module\n"
+        "del _module, _module_name, _sys\n"
+    )
+
+
 def _path_free_dependency_audit(report: dict[str, Any]) -> dict[str, Any]:
     """Keep decision evidence while omitting SDK locations and compiler log paths."""
     result = dict(report)
@@ -403,7 +431,7 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
     package.mkdir()
     shutil.copy2(extensions[0], package / extensions[0].name)
     (package / "__init__.py").write_text(
-        "from .OCP import *\nfrom .OCP import __version__\n", encoding="utf-8"
+        _package_init_source(patched["retained_modules"]), encoding="utf-8"
     )
     for name in sorted(required_dlls):
         shutil.copy2(occt_dlls_by_name[name], package / name)
