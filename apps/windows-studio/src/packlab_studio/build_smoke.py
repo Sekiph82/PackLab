@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from packlab_core.cad_adapter import (
+    CAD_RUNTIME_VERSION_STATUS_OBSERVED,
     CadRuntimeDiagnostics,
     cad_shape_precise_bounds,
     probe_cad_runtime,
@@ -61,6 +62,15 @@ def _cad_probe_failure_code(diagnostics: CadRuntimeDiagnostics) -> str:
     )
     kernel_error = diagnostics.error_code or "none"
     return f"ocp_cad_probe_not_ready:kernel={kernel_error};capabilities={failures or 'none'}"
+
+
+def _cad_version_failure_code(diagnostics: CadRuntimeDiagnostics) -> str:
+    kernel_error = diagnostics.error_code or "none"
+    return (
+        "ocp_cad_software_version_unobserved:"
+        f"binding={diagnostics.binding_version_status};"
+        f"kernel={diagnostics.kernel_version_status};detail={kernel_error}"
+    )
 
 
 def _cad_fixture() -> tuple[Any, Any, Any]:
@@ -127,6 +137,11 @@ def run_frozen_capability_smoke() -> dict[str, object]:
     diagnostics = probe_cad_runtime()
     _required(diagnostics.status.value == "READY", _cad_probe_failure_code(diagnostics))
     _required(diagnostics.binding_version == OCP_VERSION, "ocp_cad_version_mismatch")
+    _required(
+        diagnostics.binding_version_status == CAD_RUNTIME_VERSION_STATUS_OBSERVED
+        and diagnostics.kernel_version_status == CAD_RUNTIME_VERSION_STATUS_OBSERVED,
+        _cad_version_failure_code(diagnostics),
+    )
     representation = revolve_design_model_to_brep(model, profile, operation)
     _required(representation.solid_count == 1, "ocp_cad_revolve_failed")
     bounds = cad_shape_precise_bounds(representation.shape_handle)

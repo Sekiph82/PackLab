@@ -34,6 +34,26 @@ def test_cad_probe_failure_code_reports_failed_capabilities_without_paths() -> N
     )
 
 
+def test_cad_version_failure_code_reports_safe_observation_statuses() -> None:
+    diagnostics = CadRuntimeDiagnostics(
+        status=CadRuntimeStatus.READY,
+        binding_package="cadquery-ocp-novtk",
+        binding_version="7.9.3.1.1",
+        binding_version_status=CAD_RUNTIME_VERSION_STATUS_OBSERVED,
+        kernel_version=None,
+        kernel_version_status="UNAVAILABLE",
+        platform_system="Windows",
+        platform_machine="AMD64",
+        capabilities=(),
+        error_code="kernel_binary_identity_unavailable",
+    )
+
+    assert build_smoke._cad_version_failure_code(diagnostics) == (
+        "ocp_cad_software_version_unobserved:binding=OBSERVED;"
+        "kernel=UNAVAILABLE;detail=kernel_binary_identity_unavailable"
+    )
+
+
 def test_app_build_smoke_constructs_and_closes_the_real_window(monkeypatch) -> None:
     events: list[str] = []
     created_argv: list[str] = []
