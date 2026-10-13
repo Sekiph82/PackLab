@@ -1749,13 +1749,24 @@ def _observe_kernel_version() -> tuple[str | None, str | None]:
     try:
         distribution = importlib.metadata.distribution(CAD_BINDING_PACKAGE)
     except importlib.metadata.PackageNotFoundError:
-        return None, "binding_distribution_metadata_unavailable"
-    kernel_files = tuple(
-        Path(str(distribution.locate_file(item)))
-        for item in distribution.files or ()
-        if Path(item).name.casefold().startswith("tkernel-")
-        and Path(item).suffix.casefold() == ".dll"
-    )
+        kernel_files: tuple[Path, ...] = ()
+    else:
+        kernel_files = tuple(
+            Path(str(distribution.locate_file(item)))
+            for item in distribution.files or ()
+            if Path(item).name.casefold().startswith("tkernel-")
+            and Path(item).suffix.casefold() == ".dll"
+        )
+    if len(kernel_files) != 1:
+        try:
+            binding_module = _import_binding_module()
+            module_path = getattr(binding_module, "__file__", None)
+            if not isinstance(module_path, str) or not module_path:
+                return None, "kernel_binary_identity_unavailable"
+            package_dir = Path(module_path).resolve().parent
+            kernel_files = tuple(package_dir.glob("TKERNEL-*.dll"))
+        except Exception:
+            return None, "kernel_binary_identity_unavailable"
     if len(kernel_files) != 1:
         return None, "kernel_binary_identity_unavailable"
     try:

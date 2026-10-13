@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import typing
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -254,6 +256,24 @@ def test_selected_binding_reports_real_kernel_versions_and_capabilities() -> Non
         item.status is cad_adapter.CadCapabilityStatus.AVAILABLE
         for item in diagnostics.capabilities
     )
+
+
+def test_kernel_version_can_be_observed_from_controlled_package_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    kernel_dll = tmp_path / "TKERNEL-7.9.3.dll"
+    kernel_dll.touch()
+    binding_module = SimpleNamespace(__file__=str(tmp_path / "__init__.py"))
+
+    def missing_distribution(_name: str) -> None:
+        raise cad_adapter.importlib.metadata.PackageNotFoundError
+
+    monkeypatch.setattr(cad_adapter.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(cad_adapter.importlib.metadata, "distribution", missing_distribution)
+    monkeypatch.setattr(cad_adapter, "_import_binding_module", lambda: binding_module)
+    monkeypatch.setattr(cad_adapter, "_read_windows_file_version", lambda path: "7.9.3")
+
+    assert cad_adapter._observe_kernel_version() == ("7.9.3", None)
 
 
 def test_public_adapter_contracts_do_not_expose_backend_types() -> None:
