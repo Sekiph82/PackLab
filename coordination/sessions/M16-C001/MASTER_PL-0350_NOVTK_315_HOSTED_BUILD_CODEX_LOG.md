@@ -1,8 +1,20 @@
 # Master Handoff — PL-0350 Hosted 315-Module No-VTK Build
 
 Date: 2026-10-13
-Latest implementation: `a2805616c9c0dd665e48b1de82c8436ea64b0805` (R04)
-Status: **BATCH_STOPPED_AT_PL-0350 / OCP_NATIVE_DEPENDENCY_UNOWNED_FMT_DLL / AWAITING_INDEPENDENT_AUDIT**
+Latest implementation: `5ff482278fae05bbae029b5185fa2838d1cb70b9` (R05 hosted dependency preflight)
+Status: **BATCH_STOPPED_AT_PL-0350 / FMT_PROVENANCE_REQUIRED (UCRT + VC14_RUNTIME) / AWAITING_INDEPENDENT_AUDIT**
+
+## R05 current state
+
+R05 preserved the original OpenGL-enabled R04 SDK and source evidence in a noncompiling Windows-hosted recovery. The new artifact `11796717315` contains the exact original checkpoint bytes plus lineage; the recovery verified 7,991 SDK files / 173,975,159 bytes and payload SHA-256 `7ad1c8b0b2634d32eeada2e6d8fa4fb6e85f7f3c1e6989e8beab7ebdbc2c9031`.
+
+The manual Windows 2022 fmt preflight [38370004545](https://github.com/Sekiph82/PackLab/actions/runs/38370004545) verified the exact locked `fmt` package archive (SHA-256 `1d6d6f1bf284e50cf617ce9a6250e0bf70bd0d30b068568364d6b1852aad9466`), installed AMD64 `fmt.dll` (SHA-256 `0d4edfe1411f4a7c5f57758239f0f1e6e1cff7f2d0ae5f9511a1dfacc08b388d`), upstream source/MIT notice hashes, pinned feedstock recipe, CMake target and PE imports. The probe stopped before any native build because six imported API-set DLLs were owned by locked `ucrt 10.0.26100.0` and three VC DLLs by locked `vc14_runtime 14.51.36247`; no exact PackLab source/license/redistribution entries exist for these current conda runtime files. The workflow uploaded report artifact `11799090609` and failed closed with `FMT_PROVENANCE_REQUIRED`.
+
+Hosted Python quality [38369998989](https://github.com/Sekiph82/PackLab/actions/runs/38369998989) passed. No OCP/OCCT compile, Pyd quarantine, runtime CAD smoke, Studio package, Installer, or warm-cache run occurred. Root `TASKS.md`, independent audit files, owner Desktop and known-good EXE remain untouched.
+
+R05 implementation commits: `cfcbaa99621868e1238a3210e7113fe77a896d4d`, `bd1b2e25dacbbed991f843e9b7c040e9dd055a0e`, `858c8ac2206a8a80a5c9be5834ee2c1c0061ea42`, `3450afd83e369d84f67d51c717521f563bf9adc4`, `5ff482278fae05bbae029b5185fa2838d1cb70b9`. Detailed records: `PL-0350_FMT_DEPENDENCY_PROVENANCE_R05_CODEX_LOG.md` and `PL-0350_FMT_DEPENDENCY_PROVENANCE_R05_REPORT.md`.
+
+**Awaiting ChatGPT's independent audit. Stop at the unresolved UCRT/VC runtime source/license and redistribution gate; do not retry OCP compilation or advance to PL-0351.**
 
 ## R04 current state
 
