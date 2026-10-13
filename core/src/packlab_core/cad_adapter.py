@@ -8,6 +8,7 @@ import importlib
 import importlib.metadata
 import math
 import platform
+import sys
 import tempfile
 import threading
 from collections.abc import Callable
@@ -1746,22 +1747,28 @@ class _VsFixedFileInfo(ctypes.Structure):
 def _observe_kernel_version() -> tuple[str | None, str | None]:
     if platform.system() != "Windows":
         return None, "kernel_version_resource_unavailable_on_platform"
+    package_directories: list[Path] = []
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if getattr(sys, "frozen", False) and isinstance(bundle_root, str) and bundle_root:
+        frozen_root = Path(bundle_root).resolve()
+        package_directories.extend((frozen_root / "OCP", frozen_root))
     try:
         binding_module = _import_binding_module()
         module_path = getattr(binding_module, "__file__", None)
         if isinstance(module_path, str) and module_path:
             package_dir = Path(module_path).resolve().parent
-            for directory in (package_dir, package_dir.parent):
-                kernel_files = tuple(directory.glob("TKERNEL-*.dll"))
-                if kernel_files:
-                    if len(kernel_files) != 1:
-                        return None, "kernel_binary_identity_unavailable"
-                    try:
-                        return _read_windows_file_version(kernel_files[0]), None
-                    except Exception:
-                        return None, "kernel_version_resource_unavailable"
+            package_directories.extend((package_dir, package_dir.parent))
     except Exception:
         pass
+    for directory in dict.fromkeys(package_directories):
+        kernel_files = tuple(directory.glob("TKERNEL-*.dll"))
+        if kernel_files:
+            if len(kernel_files) != 1:
+                return None, "kernel_binary_identity_unavailable"
+            try:
+                return _read_windows_file_version(kernel_files[0]), None
+            except Exception:
+                return None, "kernel_version_resource_unavailable"
     try:
         distribution = importlib.metadata.distribution(CAD_BINDING_PACKAGE)
     except importlib.metadata.PackageNotFoundError:
