@@ -62,8 +62,10 @@ def test_open3d_probe_failure_code_classifies_path_free_import_detail() -> None:
         == "open3d_probe_failed:status=UNAVAILABLE;detail=module_unavailable_open3d_cpu_pybind"
     )
     assert (
-        build_smoke._open3d_probe_failure_code("UNKNOWN", "Open3D import failed (OSError)")
-        == "open3d_probe_failed:status=UNKNOWN;detail=import_failed_OSError"
+        build_smoke._open3d_probe_failure_code(
+            "UNKNOWN", "Open3D import failed (OSError;winerror=126)"
+        )
+        == "open3d_probe_failed:status=UNKNOWN;detail=import_failed_OSError_winerror_126"
     )
     assert (
         build_smoke._open3d_probe_failure_code(

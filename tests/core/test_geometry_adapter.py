@@ -91,6 +91,20 @@ def test_unavailable_package_is_reported_without_install_or_download_fallback():
     assert calls == ["import", "import"]
 
 
+def test_open3d_oserror_probe_reports_only_windows_error_code():
+    error = OSError("failure at C:\\private\\cache")
+    error.winerror = 126
+
+    def failing_import() -> ModuleType:
+        raise error
+
+    capability = probe_open3d(failing_import)
+
+    assert capability.status is CapabilityStatus.UNKNOWN
+    assert capability.detail == "Open3D import failed (OSError;winerror=126)"
+    assert "private" not in capability.detail
+
+
 def test_wrong_version_or_missing_build_facts_stays_unknown():
     module = ModuleType("open3d")
     module.__version__ = "0.21.0"

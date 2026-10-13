@@ -217,12 +217,15 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
             f"Open3D import unavailable ({exc.name or 'module not found'})",
         )
     except (ImportError, OSError) as exc:
+        error_detail = type(exc).__name__
+        if isinstance(exc, OSError) and isinstance(exc.winerror, int):
+            error_detail = f"{error_detail};winerror={exc.winerror}"
         return _capability(
             CapabilityStatus.UNKNOWN,
             _metadata_version(),
             (),
             (),
-            f"Open3D import failed ({type(exc).__name__})",
+            f"Open3D import failed ({error_detail})",
         )
 
     version_value = getattr(module, "__version__", None)

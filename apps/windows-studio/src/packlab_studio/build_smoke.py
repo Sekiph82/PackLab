@@ -86,10 +86,16 @@ def _open3d_probe_failure_code(status: str, detail: str) -> str:
         else:
             safe_detail = "module_unavailable"
     elif detail.startswith("Open3D import failed (") and detail.endswith(")"):
-        error_type = detail.removeprefix("Open3D import failed (")[:-1]
-        safe_detail = (
-            f"import_failed_{error_type}" if error_type.isidentifier() else "import_failed"
-        )
+        error_details = detail.removeprefix("Open3D import failed (")[:-1].split(";")
+        error_type = error_details[0]
+        if error_type.isidentifier():
+            safe_detail = f"import_failed_{error_type}"
+            if len(error_details) == 2 and error_details[1].startswith("winerror="):
+                winerror = error_details[1].removeprefix("winerror=")
+                if winerror.isdecimal():
+                    safe_detail += f"_winerror_{winerror}"
+        else:
+            safe_detail = "import_failed"
     return f"open3d_probe_failed:status={status};detail={safe_detail}"
 
 
