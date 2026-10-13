@@ -604,7 +604,7 @@ def project_visible_cad_edges(
         edge_explorer = top_exp.TopExp_Explorer(visible_shape, top_abs.TopAbs_EDGE)
         curves: list[CadProjectedCurveData] = []
         while edge_explorer.More():
-            edge = topods.TopoDS.Edge_s(edge_explorer.Current())
+            edge = topods.TopoDS.Edge(edge_explorer.Current())
             curve = adaptor_module.BRepAdaptor_Curve(edge)
             first = float(curve.FirstParameter())
             last = float(curve.LastParameter())
@@ -713,7 +713,7 @@ def section_cad_shape(
             edge_count += 1
             if edge_count > maximum_edges:
                 raise CadAdapterError("cad_section_edge_limit_exceeded")
-            edge = topods.TopoDS.Edge_s(explorer.Current())
+            edge = topods.TopoDS.Edge(explorer.Current())
             curve = adaptor_module.BRepAdaptor_Curve(edge)
             first = float(curve.FirstParameter())
             last = float(curve.LastParameter())

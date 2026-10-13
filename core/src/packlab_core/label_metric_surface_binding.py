@@ -532,7 +532,7 @@ def _planar_rectangle(
     if len(edges) != 4:
         raise LabelMetricSurfaceBindingError("label_metric_planar_trim_must_be_single_rectangle")
     for edge in edges:
-        curve = modules["adaptor"].BRepAdaptor_Curve(modules["topods"].TopoDS.Edge_s(edge))
+        curve = modules["adaptor"].BRepAdaptor_Curve(modules["topods"].TopoDS.Edge(edge))
         kind = getattr(curve.GetType(), "name", str(curve.GetType()).split(".")[-1])
         if kind != "GeomAbs_Line":
             raise LabelMetricSurfaceBindingError(
@@ -565,7 +565,7 @@ def _planar_rectangle(
     brep = importlib.import_module("OCP.BRep").BRep_Tool
     vertex_points: list[tuple[float, float, float]] = []
     for vertex in vertices:
-        typed = topods.Vertex_s(vertex)
+        typed = topods.Vertex(vertex)
         point = brep.Pnt_s(typed)
         xyz = (float(point.X()), float(point.Y()), float(point.Z()))
         if not any(_points_close(xyz, existing) for existing in vertex_points):
@@ -618,7 +618,7 @@ def _cylindrical_wrap(face: Any) -> tuple[float, float, tuple[tuple[str, float |
     topods = modules["topods"].TopoDS
     edge_types = []
     for edge in edges:
-        curve = modules["adaptor"].BRepAdaptor_Curve(topods.Edge_s(edge))
+        curve = modules["adaptor"].BRepAdaptor_Curve(topods.Edge(edge))
         edge_type = getattr(curve.GetType(), "name", str(curve.GetType()).split(".")[-1])
         edge_types.append(edge_type)
     if (
