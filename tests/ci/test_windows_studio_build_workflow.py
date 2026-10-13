@@ -70,6 +70,9 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     preflight = workflow.split("  capacity-preflight:\n", 1)[1].split("  occt-sdk:\n", 1)[0]
     sdk = workflow.split("  occt-sdk:\n", 1)[1].split("  controlled-ocp-runtime:\n", 1)[0]
     ocp = workflow.split("  controlled-ocp-runtime:\n", 1)[1].split("  build-studio:\n", 1)[0]
+    inspection = workflow.split("  retained-sdk-inspection:\n", 1)[1].split(
+        "  capacity-preflight:\n", 1
+    )[0]
     studio = workflow.split("  build-studio:\n", 1)[1]
 
     assert (
@@ -91,6 +94,7 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
         assert "inputs.build_revision == github.sha" in condition
 
     assert "Bootstrap Python: $bootstrapPython" in preflight
+    assert '$bootstrapPython = Join-Path $env:pythonLocation "python.exe"' in inspection
     assert preflight.index("preflight_occt_sdk_layout") < preflight.index("Invoke-WebRequest")
     assert "sys.version_info[:3] == (3,12,10)" in preflight
     native_assertion = "sys.version_info[:3] == (3,12,15)"

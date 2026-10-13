@@ -82,8 +82,9 @@ jobs:
       - name: Confirm bootstrap and native Python versions
         shell: pwsh
         run: |
-          $bootstrap = (& python -S -c "import sys; print(sys.version.split()[0])").Trim()
-          if ($LASTEXITCODE -ne 0 -or $bootstrap -ne "3.12.10") { throw "Hosted bootstrap Python must be 3.12.10; observed $bootstrap." }
+          $bootstrapPython = Join-Path $env:pythonLocation "python.exe"
+          $bootstrap = (& $bootstrapPython -S -c "import sys; print(sys.version.split()[0])").Trim()
+          if ($LASTEXITCODE -ne 0 -or $bootstrap -ne "3.12.10") { throw "Hosted bootstrap Python at $bootstrapPython must be 3.12.10; observed $bootstrap." }
           $native = (& micromamba run -n packlab-ocp-bindings python -c "import sys; print(sys.version.split()[0])").Trim()
           if ($LASTEXITCODE -ne 0 -or $native -ne "3.12.15") { throw "Native build Python must be 3.12.15; observed $native." }
           @("- Bootstrap Python: $bootstrap", "- Native conda Python: $native") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
