@@ -74,6 +74,31 @@ REQUIRED_PACKLAB_MODULES = frozenset(
 )
 
 
+def _path_free_dependency_audit(report: dict[str, Any]) -> dict[str, Any]:
+    """Keep decision evidence while omitting SDK locations and compiler log paths."""
+    result = dict(report)
+    windows_opengl = report.get("windows_opengl_system", {})
+    if isinstance(windows_opengl, dict):
+        result["windows_opengl_system"] = {
+            key: windows_opengl[key]
+            for key in (
+                "windows_sdk_version",
+                "gl_header_present",
+                "opengl32_import_library_present",
+                "opengl32_system_runtime_present",
+            )
+            if key in windows_opengl
+        }
+    compile_probe = report.get("opengl_compile_link_probe", {})
+    if isinstance(compile_probe, dict):
+        result["opengl_compile_link_probe"] = {
+            key: compile_probe[key]
+            for key in ("status", "header", "link_closure", "executable_bytes")
+            if key in compile_probe
+        }
+    return result
+
+
 def _run(command: list[str], *, timeout: int | None = None) -> None:
     print("RUN " + " ".join(command), flush=True)
     try:
@@ -523,7 +548,7 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
             "toolchain_contract_sha256": sdk["toolchain_contract_sha256"],
             "toolchain_contract_compatibility": sdk_toolchain_compatibility,
         },
-        "occt_sdk_dependency_audit": dependency_audit,
+        "occt_sdk_dependency_audit": _path_free_dependency_audit(dependency_audit),
         "windows_runtime_deployment": {
             "policy_path": RUNTIME_POLICY.as_posix(),
             "policy_sha256": sha256(RUNTIME_POLICY),

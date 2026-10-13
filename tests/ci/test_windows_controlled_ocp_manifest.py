@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 
 import pytest
+from tools.packaging.build_controlled_ocp_from_generated_sources import (
+    _path_free_dependency_audit,
+)
 from tools.packaging.validate_controlled_ocp_manifest import (
     load_and_validate_manifest,
     validate_staged_tree,
@@ -20,6 +23,34 @@ SOURCE_LOCK = ROOT / "tools" / "packaging" / "windows_native_source_lock.json"
 
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def test_dependency_audit_manifest_projection_omits_host_paths_and_logs() -> None:
+    result = _path_free_dependency_audit(
+        {
+            "status": "PASS",
+            "windows_opengl_system": {
+                "windows_sdk_root": r"C:\Program Files\Windows Kits\10",
+                "gl_header": r"C:\Program Files\Windows Kits\10\Include\gl.h",
+                "windows_sdk_version": "10.0.26100.0",
+                "gl_header_present": True,
+                "opengl32_import_library_present": True,
+                "opengl32_system_runtime_present": True,
+            },
+            "opengl_compile_link_probe": {
+                "status": "PASS",
+                "header": "OpenGl_Context.hxx",
+                "link_closure": "OpenCASCADE_LIBRARIES + opengl32",
+                "executable_bytes": 4096,
+                "log_tail": r"D:\a\PackLab\generated\build output",
+            },
+        }
+    )
+    serialized = json.dumps(result)
+    assert "C:\\\\Program Files" not in serialized
+    assert "D:\\\\a" not in serialized
+    assert "log_tail" not in serialized
+    assert result["windows_opengl_system"]["windows_sdk_version"] == "10.0.26100.0"
 
 
 @pytest.fixture
