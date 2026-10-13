@@ -1,7 +1,37 @@
 from __future__ import annotations
 
+from packlab_core.cad_adapter import (
+    CAD_RUNTIME_VERSION_STATUS_OBSERVED,
+    CadCapability,
+    CadCapabilityStatus,
+    CadRuntimeDiagnostics,
+    CadRuntimeStatus,
+)
 from packlab_studio import app as studio_app
 from packlab_studio import build_smoke
+
+
+def test_cad_probe_failure_code_reports_failed_capabilities_without_paths() -> None:
+    diagnostics = CadRuntimeDiagnostics(
+        status=CadRuntimeStatus.PARTIAL,
+        binding_package="cadquery-ocp-novtk",
+        binding_version="7.9.3.1.1",
+        binding_version_status=CAD_RUNTIME_VERSION_STATUS_OBSERVED,
+        kernel_version=None,
+        kernel_version_status="UNAVAILABLE",
+        platform_system="Windows",
+        platform_machine="AMD64",
+        capabilities=(
+            CadCapability("brep_construction", CadCapabilityStatus.AVAILABLE),
+            CadCapability("topology_validation", CadCapabilityStatus.ERROR, "AttributeError"),
+        ),
+        error_code="kernel_detail",
+    )
+
+    assert build_smoke._cad_probe_failure_code(diagnostics) == (
+        "ocp_cad_probe_not_ready:kernel=kernel_detail;"
+        "capabilities=topology_validation:ERROR:AttributeError"
+    )
 
 
 def test_app_build_smoke_constructs_and_closes_the_real_window(monkeypatch) -> None:

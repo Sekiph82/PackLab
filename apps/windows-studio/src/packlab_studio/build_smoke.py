@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from packlab_core.cad_adapter import (
+    CadRuntimeDiagnostics,
     cad_shape_precise_bounds,
     probe_cad_runtime,
     tessellate_cad_shape,
@@ -50,6 +51,16 @@ OPEN3D_VERSION = "0.20.0"
 def _required(condition: bool, code: str) -> None:
     if not condition:
         raise RuntimeError(code)
+
+
+def _cad_probe_failure_code(diagnostics: CadRuntimeDiagnostics) -> str:
+    failures = ",".join(
+        f"{item.name}:{item.status.value}:{item.error_code or 'none'}"
+        for item in diagnostics.capabilities
+        if item.status.value != "AVAILABLE"
+    )
+    kernel_error = diagnostics.error_code or "none"
+    return f"ocp_cad_probe_not_ready:kernel={kernel_error};capabilities={failures or 'none'}"
 
 
 def _cad_fixture() -> tuple[Any, Any, Any]:
@@ -114,7 +125,7 @@ def run_frozen_capability_smoke() -> dict[str, object]:
     _required(pdf_capability.available, "qt_vector_pdf_probe_failed")
     model, profile, operation = _cad_fixture()
     diagnostics = probe_cad_runtime()
-    _required(diagnostics.status.value == "READY", "ocp_cad_probe_not_ready")
+    _required(diagnostics.status.value == "READY", _cad_probe_failure_code(diagnostics))
     _required(diagnostics.binding_version == OCP_VERSION, "ocp_cad_version_mismatch")
     representation = revolve_design_model_to_brep(model, profile, operation)
     _required(representation.solid_count == 1, "ocp_cad_revolve_failed")
