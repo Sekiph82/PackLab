@@ -29,6 +29,10 @@ def test_native_workflow_is_manual_only_and_requires_exact_owner_inputs() -> Non
     )[0]
     sdk_job = workflow.split("  occt-sdk:\n", 1)[1].split("  controlled-ocp-runtime:\n", 1)[0]
     assert "inputs.preflight_only == true" not in inspection
+    assert "Verify complete hosted diagnostic evidence" in inspection
+    assert "fmt ownership/source/import dependency gate failed:" in inspection
+    assert "if: always()" in inspection
+    assert "if-no-files-found: warn" in inspection
     assert "needs: [capacity-preflight, retained-sdk-inspection]" in sdk_job
     assert "inspect_retained_occt_sdk" in workflow
     assert "actions: read" in workflow

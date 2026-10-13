@@ -127,7 +127,15 @@ jobs:
           $nativePrefix = (& micromamba run -n packlab-ocp-bindings python -c "import sys; print(sys.prefix)").Trim()
           if ($LASTEXITCODE -ne 0 -or !$nativePrefix) { throw "Native build prefix resolution failed." }
           micromamba run -n packlab-ocp-bindings python -m tools.packaging.probe_fmt_dependency --prefix $nativePrefix --scratch (Join-Path $scratch "fmt-source-evidence") --generated-cmake (Join-Path $generatedRoot "CadQuery/OCP/CMakeLists.txt") --report $fmtReport --assert-pass
-          if ($LASTEXITCODE -ne 0) { throw "fmt ownership/source/import dependency gate failed." }
+          $fmtExit = $LASTEXITCODE
+          if ($fmtExit -ne 0) {
+            if (Test-Path -LiteralPath $fmtReport -PathType Leaf) {
+              $fmtDetails = Get-Content -LiteralPath $fmtReport -Raw
+              $fmtDetails | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+              throw "fmt ownership/source/import dependency gate failed: $fmtDetails"
+            }
+            throw "fmt ownership/source/import dependency gate failed without a report (exit $fmtExit)."
+          }
           $runtimeReport = Join-Path $scratch "windows-native-runtime-policy.json"
           micromamba run -n packlab-ocp-bindings python -m tools.packaging.validate_windows_native_runtime_policy --prefix $nativePrefix --fmt-probe $fmtReport --report $runtimeReport
           if ($LASTEXITCODE -ne 0) { throw "OS API-set, VC prerequisite, or installer-policy gate failed." }
@@ -136,7 +144,21 @@ jobs:
         run: |
           uv run --locked --no-sync python -m pytest tests/ci/test_windows_native_runtime_policy.py tests/ci/test_fmt_dependency_probe.py tests/ci/test_windows_controlled_ocp_manifest.py tests/ci/test_controlled_ocp_runtime_bundle.py tests/ci/test_windows_redistribution_inventory.py tests/ci/test_windows_studio_build_workflow.py -q
           if ($LASTEXITCODE -ne 0) { throw "The pre-native PL-0350 regression/negative test matrix failed." }
+      - name: Verify complete hosted diagnostic evidence
+        shell: pwsh
+        run: |
+          $scratch = Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection"
+          $required = @(
+            (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection.json"),
+            (Join-Path $scratch "retained-sdk-dependency-audit.json"),
+            (Join-Path $scratch "fmt-dependency-probe.json"),
+            (Join-Path $scratch "windows-native-runtime-policy.json"),
+            (Join-Path $scratch "generated-source-patch-manifest.json")
+          )
+          $missing = @($required | Where-Object { !(Test-Path -LiteralPath $_ -PathType Leaf) })
+          if ($missing.Count -gt 0) { throw "Hosted diagnostic evidence is incomplete: $($missing -join ', ')" }
       - name: Upload noncompiling SDK and native runtime diagnostic evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-pl0350-precompile-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
@@ -146,7 +168,7 @@ jobs:
             ${{ runner.temp }}/pl0350-retained-sdk-inspection/fmt-dependency-probe.json
             ${{ runner.temp }}/pl0350-retained-sdk-inspection/windows-native-runtime-policy.json
             ${{ runner.temp }}/pl0350-retained-sdk-inspection/generated-source-patch-manifest.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
   capacity-preflight:
