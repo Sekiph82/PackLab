@@ -133,6 +133,10 @@ def build_from_generated_sources(args: argparse.Namespace) -> dict[str, Any]:
     config_matches = list(args.occt_sdk.rglob("OpenCASCADEConfig.cmake"))
     if not occt_dlls or len(dll_directories) != 1 or len(config_matches) != 1:
         raise ValueError("the sealed OCCT SDK is missing a flat DLL set or unique CMake package")
+    expected_bin = args.occt_sdk / sdk["sdk_layout"]["binary_dir"]
+    expected_lib = args.occt_sdk / sdk["sdk_layout"]["library_dir"]
+    if dll_directories != {expected_bin} or not (expected_lib / "TKOpenGl.lib").is_file():
+        raise ValueError("the sealed OCCT SDK DLL/LIB directories differ from its Windows layout")
 
     source_root = generated_root / "OCP_src_stubs_Windows"
     gl_include, _ = windows_sdk_gl_include_dir()

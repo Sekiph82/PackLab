@@ -36,6 +36,7 @@ NATIVE_BUILDER = Path(__file__).with_name("build_controlled_ocp_from_generated_s
 GENERATED_SOURCE_PATCHER = Path(__file__).with_name("prepare_official_ocp_generated_sources.py")
 OCCT_SDK_BUILDER = Path(__file__).with_name("build_controlled_occt_sdk.py")
 OCCT_SDK_VALIDATOR = Path(__file__).with_name("validate_controlled_occt_sdk.py")
+OCCT_SDK_LAYOUT_CONTRACT = Path(__file__).with_name("windows_occt_sdk_layout.py")
 RUNNER_PATH_RE = re.compile(r"(?i)(?<![a-z])[a-z]:[\\/]|/(?:home|runner)/")
 
 
@@ -176,6 +177,7 @@ def expected_contract_digests(
         "generated_source_patcher_sha256": sha256(GENERATED_SOURCE_PATCHER),
         "occt_sdk_builder_sha256": sha256(OCCT_SDK_BUILDER),
         "occt_sdk_validator_sha256": sha256(OCCT_SDK_VALIDATOR),
+        "occt_sdk_layout_contract_sha256": sha256(OCCT_SDK_LAYOUT_CONTRACT),
     }
 
 

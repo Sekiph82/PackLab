@@ -24,25 +24,26 @@ UNITS = 2 * MODULES
 
 
 def sdk_dependency_deficiencies(
-    missing_headers: dict[str, set[str]], required_toolkits: set[str], file_names: set[str]
+    missing_headers: dict[str, set[str]], required_toolkits: set[str], relative_paths: set[str]
 ) -> tuple[list[str], list[str]]:
     """Return every required toolkit import LIB and runtime DLL absent from the SDK."""
+    paths = {path.replace("\\", "/").casefold() for path in relative_paths}
     libraries = [
         f"{toolkit}.lib"
         for toolkit in sorted(required_toolkits)
-        if f"{toolkit}.lib".casefold() not in file_names
+        if f"win64/vc14/lib/{toolkit}.lib".casefold() not in paths
     ]
     runtimes = [
         f"{toolkit}.dll"
         for toolkit in sorted(required_toolkits)
-        if f"{toolkit}.dll".casefold() not in file_names
+        if f"win64/vc14/bin/{toolkit}.dll".casefold() not in paths
     ]
     if "opengl_context.hxx" in {key.split("/")[-1].casefold() for key in missing_headers}:
         if "tkopengl" not in {name.casefold() for name in required_toolkits}:
             required_toolkits.add("TKOpenGl")
-        if "TKOpenGl.lib" not in libraries and "tkopengl.lib" not in file_names:
+        if "TKOpenGl.lib" not in libraries and "win64/vc14/lib/tkopengl.lib" not in paths:
             libraries.append("TKOpenGl.lib")
-        if "TKOpenGl.dll" not in runtimes and "tkopengl.dll" not in file_names:
+        if "TKOpenGl.dll" not in runtimes and "win64/vc14/bin/tkopengl.dll" not in paths:
             runtimes.append("TKOpenGl.dll")
     return sorted(set(libraries)), sorted(set(runtimes))
 
@@ -281,10 +282,11 @@ def audit_dependencies(
     # The generated consumer links OpenCASCADE_LIBRARIES. Imported targets mentioned
     # by unrelated optional packages are not part of this consumer's closure.
     all_files = [path for path in sdk.rglob("*") if path.is_file() and not path.is_symlink()]
-    file_names = {path.name.casefold() for path in all_files}
+    relative_paths = {path.relative_to(sdk).as_posix() for path in all_files}
+    folded_paths = {path.casefold() for path in relative_paths}
     link_toolkits = required_toolkits | exported_toolkits
     missing_libraries, missing_runtimes = sdk_dependency_deficiencies(
-        missing_headers, link_toolkits, file_names
+        missing_headers, link_toolkits, relative_paths
     )
 
     result = {
@@ -304,8 +306,8 @@ def audit_dependencies(
         "present_exported_toolkits": sorted(
             toolkit
             for toolkit in link_toolkits
-            if f"{toolkit}.lib".casefold() in file_names
-            and f"{toolkit}.dll".casefold() in file_names
+            if f"win64/vc14/lib/{toolkit}.lib".casefold() in folded_paths
+            and f"win64/vc14/bin/{toolkit}.dll".casefold() in folded_paths
         ),
         "missing_occt_headers": {
             key: sorted(value) for key, value in sorted(missing_headers.items())
@@ -316,8 +318,8 @@ def audit_dependencies(
         "open_gl_header_present": any(
             path.name.casefold() == "opengl_context.hxx" for path in sdk_includes
         ),
-        "tkopengl_lib_present": "tkopengl.lib" in file_names,
-        "tkopengl_dll_present": "tkopengl.dll" in file_names,
+        "tkopengl_lib_present": "win64/vc14/lib/tkopengl.lib" in folded_paths,
+        "tkopengl_dll_present": "win64/vc14/bin/tkopengl.dll" in folded_paths,
         "windows_opengl_system": windows_opengl_prerequisites(
             Path(os.environ.get("WindowsSdkDir", r"C:\Program Files (x86)\Windows Kits\10")),
             os.environ.get("WindowsSDKVersion", "10.0.26100.0").rstrip("\\/"),

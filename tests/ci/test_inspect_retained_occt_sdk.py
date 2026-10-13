@@ -16,14 +16,14 @@ from tools.packaging.inspect_retained_occt_sdk import safe_extract
 def test_safe_extract_accepts_regular_bounded_archive(tmp_path: Path) -> None:
     archive = tmp_path / "sdk.zip"
     with zipfile.ZipFile(archive, "w") as zipped:
-        zipped.writestr("occt-sdk/include/OpenGl_Context.hxx", "header")
-        zipped.writestr("occt-sdk/lib/TKOpenGl.lib", "import library")
+        zipped.writestr("occt-sdk/inc/OpenGl_Context.hxx", "header")
+        zipped.writestr("occt-sdk/win64/vc14/lib/TKOpenGl.lib", "import library")
 
     output = tmp_path / "out"
     safe_extract(archive, output)
 
-    assert (output / "occt-sdk/include/OpenGl_Context.hxx").read_text() == "header"
-    assert (output / "occt-sdk/lib/TKOpenGl.lib").read_text() == "import library"
+    assert (output / "occt-sdk/inc/OpenGl_Context.hxx").read_text() == "header"
+    assert (output / "occt-sdk/win64/vc14/lib/TKOpenGl.lib").read_text() == "import library"
 
 
 @pytest.mark.parametrize(
@@ -72,11 +72,19 @@ def test_dependency_audit_rejects_missing_opengl_header_import_library_and_dll()
 
 def test_dependency_audit_accepts_complete_opengl_sdk_entries() -> None:
     libraries, runtimes = sdk_dependency_deficiencies(
-        {}, {"TKOpenGl"}, {"tkopengl.lib", "tkopengl.dll"}
+        {},
+        {"TKOpenGl"},
+        {"win64/vc14/lib/TKOpenGl.lib", "win64/vc14/bin/TKOpenGl.dll"},
     )
 
     assert libraries == []
     assert runtimes == []
+
+    flat_libraries, flat_runtimes = sdk_dependency_deficiencies(
+        {}, {"TKOpenGl"}, {"lib/TKOpenGl.lib", "bin/TKOpenGl.dll"}
+    )
+    assert flat_libraries == ["TKOpenGl.lib"]
+    assert flat_runtimes == ["TKOpenGl.dll"]
 
 
 def test_dependency_audit_rejects_other_required_occt_header_and_toolkit() -> None:

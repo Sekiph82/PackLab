@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
+from tools.packaging.windows_occt_sdk_layout import validate_windows_occt_sdk_layout
 
 OCCT_ID = "occt-source-7.9.3"
 SDK_VERSION = "10.0.26100.0"
@@ -45,6 +46,11 @@ OCCT_CMAKE_OPTIONS = {
 }
 CONTRACT = Path("tools/packaging/controlled_ocp_runtime_contract.json")
 LOCK = Path("tools/packaging/windows_native_source_lock.json")
+
+
+def validate_installed_sdk(install_root: Path) -> dict[str, Any]:
+    """Post-install seam shared with hosted fixture tests; does not invoke CMake."""
+    return validate_windows_occt_sdk_layout(install_root)
 
 
 def sha256(path: Path) -> str:
@@ -167,14 +173,7 @@ def build_sdk(
         shutil.rmtree(output)
     shutil.copytree(install, output)
     entries = _file_inventory(output)
-    sdk_files = [entry["relative_path"].casefold() for entry in entries]
-    required = {"inc/opengl_context.hxx", "lib/tkopengl.lib", "bin/tkopengl.dll"}
-    if not required <= set(sdk_files):
-        raise ValueError(
-            "OCCT install lacks the required OpenGL header, import library, or runtime DLL"
-        )
-    if not any("opencascadeconfig.cmake" in name for name in sdk_files):
-        raise ValueError("OCCT install lacks its exported CMake package")
+    layout = validate_installed_sdk(output)
     producer_run = os.environ.get("GITHUB_RUN_ID", "local-unset")
     producer_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "local-unset")
     metadata = {
@@ -186,6 +185,7 @@ def build_sdk(
         "producer_run_attempt": producer_attempt,
         "cache_key": cache_key,
         "source_lock_sha256": sha256(LOCK),
+        "toolchain_contract_sha256": sha256(CONTRACT),
         "occt_source_id": OCCT_ID,
         "occt_source_revision": record["revision"],
         "occt_source_sha256": record["sha256"],
@@ -195,6 +195,7 @@ def build_sdk(
         "compiler": compiler,
         "parallelism": PARALLELISM,
         "cmake_options": OCCT_CMAKE_OPTIONS,
+        "sdk_layout": layout,
         "build_started_utc": started.isoformat(),
         "build_ended_utc": ended.isoformat(),
         "build_duration_seconds": duration,

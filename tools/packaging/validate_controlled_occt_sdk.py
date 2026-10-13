@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from tools.packaging.build_controlled_occt_sdk import (
+    CONTRACT,
     LOCK,
     OCCT_CMAKE_OPTIONS,
     OCCT_ID,
@@ -17,6 +18,7 @@ from tools.packaging.build_controlled_occt_sdk import (
     SDK_VERSION,
 )
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
+from tools.packaging.windows_occt_sdk_layout import validate_windows_occt_sdk_layout
 
 METADATA_NAME = "occt-sdk-metadata.json"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -49,6 +51,7 @@ def validate_sdk(
         or metadata.get("producer_run_attempt") != expected_attempt
         or metadata.get("cache_key") != expected_cache_key
         or metadata.get("source_lock_sha256") != digest(LOCK)
+        or metadata.get("toolchain_contract_sha256") != digest(CONTRACT)
         or metadata.get("occt_source_id") != OCCT_ID
         or metadata.get("occt_source_revision") != record["revision"]
         or metadata.get("occt_source_sha256") != record["sha256"]
@@ -63,6 +66,12 @@ def validate_sdk(
         )
     if metadata.get("schema_version") == 2 and metadata.get("cmake_options") != OCCT_CMAKE_OPTIONS:
         raise ValueError("OCCT SDK checkpoint CMake option contract differs from the pinned build")
+    if metadata.get("schema_version") == 2:
+        layout = validate_windows_occt_sdk_layout(directory)
+        if metadata.get("sdk_layout") != layout:
+            raise ValueError(
+                "OCCT SDK checkpoint canonical layout differs from its sealed metadata"
+            )
     if require_opengl and (
         metadata.get("schema_version") != 2
         or metadata.get("cmake_options") != OCCT_CMAKE_OPTIONS
@@ -78,10 +87,14 @@ def validate_sdk(
     for entry in entries:
         relative = entry.get("relative_path")
         relative_path = PurePosixPath(relative) if isinstance(relative, str) else None
+        raw_parts = relative.split("/") if isinstance(relative, str) else []
         if (
             relative_path is None
             or relative_path.is_absolute()
             or ".." in relative_path.parts
+            or "\\" in relative
+            or any(part in {"", ".", ".."} for part in raw_parts)
+            or (raw_parts and ":" in raw_parts[0])
             or not SHA256.fullmatch(entry.get("sha256", ""))
             or not isinstance(entry.get("byte_length"), int)
             or entry["byte_length"] < 0
@@ -112,9 +125,6 @@ def validate_sdk(
     if metadata.get("payload_sha256") != hashlib.sha256(payload).hexdigest():
         raise ValueError("OCCT SDK checkpoint payload digest differs from its file manifest")
     folded = {name.casefold() for name in observed}
-    required = {"inc/opengl_context.hxx", "lib/tkopengl.lib", "bin/tkopengl.dll"}
-    if not required <= folded and metadata.get("schema_version") == 2:
-        raise ValueError("OCCT SDK checkpoint lacks required OpenGL header, import library, or DLL")
     if (
         not any(name.endswith(".dll") for name in folded)
         or not any(name.endswith(".lib") for name in folded)

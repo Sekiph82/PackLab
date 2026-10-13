@@ -133,6 +133,9 @@ jobs:
           if ($runArtifactCap -le 0) { throw "No retained-artifact budget remains for both the cold and warm run under the 8 GiB ceiling." }
           "max-run-artifact-bytes=$runArtifactCap" >> $env:GITHUB_OUTPUT
           if ($cacheBytes + $projectedCacheCap -gt $cacheCap) { throw "Existing cache usage plus the 4 GiB exact-key cache budget exceeds GitHub's 10 GiB repository cache limit." }
+          $env:PYTHONPATH = $env:GITHUB_WORKSPACE
+          python -S -m tools.packaging.preflight_occt_sdk_layout
+          if ($LASTEXITCODE -ne 0) { throw "The nested Windows OCCT SDK layout/closure fixture failed; native jobs must remain skipped." }
           $archive = Join-Path $env:RUNNER_TEMP "OCP_src_stubs_Windows.zip"
           Invoke-WebRequest -Uri "https://github.com/CadQuery/OCP/releases/download/7.9.3.1.1/OCP_src_stubs_Windows.zip" -OutFile $archive
           $patchRoot = Join-Path $env:RUNNER_TEMP "ocp-generated-source-preflight"
@@ -223,7 +226,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/occt-sdk
-          key: Windows-x64-occt-sdk-v3-${{ hashFiles('.github/workflows/windows-studio-build.yml', 'tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/controlled_ocp_runtime_contract.json', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py') }}
+          key: Windows-x64-occt-sdk-v4-${{ hashFiles('.github/workflows/windows-studio-build.yml', 'tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/controlled_ocp_runtime_contract.json', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/windows_occt_sdk_layout.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py') }}
       - name: Fetch and verify locked corresponding-source archives
         shell: pwsh
         run: |
@@ -407,7 +410,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/controlled-ocp-runtime
-          key: Windows-x64-controlled-ocp315-v3-${{ needs.occt-sdk.outputs.sdk-payload-sha256 }}-${{ hashFiles('.github/workflows/windows-studio-build.yml', 'tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/controlled_ocp_runtime_contract.json', 'tools/packaging/prepare_official_ocp_generated_sources.py', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/build_controlled_ocp_from_generated_sources.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py', 'tools/packaging/controlled_ocp_runtime_bundle.py', 'tools/packaging/validate_controlled_ocp_manifest.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/validate_windows_native_source_lock.py', 'tools/packaging/fetch_verify_windows_native_sources.py') }}-290941ef2d34e7b10b7b6bde4577c5d5d0e703342f934c29a55660caaed8dd5b
+          key: Windows-x64-controlled-ocp315-v4-${{ needs.occt-sdk.outputs.sdk-payload-sha256 }}-${{ hashFiles('.github/workflows/windows-studio-build.yml', 'tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/controlled_ocp_runtime_contract.json', 'tools/packaging/prepare_official_ocp_generated_sources.py', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/build_controlled_ocp_from_generated_sources.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py', 'tools/packaging/controlled_ocp_runtime_bundle.py', 'tools/packaging/validate_controlled_ocp_manifest.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/windows_occt_sdk_layout.py', 'tools/packaging/validate_windows_native_source_lock.py', 'tools/packaging/fetch_verify_windows_native_sources.py') }}-290941ef2d34e7b10b7b6bde4577c5d5d0e703342f934c29a55660caaed8dd5b
       - name: Fail-closed validate restored OCP runtime cache
         id: bundle_cache_check
         shell: pwsh

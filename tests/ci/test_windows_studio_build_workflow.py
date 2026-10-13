@@ -32,6 +32,7 @@ def test_native_workflow_is_manual_only_and_requires_exact_owner_inputs() -> Non
     assert "8 GiB free on the build volume" in workflow
     assert "two authorized runs under the" in workflow
     assert "max-run-artifact-bytes" in workflow
+    assert "python -S -m tools.packaging.preflight_occt_sdk_layout" in workflow
     assert "Math]::Floor(($twoRunArtifactCap - $artifactBytes) / 2)" in workflow
     assert workflow.count("assert_actions_run_artifact_budget --max-bytes") >= 5
     assert "retention-days: 1" in workflow
@@ -85,6 +86,7 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
         assert "inputs.build_revision == github.sha" in condition
 
     assert "Bootstrap Python: $bootstrapPython" in preflight
+    assert preflight.index("preflight_occt_sdk_layout") < preflight.index("Invoke-WebRequest")
     assert "sys.version_info[:3] == (3,12,10)" in preflight
     native_assertion = "sys.version_info[:3] == (3,12,15)"
     assert native_assertion in sdk and native_assertion in ocp
@@ -102,8 +104,8 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     assert '"USE_VTK": False' in occt_builder
     assert '"USE_OPENGL"' in occt_builder
     assert "-D{key}=" in occt_builder
-    assert "Windows-x64-occt-sdk-v3-" in workflow
-    assert "controlled-ocp315-v3-" in workflow
+    assert "Windows-x64-occt-sdk-v4-" in workflow
+    assert "controlled-ocp315-v4-" in workflow
     assert "OpenGl_Context.hxx" in dependency_audit
     assert "OpenCASCADE_LIBRARIES" in dependency_audit
     assert "windows_opengl_prerequisites" in dependency_audit
@@ -136,6 +138,7 @@ def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
         "tools.packaging.controlled_ocp_runtime_bundle",
         "tools.packaging.fetch_verify_windows_native_sources",
         "tools.packaging.inspect_retained_occt_sdk",
+        "tools.packaging.preflight_occt_sdk_layout",
         "tools.packaging.prepare_official_ocp_generated_sources",
         "tools.packaging.validate_controlled_occt_sdk",
         "tools.packaging.validate_controlled_ocp_manifest",
