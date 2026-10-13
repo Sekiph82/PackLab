@@ -1,0 +1,59 @@
+name: PL-0350 R04 SDK checkpoint recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_noncompiling_recovery:
+        description: Confirm exact R04 SDK and source evidence recovery only (no native build)
+        required: true
+        type: choice
+        options:
+          - "NO"
+          - "YES"
+        default: "NO"
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main' && inputs.confirm_noncompiling_recovery == 'YES'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out exact main source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.10"
+      - name: Download and verify original SDK and source evidence
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP "pl0350-r04-sdk-recovery"
+          python -S -m tools.packaging.recover_pl0350_sdk_artifacts --output $output
+          if ($LASTEXITCODE -ne 0) { throw "R04 checkpoint was not fully verified; no native build is permitted." }
+          $lineage = Get-Content -LiteralPath (Join-Path $output "sdk-recovery-lineage.json") -Raw | ConvertFrom-Json
+          if ($lineage.status -ne "VERIFIED_ORIGINAL_BYTES_REPUBLISHED") { throw "Recovery lineage status is invalid." }
+          $size = (Get-ChildItem -LiteralPath $output -File -Recurse | Measure-Object -Property Length -Sum).Sum
+          if ([long]$size -gt 400MB) { throw "Recovery payload exceeds 400 MiB bound." }
+          "Verified recovery payload bytes: $size" >> $env:GITHUB_STEP_SUMMARY
+          "Original SDK artifact: $($lineage.origin_artifacts[0].id), $($lineage.origin_artifacts[0].sha256)" >> $env:GITHUB_STEP_SUMMARY
+          "Original source evidence: $($lineage.origin_artifacts[1].id), $($lineage.origin_artifacts[1].sha256)" >> $env:GITHUB_STEP_SUMMARY
+      - name: Upload verified checkpoint with lineage
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-pl0350-r04-sdk-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/pl0350-r04-sdk-recovery/**
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: 14
