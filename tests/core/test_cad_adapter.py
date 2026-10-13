@@ -283,7 +283,8 @@ def test_kernel_version_uses_frozen_controlled_runtime_directory(
     bundle_root = tmp_path / "_internal"
     package_dir = bundle_root / "OCP"
     package_dir.mkdir(parents=True)
-    (package_dir / "TKERNEL-7.9.3.dll").touch()
+    kernel_dll = package_dir / "tkernel.dll"
+    kernel_dll.touch()
 
     def missing_distribution(_name: str) -> None:
         raise cad_adapter.importlib.metadata.PackageNotFoundError
@@ -293,7 +294,11 @@ def test_kernel_version_uses_frozen_controlled_runtime_directory(
     monkeypatch.setattr(sys, "_MEIPASS", str(bundle_root), raising=False)
     monkeypatch.setattr(cad_adapter.importlib.metadata, "distribution", missing_distribution)
     monkeypatch.setattr(cad_adapter, "_import_binding_module", lambda: SimpleNamespace())
-    monkeypatch.setattr(cad_adapter, "_read_windows_file_version", lambda _path: "7.9.3")
+    monkeypatch.setattr(
+        cad_adapter,
+        "_read_windows_file_version",
+        lambda path: "7.9.3" if path == kernel_dll else None,
+    )
 
     assert cad_adapter._observe_kernel_version() == ("7.9.3", None)
 

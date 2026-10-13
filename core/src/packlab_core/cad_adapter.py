@@ -1761,7 +1761,11 @@ def _observe_kernel_version() -> tuple[str | None, str | None]:
     except Exception:
         pass
     for directory in dict.fromkeys(package_directories):
-        kernel_files = tuple(directory.glob("TKERNEL-*.dll"))
+        kernel_files = tuple(
+            path
+            for path in directory.glob("*.dll")
+            if path.name.casefold() == "tkernel.dll" or path.name.casefold().startswith("tkernel-")
+        )
         if kernel_files:
             if len(kernel_files) != 1:
                 return None, "kernel_binary_identity_unavailable"
@@ -1776,7 +1780,10 @@ def _observe_kernel_version() -> tuple[str | None, str | None]:
     kernel_files = tuple(
         Path(str(distribution.locate_file(item)))
         for item in distribution.files or ()
-        if Path(item).name.casefold().startswith("tkernel-")
+        if (
+            Path(item).name.casefold() == "tkernel.dll"
+            or Path(item).name.casefold().startswith("tkernel-")
+        )
         and Path(item).suffix.casefold() == ".dll"
     )
     if len(kernel_files) != 1:
