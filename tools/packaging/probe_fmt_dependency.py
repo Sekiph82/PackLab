@@ -238,13 +238,24 @@ def _locked_conda_package(
         raise ValueError(f"native transitive package is absent from the explicit lock: {name}")
     url = str(record.get("url", ""))
     sha = record.get("sha256") or record.get("repodata_record", {}).get("sha256")
-    if (
-        record.get("version") != locked.get("version")
-        or record.get("build") != locked.get("build")
-        or url != locked.get("url")
-        or sha != locked.get("hash", {}).get("sha256")
-    ):
-        raise ValueError(f"installed native dependency differs from exact lock: {name}")
+    observed = {
+        "version": record.get("version"),
+        "build": record.get("build"),
+        "url": url,
+        "sha256": sha,
+    }
+    expected = {
+        "version": locked.get("version"),
+        "build": locked.get("build"),
+        "url": locked.get("url"),
+        "sha256": locked.get("hash", {}).get("sha256"),
+    }
+    mismatches = [key for key, value in expected.items() if observed[key] != value]
+    if mismatches:
+        raise ValueError(
+            f"installed native dependency differs from exact lock: {name}; "
+            f"mismatched_fields={','.join(mismatches)}; observed={json.dumps(observed, sort_keys=True)}"
+        )
     return {
         "name": name,
         "version": record.get("version"),

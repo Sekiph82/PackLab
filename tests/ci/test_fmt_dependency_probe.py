@@ -186,6 +186,27 @@ def test_fmt_probe_rejects_changed_package_lock() -> None:
         probe.verify_pinned_identity(contract, probe.CONDA_LOCK)
 
 
+def test_fmt_probe_reports_installed_lock_mismatch_fields() -> None:
+    record = {
+        "name": "fmt",
+        "version": "12.1.0",
+        "build": "h1ced75a_1",
+        "url": "https://conda.anaconda.org/conda-forge/win-64/fmt-12.1.0-h1ced75a_1.conda",
+        "sha256": None,
+    }
+    locked = {
+        "fmt": {
+            "version": "12.1.0",
+            "build": "h1ced75a_1",
+            "url": record["url"],
+            "hash": {"sha256": "a" * 64},
+        }
+    }
+
+    with pytest.raises(ValueError, match="mismatched_fields=sha256"):
+        probe._locked_conda_package(record, locked)
+
+
 def test_fmt_recipe_url_uses_pinned_feedstock_repository() -> None:
     contract = json.loads(probe.CONTRACT.read_text(encoding="utf-8"))
 
