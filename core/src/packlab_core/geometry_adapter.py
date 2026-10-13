@@ -218,7 +218,25 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
         )
     except (ImportError, OSError) as exc:
         error_detail = type(exc).__name__
-        if isinstance(exc, OSError) and isinstance(exc.winerror, int):
+        if isinstance(exc, ImportError):
+            module_name = exc.name
+            if isinstance(module_name, str) and all(
+                part.isidentifier() for part in module_name.split(".")
+            ):
+                error_detail = f"{error_detail};module={module_name}"
+            message = (exc.msg if isinstance(exc.msg, str) else str(exc)).casefold()
+            if "dll load failed" in message:
+                reason = "dll_module_missing"
+                if "specified procedure could not be found" in message:
+                    reason = "dll_procedure_missing"
+                elif "initialization routine failed" in message:
+                    reason = "dll_initialization_failed"
+                elif "specified module could not be found" not in message:
+                    reason = "dll_load_failed"
+                error_detail = f"{error_detail};reason={reason}"
+            else:
+                error_detail = f"{error_detail};reason=import_error"
+        elif isinstance(exc, OSError) and isinstance(exc.winerror, int):
             error_detail = f"{error_detail};winerror={exc.winerror}"
         return _capability(
             CapabilityStatus.UNKNOWN,

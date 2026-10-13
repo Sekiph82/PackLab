@@ -105,6 +105,24 @@ def test_open3d_oserror_probe_reports_only_windows_error_code():
     assert "private" not in capability.detail
 
 
+def test_open3d_import_error_probe_reports_only_module_and_loader_category():
+    error = ImportError(
+        "DLL load failed while importing pybind: The specified module could not be found.",
+        name="open3d.pybind",
+    )
+
+    def failing_import() -> ModuleType:
+        raise error
+
+    capability = probe_open3d(failing_import)
+
+    assert capability.status is CapabilityStatus.UNKNOWN
+    assert capability.detail == (
+        "Open3D import failed (ImportError;module=open3d.pybind;reason=dll_module_missing)"
+    )
+    assert "DLL load failed" not in capability.detail
+
+
 def test_wrong_version_or_missing_build_facts_stays_unknown():
     module = ModuleType("open3d")
     module.__version__ = "0.21.0"

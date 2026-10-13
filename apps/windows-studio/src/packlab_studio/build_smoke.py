@@ -90,10 +90,25 @@ def _open3d_probe_failure_code(status: str, detail: str) -> str:
         error_type = error_details[0]
         if error_type.isidentifier():
             safe_detail = f"import_failed_{error_type}"
-            if len(error_details) == 2 and error_details[1].startswith("winerror="):
-                winerror = error_details[1].removeprefix("winerror=")
-                if winerror.isdecimal():
-                    safe_detail += f"_winerror_{winerror}"
+            for field in error_details[1:]:
+                if field.startswith("winerror="):
+                    winerror = field.removeprefix("winerror=")
+                    if winerror.isdecimal():
+                        safe_detail += f"_winerror_{winerror}"
+                elif field.startswith("module="):
+                    module = field.removeprefix("module=")
+                    if module and all(part.isidentifier() for part in module.split(".")):
+                        safe_detail += f"_module_{module.replace('.', '_')}"
+                elif field.startswith("reason="):
+                    reason = field.removeprefix("reason=")
+                    if reason in {
+                        "dll_initialization_failed",
+                        "dll_load_failed",
+                        "dll_module_missing",
+                        "dll_procedure_missing",
+                        "import_error",
+                    }:
+                        safe_detail += f"_{reason}"
         else:
             safe_detail = "import_failed"
     return f"open3d_probe_failed:status={status};detail={safe_detail}"
