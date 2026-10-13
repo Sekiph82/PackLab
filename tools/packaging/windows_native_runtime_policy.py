@@ -42,6 +42,16 @@ def minimum_runtime_version(contract: dict[str, object]) -> tuple[int, ...]:
     return tuple(int(part) for part in raw.split("."))
 
 
+def version_below_minimum(minimum: tuple[int, ...]) -> tuple[int, ...]:
+    """Return a valid non-negative version tuple strictly below the minimum."""
+    values = list(minimum)
+    for index in range(len(values) - 1, -1, -1):
+        if values[index] > 0:
+            values[index] -= 1
+            return tuple(values)
+    raise ValueError("VC runtime minimum must contain a positive version component")
+
+
 def runtime_is_supported(
     *, installed: bool, architecture: str, version: tuple[int, ...], minimum: tuple[int, ...]
 ) -> bool:

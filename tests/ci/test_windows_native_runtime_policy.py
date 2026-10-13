@@ -9,6 +9,7 @@ from tools.packaging.windows_native_runtime_policy import (
     is_windows_runtime_dll,
     minimum_runtime_version,
     runtime_is_supported,
+    version_below_minimum,
 )
 from tools.packaging.windows_sdk_source_lock_compatibility import (
     validate_sdk_source_lock_compatibility,
@@ -69,6 +70,13 @@ def test_prerequisite_gate_rejects_missing_wrong_arch_and_undersized() -> None:
     )
     assert not runtime_is_supported(
         installed=True, architecture="x64", version=(14, 44, 35210, 9), minimum=minimum
+    )
+    assert version_below_minimum(minimum) < minimum
+    assert not runtime_is_supported(
+        installed=True,
+        architecture="x64",
+        version=version_below_minimum(minimum),
+        minimum=minimum,
     )
 
 

@@ -17,6 +17,7 @@ from tools.packaging.windows_native_runtime_policy import (
     is_windows_runtime_dll,
     minimum_runtime_version,
     runtime_is_supported,
+    version_below_minimum,
 )
 
 POLICY = Path("tools/packaging/windows-runtime-prerequisite.json")
@@ -179,10 +180,7 @@ def validate_runtime(prefix: Path, fmt_probe: Path, stage: Path | None = None) -
         "below_minimum": runtime_is_supported(
             installed=True,
             architecture="x64",
-            version=tuple(
-                max(0, value - (1 if index == len(minimum) - 1 else 0))
-                for index, value in enumerate(minimum)
-            ),
+            version=version_below_minimum(minimum),
             minimum=minimum,
         ),
     }
