@@ -4,8 +4,8 @@ import hashlib
 import importlib
 import json
 import sys
-from types import ModuleType
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 from tools.packaging.build_controlled_ocp_from_generated_sources import (
