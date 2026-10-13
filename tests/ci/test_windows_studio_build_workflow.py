@@ -34,6 +34,7 @@ def test_native_workflow_is_manual_only_and_requires_exact_owner_inputs() -> Non
     assert "if: always()" in inspection
     assert "if-no-files-found: warn" in inspection
     assert 'Join-Path $generatedRoot "OCP_src_stubs_Windows/CMakeLists.txt"' in inspection
+    assert "uv run --locked --no-sync python -m tools.packaging.probe_fmt_dependency --prefix $nativePrefix" in inspection
     assert "needs: [capacity-preflight, retained-sdk-inspection]" in sdk_job
     assert "inspect_retained_occt_sdk" in workflow
     assert "actions: read" in workflow
