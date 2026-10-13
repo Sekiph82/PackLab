@@ -1747,29 +1747,36 @@ def _observe_kernel_version() -> tuple[str | None, str | None]:
     if platform.system() != "Windows":
         return None, "kernel_version_resource_unavailable_on_platform"
     try:
+        binding_module = _import_binding_module()
+        module_path = getattr(binding_module, "__file__", None)
+        if isinstance(module_path, str) and module_path:
+            package_dir = Path(module_path).resolve().parent
+            for directory in (package_dir, package_dir.parent):
+                kernel_files = tuple(directory.glob("TKERNEL-*.dll"))
+                if kernel_files:
+                    if len(kernel_files) != 1:
+                        return None, "kernel_binary_identity_unavailable"
+                    try:
+                        return _read_windows_file_version(kernel_files[0]), None
+                    except Exception:
+                        return None, "kernel_version_resource_unavailable"
+    except Exception:
+        pass
+    try:
         distribution = importlib.metadata.distribution(CAD_BINDING_PACKAGE)
     except importlib.metadata.PackageNotFoundError:
-        kernel_files: tuple[Path, ...] = ()
-    else:
-        kernel_files = tuple(
-            Path(str(distribution.locate_file(item)))
-            for item in distribution.files or ()
-            if Path(item).name.casefold().startswith("tkernel-")
-            and Path(item).suffix.casefold() == ".dll"
-        )
-    if len(kernel_files) != 1:
-        try:
-            binding_module = _import_binding_module()
-            module_path = getattr(binding_module, "__file__", None)
-            if not isinstance(module_path, str) or not module_path:
-                return None, "kernel_binary_identity_unavailable"
-            package_dir = Path(module_path).resolve().parent
-            kernel_files = tuple(package_dir.glob("TKERNEL-*.dll"))
-        except Exception:
-            return None, "kernel_binary_identity_unavailable"
+        return None, "kernel_binary_identity_unavailable"
+    kernel_files = tuple(
+        Path(str(distribution.locate_file(item)))
+        for item in distribution.files or ()
+        if Path(item).name.casefold().startswith("tkernel-")
+        and Path(item).suffix.casefold() == ".dll"
+    )
     if len(kernel_files) != 1:
         return None, "kernel_binary_identity_unavailable"
     try:
+        if not kernel_files[0].is_file():
+            return None, "kernel_binary_identity_unavailable"
         return _read_windows_file_version(kernel_files[0]), None
     except Exception:
         return None, "kernel_version_resource_unavailable"
