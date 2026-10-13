@@ -77,6 +77,14 @@ def test_open3d_probe_failure_code_classifies_path_free_import_detail() -> None:
     )
     assert (
         build_smoke._open3d_probe_failure_code(
+            "UNKNOWN",
+            "Open3D import failed (ImportError;module=open3d.pybind;reason=symbol_missing)",
+        )
+        == "open3d_probe_failed:status=UNKNOWN;"
+        "detail=import_failed_ImportError_module_open3d_pybind_symbol_missing"
+    )
+    assert (
+        build_smoke._open3d_probe_failure_code(
             "UNKNOWN", "Open3D import unavailable (C:\\private\\cache)"
         )
         == "open3d_probe_failed:status=UNKNOWN;detail=module_unavailable"

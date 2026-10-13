@@ -106,7 +106,13 @@ def _open3d_probe_failure_code(status: str, detail: str) -> str:
                         "dll_load_failed",
                         "dll_module_missing",
                         "dll_procedure_missing",
+                        "circular_import",
+                        "extension_export_missing",
                         "import_error",
+                        "module_missing",
+                        "module_not_package",
+                        "numpy_multiarray_unavailable",
+                        "symbol_missing",
                     }:
                         safe_detail += f"_{reason}"
         else:

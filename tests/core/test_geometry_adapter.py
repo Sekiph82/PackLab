@@ -123,6 +123,26 @@ def test_open3d_import_error_probe_reports_only_module_and_loader_category():
     assert "DLL load failed" not in capability.detail
 
 
+def test_open3d_missing_import_symbol_reports_only_safe_category():
+    error = ImportError(
+        "cannot import name 'private_symbol' from 'open3d.pybind' "
+        "(C:\\private\\cache\\open3d.pybind.pyd)",
+        name="open3d.pybind",
+    )
+
+    def failing_import() -> ModuleType:
+        raise error
+
+    capability = probe_open3d(failing_import)
+
+    assert capability.status is CapabilityStatus.UNKNOWN
+    assert capability.detail == (
+        "Open3D import failed (ImportError;module=open3d.pybind;reason=symbol_missing)"
+    )
+    assert "private_symbol" not in capability.detail
+    assert "private" not in capability.detail
+
+
 def test_wrong_version_or_missing_build_facts_stays_unknown():
     module = ModuleType("open3d")
     module.__version__ = "0.21.0"

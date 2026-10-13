@@ -225,6 +225,7 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
             ):
                 error_detail = f"{error_detail};module={module_name}"
             message = (exc.msg if isinstance(exc.msg, str) else str(exc)).casefold()
+            reason = "import_error"
             if "dll load failed" in message:
                 reason = "dll_module_missing"
                 if "specified procedure could not be found" in message:
@@ -233,9 +234,19 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
                     reason = "dll_initialization_failed"
                 elif "specified module could not be found" not in message:
                     reason = "dll_load_failed"
-                error_detail = f"{error_detail};reason={reason}"
-            else:
-                error_detail = f"{error_detail};reason=import_error"
+            elif "cannot import name" in message:
+                reason = "symbol_missing"
+            elif "no module named" in message:
+                reason = "module_missing"
+            elif "is not a package" in message:
+                reason = "module_not_package"
+            elif "partially initialized module" in message:
+                reason = "circular_import"
+            elif "does not define module export function" in message:
+                reason = "extension_export_missing"
+            elif "numpy.core.multiarray failed to import" in message:
+                reason = "numpy_multiarray_unavailable"
+            error_detail = f"{error_detail};reason={reason}"
         elif isinstance(exc, OSError) and isinstance(exc.winerror, int):
             error_detail = f"{error_detail};winerror={exc.winerror}"
         return _capability(
