@@ -30,9 +30,9 @@ def ensure_artifact_budget(current_bytes: int, additional_bytes: int, max_bytes:
         )
 
 
-def fetch_artifacts(token: str) -> list[dict[str, Any]]:
+def fetch_artifacts(token: str, run_id: str) -> list[dict[str, Any]]:
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{REPOSITORY}/actions/artifacts?per_page=100",
+        f"https://api.github.com/repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100",
         headers={
             "Authorization": f"Bearer {token}",
             "Accept": "application/vnd.github+json",
@@ -47,7 +47,7 @@ def fetch_artifacts(token: str) -> list[dict[str, Any]]:
     if not isinstance(payload, dict) or not isinstance(payload.get("artifacts"), list):
         raise ValueError("GitHub Actions artifact inventory has an unexpected response shape")
     if payload.get("total_count", 0) > 100:
-        raise ValueError("Actions artifact inventory exceeds the bounded 100-item page")
+        raise ValueError("current-run Actions artifact inventory exceeds the bounded 100-item page")
     return payload["artifacts"]
 
 
@@ -60,7 +60,7 @@ def main() -> int:
     token = os.environ.get("GH_TOKEN")
     if not token or not args.run_id:
         raise ValueError("GH_TOKEN and GITHUB_RUN_ID are required")
-    current = current_run_artifact_bytes(fetch_artifacts(token), args.run_id)
+    current = current_run_artifact_bytes(fetch_artifacts(token, args.run_id), args.run_id)
     ensure_artifact_budget(current, args.additional_bytes, args.max_bytes)
     print(
         f"ACTIONS_RUN_ARTIFACT_BUDGET_PASS current={current} "
