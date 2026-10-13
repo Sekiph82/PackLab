@@ -48,6 +48,10 @@ def test_native_workflow_is_manual_only_and_requires_exact_owner_inputs() -> Non
     assert "max-run-artifact-bytes" in workflow
     assert "python -S -m tools.packaging.preflight_occt_sdk_layout" in workflow
     assert "Math]::Floor(($twoRunArtifactCap - $artifactBytes) / 2)" in workflow
+    assert "$artifactMaxPages = 100" in workflow
+    assert "actions/artifacts?per_page=$artifactPageSize&page=$page" in workflow
+    assert "if ($artifactCount -ne $artifactTotalCount)" in workflow
+    assert "exceeds the bounded 100-page preflight" in workflow
     assert workflow.count("assert_actions_run_artifact_budget --max-bytes") >= 5
     assert "retention-days: 1" in workflow
     assert workflow.count("timeout-minutes: 330") == 3

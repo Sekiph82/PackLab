@@ -218,9 +218,28 @@ jobs:
           $freeBytes = [long]$disk.FreeSpace
           if ($freeBytes -lt 8GB) { throw "Hosted runner has less than 8 GiB free on the build volume." }
           $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json"; "X-GitHub-Api-Version" = "2022-11-28" }
-          $artifacts = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100"
-          if ($artifacts.total_count -gt 100) { throw "Artifact inventory exceeds the bounded preflight page." }
-          $artifactBytes = [long](($artifacts.artifacts | Measure-Object -Property size_in_bytes -Sum).Sum)
+          $artifactPageSize = 100
+          $artifactMaxPages = 100
+          $artifactTotalCount = -1L
+          $artifactCount = 0L
+          $artifactBytes = 0L
+          for ($page = 1; $page -le $artifactMaxPages; $page++) {
+            $artifacts = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=$artifactPageSize&page=$page"
+            if ($null -eq $artifacts.artifacts -or $null -eq $artifacts.total_count) { throw "Actions artifact inventory response is incomplete." }
+            if ($artifactTotalCount -lt 0) { $artifactTotalCount = [long]$artifacts.total_count }
+            elseif ([long]$artifacts.total_count -ne $artifactTotalCount) { throw "Actions artifact inventory changed while pages were read." }
+            $pageArtifacts = @($artifacts.artifacts)
+            foreach ($artifact in $pageArtifacts) {
+              $size = [long]$artifact.size_in_bytes
+              if ($size -lt 0) { throw "Actions artifact inventory contains a negative byte count." }
+              $artifactBytes += $size
+            }
+            $artifactCount += $pageArtifacts.Count
+            if ($artifactCount -ge $artifactTotalCount) { break }
+            if ($pageArtifacts.Count -lt $artifactPageSize) { throw "Actions artifact inventory ended before its reported total." }
+            if ($page -eq $artifactMaxPages) { throw "Actions artifact inventory exceeds the bounded 100-page preflight." }
+          }
+          if ($artifactCount -ne $artifactTotalCount) { throw "Actions artifact inventory did not match its reported total." }
           $cacheUsage = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/cache/usage"
           $cacheBytes = [long]$cacheUsage.active_caches_size_in_bytes
           $runArtifactCap = [Math]::Min([long]$maxSingleRunArtifactCap, [long][Math]::Floor(($twoRunArtifactCap - $artifactBytes) / 2))
