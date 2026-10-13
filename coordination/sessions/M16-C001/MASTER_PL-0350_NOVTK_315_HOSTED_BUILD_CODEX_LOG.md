@@ -1,8 +1,28 @@
 # Master Handoff — PL-0350 Hosted 315-Module No-VTK Build
 
 Date: 2026-10-13
-Latest implementation: `038d3c462ef176293cb37d778fc79676f3bbf0be` (R03)
-Status: **BATCH_STOPPED_AT_PL-0350 / OCCT_SDK_INSTALL_LAYOUT_VALIDATION_MISMATCH**
+Latest implementation: `a2805616c9c0dd665e48b1de82c8436ea64b0805` (R04)
+Status: **BATCH_STOPPED_AT_PL-0350 / OCP_NATIVE_DEPENDENCY_UNOWNED_FMT_DLL / AWAITING_INDEPENDENT_AUDIT**
+
+## R04 current state
+
+R04 introduced one shared strict Windows OCCT SDK layout contract for `inc/OpenGl_Context.hxx`, `win64/vc14/lib/TKOpenGl.lib`, and `win64/vc14/bin/TKOpenGl.dll`. Producer, consumer, downstream dependency audit, generated OCP builder, and runtime metadata use this contract. Cache namespaces were bumped to v4. A synthetic hosted preflight verified producer, consumer, and downstream scanner behavior without native builds.
+
+Implementation commit `a2805616c9c0dd665e48b1de82c8436ea64b0805` was pushed to `main`. Focused checks passed (37 passed, 1 skipped), as did Ruff, format, mypy, compileall, 16 workflow Python imports, YAML parse, preflight fixture, and diff hygiene.
+
+The valid exact-SHA hosted preflight [38346246435](https://github.com/Sekiph82/PackLab/actions/runs/38346246435) passed and independently skipped native SDK/OCP/Studio jobs. The single authorized cold run [38346317865](https://github.com/Sekiph82/PackLab/actions/runs/38346317865) compiled, validated, sealed, and uploaded the canonical OpenGL-enabled SDK before starting OCP. Preserved artifacts:
+
+- SDK: ID `11790440856`, `packlab-occt-sdk-38346317865-1`, 57,520,243 bytes, SHA-256 `467b44ab0fb747343cb55e55e71a0dd4ecadb989fd7eed22d1e49fff3153ddf8`.
+- Corresponding-source evidence: ID `11790585684`, `packlab-native-source-evidence-38346317865-1`, 1,398 bytes, SHA-256 `091c391b8d6ccda19823f57eae891b1dd45383b164c117ca05928df6bafd2018`.
+
+The official OCP extension compiled, but its post-build dependency ownership check stopped on `ValueError: compiled OCP references an unowned DLL dependency: fmt.dll`. OCP smoke/runtime artifact steps and Studio packaging were skipped. No Installer, compliance clearance, warm-cache run, signing, or release exists. No retry was dispatched. Parent PL-0350 remains unaudited and open.
+
+Detailed R04 records:
+
+- `PL-0350_SDK_WINDOWS_LAYOUT_R04_CODEX_LOG.md`
+- `PL-0350_SDK_WINDOWS_LAYOUT_R04_REPORT.md`
+
+**Awaiting ChatGPT's independent audit and separately issued follow-up prompt. Do not retry the native build, claim acceptance, or proceed to PL-0351.**
 
 ## R03 current state
 
