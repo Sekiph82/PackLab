@@ -1,0 +1,101 @@
+name: PL-0350 locked fmt dependency ownership preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_noncompiling_probe:
+        description: Confirm exact locked dependency inspection only (no OCCT/OCP build)
+        required: true
+        type: choice
+        options:
+          - "NO"
+          - "YES"
+        default: "NO"
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-probe:
+    if: github.ref == 'refs/heads/main' && inputs.confirm_noncompiling_probe == 'YES'
+    runs-on: windows-2022
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact main source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Python and uv
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.10"
+      - name: Install locked PackLab probe dependencies
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.26"
+          enable-cache: false
+      - name: Validate source and package locks and render Windows conda environment
+        id: render
+        shell: pwsh
+        run: |
+          uv lock --check
+          if ($LASTEXITCODE -ne 0) { throw "uv.lock changed during dependency preflight." }
+          uv sync --locked --all-groups
+          if ($LASTEXITCODE -ne 0) { throw "Locked Python probe dependencies could not be installed." }
+          uv run --locked python -m tools.packaging.validate_windows_native_source_lock --verify-build-lock --verify-conda-lock
+          if ($LASTEXITCODE -ne 0) { throw "Native source or exact fmt conda package lock is invalid." }
+          $template = Join-Path $env:RUNNER_TEMP "packlab-ocp-{platform}.lock"
+          $lockPath = Join-Path $env:RUNNER_TEMP "packlab-ocp-win-64.lock"
+          uv tool run --from conda-lock==3.0.0 conda-lock render --platform win-64 --kind explicit --filename-template $template tools/packaging/packlab-ocp-bindings-win.lock
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $lockPath)) { throw "Exact locked Windows native environment could not be rendered." }
+          "path=$lockPath" >> $env:GITHUB_OUTPUT
+      - name: Install exact locked Windows native environment
+        uses: mamba-org/setup-micromamba@f457c30a868e4760d3a6fcea5f25dc655b8edf39 # v3.2.1
+        with:
+          environment-file: ${{ steps.render.outputs.path }}
+          environment-name: packlab-ocp-bindings
+          micromamba-version: "2.0.5-0"
+          init-shell: powershell
+          cache-environment: false
+          post-cleanup: "shell-init"
+      - name: Prepare exact generated OCP source without compiling
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "OCP_src_stubs_Windows.zip"
+          Invoke-WebRequest -Uri "https://github.com/CadQuery/OCP/releases/download/7.9.3.1.1/OCP_src_stubs_Windows.zip" -OutFile $archive
+          $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne "290941ef2d34e7b10b7b6bde4577c5d5d0e703342f934c29a55660caaed8dd5b") { throw "Official generated OCP source archive failed its frozen digest." }
+          $root = Join-Path $env:RUNNER_TEMP "fmt-generated-source"
+          $manifest = Join-Path $env:RUNNER_TEMP "fmt-generated-source-manifest.json"
+          uv run --locked python -m tools.packaging.prepare_official_ocp_generated_sources --archive $archive --destination $root --manifest $manifest
+          if ($LASTEXITCODE -ne 0) { throw "Exact 319-to-315 generated-source preparation failed." }
+          $cmake = Join-Path $root "OCP_src_stubs_Windows\CMakeLists.txt"
+          if (!(Test-Path -LiteralPath $cmake)) { throw "Prepared generated OCP CMakeLists.txt is missing." }
+          "PACKLAB_FMT_PROBE_CMAKE=$cmake" >> $env:GITHUB_ENV
+      - name: Inspect exact fmt binary, provenance, and complete PE import closure
+        id: probe
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "fmt-dependency-preflight.json"
+          uv run --locked python -m tools.packaging.probe_fmt_dependency --prefix $env:CONDA_PREFIX --scratch (Join-Path $env:RUNNER_TEMP "fmt-probe") --generated-cmake $env:PACKLAB_FMT_PROBE_CMAKE --report $report
+          if ($LASTEXITCODE -ne 0) { throw "fmt dependency probe could not produce a bounded evidence report." }
+          "PACKLAB_FMT_PROBE_REPORT=$report" >> $env:GITHUB_ENV
+          Get-Content -LiteralPath $report -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Upload dependency probe evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-pl0350-fmt-dependency-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/fmt-dependency-preflight.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Fail closed when any native owner is unresolved
+        if: always()
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "fmt-dependency-preflight.json"
+          if (!(Test-Path -LiteralPath $report)) { throw "fmt preflight report is missing; native OCP compilation is prohibited." }
+          $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+          if ($result.status -ne "PASS") { throw "FMT_PROVENANCE_REQUIRED: native dependency ownership preflight did not pass ($($result.reason))." }

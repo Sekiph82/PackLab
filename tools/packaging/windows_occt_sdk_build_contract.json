@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "target": {
+    "operating_system": "Windows",
+    "runner_image": "windows-2022",
+    "architecture": "x86_64",
+    "python": "3.12.15"
+  },
+  "occt_source": {
+    "record_id": "occt-source-7.9.3",
+    "version": "7.9.3",
+    "revision": "a016080bf6738d6aeae020badee4e888ad1540a5",
+    "sha256": "c533f2667b59921bd6bd40ce82e7b9900b0289ccc731af5fdeeba097de80ef0f"
+  },
+  "build_environment_lock": {
+    "path": "tools/packaging/packlab-ocp-bindings-win.lock",
+    "sha256": "38e8c0a4d4b8ad1284f5595eb33f9196d124271c63da9c1395afa083028d3867",
+    "platform": "win-64"
+  },
+  "cmake": "cmake version 3.31.8",
+  "compiler": "MSVC 19.44.35229.0",
+  "windows_sdk": "10.0.26100.0",
+  "generator": "Visual Studio 17 2022",
+  "parallelism": 4,
+  "cmake_options": {
+    "BUILD_LIBRARY_TYPE": "Shared",
+    "BUILD_DOC_Overview": false,
+    "BUILD_DOC_RefMan": false,
+    "BUILD_SAMPLES_MFC": false,
+    "BUILD_SAMPLES_QT": false,
+    "BUILD_Inspector": false,
+    "USE_TK": false,
+    "USE_VTK": false,
+    "USE_TBB": false,
+    "USE_FREETYPE": false,
+    "USE_FREEIMAGE": false,
+    "USE_OPENGL": true,
+    "USE_FFMPEG": false,
+    "USE_OPENVR": false,
+    "USE_RAPIDJSON": false,
+    "USE_DRACO": false,
+    "USE_EIGEN": false,
+    "BUILD_WITH_DEBUG": false,
+    "BUILD_USE_PCH": false
+  },
+  "cache_identity_files": [
+    "tools/packaging/windows_native_source_lock.json",
+    "tools/packaging/packlab-ocp-bindings-win.lock",
+    "tools/packaging/windows_occt_sdk_build_contract.json",
+    "tools/packaging/build_controlled_occt_sdk.py",
+    "tools/packaging/validate_controlled_occt_sdk.py",
+    "tools/packaging/windows_occt_sdk_layout.py",
+    "tools/packaging/audit_controlled_occt_sdk_dependencies.py"
+  ]
+}

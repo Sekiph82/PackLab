@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "dependency_id": "fmt-source-12.1.0",
+  "package": {
+    "name": "fmt",
+    "version": "12.1.0",
+    "build": "h1ced75a_1",
+    "subdir": "win-64",
+    "url": "https://conda.anaconda.org/conda-forge/win-64/fmt-12.1.0-h1ced75a_1.conda",
+    "sha256": "1d6d6f1bf284e50cf617ce9a6250e0bf70bd0d30b068568364d6b1852aad9466",
+    "byte_length": 187511,
+    "dll_relative_path": "Library/bin/fmt.dll"
+  },
+  "upstream_source": {
+    "revision": "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f",
+    "url": "https://github.com/fmtlib/fmt/archive/12.1.0.tar.gz",
+    "sha256": "ea7de4299689e12b6dddd392f9896f08fb0777ac7168897a244a6d6085043fea",
+    "license_identifier": "MIT",
+    "license_path": "fmt-12.1.0/LICENSE",
+    "license_sha256": "07580f2a3b35709ce703d523f447b242f6dfec7582a8c0df102c7fa2849375f8",
+    "license_notice_source": "https://github.com/fmtlib/fmt/blob/407c905e45ad75fc29bf0f9bb7c5c2fd3475976f/LICENSE"
+  },
+  "conda_forge_recipe": {
+    "repository": "conda-forge/fmt-feedstock",
+    "commit": "437ad8fba6cc830bd16eef7f98aeb2d76c9ff060",
+    "path": "recipe/meta.yaml",
+    "sha256": "e122a830860163ff276b40a6ffcc42d79bc115bc73bdbdff78ccfbef5c13d436",
+    "package_license": "MIT"
+  },
+  "pe_machine": "IMAGE_FILE_MACHINE_AMD64"
+}

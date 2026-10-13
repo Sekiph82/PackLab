@@ -61,6 +61,38 @@
       ]
     },
     {
+      "id": "fmt-source-12.1.0",
+      "component": "fmt native dependency",
+      "version": "12.1.0",
+      "revision": "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f",
+      "build": "conda-forge-win-64-h1ced75a_1",
+      "url": "https://github.com/fmtlib/fmt/archive/12.1.0.tar.gz",
+      "sha256": "ea7de4299689e12b6dddd392f9896f08fb0777ac7168897a244a6d6085043fea",
+      "license_identifier": "MIT",
+      "license_notice_source": "https://github.com/fmtlib/fmt/blob/407c905e45ad75fc29bf0f9bb7c5c2fd3475976f/LICENSE",
+      "source_availability_role": "CORRESPONDING_SOURCE_AND_NOTICE",
+      "production_purpose": "Corresponding source and notice for the exact conda-forge fmt 12.1.0 Windows DLL linked by the generated OCP extension.",
+      "retained_runtime_surface": [
+        "OCP/fmt.dll"
+      ],
+      "license_notice_sha256": "07580f2a3b35709ce703d523f447b242f6dfec7582a8c0df102c7fa2849375f8",
+      "binary_package": {
+        "name": "fmt",
+        "version": "12.1.0",
+        "build": "h1ced75a_1",
+        "subdir": "win-64",
+        "url": "https://conda.anaconda.org/conda-forge/win-64/fmt-12.1.0-h1ced75a_1.conda",
+        "sha256": "1d6d6f1bf284e50cf617ce9a6250e0bf70bd0d30b068568364d6b1852aad9466",
+        "byte_length": 187511
+      },
+      "recipe": {
+        "repository": "conda-forge/fmt-feedstock",
+        "commit": "437ad8fba6cc830bd16eef7f98aeb2d76c9ff060",
+        "path": "recipe/meta.yaml",
+        "sha256": "e122a830860163ff276b40a6ffcc42d79bc115bc73bdbdff78ccfbef5c13d436"
+      }
+    },
+    {
       "id": "pyside-source-6.11.2",
       "component": "PySide6 and Shiboken6 source",
       "version": "6.11.2",
@@ -272,6 +304,7 @@
     "ocp-source-7.9.3.1.1",
     "ocp-pywrap-source-9251940",
     "occt-source-7.9.3",
+    "fmt-source-12.1.0",
     "pyside-source-6.11.2",
     "qtbase-source-6.11.2",
     "qtsvg-source-6.11.2",
@@ -287,7 +320,8 @@
     "controlled-ocp-occt-runtime": [
       "ocp-source-7.9.3.1.1",
       "ocp-pywrap-source-9251940",
-      "occt-source-7.9.3"
+      "occt-source-7.9.3",
+      "fmt-source-12.1.0"
     ],
     "retained-qt-pyside-runtime": [
       "pyside-source-6.11.2",

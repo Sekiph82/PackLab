@@ -70,8 +70,11 @@ def _repository_importing_modules(root: Path) -> set[str]:
 
 
 def verify_workflow_imports(root: Path) -> list[str]:
-    workflow_path = root / ".github/workflows/windows-studio-build.yml"
-    workflow = workflow_path.read_text(encoding="utf-8")
+    workflow_dir = root / ".github/workflows"
+    workflow_paths = [workflow_dir / "windows-studio-build.yml"] + sorted(
+        workflow_dir.glob("pl0350-*.yml")
+    )
+    workflow = "\n".join(path.read_text(encoding="utf-8") for path in workflow_paths)
     direct_calls = SCRIPT_CALL.findall(workflow)
     if direct_calls:
         raise RuntimeError(

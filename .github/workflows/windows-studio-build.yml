@@ -221,12 +221,19 @@ jobs:
           $nativePython = (& micromamba run -n packlab-ocp-bindings python -c "import sys; assert sys.version_info[:3] == (3,12,15), sys.version; print(sys.executable)").Trim()
           if ($LASTEXITCODE -ne 0 -or !$nativePython) { throw "OCCT native build Python must be the locked micromamba 3.12.15 interpreter." }
           "Native build Python: $nativePython" >> $env:GITHUB_STEP_SUMMARY
+      - name: Validate SDK build and cache identity contract
+        shell: pwsh
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          uv run --locked python -m tools.packaging.validate_windows_occt_sdk_build_contract
+          if ($LASTEXITCODE -ne 0) { throw "SDK cache identity contract differs from the locked producer inputs." }
       - name: Restore exact OCCT SDK cache
         id: sdk_cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/occt-sdk
-          key: Windows-x64-occt-sdk-v4-${{ hashFiles('.github/workflows/windows-studio-build.yml', 'tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/controlled_ocp_runtime_contract.json', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/windows_occt_sdk_layout.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py') }}
+          key: Windows-x64-occt-sdk-v5-${{ hashFiles('tools/packaging/windows_native_source_lock.json', 'tools/packaging/packlab-ocp-bindings-win.lock', 'tools/packaging/windows_occt_sdk_build_contract.json', 'tools/packaging/build_controlled_occt_sdk.py', 'tools/packaging/validate_controlled_occt_sdk.py', 'tools/packaging/windows_occt_sdk_layout.py', 'tools/packaging/audit_controlled_occt_sdk_dependencies.py') }}
       - name: Fetch and verify locked corresponding-source archives
         shell: pwsh
         run: |

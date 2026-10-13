@@ -104,8 +104,22 @@ def test_bootstrap_and_native_python_identities_are_separate_and_preflight_is_ga
     assert '"USE_VTK": False' in occt_builder
     assert '"USE_OPENGL"' in occt_builder
     assert "-D{key}=" in occt_builder
-    assert "Windows-x64-occt-sdk-v4-" in workflow
+    assert "Windows-x64-occt-sdk-v5-" in workflow
     assert "controlled-ocp315-v4-" in workflow
+    sdk_cache = sdk.split("Restore exact OCCT SDK cache", 1)[1].split(
+        "Fetch and verify locked corresponding-source archives", 1
+    )[0]
+    assert "hashFiles(" in sdk_cache
+    assert "Windows-x64-occt-sdk-v5-" in sdk_cache
+    assert ".github/workflows/windows-studio-build.yml" not in sdk_cache
+    sdk_cache_contract = json.loads(
+        (ROOT / "tools/packaging/windows_occt_sdk_build_contract.json").read_text(encoding="utf-8")
+    )
+    assert (
+        "tools/packaging/windows_occt_sdk_build_contract.json"
+        in sdk_cache_contract["cache_identity_files"]
+    )
+    assert "controlled_ocp_runtime_contract.json" not in sdk_cache_contract["cache_identity_files"]
     assert "OpenGl_Context.hxx" in dependency_audit
     assert "OpenCASCADE_LIBRARIES" in dependency_audit
     assert "windows_opengl_prerequisites" in dependency_audit
@@ -140,9 +154,12 @@ def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
         "tools.packaging.inspect_retained_occt_sdk",
         "tools.packaging.preflight_occt_sdk_layout",
         "tools.packaging.prepare_official_ocp_generated_sources",
+        "tools.packaging.probe_fmt_dependency",
+        "tools.packaging.recover_pl0350_sdk_artifacts",
         "tools.packaging.validate_controlled_occt_sdk",
         "tools.packaging.validate_controlled_ocp_manifest",
         "tools.packaging.validate_windows_native_source_lock",
+        "tools.packaging.validate_windows_occt_sdk_build_contract",
         "tools.packaging.verify_windows_workflow_python_imports",
         "tools.packaging.windows_redistribution_inventory",
     }
