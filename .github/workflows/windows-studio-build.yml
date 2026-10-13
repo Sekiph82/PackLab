@@ -126,7 +126,7 @@ jobs:
           $fmtReport = Join-Path $scratch "fmt-dependency-probe.json"
           $nativePrefix = (& micromamba run -n packlab-ocp-bindings python -c "import sys; print(sys.prefix)").Trim()
           if ($LASTEXITCODE -ne 0 -or !$nativePrefix) { throw "Native build prefix resolution failed." }
-          micromamba run -n packlab-ocp-bindings python -m tools.packaging.probe_fmt_dependency --prefix $nativePrefix --scratch (Join-Path $scratch "fmt-source-evidence") --generated-cmake (Join-Path $generatedRoot "CadQuery/OCP/CMakeLists.txt") --report $fmtReport --assert-pass
+          micromamba run -n packlab-ocp-bindings python -m tools.packaging.probe_fmt_dependency --prefix $nativePrefix --scratch (Join-Path $scratch "fmt-source-evidence") --generated-cmake (Join-Path $generatedRoot "OCP_src_stubs_Windows/CMakeLists.txt") --report $fmtReport --assert-pass
           $fmtExit = $LASTEXITCODE
           if ($fmtExit -ne 0) {
             if (Test-Path -LiteralPath $fmtReport -PathType Leaf) {
