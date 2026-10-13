@@ -146,7 +146,7 @@ def verify_source_and_recipe(contract: dict[str, Any], scratch: Path) -> dict[st
     }
 
 
-def verify_anaconda_metadata(contract: dict[str, Any]) -> dict[str, Any]:
+def verify_anaconda_metadata(contract: dict[str, Any], scratch: Path) -> dict[str, Any]:
     package = contract["package"]
     metadata = json.loads(fetch(ANACONDA_API))
     matches = [
@@ -168,10 +168,20 @@ def verify_anaconda_metadata(contract: dict[str, Any]) -> dict[str, Any]:
         or attrs.get("license") != contract["conda_forge_recipe"]["package_license"]
     ):
         raise ValueError("Anaconda published package metadata differs from the locked fmt identity")
+    package_archive = fetch(package["url"])
+    archive_sha256 = digest_bytes(package_archive)
+    if archive_sha256 != package["sha256"] or len(package_archive) != package["byte_length"]:
+        raise ValueError(
+            "downloaded fmt conda archive differs from the exact locked digest and size"
+        )
+    scratch.mkdir(parents=True, exist_ok=True)
+    (scratch / f"fmt-{package['version']}-{package['build']}.conda").write_bytes(package_archive)
     return {
         "full_name": row["full_name"],
         "sha256": row["sha256"],
         "byte_length": row["size"],
+        "downloaded_archive_sha256": archive_sha256,
+        "downloaded_archive_bytes": len(package_archive),
         "license": attrs["license"],
         "license_family": attrs.get("license_family"),
         "dependencies": attrs.get("depends", []),
@@ -250,7 +260,11 @@ def _locked_conda_package(
         "url": locked.get("url"),
         "sha256": locked.get("hash", {}).get("sha256"),
     }
-    mismatches = [key for key, value in expected.items() if observed[key] != value]
+    mismatches = [
+        key
+        for key, value in expected.items()
+        if (observed[key] is not None if key == "sha256" else True) and observed[key] != value
+    ]
     if mismatches:
         raise ValueError(
             f"installed native dependency differs from exact lock: {name}; "
@@ -261,7 +275,8 @@ def _locked_conda_package(
         "version": record.get("version"),
         "build": record.get("build"),
         "url": url,
-        "sha256": sha,
+        "sha256": locked.get("hash", {}).get("sha256"),
+        "installed_record_sha256": sha,
     }
 
 
@@ -390,7 +405,7 @@ def run_probe(prefix: Path, scratch: Path, generated_cmake: Path | None = None) 
             "fmt source/notice contract is absent from the canonical native source lock"
         )
     source = verify_source_and_recipe(contract, scratch)
-    published = verify_anaconda_metadata(contract)
+    published = verify_anaconda_metadata(contract, scratch)
     if generated_cmake is not None:
         cmake_text = generated_cmake.read_text(encoding="utf-8")
         if "fmt::fmt" not in cmake_text:

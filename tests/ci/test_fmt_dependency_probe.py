@@ -76,6 +76,7 @@ def test_fmt_probe_accepts_hash_bound_locked_native_owner(
                 "build": "h1ced75a_1",
                 "url": lock["fmt"]["url"],
                 "sha256": "a" * 64,
+                "installed_record_sha256": "a" * 64,
             },
             "source_record_id": "fmt-source-12.1.0",
             "owner": "fmt package",
@@ -186,13 +187,36 @@ def test_fmt_probe_rejects_changed_package_lock() -> None:
         probe.verify_pinned_identity(contract, probe.CONDA_LOCK)
 
 
-def test_fmt_probe_reports_installed_lock_mismatch_fields() -> None:
+def test_fmt_probe_allows_omitted_installed_package_sha_when_identity_matches_lock() -> None:
     record = {
         "name": "fmt",
         "version": "12.1.0",
         "build": "h1ced75a_1",
         "url": "https://conda.anaconda.org/conda-forge/win-64/fmt-12.1.0-h1ced75a_1.conda",
         "sha256": None,
+    }
+    locked = {
+        "fmt": {
+            "version": "12.1.0",
+            "build": "h1ced75a_1",
+            "url": record["url"],
+            "hash": {"sha256": "a" * 64},
+        }
+    }
+
+    verified = probe._locked_conda_package(record, locked)
+
+    assert verified["sha256"] == "a" * 64
+    assert verified["installed_record_sha256"] is None
+
+
+def test_fmt_probe_rejects_present_installed_package_sha_mismatch() -> None:
+    record = {
+        "name": "fmt",
+        "version": "12.1.0",
+        "build": "h1ced75a_1",
+        "url": "https://conda.anaconda.org/conda-forge/win-64/fmt-12.1.0-h1ced75a_1.conda",
+        "sha256": "b" * 64,
     }
     locked = {
         "fmt": {
