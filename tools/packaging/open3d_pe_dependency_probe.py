@@ -88,7 +88,11 @@ def inspect_open3d_imports(stage: Path) -> dict[str, object]:
     dll_directory_handles: list[object] = []
     loaded_handles: list[object] = []
     if os.name == "nt":
-        for directory in (open3d_directory, open3d_directory.parent):
+        bundle_root = open3d_directory.parent
+        for name in ("PySide6", "shiboken6", "OCP", "open3d", "numpy.libs"):
+            directory = bundle_root / name
+            if not directory.is_dir():
+                continue
             try:
                 dll_directory_handles.append(os.add_dll_directory(str(directory)))
             except OSError:
