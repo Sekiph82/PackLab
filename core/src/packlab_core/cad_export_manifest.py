@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -223,12 +224,25 @@ def build_cad_export_manifest(
 
 
 def resolve_packlab_commit() -> str:
-    """Return the explicit build commit or the enclosing source checkout HEAD."""
+    """Return the explicit commit, frozen-build provenance, or checkout HEAD."""
     configured = os.environ.get("PACKLAB_COMMIT")
     if configured is not None:
         if _COMMIT_PATTERN.fullmatch(configured):
             return configured
         raise CadExportManifestError("cad_export_manifest_packlab_commit_invalid")
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if isinstance(frozen_root, str) and frozen_root:
+        provenance_path = Path(frozen_root) / "packlab-build-provenance.json"
+        try:
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise CadExportManifestError(
+                "cad_export_manifest_packlab_commit_unavailable"
+            ) from error
+        commit = provenance.get("PACKLAB_BUILD_REVISION") if isinstance(provenance, dict) else None
+        if not isinstance(commit, str) or not _COMMIT_PATTERN.fullmatch(commit):
+            raise CadExportManifestError("cad_export_manifest_packlab_commit_invalid")
+        return commit
     repository_root = Path(__file__).resolve().parents[3]
     try:
         result = subprocess.run(

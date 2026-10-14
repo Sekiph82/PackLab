@@ -5,9 +5,11 @@ import json
 import re
 from pathlib import Path
 
+import pytest
 from tests.core.test_cad_brep import _inputs
 
 from packlab_core.cad_brep import revolve_design_model_to_brep
+from packlab_core.cad_export_manifest import CadExportManifestError, resolve_packlab_commit
 from packlab_core.cad_mesh_export import export_design_model_obj_glb
 from packlab_core.cad_preview import tessellate_brep_preview
 from packlab_core.cad_step_export import export_design_model_step
@@ -103,3 +105,33 @@ def test_captured_parent_manifest_names_exact_scan_master_binding(tmp_path) -> N
     assert parent_authority["kind"] == "CAPTURED_SCAN_MASTER"
     assert parent_authority["scan_master_binding_revision_id"] == model.parent_binding_revision_id
     assert "root_revision_id" not in parent_authority
+
+
+def test_frozen_build_commit_comes_from_embedded_provenance(tmp_path, monkeypatch) -> None:
+    revision = "e" * 40
+    (tmp_path / "packlab-build-provenance.json").write_text(
+        json.dumps({"PACKLAB_BUILD_REVISION": revision}), encoding="utf-8"
+    )
+    monkeypatch.delenv("PACKLAB_COMMIT", raising=False)
+    monkeypatch.setattr(
+        "packlab_core.cad_export_manifest.sys._MEIPASS", str(tmp_path), raising=False
+    )
+
+    assert resolve_packlab_commit() == revision
+
+
+def test_frozen_build_commit_fails_closed_for_missing_or_invalid_provenance(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.delenv("PACKLAB_COMMIT", raising=False)
+    monkeypatch.setattr(
+        "packlab_core.cad_export_manifest.sys._MEIPASS", str(tmp_path), raising=False
+    )
+    with pytest.raises(CadExportManifestError, match="commit_unavailable"):
+        resolve_packlab_commit()
+
+    (tmp_path / "packlab-build-provenance.json").write_text(
+        json.dumps({"PACKLAB_BUILD_REVISION": "unknown"}), encoding="utf-8"
+    )
+    with pytest.raises(CadExportManifestError, match="commit_invalid"):
+        resolve_packlab_commit()
