@@ -97,13 +97,15 @@ def test_open3d_probe_failure_code_classifies_path_free_import_detail() -> None:
         build_smoke._open3d_probe_failure_code(
             "UNKNOWN",
             "Open3D import failed (ImportError;reason=import_error;"
-            "cause=ModuleNotFoundError;cause_module=open3d.cpu.pybind;"
+            "cause=ModuleNotFoundError;cause_reason=module_missing;"
+            "cause_module=open3d.cpu.pybind;"
             "trace=packlab_core.geometry_adapter._load_open3d,"
             "importlib._bootstrap._find_and_load)",
         )
         == "open3d_probe_failed:status=UNKNOWN;"
         "detail=import_failed_ImportError_import_error_"
-        "cause_ModuleNotFoundError_cause_module_open3d_cpu_pybind_"
+        "cause_ModuleNotFoundError_cause_reason_module_missing_"
+        "cause_module_open3d_cpu_pybind_"
         "trace_packlab_core_geometry_adapter__load_open3d_"
         "importlib__bootstrap__find_and_load"
     )

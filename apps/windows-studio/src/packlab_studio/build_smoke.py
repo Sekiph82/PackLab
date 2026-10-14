@@ -125,6 +125,22 @@ def _open3d_probe_failure_code(status: str, detail: str) -> str:
                         "ValueError",
                     }:
                         safe_detail += f"_cause_{cause_type}"
+                elif field.startswith("cause_reason="):
+                    cause_reason = field.removeprefix("cause_reason=")
+                    if cause_reason in {
+                        "circular_import",
+                        "dll_initialization_failed",
+                        "dll_load_failed",
+                        "dll_module_missing",
+                        "dll_procedure_missing",
+                        "extension_export_missing",
+                        "import_error",
+                        "module_missing",
+                        "module_not_package",
+                        "numpy_multiarray_unavailable",
+                        "symbol_missing",
+                    }:
+                        safe_detail += f"_cause_reason_{cause_reason}"
                 elif field.startswith("cause_module="):
                     cause_module = field.removeprefix("cause_module=")
                     if cause_module and all(
