@@ -193,7 +193,12 @@ def load_and_validate_manifest(manifest_path: Path, source_lock_path: Path) -> d
 
 def validate_staged_tree(stage_root: Path, manifest: dict[str, Any]) -> None:
     stage_root = stage_root.resolve(strict=True)
-    expected = {entry["relative_path"]: entry for entry in manifest["files"]}
+    expected: dict[str, dict[str, Any]] = {}
+    for entry in manifest["files"]:
+        key = entry["relative_path"].casefold()
+        if key in expected:
+            raise ValueError("The controlled OCP manifest has case-insensitive duplicate paths")
+        expected[key] = entry
     observed: dict[str, Path] = {}
     for path in stage_root.rglob("*"):
         if not path.is_file():
@@ -212,17 +217,18 @@ def validate_staged_tree(stage_root: Path, manifest: dict[str, Any]) -> None:
         if marker not in f"/{lowered}":
             continue
         suffix = relative[relative.casefold().find(marker) + 1 :]
-        if suffix in observed:
+        key = suffix.casefold()
+        if key in observed:
             raise ValueError("A controlled OCP native file was staged more than once")
-        observed[suffix] = path
-        if suffix not in expected:
+        observed[key] = path
+        if key not in expected:
             raise ValueError(
                 "An OCP native file is staged without controlled provenance: " + path.name
             )
     if set(observed) != set(expected):
         raise ValueError("The controlled OCP manifest and staged native files differ")
-    for relative, path in observed.items():
-        if sha256(path) != expected[relative]["sha256"]:
+    for key, path in observed.items():
+        if sha256(path) != expected[key]["sha256"]:
             raise ValueError("A staged controlled OCP native file differs from its manifest hash")
 
 

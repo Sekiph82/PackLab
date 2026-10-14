@@ -253,6 +253,42 @@ def test_controlled_ocp_manifest_rejects_missing_native_file(
         validate_staged_tree(stage, manifest)
 
 
+def test_controlled_ocp_stage_matches_windows_native_paths_case_insensitively(
+    tmp_path: Path, controlled_manifest: tuple[Path, dict[str, object], dict[str, bytes]]
+) -> None:
+    manifest_path, _, files = controlled_manifest
+    manifest = load_and_validate_manifest(manifest_path, SOURCE_LOCK)
+    stage = tmp_path / "PackLabStudio"
+    for relative, content in files.items():
+        destination = stage / "_internal" / Path(relative)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+
+    source = stage / "_internal" / "OCP" / "TKBRep.dll"
+    source.rename(source.with_name("tkbrep.DLL"))
+
+    validate_staged_tree(stage, manifest)
+
+
+def test_controlled_ocp_manifest_rejects_case_insensitive_duplicate_paths(
+    tmp_path: Path, controlled_manifest: tuple[Path, dict[str, object], dict[str, bytes]]
+) -> None:
+    manifest_path, manifest_data, files = controlled_manifest
+    duplicate = dict(manifest_data["files"][1])
+    duplicate["relative_path"] = "OCP/tkbrep.DLL"
+    manifest_data["files"].append(duplicate)
+    manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+    manifest = load_and_validate_manifest(manifest_path, SOURCE_LOCK)
+    stage = tmp_path / "PackLabStudio"
+    for relative, content in files.items():
+        destination = stage / "_internal" / Path(relative)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+
+    with pytest.raises(ValueError, match="case-insensitive duplicate paths"):
+        validate_staged_tree(stage, manifest)
+
+
 def test_controlled_ocp_stage_rejects_windows_runtime_copy(
     tmp_path: Path, controlled_manifest: tuple[Path, dict[str, object], dict[str, bytes]]
 ) -> None:
