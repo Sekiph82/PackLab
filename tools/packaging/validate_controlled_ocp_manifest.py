@@ -216,7 +216,9 @@ def validate_staged_tree(stage_root: Path, manifest: dict[str, Any]) -> None:
             raise ValueError("A controlled OCP native file was staged more than once")
         observed[suffix] = path
         if suffix not in expected:
-            raise ValueError("An OCP native file is staged without controlled provenance")
+            raise ValueError(
+                "An OCP native file is staged without controlled provenance: " + path.name
+            )
     if set(observed) != set(expected):
         raise ValueError("The controlled OCP manifest and staged native files differ")
     for relative, path in observed.items():
