@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from tools.packaging.windows_native_runtime_policy import (
     deployment_role,
+    is_numpy_wheel_msvc_alias,
     is_windows_runtime_dll,
     minimum_runtime_version,
     runtime_is_supported,
@@ -41,6 +42,12 @@ def test_runtime_classification_covers_os_and_vc_payloads() -> None:
     ):
         assert is_windows_runtime_dll(Path("nested") / name)
     assert not is_windows_runtime_dll("fmt.dll")
+    assert is_numpy_wheel_msvc_alias("numpy.libs/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll")
+    assert not is_numpy_wheel_msvc_alias("open3d/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll")
+    assert not is_numpy_wheel_msvc_alias("numpy.libs/msvcp140.dll")
+    assert not is_numpy_wheel_msvc_alias(
+        "numpy.libs/vcruntime140-a4c2229bdc2a2a630acdc095b4d86008.dll"
+    )
     assert deployment_role("vc14_runtime") == "BUILD_ENV_CONDA_ONLY"
     assert deployment_role("ucrt") == "BUILD_ENV_CONDA_ONLY"
     assert deployment_role("fmt") is None

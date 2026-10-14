@@ -3,7 +3,10 @@
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_dynamic_libs, copy_metadata
-from tools.packaging.windows_native_runtime_policy import is_windows_runtime_dll
+from tools.packaging.windows_native_runtime_policy import (
+    is_numpy_wheel_msvc_alias,
+    is_windows_runtime_dll,
+)
 
 root = Path(SPECPATH).parents[1]
 entry = root / "tools" / "packaging" / "packlab_studio_entry.py"
@@ -97,10 +100,11 @@ def keep_curated_qt_file(destination):
     normalized = destination.replace("\\", "/").casefold()
     base = Path(normalized).name
     # Windows 10/11 services UCRT/API sets. MSVC CRT DLLs use the separately
-    # detected x64 VC++ Redistributable; never package conda or wheel-private
-    # copies, including copies nested under package directories.
+    # detected x64 VC++ Redistributable. NumPy's Windows wheel has one
+    # hash-renamed MSVCP140 import that the loader resolves by exact filename;
+    # retain only that wheel-private file so the frozen extension can load.
     if is_windows_runtime_dll(base):
-        return False
+        return is_numpy_wheel_msvc_alias(destination)
     # These x64-suffixed OpenSSL files are unrelated Poppler PATH pollution;
     # CPython's own _ssl extension uses the un-suffixed DLLs from Python/DLLs.
     if base in {"libcrypto-3-x64.dll", "libssl-3-x64.dll"}:

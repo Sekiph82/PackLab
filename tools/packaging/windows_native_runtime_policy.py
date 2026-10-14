@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 BUILD_ENV_CONDA_ONLY = {"ucrt", "vc14_runtime"}
+_NUMPY_MSVCP_ALIAS = re.compile(r"^msvcp140-[0-9a-f]{32}\.dll$", re.IGNORECASE)
 
 
 def is_windows_runtime_dll(path: Path | str) -> bool:
@@ -17,6 +18,17 @@ def is_windows_runtime_dll(path: Path | str) -> bool:
         or name.startswith(("msvcp140", "vcruntime140"))
         and name.endswith(".dll")
         or name in {"concrt140.dll", "vcomp140.dll"}
+    )
+
+
+def is_numpy_wheel_msvc_alias(destination: Path | str) -> bool:
+    """Identify NumPy's exact wheel-private, hash-renamed MSVC runtime location."""
+    normalized = str(destination).replace("\\", "/").casefold()
+    parts = normalized.split("/")
+    return (
+        len(parts) >= 2
+        and parts[-2] == "numpy.libs"
+        and _NUMPY_MSVCP_ALIAS.fullmatch(parts[-1]) is not None
     )
 
 

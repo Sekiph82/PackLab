@@ -364,7 +364,7 @@
       "provenance_class": "EXTERNAL_SYSTEM_PREREQUISITE",
       "deployment_role": "MICROSOFT_SIGNED_PREREQUISITE",
       "prerequisite_contract": "tools/packaging/windows-runtime-prerequisite.json",
-      "reason": "VC runtime DLLs must be omitted from the application payload; the installer requires an installed x64 Microsoft VC++ Redistributable meeting the prerequisite contract. A staged copy remains unresolved."
+      "reason": "VC runtime DLLs are supplied by the version-checked x64 Microsoft VC++ Redistributable prerequisite. NumPy's Windows wheel additionally contains a hash-renamed MSVCP140 DLL required by its native extension; staging that file fixes loading, but the exact Microsoft redistribution entitlement for this wheel-private file is not established, so it remains unresolved."
     },
     "microsoft-windows-runtime": {
       "status": "UNRESOLVED_IF_STAGED",

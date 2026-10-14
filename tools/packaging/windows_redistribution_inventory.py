@@ -20,7 +20,10 @@ from tools.packaging.validate_controlled_ocp_manifest import (
     load_and_validate_manifest,
     validate_staged_tree,
 )
-from tools.packaging.windows_native_runtime_policy import is_windows_runtime_dll
+from tools.packaging.windows_native_runtime_policy import (
+    is_numpy_wheel_msvc_alias,
+    is_windows_runtime_dll,
+)
 
 SCHEMA_VERSION = 1
 PE_SUFFIXES = {".dll", ".exe", ".pyd"}
@@ -681,6 +684,14 @@ def build_inventory(
                         owner_ids.add("unmapped-source-component")
                         mapping_evidence = "python_openssl_version_unparsed"
                         unresolved_reason = "The selected Python runtime OpenSSL version could not be identified exactly."
+                elif is_numpy_wheel_msvc_alias(source_path) and is_windows_api_runtime(source_path):
+                    owner_ids.add("microsoft-vc-runtime")
+                    mapping_evidence = "locked_numpy_wheel_hash_renamed_msvc_runtime_file"
+                    unresolved_reason = (
+                        "NumPy requires this hash-renamed Microsoft VC runtime DLL to load. "
+                        "Its exact Microsoft redistribution entitlement for this staged file "
+                        "has not been established; the native runtime remains unresolved."
+                    )
                 elif matches:
                     owner_ids.update(
                         normalized_distribution_name(item.metadata.get("Name", "unknown"))
