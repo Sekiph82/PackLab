@@ -9,6 +9,19 @@ https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-
 Native build owner approval:
 https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_OWNER_APPROVAL_HOSTED_BUILD_315_NOVTK.md
 
+## Owner-decision and final compliance audit amendment (2026-10-14)
+
+This independent audit now incorporates the owner's explicit deployment determination:
+https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_OWNER_INTERNAL_FACTORY_DEPLOYMENT_DECISION.md
+
+- Deployment is **proprietary INTERNAL BUSINESS** PackLab, current owner computer then managed Kenya factory **multi-PC** operations (approximately two months), authorized staff, **no external sales or public release**. It is commercial-purpose factory activity, NOT `PERSONAL_USE_ONLY`/`NONCOMMERCIAL` for dependency-license gates.
+- Original AI-generated code and custom graphics produced for the user are user-controlled project outputs as between user and OpenAI to the extent applicable terms/law permits, **not a blanket clearance** for third-party code, externally supplied art or separate legal-entity IP assignments. Auditor should not demand a fictional company/rightsholder identity, an automatic commercial Qt license purchase or re-ask personal-vs-customer-sale intent.
+- PackLab proprietary project notice, exact file provenance and imported source attribution still require verification before marking `component:packlab` fully cleared.
+- Default Qt route is **LGPLv3 candidate**, conditionally accepted only after exact PySide6 Essentials/Addons/Shiboken module compliance, notices, sources, user replacement/relink rights and actual wheel file list. Do not assert LGPL exemptions without evidence; any commercial route requires real license entitlement. Open3D MIT core **does not** prove wheel transitive rights; require exact SBOM/NOTICE/source. Hash-renamed NumPy MSVC DLL needs exact lawful redistributable file entitlement or proven legitimate removal plus clean frozen smoke.
+- Last hosted run `38617631153` independent W07 frozen NumPy/Open3D/QtPdf/OCP/STEP/DXF smoke PASS, OCP/OCCT reuse PASS, quality `38617544058` PASS (2,149 tests), but W07 compliance BLOCKED 9 top-level entries/28 shipped files, missing 2 NOTICE and 1 source package. **No Installer, no full warm proof**. Treat those facts as the starting frontier, do not waste time replaying solved Open3D diagnostics.
+- **Before 2026-10-15 19:12 UTC**, verify retention of latest same-run OCP artifact 11922382361 and compliance artifact 11922367788, original digest+manifest provenance through noncompiling validation/renewal. Never rebuild just to extend retention or call an expired artifact reusable.
+- Codex must collect vendor/manifest/license evidence autonomously and group actual 28 staged files by owners, not demand nine separate owner approvals. One master task; no new R07/R08 prompts. Actual legal ambiguity remains hard blocker; no bypass. Publish real internal unsigned Installer only with file-level source/NOTICE/REDIST clearance, signed Microsoft prerequisite where needed, full offline smoke and genuine cold-to-warm cache reuse, retaining `legal_review_required=true` and `public_release_authorized=false`.
+
 ## Scope of ONE end-to-end audit
 
 **Acceptance requires actual Installer**; completion of fmt/CRT research, OCP compilation, static tests, successful SDK build, empty cached folders or a green workflow without real runtime evidence is insufficient. Audit independent from Codex log against live GitHub commits, workflow job logs, artifacts/manifest digests and true report bytes. Only ChatGPT may update/check off root `TASKS.md`.
