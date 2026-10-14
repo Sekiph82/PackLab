@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
 import os
 import re
@@ -84,6 +85,14 @@ def inspect_open3d_imports(stage: Path) -> dict[str, object]:
     system_directories = _system_search_directories()
     inspections: list[dict[str, object]] = []
     unresolved = False
+    dll_directory_handles: list[object] = []
+    loaded_handles: list[object] = []
+    if os.name == "nt":
+        for directory in (open3d_directory, open3d_directory.parent):
+            try:
+                dll_directory_handles.append(os.add_dll_directory(str(directory)))
+            except OSError:
+                pass
     for binary in binaries:
         try:
             image = pefile.PE(str(binary), fast_load=True)
@@ -113,7 +122,23 @@ def inspect_open3d_imports(stage: Path) -> dict[str, object]:
             resolution = _resolution(dependency, staged_names, system_directories)
             dependencies.append({"name": dependency, "resolution": resolution})
             unresolved |= resolution == "UNRESOLVED"
-        inspections.append({"binary": binary.name, "status": "INSPECTED", "imports": dependencies})
+        load_probe: dict[str, object] = {"status": "NOT_WINDOWS"}
+        if os.name == "nt":
+            try:
+                loaded_handles.append(ctypes.WinDLL(str(binary)))
+                load_probe = {"status": "LOADABLE"}
+            except OSError as error:
+                load_probe = {"status": "LOAD_FAILED"}
+                if isinstance(error.winerror, int):
+                    load_probe["winerror"] = error.winerror
+        inspections.append(
+            {
+                "binary": binary.name,
+                "status": "INSPECTED",
+                "imports": dependencies,
+                "load_probe": load_probe,
+            }
+        )
 
     return {
         "schema_version": 1,

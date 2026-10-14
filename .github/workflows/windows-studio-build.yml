@@ -901,12 +901,15 @@ jobs:
           $unresolved = @($report.binaries | ForEach-Object { $_.imports } |
             Where-Object { $_.resolution -in @("UNRESOLVED", "MICROSOFT_SIGNED_PREREQUISITE") } |
             Select-Object -ExpandProperty name -Unique)
+          $loadFailures = @($report.binaries | Where-Object { $_.load_probe.status -eq "LOAD_FAILED" } |
+            ForEach-Object { if ($null -ne $_.load_probe.winerror) { "$($_.binary):WinError$($_.load_probe.winerror)" } else { "$($_.binary):load_failed" } })
           @(
             "## Staged Open3D PE dependency inspection",
             "",
             "- Inspection status: $($report.status)",
             "- Native binary count: $($report.binary_count)",
             "- Imports absent from package/host: $(if ($unresolved.Count) { $unresolved -join ', ' } else { 'none' })",
+            "- Direct binary load probes: $(if ($loadFailures.Count) { $loadFailures -join ', ' } else { 'all loadable or not probed' })",
             "- Report: ``packlab-open3d-pe-dependencies.json``; names and classifications only, no machine paths."
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
