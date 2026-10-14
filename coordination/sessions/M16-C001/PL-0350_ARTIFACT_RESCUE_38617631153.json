@@ -1,0 +1,636 @@
+{
+  "schema_version": 1,
+  "record_type": "PL0350_EXPIRING_ARTIFACT_RESCUE_AND_PREFLIGHT_SNAPSHOT",
+  "recorded_at_utc": "2026-10-14T19:52:22Z",
+  "source_revision": "bb50690b8e932cbd8bb9f04504f36ed798698faa",
+  "hosted_run_id": 38617631153,
+  "hosted_run_url": "https://github.com/Sekiph82/PackLab/actions/runs/38617631153",
+  "artifact_archives_verified_against_actions_api": [
+    {
+      "id": 11921297195,
+      "name": "packlab-occt-sdk-38617631153-1",
+      "size_bytes": 57520243,
+      "sha256": "a14f2660e3627b4ee88f7a7f1d6b4c66f9cdb2e6a9022990d64ba5d616a2ee72",
+      "expires_at_utc": "2026-10-15T19:03:30Z",
+      "preserved_archive": "occt-sdk.zip"
+    },
+    {
+      "id": 11921068651,
+      "name": "packlab-native-source-evidence-38617631153-1",
+      "size_bytes": 1466,
+      "sha256": "3179d44b102a53960ba2f881d1330d3a5add61f6c0c7ec03931012598b4d88f4",
+      "expires_at_utc": "2026-10-15T19:03:38Z",
+      "preserved_archive": "native-source-evidence.zip"
+    },
+    {
+      "id": 11922382361,
+      "name": "packlab-controlled-ocp-38617631153-1",
+      "size_bytes": 46462994,
+      "sha256": "1a62424b85845eecd61be8a9706fb367258faaf8ae0dab63b2cbb7cfe1774e0b",
+      "expires_at_utc": "2026-10-15T19:09:52Z",
+      "preserved_archive": "controlled-ocp-runtime.zip"
+    },
+    {
+      "id": 11922367788,
+      "name": "packlab-windows-compliance-preclearance-bb50690b8e932cbd8bb9f04504f36ed798698faa",
+      "size_bytes": 305713,
+      "sha256": "fd46a7e14299845b9f65055451b6549bc90de6c41ed2c3d43aa1a6d8fbf0ee02",
+      "expires_at_utc": "2026-10-15T19:12:44Z",
+      "preserved_archive": "compliance-preclearance.zip"
+    }
+  ],
+  "ocp_runtime": {
+    "manifest_status": "PASS",
+    "manifest_file_count": 48,
+    "all_manifest_file_hashes_verified": true,
+    "manifest_sha256": "c88e81f7a607943fad5fb2cd22cefd0f673bdec5aa1068dc25ff9376ae2026d8",
+    "input_lock_sha256": "0fc50a9e092e4c712627518cb87ad0c841fc4a69f7272a2ba02cf5195f836acb",
+    "ocp_source_revision": "d69b064a3a604ebf245b1f3b14fb54c835a3a571",
+    "occt_source_revision": "a016080bf6738d6aeae020badee4e888ad1540a5",
+    "generated_source_archive_sha256": "290941ef2d34e7b10b7b6bde4577c5d5d0e703342f934c29a55660caaed8dd5b",
+    "generated_source_input_modules": 319,
+    "generated_source_output_modules": 315,
+    "compiled_pyd": {
+      "path": "OCP/OCP.cp312-win_amd64.pyd",
+      "bytes": 93657600,
+      "sha256": "c9db27bf7d3e95932a0ddb512c35bfe19a63e50394da0d9978355db28842fa29"
+    }
+  },
+  "preclearance_summary": {
+    "status": "BLOCKED",
+    "engineering_packaging_status": "BLOCKED",
+    "staged_file_count": 479,
+    "staged_total_bytes": 514901343,
+    "collected_notice_count": 123,
+    "required_notice_count": 61,
+    "missing_notice_count": 2,
+    "missing_source_package_count": 1,
+    "unresolved_file_count": 28,
+    "unresolved_component_count": 6,
+    "unresolved_count": 9,
+    "unresolved_items": [
+      "component:microsoft-vc-runtime",
+      "component:open3d",
+      "component:packlab",
+      "component:pyside6-addons",
+      "component:pyside6-essentials",
+      "component:shiboken6",
+      "evidence:missing-notices",
+      "evidence:missing-source-packages",
+      "file:_internal/numpy.libs/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll"
+    ],
+    "legal_review_required": true,
+    "public_release_authorized": false
+  },
+  "unresolved_shipped_file_count": 28,
+  "unresolved_shipped_files": [
+    {
+      "relative_path": "_internal/numpy.libs/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll",
+      "sha256": "a4c2229bdc2a2a630acdc095b4d86008e5c3e3bc7773174354f3da4f5beb9cde",
+      "byte_length": 575056,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "microsoft-vc-runtime"
+      ],
+      "component_versions": {
+        "microsoft-vc-runtime": null
+      },
+      "provenance_class": "EXTERNAL_SYSTEM_PREREQUISITE",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "NumPy requires this hash-renamed Microsoft VC runtime DLL to load. Its exact Microsoft redistribution entitlement for this staged file has not been established; the native runtime remains unresolved."
+    },
+    {
+      "relative_path": "_internal/open3d/Open3D.dll",
+      "sha256": "067921a365a91aabe939ee7764d1cde74cf2e0c8ad55f688d2a05ff87cb065da",
+      "byte_length": 164283904,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "open3d"
+      ],
+      "component_versions": {
+        "open3d": "0.20.0"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/open3d/pybind.cp312-win_amd64.pyd",
+      "sha256": "70d13ecef013bf4f0ca29d9e51442e01348c37db965a521ea91acb377470a389",
+      "byte_length": 6747136,
+      "file_category": "python_native_extension",
+      "component_ids": [
+        "open3d"
+      ],
+      "component_versions": {
+        "open3d": "0.20.0"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/open3d/tbb12.dll",
+      "sha256": "a0e2c43bd97b2bece9420c1e179320c195784cf4989192cb53b1434db5f06144",
+      "byte_length": 328704,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "open3d"
+      ],
+      "component_versions": {
+        "open3d": "0.20.0"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/opengl32sw.dll",
+      "sha256": "34b444c016289b560662ff896deceb7f4b2c0723aed3d319ae167c9186ce42b3",
+      "byte_length": 20639544,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/plugins/iconengines/qsvgicon.dll",
+      "sha256": "5bb97b6f114682ae0b5f42b23b6818aece6499bad88dac80a138efa8a88c12bc",
+      "byte_length": 72504,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qico.dll",
+      "sha256": "1684fd56f1758167f7b3ac011264ae5859b3cf6113e381626ec3dc1d3122fe52",
+      "byte_length": 46904,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qjpeg.dll",
+      "sha256": "6517345ac19f5c489daeadc029d0018bbdc09d8e1031c60d714557972f22c6d4",
+      "byte_length": 591672,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/plugins/imageformats/qsvg.dll",
+      "sha256": "4b7d65ba39be58cb469b54b5fdee2987871d67e5050cd70724016e09966e54f6",
+      "byte_length": 39736,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/plugins/platforms/qoffscreen.dll",
+      "sha256": "e776251668440169ed18a2fe1b236762d514ef5244639cbb559b5a77ddd38954",
+      "byte_length": 110904,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/plugins/platforms/qwindows.dll",
+      "sha256": "bf6dbc3009f386fa22f0ced560bea6bbf3e0e0b4442d2fb855db67cffce49dbf",
+      "byte_length": 991032,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/plugins/styles/qmodernwindowsstyle.dll",
+      "sha256": "a7a6424c23bf371bd28a404a196b210971726f6f2a87b63aac185a5e6e40da71",
+      "byte_length": 240440,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/pyside6.abi3.dll",
+      "sha256": "d0b5c701fb3a8ea839e72b602058f3960935156ebeca084893c54c99e54dd707",
+      "byte_length": 255288,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/Qt6Core.dll",
+      "sha256": "d6a3c37c5263c5d418fc0e80b722bc9fca7c0859e6f635f9624a2fde00bdc653",
+      "byte_length": 10363704,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/Qt6Gui.dll",
+      "sha256": "ae29b005f51b6850bf57fa06fced0dc8c7039fd6fafc3bfbcfe76e38adc7abf1",
+      "byte_length": 9546552,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/Qt6Network.dll",
+      "sha256": "dd3512d1c5ed062d30c98426cd0a850f13e0cf31437afb5b0b474132b9c52922",
+      "byte_length": 1751352,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/Qt6Pdf.dll",
+      "sha256": "6fc87c84a723b05a0a3d7dce87083d25d23b1558e8806ff1cc7952bb9c5c9779",
+      "byte_length": 4620600,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-addons"
+      ],
+      "component_versions": {
+        "pyside6-addons": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/Qt6Svg.dll",
+      "sha256": "1eac8f7415b311a88cb3cb4e25c3098d0e059c24c831fbbb13f43a80f0df06b7",
+      "byte_length": 609080,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/Qt6Widgets.dll",
+      "sha256": "ff0df9e2e6827e035f0731a4cedfc6333f4602bca00775e56346f27032406b74",
+      "byte_length": 6497080,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/QtCore.pyd",
+      "sha256": "74f96322c5e9cea73aefd2ed5870e5275336b31f552fcd32f12fc81d23f1bc6f",
+      "byte_length": 3345720,
+      "file_category": "python_native_extension",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/QtGui.pyd",
+      "sha256": "7bef20046045199c037b7cbfedaa1c5464730fa948b2c9ec8afbf718e63774d4",
+      "byte_length": 3901240,
+      "file_category": "python_native_extension",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/QtNetwork.pyd",
+      "sha256": "c5038bb71fc9d57330fa2d8eeec65aab69fcf02687cc8f54dbfb5995cfec6a71",
+      "byte_length": 1009464,
+      "file_category": "python_native_extension",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/QtPdf.pyd",
+      "sha256": "dd7136bf75bb893c464d80121cab8775174dcbdce97b8fc079176241700c75a5",
+      "byte_length": 246584,
+      "file_category": "python_native_extension",
+      "component_ids": [
+        "pyside6-addons"
+      ],
+      "component_versions": {
+        "pyside6-addons": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/QtSvg.pyd",
+      "sha256": "2d128bbd2839aaad93f96d4d0705912065d2dcc20c92cb028f0441979bdb7280",
+      "byte_length": 116024,
+      "file_category": "python_native_extension",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/PySide6/QtWidgets.pyd",
+      "sha256": "f12f4ca641998e5706d5f7b0023147d573f0f2d2361e26dadf31bdbf05fbfd1d",
+      "byte_length": 4857656,
+      "file_category": "python_native_extension",
+      "component_ids": [
+        "pyside6-essentials"
+      ],
+      "component_versions": {
+        "pyside6-essentials": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/shiboken6/Shiboken.pyd",
+      "sha256": "2f6f3a694f675b1dafdae26903191613c02866ab48e02591ae34ca1a3b1284f1",
+      "byte_length": 33592,
+      "file_category": "python_native_extension",
+      "component_ids": [
+        "shiboken6"
+      ],
+      "component_versions": {
+        "shiboken6": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "_internal/shiboken6/shiboken6.abi3.dll",
+      "sha256": "de3c6b2ed5f75c9ac0de4a6844b653b3b9d09263ce68c2b5fc25a96c5c3e8469",
+      "byte_length": 394040,
+      "file_category": "windows_shared_library",
+      "component_ids": [
+        "shiboken6"
+      ],
+      "component_versions": {
+        "shiboken6": "6.11.2"
+      },
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    },
+    {
+      "relative_path": "PackLabStudio.exe",
+      "sha256": "644cfdb8dad1650d7c5d278ad8f4c99f3cfe4e868756ef959b3dc7c1afea511c",
+      "byte_length": 18874819,
+      "file_category": "windows_executable",
+      "component_ids": [
+        "annotated-types",
+        "attrs",
+        "blinker",
+        "cadquery-ocp-novtk",
+        "certifi",
+        "cffi",
+        "charset-normalizer",
+        "click",
+        "colorama",
+        "comm",
+        "cpython-runtime",
+        "cryptography",
+        "dash",
+        "flask",
+        "idna",
+        "importlib-metadata",
+        "iniconfig",
+        "ipywidgets",
+        "itsdangerous",
+        "janus",
+        "jinja2",
+        "jsonschema",
+        "jsonschema-specifications",
+        "librt",
+        "markupsafe",
+        "matplotlib-inline",
+        "mypy",
+        "mypy-extensions",
+        "narwhals",
+        "nest-asyncio",
+        "numpy",
+        "open3d",
+        "packaging",
+        "packlab",
+        "packlab-application",
+        "packlab-controlled-ocp",
+        "plotly",
+        "pluggy",
+        "psutil",
+        "pydantic",
+        "pydantic-core",
+        "pygments",
+        "pyinstaller",
+        "pyinstaller-bootloader",
+        "pyinstaller-hooks-contrib-runtime-2026.8",
+        "pyside6-addons",
+        "pyside6-essentials",
+        "pytest",
+        "referencing",
+        "requests",
+        "retrying",
+        "rpds-py",
+        "setuptools",
+        "shiboken6",
+        "traitlets",
+        "typing-extensions",
+        "typing-inspection",
+        "urllib3",
+        "werkzeug",
+        "zipp"
+      ],
+      "component_versions": {
+        "annotated-types": "0.8.0",
+        "attrs": "26.1.0",
+        "blinker": "1.9.0",
+        "cadquery-ocp-novtk": "7.9.3.1.1",
+        "certifi": "2026.7.22",
+        "cffi": "2.1.1",
+        "charset-normalizer": "3.5.2",
+        "click": "8.5.0",
+        "colorama": "0.4.6",
+        "comm": "0.2.3",
+        "cpython-runtime": "3.12.10",
+        "cryptography": "45.0.7",
+        "dash": "4.4.1",
+        "flask": "3.1.3",
+        "idna": "3.20",
+        "importlib-metadata": "9.0.1",
+        "iniconfig": "2.3.0",
+        "ipywidgets": "8.1.9",
+        "itsdangerous": "2.2.0",
+        "janus": "2.0.0",
+        "jinja2": "3.1.6",
+        "jsonschema": "4.26.0",
+        "jsonschema-specifications": "2025.9.1",
+        "librt": "0.15.0",
+        "markupsafe": "3.0.3",
+        "matplotlib-inline": "0.2.2",
+        "mypy": "1.20.2",
+        "mypy-extensions": "1.1.0",
+        "narwhals": "2.26.0",
+        "nest-asyncio": "1.6.0",
+        "numpy": "2.5.3",
+        "open3d": "0.20.0",
+        "packaging": "26.3",
+        "packlab": "0.1.0",
+        "packlab-controlled-ocp": "7.9.3.1.1",
+        "plotly": "7.1.0",
+        "pluggy": "1.6.0",
+        "psutil": "7.2.2",
+        "pydantic": "2.13.5",
+        "pydantic-core": "2.46.5",
+        "pygments": "2.21.0",
+        "pyinstaller": "6.22.3",
+        "pyinstaller-bootloader": "6.22.3",
+        "pyinstaller-hooks-contrib-runtime-2026.8": "2026.8",
+        "pyside6-addons": "6.11.2",
+        "pyside6-essentials": "6.11.2",
+        "pytest": "8.4.2",
+        "referencing": "0.37.0",
+        "requests": "2.34.2",
+        "retrying": "1.4.2",
+        "rpds-py": "2026.6.3",
+        "setuptools": "84.0.0",
+        "shiboken6": "6.11.2",
+        "traitlets": "5.16.1",
+        "typing-extensions": "4.16.0",
+        "typing-inspection": "0.4.4",
+        "urllib3": "2.8.0",
+        "werkzeug": "3.1.9",
+        "zipp": "4.1.0"
+      },
+      "provenance_class": "PACKLAB_OWNED",
+      "license_status": "UNRESOLVED",
+      "unresolved_reason": "At least one mapped component lacks complete license/notice evidence."
+    }
+  ],
+  "retention_note": "Exact artifact ZIP archives are locally preserved off the Desktop under the user Codex artifact area. Main-ref OCP cache also restored and validated by hosted run 38617631153. No native compilation was performed in that run.",
+  "controlled_ocp_cache": {
+    "cache_id": 8951101940,
+    "key": "Windows-x64-controlled-ocp315-v4-7ad1c8b0b2634d32eeada2e6d8fa4fb6e85f7f3c1e6989e8beab7ebdbc2c9031-3c3ce0b7acf7a56a7a10081a17e2b64dbf0dd1ede954c3c2173f1ccf2bfd7574-290941ef2d34e7b10b7b6bde4577c5d5d0e703342f934c29a55660caaed8dd5b",
+    "cache_version": "e5a584bc4abb19ce571bf32a6bba6fa74a652d6a0e3c9b9a1753f815400d92c0",
+    "compressed_size_bytes": 36414458,
+    "last_accessed_at_utc": "2026-10-14T19:09:44.236459Z",
+    "ref": "refs/heads/main",
+    "hosted_restore_and_fail_closed_validation": "PASS",
+    "source_compilation_step": "SKIPPED"
+  }
+}
