@@ -549,9 +549,10 @@ def build_inventory(
                 raise ValueError(
                     "Controlled OCP manifest source identity differs from the exact lock"
                 )
-            if relative in controlled_ocp:
+            relative_key = relative.casefold()
+            if relative_key in controlled_ocp:
                 raise ValueError("Controlled OCP manifest contains a duplicate relative path")
-            controlled_ocp[relative] = item
+            controlled_ocp[relative_key] = item
             controlled_ocp_owner_by_name[Path(relative).name.casefold()] = {
                 "ocp-source-7.9.3.1.1": "packlab-controlled-ocp",
                 "occt-source-7.9.3": "occt-7.9.3",
@@ -572,18 +573,20 @@ def build_inventory(
     for path in all_paths:
         relative = path.relative_to(stage_root).as_posix()
         lowered = relative.casefold()
-        if "/ocp/" in f"/{lowered}" and path.suffix.casefold() in {".pyd", ".dll"}:
-            manifest_key = f"OCP/{path.name}"
-            if manifest_key in controlled_ocp:
-                if sha256_file(path) != controlled_ocp[manifest_key]["sha256"]:
-                    raise ValueError(
-                        "A staged controlled OCP native file hash differs from its manifest"
-                    )
-                if manifest_key in staged_ocp:
-                    raise ValueError("A controlled OCP manifest file was staged more than once")
-                staged_ocp[manifest_key] = path
-            elif path.suffix.casefold() == ".pyd":
-                raise ValueError("An OCP Python extension is staged without controlled provenance")
+        marker = "/ocp/"
+        if marker not in f"/{lowered}" or path.suffix.casefold() not in {".pyd", ".dll"}:
+            continue
+        manifest_key = relative[lowered.find(marker) + 1 :].casefold()
+        if manifest_key in controlled_ocp:
+            if sha256_file(path) != controlled_ocp[manifest_key]["sha256"]:
+                raise ValueError(
+                    "A staged controlled OCP native file hash differs from its manifest"
+                )
+            if manifest_key in staged_ocp:
+                raise ValueError("A controlled OCP manifest file was staged more than once")
+            staged_ocp[manifest_key] = path
+        elif path.suffix.casefold() == ".pyd":
+            raise ValueError("An OCP Python extension is staged without controlled provenance")
     if controlled_ocp and set(staged_ocp) != set(controlled_ocp):
         raise ValueError("The controlled OCP manifest and exact staged native files differ")
     records: list[dict[str, Any]] = []

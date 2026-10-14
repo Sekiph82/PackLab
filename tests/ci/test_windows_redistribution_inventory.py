@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from tools.packaging import windows_redistribution_inventory as inventory
+from tools.packaging.validate_controlled_ocp_manifest import validate_staged_tree
 
 
 def test_safe_posix_path_rejects_absolute_and_parent_paths() -> None:
@@ -37,6 +38,92 @@ def test_toc_maps_exact_stage_layout_and_rejects_traversal(tmp_path: Path) -> No
     }
     with pytest.raises(ValueError, match="unsafe destination"):
         inventory.toc_destinations([("../escape.dll", "x", "BINARY")], "_internal", stage)
+
+
+def test_inventory_reuses_case_insensitive_controlled_ocp_stage_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "repo"
+    project.mkdir()
+    stage = project / "build" / "PackLabStudio"
+    staged = stage / "_internal" / "OCP" / "TKBin.dll"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"controlled native binary")
+    revision = "a" * 40
+    version = "7.9.3"
+    license_id = "LGPL-2.1-only WITH OCCT-exception"
+    notice_source = "tools/packaging/windows_licenses/OCCT-7.9.3/LGPL-2.1.txt"
+    source_record = {
+        "id": "occt-source-7.9.3",
+        "version": version,
+        "revision": revision,
+        "license_identifier": license_id,
+        "license_notice_source": notice_source,
+    }
+    source_lock = project / "tools" / "packaging" / "windows_native_source_lock.json"
+    source_lock.parent.mkdir(parents=True)
+    source_lock.write_text(json.dumps({"records": [source_record]}), encoding="utf-8")
+    manifest = {
+        "files": [
+            {
+                "relative_path": "OCP/tkbin.dll",
+                "sha256": inventory.sha256_file(staged),
+                "source_package_id": source_record["id"],
+                "version": version,
+                "build_revision": revision,
+                "license_identifier": license_id,
+                "license_notice_source": notice_source,
+            }
+        ]
+    }
+    monkeypatch.setattr(inventory, "load_and_validate_manifest", lambda *_args: manifest)
+    monkeypatch.setattr(inventory, "validate_staged_tree", lambda *_args: None)
+    toc = tmp_path / "COLLECT-00.toc"
+    source = tmp_path / "tkbin.dll"
+    source.write_bytes(staged.read_bytes())
+    toc.write_text(repr([("_internal/OCP/TKBin.dll", str(source), "BINARY")]), encoding="utf-8")
+    analysis = tmp_path / "Analysis-00.toc"
+    analysis.write_text("()", encoding="utf-8")
+    registry = tmp_path / "registry.json"
+    registry.write_text('{"schema_version":1}', encoding="utf-8")
+    monkeypatch.setattr(inventory, "analysis_source_paths", lambda _path: [])
+    monkeypatch.setattr(inventory.importlib.metadata, "distributions", lambda: [])
+
+    files, _summary, _evidence = inventory.build_inventory(
+        stage,
+        toc,
+        analysis,
+        "_internal",
+        project,
+        revision,
+        "1.2.3",
+        registry,
+        tmp_path / "evidence",
+        tmp_path / "controlled-manifest.json",
+    )
+
+    row = next(record for record in files["files"] if record["relative_path"].endswith("TKBin.dll"))
+    assert row["component_ids"] == ["occt-7.9.3"]
+    assert row["mapping_method"] == "controlled_ocp_manifest_and_exact_staged_sha256"
+
+
+def test_case_insensitive_controlled_ocp_validator_is_used_for_manifest_parity(
+    tmp_path: Path,
+) -> None:
+    stage = tmp_path / "PackLabStudio"
+    staged = stage / "_internal" / "OCP" / "TKBin.dll"
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"controlled native binary")
+    manifest = {
+        "files": [
+            {
+                "relative_path": "OCP/tkbin.dll",
+                "sha256": inventory.sha256_file(staged),
+            }
+        ]
+    }
+
+    validate_staged_tree(stage, manifest)
 
 
 def test_extensionless_declared_license_file_is_collected(tmp_path: Path) -> None:
