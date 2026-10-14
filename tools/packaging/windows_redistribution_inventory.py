@@ -660,6 +660,8 @@ def build_inventory(
             }[source_record["source_package_id"]]
             owner_ids.add(owner_id)
             mapping_evidence = "controlled_ocp_manifest_and_exact_staged_sha256"
+            if toc_key in toc:
+                toc_seen.add(toc_key)
         elif row is not None:
             raw_source, toc_kind = row
             toc_seen.add(toc_key)

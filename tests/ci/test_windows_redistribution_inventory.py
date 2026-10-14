@@ -121,6 +121,7 @@ def test_inventory_reuses_case_insensitive_controlled_ocp_stage_validation(
     row = next(record for record in files["files"] if record["relative_path"].endswith("TKBin.dll"))
     assert row["component_ids"] == ["occt-7.9.3"]
     assert row["mapping_method"] == "controlled_ocp_manifest_and_exact_staged_sha256"
+    assert not any(item.startswith("toc:") for item in _evidence[0]["unresolved_items"])
 
 
 def test_case_insensitive_controlled_ocp_validator_is_used_for_manifest_parity(
