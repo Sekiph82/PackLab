@@ -9,7 +9,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from tools.packaging.validate_windows_native_source_lock import load_source_lock
-from tools.packaging.windows_native_runtime_policy import is_windows_runtime_dll
+from tools.packaging.windows_native_runtime_policy import (
+    is_numpy_wheel_msvc_alias,
+    is_windows_runtime_dll,
+)
 from tools.packaging.windows_sdk_source_lock_compatibility import (
     validate_sdk_source_lock_compatibility,
     validate_sdk_toolchain_contract_compatibility,
@@ -195,7 +198,9 @@ def validate_staged_tree(stage_root: Path, manifest: dict[str, Any]) -> None:
     for path in stage_root.rglob("*"):
         if not path.is_file():
             continue
-        if is_windows_runtime_dll(path):
+        if is_windows_runtime_dll(path) and not is_numpy_wheel_msvc_alias(
+            path.relative_to(stage_root)
+        ):
             raise ValueError(
                 "A Windows OS or VC prerequisite runtime DLL is staged in the application payload"
             )

@@ -269,6 +269,27 @@ def test_controlled_ocp_stage_rejects_windows_runtime_copy(
         validate_staged_tree(stage, manifest)
 
 
+def test_controlled_ocp_stage_allows_only_the_numpy_hash_renamed_msvc_alias(
+    tmp_path: Path, controlled_manifest: tuple[Path, dict[str, object], dict[str, bytes]]
+) -> None:
+    manifest_path, _, files = controlled_manifest
+    manifest = load_and_validate_manifest(manifest_path, SOURCE_LOCK)
+    stage = tmp_path / "PackLabStudio"
+    for relative, content in files.items():
+        destination = stage / "_internal" / Path(relative)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+    alias = stage / "_internal" / "numpy.libs" / "msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll"
+    alias.parent.mkdir(parents=True)
+    alias.write_bytes(b"wheel-owned Microsoft runtime alias")
+
+    validate_staged_tree(stage, manifest)
+
+    alias.rename(alias.with_name("msvcp140.dll"))
+    with pytest.raises(ValueError, match="Windows OS or VC prerequisite runtime DLL"):
+        validate_staged_tree(stage, manifest)
+
+
 def test_fmt_manifest_record_requires_exact_package_and_binary_identity(
     tmp_path: Path, controlled_manifest: tuple[Path, dict[str, object], dict[str, bytes]]
 ) -> None:
