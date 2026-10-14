@@ -32,12 +32,28 @@ def test_toc_maps_exact_stage_layout_and_rejects_traversal(tmp_path: Path) -> No
     stage = tmp_path / "PackLabStudio"
     (stage / "_internal").mkdir(parents=True)
     (stage / "_internal" / "QtCore.dll").write_bytes(b"qt")
-    rows = [("QtCore.dll", str(tmp_path / "QtCore.dll"), "BINARY")]
+    rows = [("qtcore.DLL", str(tmp_path / "QtCore.dll"), "BINARY")]
     assert inventory.toc_destinations(rows, "_internal", stage) == {
-        "_internal/QtCore.dll": (str(tmp_path / "QtCore.dll"), "BINARY")
+        "_internal/qtcore.dll": (str(tmp_path / "QtCore.dll"), "BINARY")
     }
     with pytest.raises(ValueError, match="unsafe destination"):
         inventory.toc_destinations([("../escape.dll", "x", "BINARY")], "_internal", stage)
+
+
+def test_toc_rejects_case_insensitive_duplicate_stage_destinations(tmp_path: Path) -> None:
+    stage = tmp_path / "PackLabStudio"
+    (stage / "_internal").mkdir(parents=True)
+    (stage / "_internal" / "QtCore.dll").write_bytes(b"qt")
+
+    with pytest.raises(ValueError, match="duplicate staged destinations"):
+        inventory.toc_destinations(
+            [
+                ("_internal/QtCore.dll", "source-a", "BINARY"),
+                ("_internal/qtcore.DLL", "source-b", "BINARY"),
+            ],
+            "_internal",
+            stage,
+        )
 
 
 def test_inventory_reuses_case_insensitive_controlled_ocp_stage_validation(

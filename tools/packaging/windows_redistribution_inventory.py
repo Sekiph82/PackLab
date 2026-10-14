@@ -163,6 +163,15 @@ def distribution_source_index(
 def toc_destinations(
     rows: list[tuple[str, str, str]], contents_dir: str, stage_root: Path
 ) -> dict[str, tuple[str, str]]:
+    staged_files: dict[str, str] = {}
+    for path in stage_root.rglob("*"):
+        if not path.is_file():
+            continue
+        staged_relative = path.relative_to(stage_root).as_posix()
+        key = staged_relative.casefold()
+        if key in staged_files:
+            raise ValueError("The staging directory contains case-insensitive duplicate paths")
+        staged_files[key] = staged_relative
     result: dict[str, tuple[str, str]] = {}
     for destination, source, kind in rows:
         relative = safe_posix_path(destination)
@@ -171,17 +180,14 @@ def toc_destinations(
         candidates = [relative]
         if kind not in {"EXECUTABLE", "PKG"} and not relative.startswith(f"{contents_dir}/"):
             candidates.append(f"{contents_dir}/{relative}")
-        present = [
-            candidate
-            for candidate in candidates
-            if (stage_root / PurePosixPath(candidate)).is_file()
-        ]
+        present = [candidate for candidate in candidates if candidate.casefold() in staged_files]
         if len(present) > 1:
             raise ValueError("PyInstaller TOC destination maps to multiple staged files")
-        staged_path = present[0] if present else candidates[-1]
-        if staged_path in result:
+        staged_path = staged_files[present[0].casefold()] if present else candidates[-1]
+        key = staged_path.casefold()
+        if key in result:
             raise ValueError("PyInstaller TOC contains duplicate staged destinations")
-        result[staged_path] = (source, kind)
+        result[key] = (source, kind)
     return result
 
 
@@ -620,7 +626,8 @@ def build_inventory(
             analysis_component_owners.add("packlab-application")
     for path in all_paths:
         relative = path.relative_to(stage_root).as_posix()
-        row = toc.get(relative)
+        toc_key = relative.casefold()
+        row = toc.get(toc_key)
         toc_kind: str | None = None
         source_path: Path | None = None
         owner_ids: set[str] = set()
@@ -655,7 +662,7 @@ def build_inventory(
             mapping_evidence = "controlled_ocp_manifest_and_exact_staged_sha256"
         elif row is not None:
             raw_source, toc_kind = row
-            toc_seen.add(relative)
+            toc_seen.add(toc_key)
             source_path = Path(raw_source) if raw_source else None
             if Path(relative).name == "packlab-build-provenance.json":
                 owner_ids.add("packlab-build-provenance")
