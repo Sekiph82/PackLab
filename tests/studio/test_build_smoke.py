@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+from tools.packaging import packlab_studio_entry
+
 from packlab_core.cad_adapter import (
     CAD_RUNTIME_VERSION_STATUS_OBSERVED,
     CadCapability,
@@ -124,6 +128,37 @@ def test_open3d_probe_failure_code_classifies_path_free_import_detail() -> None:
         )
         == "open3d_probe_failed:status=UNKNOWN;detail=module_unavailable"
     )
+
+
+def test_open3d_first_probe_writes_only_status_and_reports_success(monkeypatch, tmp_path) -> None:
+    from packlab_core import geometry_adapter
+
+    log_path = tmp_path / "open3d-first.log"
+    monkeypatch.setenv("PACKLAB_OPEN3D_PROBE_LOG", str(log_path))
+    monkeypatch.setattr(
+        geometry_adapter,
+        "probe_open3d",
+        lambda: SimpleNamespace(status=SimpleNamespace(value="available")),
+    )
+
+    assert packlab_studio_entry._run_open3d_first_probe() == 0
+    assert log_path.read_text(encoding="utf-8") == "status=available\n"
+
+
+def test_open3d_first_probe_failure_log_omits_exception_message(monkeypatch, tmp_path) -> None:
+    from packlab_core import geometry_adapter
+
+    log_path = tmp_path / "open3d-first.log"
+    monkeypatch.setenv("PACKLAB_OPEN3D_PROBE_LOG", str(log_path))
+
+    def fail_probe():
+        raise RuntimeError("private path C:\\Users\\private\\cache")
+
+    monkeypatch.setattr(geometry_adapter, "probe_open3d", fail_probe)
+
+    assert packlab_studio_entry._run_open3d_first_probe() == 1
+    assert log_path.read_text(encoding="utf-8") == "status=probe_error;error_type=RuntimeError\n"
+    assert "private" not in log_path.read_text(encoding="utf-8")
 
 
 def test_app_build_smoke_constructs_and_closes_the_real_window(monkeypatch) -> None:
