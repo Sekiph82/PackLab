@@ -138,11 +138,13 @@ def test_open3d_first_probe_writes_only_status_and_reports_success(monkeypatch, 
     monkeypatch.setattr(
         geometry_adapter,
         "probe_open3d",
-        lambda: SimpleNamespace(status=SimpleNamespace(value="available")),
+        lambda: SimpleNamespace(status=SimpleNamespace(value="available"), detail="Open3D OK"),
     )
 
-    assert packlab_studio_entry._run_open3d_first_probe() == 0
-    assert log_path.read_text(encoding="utf-8") == "status=available\n"
+    assert packlab_studio_entry._run_open3d_first_probe(("open3d", "numpy.libs")) == 0
+    assert log_path.read_text(encoding="utf-8") == (
+        "status=available;detail=Open3D OK;dll_dirs=open3d,numpy.libs\n"
+    )
 
 
 def test_open3d_first_probe_failure_log_omits_exception_message(monkeypatch, tmp_path) -> None:
@@ -159,6 +161,46 @@ def test_open3d_first_probe_failure_log_omits_exception_message(monkeypatch, tmp
     assert packlab_studio_entry._run_open3d_first_probe() == 1
     assert log_path.read_text(encoding="utf-8") == "status=probe_error;error_type=RuntimeError\n"
     assert "private" not in log_path.read_text(encoding="utf-8")
+
+
+def test_open3d_first_probe_records_only_safe_capability_detail(monkeypatch, tmp_path) -> None:
+    from packlab_core import geometry_adapter
+
+    log_path = tmp_path / "open3d-first.log"
+    monkeypatch.setenv("PACKLAB_OPEN3D_PROBE_LOG", str(log_path))
+    monkeypatch.setattr(
+        geometry_adapter,
+        "probe_open3d",
+        lambda: SimpleNamespace(
+            status=SimpleNamespace(value="unknown"),
+            detail="Open3D import failed (ImportError;reason=dll_module_missing)",
+        ),
+    )
+
+    assert packlab_studio_entry._run_open3d_first_probe(("open3d",)) == 1
+    assert log_path.read_text(encoding="utf-8") == (
+        "status=unknown;detail=Open3D import failed "
+        "(ImportError;reason=dll_module_missing);dll_dirs=open3d\n"
+    )
+
+
+def test_open3d_first_probe_omits_path_like_capability_detail(monkeypatch, tmp_path) -> None:
+    from packlab_core import geometry_adapter
+
+    log_path = tmp_path / "open3d-first.log"
+    monkeypatch.setenv("PACKLAB_OPEN3D_PROBE_LOG", str(log_path))
+    monkeypatch.setattr(
+        geometry_adapter,
+        "probe_open3d",
+        lambda: SimpleNamespace(
+            status=SimpleNamespace(value="unknown"), detail="failed at C:\\Users\\private"
+        ),
+    )
+
+    assert packlab_studio_entry._run_open3d_first_probe() == 1
+    assert log_path.read_text(encoding="utf-8") == (
+        "status=unknown;detail=diagnostic_omitted;dll_dirs=none\n"
+    )
 
 
 def test_app_build_smoke_constructs_and_closes_the_real_window(monkeypatch) -> None:

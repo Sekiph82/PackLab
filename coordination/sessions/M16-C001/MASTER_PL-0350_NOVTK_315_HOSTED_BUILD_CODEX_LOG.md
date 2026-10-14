@@ -86,3 +86,6 @@ Full authorized cold run [38399051467](https://github.com/Sekiph82/PackLab/actio
 The cold compile completed and linked successfully; the same-run post-link quarantine was saved before `fmt.dll` ownership failed. Its immutable digest and the post-link remediation, hosted retry, and packaging status are maintained in the append-only one-shot log below. The line above records the checkpoint while it was still executing, not the final outcome for run 38399051467.
 
 The one-shot continuation now also records hosted packaged run [38502467258](https://github.com/Sekiph82/PackLab/actions/runs/38502467258): SDK and quarantined OCP checkpoints were reused, while staged Open3D native direct-load probes passed and the full Studio smoke exposed an import-order-sensitive Open3D failure. The one-shot log contains the artifact IDs and the follow-up clean-process probe; this historical master remains a pointer, not a current progress tracker.
+
+
+Hosted retry [38504978407](https://github.com/Sekiph82/PackLab/actions/runs/38504978407) reused the verified OCCT SDK and quarantined OCP extension, passed native CAD/package staging, and reproduced the Open3D DLL-load failure in a clean frozen process. The one-shot log now records the exact artifact chain and safe-detail diagnostic follow-up; installer/compliance stages did not run.
