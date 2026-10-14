@@ -1,1 +1,2 @@
 tools/packaging/windows_licenses/** text eol=lf
+tools/packaging/windows-runtime-prerequisite.json text eol=lf

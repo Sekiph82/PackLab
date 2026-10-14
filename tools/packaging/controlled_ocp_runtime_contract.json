@@ -28,7 +28,7 @@
   },
   "windows_runtime_deployment": {
     "policy_path": "tools/packaging/windows-runtime-prerequisite.json",
-    "policy_sha256": "6735debdcb48a614297a89b6c51c73abec3256c1d872a681cc679ea371028ee3",
+    "policy_sha256": "16fcf41c343f88e860358bc0b39a47716af33f1e9e7cb749a5294f0411331659",
     "minimum_vc_runtime_version": "14.44.35211.0",
     "deployment_roles": [
       "BUILD_ENV_CONDA_ONLY",
