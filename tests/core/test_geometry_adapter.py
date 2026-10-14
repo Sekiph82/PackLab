@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import platform
 import sys
-from types import ModuleType, SimpleNamespace
+from types import FunctionType, ModuleType, SimpleNamespace
 
 import pytest
 
@@ -141,6 +141,24 @@ def test_open3d_missing_import_symbol_reports_only_safe_category():
     )
     assert "private_symbol" not in capability.detail
     assert "private" not in capability.detail
+
+
+def test_open3d_import_error_reports_only_safe_trace_module_names():
+    def failing_import() -> ModuleType:
+        raise ImportError("unclassified native import failure")
+
+    loader = FunctionType(
+        failing_import.__code__,
+        {"__name__": "open3d._build_config"},
+    )
+
+    capability = probe_open3d(loader)
+
+    assert capability.status is CapabilityStatus.UNKNOWN
+    assert capability.detail == (
+        "Open3D import failed (ImportError;reason=import_error;"
+        "trace=open3d._build_config.failing_import)"
+    )
 
 
 def test_wrong_version_or_missing_build_facts_stays_unknown():

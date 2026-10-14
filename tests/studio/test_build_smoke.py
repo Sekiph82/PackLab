@@ -85,6 +85,16 @@ def test_open3d_probe_failure_code_classifies_path_free_import_detail() -> None:
     )
     assert (
         build_smoke._open3d_probe_failure_code(
+            "UNKNOWN",
+            "Open3D import failed (ImportError;reason=import_error;"
+            "trace=open3d._build_config.failing_import)",
+        )
+        == "open3d_probe_failed:status=UNKNOWN;"
+        "detail=import_failed_ImportError_import_error_"
+        "trace_open3d__build_config_failing_import"
+    )
+    assert (
+        build_smoke._open3d_probe_failure_code(
             "UNKNOWN", "Open3D import unavailable (C:\\private\\cache)"
         )
         == "open3d_probe_failed:status=UNKNOWN;detail=module_unavailable"

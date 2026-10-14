@@ -115,6 +115,20 @@ def _open3d_probe_failure_code(status: str, detail: str) -> str:
                         "symbol_missing",
                     }:
                         safe_detail += f"_{reason}"
+                elif field.startswith("trace="):
+                    frames = field.removeprefix("trace=").split(",")
+                    safe_frames: list[str] = []
+                    for frame in frames[-5:]:
+                        module, separator, function = frame.rpartition(".")
+                        if (
+                            separator
+                            and module.startswith("open3d")
+                            and all(part.isidentifier() for part in module.split("."))
+                            and function.isidentifier()
+                        ):
+                            safe_frames.append(frame.replace(".", "_"))
+                    if safe_frames:
+                        safe_detail += "_trace_" + "_".join(safe_frames)
         else:
             safe_detail = "import_failed"
     return f"open3d_probe_failed:status={status};detail={safe_detail}"

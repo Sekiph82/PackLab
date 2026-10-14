@@ -247,6 +247,22 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
             elif "numpy.core.multiarray failed to import" in message:
                 reason = "numpy_multiarray_unavailable"
             error_detail = f"{error_detail};reason={reason}"
+            trace_frames: list[str] = []
+            traceback_node = exc.__traceback__
+            while traceback_node is not None:
+                frame = traceback_node.tb_frame
+                frame_module = frame.f_globals.get("__name__")
+                frame_function = frame.f_code.co_name
+                if (
+                    isinstance(frame_module, str)
+                    and frame_module.startswith("open3d")
+                    and all(part.isidentifier() for part in frame_module.split("."))
+                    and frame_function.isidentifier()
+                ):
+                    trace_frames.append(f"{frame_module}.{frame_function}")
+                traceback_node = traceback_node.tb_next
+            if trace_frames:
+                error_detail = f"{error_detail};trace={','.join(trace_frames[-5:])}"
         elif isinstance(exc, OSError) and isinstance(exc.winerror, int):
             error_detail = f"{error_detail};winerror={exc.winerror}"
         return _capability(
