@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from tools.packaging.open3d_pe_dependency_probe import _OPTIONAL_EXCLUDED_DLLS, _resolution
+from tools.packaging.open3d_pe_dependency_probe import (
+    _OPTIONAL_EXCLUDED_DLLS,
+    _find_open3d_directory,
+    _resolution,
+)
 from tools.packaging.windows_native_runtime_policy import is_windows_runtime_dll
 
 
@@ -28,5 +32,13 @@ def test_open3d_dependency_probe_emits_only_path_free_failure_codes(tmp_path: Pa
     assert report == {
         "schema_version": 1,
         "status": "FAIL",
-        "error_code": "open3d_directory_missing",
+        "error_code": "open3d_package_layout_unrecognized",
     }
+
+
+def test_open3d_dependency_probe_finds_pyinstaller_internal_layout(tmp_path: Path):
+    package = tmp_path / "_internal" / "open3d"
+    package.mkdir(parents=True)
+    (package / "pybind.cp312-win_amd64.pyd").write_bytes(b"staged")
+
+    assert _find_open3d_directory(tmp_path) == package

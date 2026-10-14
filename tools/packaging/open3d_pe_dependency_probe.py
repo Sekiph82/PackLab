@@ -38,22 +38,33 @@ def _resolution(
     return "UNRESOLVED"
 
 
+def _find_open3d_directory(stage_root: Path) -> Path | None:
+    candidates = [
+        item
+        for item in stage_root.rglob("*")
+        if item.is_dir()
+        and item.name.casefold() == "open3d"
+        and any(
+            child.is_file() and child.name.casefold().startswith("pybind")
+            for child in item.rglob("*")
+        )
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def inspect_open3d_imports(stage: Path) -> dict[str, object]:
     """Report static imports for staged Open3D DLLs and Python extensions."""
 
     import pefile
 
     stage_root = stage.resolve(strict=True)
-    open3d_directory = next(
-        (
-            item
-            for item in stage_root.iterdir()
-            if item.is_dir() and item.name.casefold() == "open3d"
-        ),
-        None,
-    )
+    open3d_directory = _find_open3d_directory(stage_root)
     if open3d_directory is None:
-        return {"schema_version": 1, "status": "FAIL", "error_code": "open3d_directory_missing"}
+        return {
+            "schema_version": 1,
+            "status": "FAIL",
+            "error_code": "open3d_package_layout_unrecognized",
+        }
 
     binaries = sorted(
         (
