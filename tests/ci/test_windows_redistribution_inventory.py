@@ -429,8 +429,48 @@ def test_generated_runtime_json_must_match_build_revision_and_version(
             ),
             encoding="utf-8",
         )
+    normalization = {
+        "PACKLAB_BUILD_REVISION": revision,
+        "studio_version": version,
+        "status": "PASS",
+        "numpy_version": "2.5.3",
+        "numpy_wheel_sha256": "0a59a421a32580a009e8a1751345bf829631b990dc1794b80514ab722b435def",
+        "removed_private_msvc_runtime": {
+            "sha256": "a4c2229bdc2a2a630acdc095b4d86008e5c3e3bc7773174354f3da4f5beb9cde"
+        },
+        "external_prerequisite": {
+            "application_payload_contains_microsoft_runtime": False,
+            "canonical_runtime_filename": "msvcp140.dll",
+            "canonical_runtime_location": "Windows System32",
+        },
+        "rewritten_imports": [
+            {
+                "path": path,
+                "from_import": "msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll",
+                "to_import": "msvcp140.dll",
+                "new_sha256": "0" * 64,
+            }
+            for path in (
+                "numpy/_core/_multiarray_umath.cp312-win_amd64.pyd",
+                "numpy/fft/_pocketfft_umath.cp312-win_amd64.pyd",
+            )
+        ],
+    }
+    internal = stage / "_internal"
+    internal.mkdir()
+    (internal / "numpy-runtime-normalization.json").write_text(
+        json.dumps(normalization), encoding="utf-8"
+    )
     toc = tmp_path / "COLLECT-00.toc"
-    toc.write_text(repr([("packlab-build-provenance.json", "source", "DATA")]), encoding="utf-8")
+    toc.write_text(
+        repr(
+            [
+                ("packlab-build-provenance.json", "source", "DATA"),
+                ("_internal/numpy-runtime-normalization.json", "source", "DATA"),
+            ]
+        ),
+        encoding="utf-8",
+    )
     analysis = tmp_path / "Analysis-00.toc"
     analysis.write_text("()", encoding="utf-8")
     registry = tmp_path / "registry.json"
@@ -458,4 +498,12 @@ def test_generated_runtime_json_must_match_build_revision_and_version(
     assert len(generated) == 2
     assert all(row["component_ids"] == ["packlab-generated-runtime-evidence"] for row in generated)
     assert all(row["license_status"] == "EVIDENCE_PRESENT" for row in generated)
+    normalization_row = next(
+        row
+        for row in files["files"]
+        if row["relative_path"].endswith("numpy-runtime-normalization.json")
+    )
+    assert normalization_row["component_ids"] == ["packlab-generated-runtime-evidence"]
+    assert normalization_row["license_status"] == "EVIDENCE_PRESENT"
     assert output[0]["unresolved_count"] == 0
+    assert not any(item.startswith("toc:") for item in output[0]["unresolved_items"])

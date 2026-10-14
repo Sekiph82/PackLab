@@ -889,6 +889,8 @@ def build_inventory(
         relative = path.relative_to(stage_root).as_posix()
         toc_key = relative.casefold()
         row = toc.get(toc_key)
+        if row is not None:
+            toc_seen.add(toc_key)
         toc_kind: str | None = None
         source_path: Path | None = None
         owner_ids: set[str] = set()
