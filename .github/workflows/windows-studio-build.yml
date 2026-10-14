@@ -884,6 +884,32 @@ jobs:
             "- Forbidden Qt module families absent: $($assertion.forbidden_module_families_absent)"
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      - name: Inspect staged Open3D PE dependencies
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $appDirectory = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio"
+          $dependencyReportPath = Join-Path $env:RUNNER_TEMP "packlab-open3d-pe-dependencies.json"
+          uv run --locked python -m tools.packaging.open3d_pe_dependency_probe `
+            --stage $appDirectory `
+            --output $dependencyReportPath
+          if (!(Test-Path -LiteralPath $dependencyReportPath -PathType Leaf)) {
+            Write-Warning "The path-free Open3D PE dependency report was not created."
+            exit 1
+          }
+          $report = Get-Content -LiteralPath $dependencyReportPath -Raw | ConvertFrom-Json
+          $unresolved = @($report.binaries | ForEach-Object { $_.imports } |
+            Where-Object { $_.resolution -in @("UNRESOLVED", "MICROSOFT_SIGNED_PREREQUISITE") } |
+            Select-Object -ExpandProperty name -Unique)
+          @(
+            "## Staged Open3D PE dependency inspection",
+            "",
+            "- Inspection status: $($report.status)",
+            "- Native binary count: $($report.binary_count)",
+            "- Imports absent from package/host: $(if ($unresolved.Count) { $unresolved -join ', ' } else { 'none' })",
+            "- Report: ``packlab-open3d-pe-dependencies.json``; names and classifications only, no machine paths."
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: Smoke-test packaged Studio without network
         shell: pwsh
         env:
@@ -950,6 +976,7 @@ jobs:
           name: packlab-studio-smoke-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/packlab-studio-smoke.log
+            ${{ runner.temp }}/packlab-open3d-pe-dependencies.json
             build/windows-studio/PackLabStudio/windows-runtime-capabilities.json
             build/windows-studio/PackLabStudio/qt-staged-surface.json
           if-no-files-found: ignore

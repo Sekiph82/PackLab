@@ -185,6 +185,7 @@ def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
         "tools.packaging.controlled_ocp_runtime_bundle",
         "tools.packaging.fetch_verify_windows_native_sources",
         "tools.packaging.inspect_retained_occt_sdk",
+        "tools.packaging.open3d_pe_dependency_probe",
         "tools.packaging.preflight_occt_sdk_layout",
         "tools.packaging.prepare_official_ocp_generated_sources",
         "tools.packaging.probe_fmt_dependency",
@@ -287,6 +288,8 @@ def test_packaged_studio_smoke_diagnostics_are_retained_on_failure() -> None:
     assert '$smokeLog = Join-Path $env:RUNNER_TEMP "packlab-studio-smoke.log"' in packaging
     assert '"PACKLAB_BUILD_SMOKE_LOG=$smokeLog" >> $env:GITHUB_ENV' in packaging
     assert "- Sanitized diagnostic: $smokeDiagnostic" in packaging
+    assert "Inspect staged Open3D PE dependencies" in packaging
+    assert "tools.packaging.open3d_pe_dependency_probe" in packaging
     assert "Upload packaged Studio smoke diagnostics\n        if: always()" in packaging
     diagnostic_upload = packaging.split("Upload packaged Studio smoke diagnostics", 1)[1].split(
         "Validate bidirectional controlled OCP manifest", 1
@@ -294,3 +297,4 @@ def test_packaged_studio_smoke_diagnostics_are_retained_on_failure() -> None:
     assert "${{ runner.temp }}/packlab-studio-smoke.log" in diagnostic_upload
     assert "windows-runtime-capabilities.json" in diagnostic_upload
     assert "qt-staged-surface.json" in diagnostic_upload
+    assert "packlab-open3d-pe-dependencies.json" in diagnostic_upload
