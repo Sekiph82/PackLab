@@ -239,6 +239,35 @@ def test_license_digest_mismatch_remains_unresolved(tmp_path: Path) -> None:
     assert "component:example" in unresolved
 
 
+def test_locked_openssl_runtime_has_explicit_third_party_provenance(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    registry = json.loads(
+        (project_root / "tools/packaging/windows_component_license_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    record = registry["supplemental_evidence"]["openssl-runtime-3.0.16"]
+    license_bytes = (project_root / record["license_file"]).read_bytes()
+    local_license = tmp_path / "OpenSSL-LICENSE.txt"
+    local_license.write_bytes(license_bytes)
+    record["license_file"] = str(local_license)
+
+    components, notices, unresolved = inventory.license_rows(
+        {"openssl-runtime-3.0.16"}, {}, registry, tmp_path / "evidence"
+    )
+
+    assert components[0]["license_status"] == "EVIDENCE_PRESENT"
+    assert components[0]["provenance_class"] == "APP_SHIPPED_THIRD_PARTY"
+    assert components[0]["source_evidence_required"] is True
+    assert components[0]["source_evidence"]["sha256"] == (
+        "57e03c50feab5d31b152af2b764f10379aecd8ee92f16c985983ce4a99f7ef86"
+    )
+    assert notices[0]["sha256"] == record["license_sha256"]
+    assert not unresolved
+
+
 def test_metadata_only_supplement_uses_exact_distribution_license_file(
     tmp_path: Path,
 ) -> None:

@@ -54,6 +54,7 @@
     },
     "openssl-runtime-3.0.16": {
       "license_identifier": "Apache-2.0",
+      "provenance_class": "APP_SHIPPED_THIRD_PARTY",
       "license_file": "tools/packaging/windows_licenses/OpenSSL-3.0.16/LICENSE.txt",
       "license_sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
       "license_mapping_evidence": "CPython 3.12.10 ssl.OPENSSL_VERSION plus exact Python/DLLs source path; OpenSSL release source archive hash pinned separately",
