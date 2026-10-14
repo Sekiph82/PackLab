@@ -255,7 +255,16 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
                 frame_function = frame.f_code.co_name
                 if (
                     isinstance(frame_module, str)
-                    and frame_module.startswith("open3d")
+                    and (
+                        frame_module == "open3d"
+                        or frame_module.startswith("open3d.")
+                        or frame_module
+                        in {
+                            "importlib._bootstrap",
+                            "importlib._bootstrap_external",
+                            "packlab_core.geometry_adapter",
+                        }
+                    )
                     and all(part.isidentifier() for part in frame_module.split("."))
                     and frame_function.isidentifier()
                 ):

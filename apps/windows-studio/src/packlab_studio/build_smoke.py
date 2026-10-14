@@ -122,7 +122,16 @@ def _open3d_probe_failure_code(status: str, detail: str) -> str:
                         module, separator, function = frame.rpartition(".")
                         if (
                             separator
-                            and module.startswith("open3d")
+                            and (
+                                module == "open3d"
+                                or module.startswith("open3d.")
+                                or module
+                                in {
+                                    "importlib._bootstrap",
+                                    "importlib._bootstrap_external",
+                                    "packlab_core.geometry_adapter",
+                                }
+                            )
                             and all(part.isidentifier() for part in module.split("."))
                             and function.isidentifier()
                         ):

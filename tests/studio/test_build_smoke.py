@@ -95,6 +95,27 @@ def test_open3d_probe_failure_code_classifies_path_free_import_detail() -> None:
     )
     assert (
         build_smoke._open3d_probe_failure_code(
+            "UNKNOWN",
+            "Open3D import failed (ImportError;reason=import_error;"
+            "trace=packlab_core.geometry_adapter._load_open3d,"
+            "importlib._bootstrap._find_and_load)",
+        )
+        == "open3d_probe_failed:status=UNKNOWN;"
+        "detail=import_failed_ImportError_import_error_"
+        "trace_packlab_core_geometry_adapter__load_open3d_"
+        "importlib__bootstrap__find_and_load"
+    )
+    assert (
+        build_smoke._open3d_probe_failure_code(
+            "UNKNOWN",
+            "Open3D import failed (ImportError;reason=import_error;"
+            "trace=private_package.secret_function)",
+        )
+        == "open3d_probe_failed:status=UNKNOWN;"
+        "detail=import_failed_ImportError_import_error"
+    )
+    assert (
+        build_smoke._open3d_probe_failure_code(
             "UNKNOWN", "Open3D import unavailable (C:\\private\\cache)"
         )
         == "open3d_probe_failed:status=UNKNOWN;detail=module_unavailable"

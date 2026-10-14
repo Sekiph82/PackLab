@@ -118,7 +118,8 @@ def test_open3d_import_error_probe_reports_only_module_and_loader_category():
 
     assert capability.status is CapabilityStatus.UNKNOWN
     assert capability.detail == (
-        "Open3D import failed (ImportError;module=open3d.pybind;reason=dll_module_missing)"
+        "Open3D import failed (ImportError;module=open3d.pybind;reason=dll_module_missing;"
+        "trace=packlab_core.geometry_adapter.probe_open3d)"
     )
     assert "DLL load failed" not in capability.detail
 
@@ -137,7 +138,8 @@ def test_open3d_missing_import_symbol_reports_only_safe_category():
 
     assert capability.status is CapabilityStatus.UNKNOWN
     assert capability.detail == (
-        "Open3D import failed (ImportError;module=open3d.pybind;reason=symbol_missing)"
+        "Open3D import failed (ImportError;module=open3d.pybind;reason=symbol_missing;"
+        "trace=packlab_core.geometry_adapter.probe_open3d)"
     )
     assert "private_symbol" not in capability.detail
     assert "private" not in capability.detail
@@ -157,7 +159,8 @@ def test_open3d_import_error_reports_only_safe_trace_module_names():
     assert capability.status is CapabilityStatus.UNKNOWN
     assert capability.detail == (
         "Open3D import failed (ImportError;reason=import_error;"
-        "trace=open3d._build_config.failing_import)"
+        "trace=packlab_core.geometry_adapter.probe_open3d,"
+        "open3d._build_config.failing_import)"
     )
 
 
