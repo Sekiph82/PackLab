@@ -92,3 +92,5 @@ Hosted retry [38504978407](https://github.com/Sekiph82/PackLab/actions/runs/3850
 
 
 Hosted retry [38571979341](https://github.com/Sekiph82/PackLab/actions/runs/38571979341) again reused the retained SDK and quarantined OCP Pyd and passed native CAD smoke, but the clean frozen Open3D import still fails with a nested `dll_module_missing` cause despite all expected DLL directories being registered. Installer/compliance stages remain blocked by the packaged Studio smoke. The one-shot log records a separate NumPy package probe and import-state diagnostic for the next packaging-only retry.
+
+Hosted retry [38575774675](https://github.com/Sekiph82/PackLab/actions/runs/38575774675) again reused the authenticated OCCT SDK and original quarantined OCP Pyd (no native recompilation), passed source/module/CAD checks, and failed the frozen NumPy import used by Open3D. The one-shot log records artifact IDs and digests. The next package-only retry adds direct NumPy PE/dependency inspection; compliance and Installer remain gated on a passing packaged Studio smoke.

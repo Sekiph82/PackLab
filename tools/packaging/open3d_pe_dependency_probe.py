@@ -53,6 +53,21 @@ def _find_open3d_directory(stage_root: Path) -> Path | None:
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _find_numpy_directory(stage_root: Path) -> Path | None:
+    candidates = [
+        item
+        for item in stage_root.rglob("numpy")
+        if item.is_dir()
+        and any(
+            child.is_file()
+            and child.suffix.casefold() == ".pyd"
+            and child.name.casefold().startswith("_multiarray_umath")
+            for child in item.rglob("*")
+        )
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def inspect_open3d_imports(stage: Path) -> dict[str, object]:
     """Report static imports for staged Open3D DLLs and Python extensions."""
 
@@ -60,24 +75,57 @@ def inspect_open3d_imports(stage: Path) -> dict[str, object]:
 
     stage_root = stage.resolve(strict=True)
     open3d_directory = _find_open3d_directory(stage_root)
+    numpy_directory = _find_numpy_directory(stage_root)
     if open3d_directory is None:
         return {
             "schema_version": 1,
             "status": "FAIL",
             "error_code": "open3d_package_layout_unrecognized",
         }
+    if numpy_directory is None:
+        return {
+            "schema_version": 1,
+            "status": "FAIL",
+            "error_code": "numpy_native_layout_unrecognized",
+        }
 
+    open3d_binaries = [
+        item
+        for item in open3d_directory.rglob("*")
+        if item.is_file()
+        and item.suffix.casefold() in {".dll", ".pyd"}
+        and item.name.casefold() not in _OPTIONAL_EXCLUDED_DLLS
+    ]
+    numpy_binaries = [
+        item
+        for item in numpy_directory.rglob("*")
+        if item.is_file()
+        and item.suffix.casefold() in {".dll", ".pyd"}
+        and (
+            item.suffix.casefold() == ".dll" or item.name.casefold().startswith("_multiarray_umath")
+        )
+    ]
+    numpy_library_directory = numpy_directory.parent / "numpy.libs"
+    if numpy_library_directory.is_dir():
+        numpy_binaries.extend(
+            item for item in numpy_library_directory.rglob("*.dll") if item.is_file()
+        )
     binaries = sorted(
-        (
-            item
-            for item in open3d_directory.rglob("*")
-            if item.is_file()
-            and item.suffix.casefold() in {".dll", ".pyd"}
-            and item.name.casefold() not in _OPTIONAL_EXCLUDED_DLLS
-        ),
-        key=lambda item: item.name.casefold(),
+        [("open3d", item) for item in open3d_binaries]
+        + [
+            (
+                "numpy.libs" if numpy_library_directory in item.parents else "numpy",
+                item,
+            )
+            for item in numpy_binaries
+        ],
+        key=lambda item: (item[0], item[1].name.casefold()),
     )
-    pybind_binaries = [item for item in binaries if item.name.casefold().startswith("pybind")]
+    pybind_binaries = [
+        item
+        for package, item in binaries
+        if package == "open3d" and item.name.casefold().startswith("pybind")
+    ]
     if not pybind_binaries:
         return {"schema_version": 1, "status": "FAIL", "error_code": "open3d_pybind_missing"}
 
@@ -97,7 +145,7 @@ def inspect_open3d_imports(stage: Path) -> dict[str, object]:
                 dll_directory_handles.append(os.add_dll_directory(str(directory)))
             except OSError:
                 pass
-    for binary in binaries:
+    for package, binary in binaries:
         try:
             image = pefile.PE(str(binary), fast_load=True)
             image.parse_data_directories(
@@ -113,7 +161,7 @@ def inspect_open3d_imports(stage: Path) -> dict[str, object]:
                 key=str.casefold,
             )
         except (OSError, pefile.PEFormatError, UnicodeDecodeError):
-            inspections.append({"binary": binary.name, "status": "FAIL"})
+            inspections.append({"package": package, "binary": binary.name, "status": "FAIL"})
             unresolved = True
             continue
 
@@ -137,6 +185,7 @@ def inspect_open3d_imports(stage: Path) -> dict[str, object]:
                     load_probe["winerror"] = error.winerror
         inspections.append(
             {
+                "package": package,
                 "binary": binary.name,
                 "status": "INSPECTED",
                 "imports": dependencies,

@@ -220,6 +220,28 @@ def test_numpy_first_probe_reports_runtime_version_without_paths(monkeypatch, tm
     assert str(tmp_path) not in diagnostic
 
 
+def test_numpy_probe_failure_reports_safe_error_detail(monkeypatch, tmp_path) -> None:
+    import sys
+
+    log_path = tmp_path / "numpy-probe.log"
+    monkeypatch.setenv("PACKLAB_NUMPY_PROBE_LOG", str(log_path))
+
+    class FailNumpyImport:
+        def find_spec(self, fullname, path=None, target=None):
+            del path, target
+            if fullname == "numpy":
+                raise ImportError("DLL load failed while importing _multiarray_umath")
+            return None
+
+    monkeypatch.delitem(sys.modules, "numpy", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [FailNumpyImport(), *sys.meta_path])
+    assert packlab_studio_entry._run_numpy_probe() == 1
+    diagnostic = log_path.read_text(encoding="utf-8")
+    assert "status=probe_error;error_type=ImportError" in diagnostic
+    assert "DLL load failed while importing _multiarray_umath" in diagnostic
+    assert str(tmp_path) not in diagnostic
+
+
 def test_app_build_smoke_constructs_and_closes_the_real_window(monkeypatch) -> None:
     events: list[str] = []
     created_argv: list[str] = []

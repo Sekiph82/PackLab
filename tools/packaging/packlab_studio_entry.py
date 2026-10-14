@@ -60,7 +60,12 @@ def _run_numpy_probe() -> int:
         diagnostic = f"status=available;version={version}\n"
         exit_code = 0
     except Exception as error:
-        diagnostic = f"status=probe_error;error_type={type(error).__name__}\n"
+        message = str(error).splitlines()[0] if str(error) else type(error).__name__
+        if re.search(r"(?i)(?:[A-Z]:\\|\\\\)", message):
+            message = "diagnostic_omitted"
+        else:
+            message = re.sub(r"[\x00-\x1f\x7f]", " ", message)[:180]
+        diagnostic = f"status=probe_error;error_type={type(error).__name__};detail={message}\n"
         exit_code = 1
     if log_path:
         try:

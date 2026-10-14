@@ -2,6 +2,7 @@ from pathlib import Path
 
 from tools.packaging.open3d_pe_dependency_probe import (
     _OPTIONAL_EXCLUDED_DLLS,
+    _find_numpy_directory,
     _find_open3d_directory,
     _resolution,
 )
@@ -42,3 +43,12 @@ def test_open3d_dependency_probe_finds_pyinstaller_internal_layout(tmp_path: Pat
     (package / "pybind.cp312-win_amd64.pyd").write_bytes(b"staged")
 
     assert _find_open3d_directory(tmp_path) == package
+
+
+def test_open3d_dependency_probe_finds_staged_numpy_native_package(tmp_path: Path):
+    package = tmp_path / "_internal" / "numpy"
+    native = package / "_core"
+    native.mkdir(parents=True)
+    (native / "_multiarray_umath.cp312-win_amd64.pyd").write_bytes(b"staged")
+
+    assert _find_numpy_directory(tmp_path) == package
