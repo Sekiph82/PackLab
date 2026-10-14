@@ -247,6 +247,19 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
             elif "numpy.core.multiarray failed to import" in message:
                 reason = "numpy_multiarray_unavailable"
             error_detail = f"{error_detail};reason={reason}"
+            cause = exc.__cause__ or exc.__context__
+            if cause is not None:
+                cause_type = type(cause).__name__
+                if cause_type.isidentifier():
+                    error_detail = f"{error_detail};cause={cause_type}"
+                if isinstance(cause, ModuleNotFoundError):
+                    cause_module = cause.name
+                    if isinstance(cause_module, str) and all(
+                        part.isidentifier() for part in cause_module.split(".")
+                    ):
+                        error_detail = f"{error_detail};cause_module={cause_module}"
+                elif isinstance(cause, OSError) and isinstance(cause.winerror, int):
+                    error_detail = f"{error_detail};cause_winerror={cause.winerror}"
             trace_frames: list[str] = []
             traceback_node = exc.__traceback__
             while traceback_node is not None:
@@ -270,8 +283,20 @@ def probe_open3d(loader: Open3DLoader = _load_open3d) -> Open3DCapability:
                 ):
                     trace_frames.append(f"{frame_module}.{frame_function}")
                 traceback_node = traceback_node.tb_next
-            if trace_frames:
-                error_detail = f"{error_detail};trace={','.join(trace_frames[-5:])}"
+            selected_trace_frames: list[str] = []
+            for prefix in (
+                "packlab_core.geometry_adapter.",
+                "open3d.",
+                "importlib._bootstrap.",
+            ):
+                match = next(
+                    (frame for frame in reversed(trace_frames) if frame.startswith(prefix)),
+                    None,
+                )
+                if match is not None and match not in selected_trace_frames:
+                    selected_trace_frames.append(match)
+            if selected_trace_frames:
+                error_detail = f"{error_detail};trace={','.join(selected_trace_frames)}"
         elif isinstance(exc, OSError) and isinstance(exc.winerror, int):
             error_detail = f"{error_detail};winerror={exc.winerror}"
         return _capability(

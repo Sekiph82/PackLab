@@ -164,6 +164,23 @@ def test_open3d_import_error_reports_only_safe_trace_module_names():
     )
 
 
+def test_open3d_import_error_reports_safe_chained_failure_facts():
+    def failing_import() -> ModuleType:
+        raise ImportError("private wrapper text") from ModuleNotFoundError(
+            "private path text", name="open3d.cpu.pybind"
+        )
+
+    capability = probe_open3d(failing_import)
+
+    assert capability.status is CapabilityStatus.UNKNOWN
+    assert capability.detail == (
+        "Open3D import failed (ImportError;reason=import_error;"
+        "cause=ModuleNotFoundError;cause_module=open3d.cpu.pybind;"
+        "trace=packlab_core.geometry_adapter.probe_open3d)"
+    )
+    assert "private" not in capability.detail
+
+
 def test_wrong_version_or_missing_build_facts_stays_unknown():
     module = ModuleType("open3d")
     module.__version__ = "0.21.0"

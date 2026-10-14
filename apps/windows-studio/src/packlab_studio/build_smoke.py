@@ -115,6 +115,26 @@ def _open3d_probe_failure_code(status: str, detail: str) -> str:
                         "symbol_missing",
                     }:
                         safe_detail += f"_{reason}"
+                elif field.startswith("cause="):
+                    cause_type = field.removeprefix("cause=")
+                    if cause_type in {
+                        "ImportError",
+                        "ModuleNotFoundError",
+                        "OSError",
+                        "RuntimeError",
+                        "ValueError",
+                    }:
+                        safe_detail += f"_cause_{cause_type}"
+                elif field.startswith("cause_module="):
+                    cause_module = field.removeprefix("cause_module=")
+                    if cause_module and all(
+                        part.isidentifier() for part in cause_module.split(".")
+                    ):
+                        safe_detail += f"_cause_module_{cause_module.replace('.', '_')}"
+                elif field.startswith("cause_winerror="):
+                    winerror = field.removeprefix("cause_winerror=")
+                    if winerror.isdecimal():
+                        safe_detail += f"_cause_winerror_{winerror}"
                 elif field.startswith("trace="):
                     frames = field.removeprefix("trace=").split(",")
                     safe_frames: list[str] = []
