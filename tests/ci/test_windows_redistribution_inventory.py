@@ -16,6 +16,38 @@ def test_safe_posix_path_rejects_absolute_and_parent_paths() -> None:
     assert inventory.safe_posix_path(r"C:\private\file.dll") is None
 
 
+def test_corresponding_source_delivery_fails_closed_when_missing(tmp_path: Path) -> None:
+    stage = tmp_path / "PackLabStudio"
+    stage.mkdir()
+    by_path, delivered, valid = inventory._validate_source_delivery(
+        stage, Path(__file__).resolve().parents[2], "a" * 40, "1.2.3"
+    )
+    assert by_path == {}
+    assert delivered == set()
+    assert not valid
+
+
+def test_corresponding_source_manifest_metadata_is_pinned() -> None:
+    pinned = {
+        "component": "Open3D",
+        "version": "0.20.0",
+        "revision": "d32b4fce639b3cde284184072796480ef9b528d1",
+        "url": "https://github.com/isl-org/Open3D/archive/d32b4fce639b3cde284184072796480ef9b528d1.tar.gz",
+        "sha256": "a" * 64,
+        "license_identifier": "MIT",
+        "source_availability_role": "CORRESPONDING_SOURCE_AND_THIRD_PARTY_INVENTORY",
+    }
+    row = {
+        **pinned,
+        "id": "open3d-attested-source-d32b4fce",
+        "source_filename": "d32b4fce639b3cde284184072796480ef9b528d1.tar.gz",
+    }
+
+    assert inventory._source_record_matches(pinned, row)
+    assert not inventory._source_record_matches(pinned, {**row, "version": "0.20.1"})
+    assert not inventory._source_record_matches(pinned, {**row, "license_identifier": "Other"})
+
+
 def test_hooks_contrib_runtime_hook_classification_is_path_and_name_bounded() -> None:
     assert inventory.is_pyinstaller_hooks_contrib_runtime_hook(
         Path("_pyinstaller_hooks_contrib/rthooks/pyi_rth_cryptography_openssl.py")
@@ -266,6 +298,69 @@ def test_locked_openssl_runtime_has_explicit_third_party_provenance(
     )
     assert notices[0]["sha256"] == record["license_sha256"]
     assert not unresolved
+
+
+def test_packlab_application_notice_is_generated_for_project_owned_files(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    registry = json.loads(
+        (project_root / "tools/packaging/windows_component_license_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    record = registry["supplemental_evidence"]["packlab-application"]
+    license_path = project_root / record["license_file"]
+    assert inventory.sha256_file(license_path) == record["license_sha256"]
+
+    components, notices, unresolved = inventory.license_rows(
+        {"packlab-application"}, {}, registry, tmp_path / "evidence"
+    )
+
+    assert not unresolved
+    assert components[0]["license_identifier"] == "LicenseRef-PackLab-Proprietary-Internal-Use"
+    assert components[0]["provenance_class"] == "PACKLAB_OWNED"
+    assert components[0]["source_evidence_required"] is False
+    assert len(notices) == 1
+    copied_notice = tmp_path / "evidence" / notices[0]["path"]
+    assert copied_notice.read_bytes() == license_path.read_bytes()
+
+
+def test_open3d_native_third_party_license_corpus_is_hashed_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    registry = json.loads(
+        (project_root / "tools/packaging/windows_component_license_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    record = registry["supplemental_evidence"]["open3d"]
+    mit_license = tmp_path / "open3d-wheel-LICENSE.txt"
+    mit_license.write_text("MIT license from the exact wheel\n", encoding="utf-8")
+
+    class Distribution:
+        version = "0.20.0"
+        metadata = {"Name": "open3d", "License": "MIT"}
+        files = [Path("open3d-0.20.0.dist-info/licenses/LICENSE.txt")]
+
+        @staticmethod
+        def locate_file(_path: Path) -> Path:
+            return mit_license
+
+    components, notices, unresolved = inventory.license_rows(
+        {"open3d"}, {"open3d": Distribution()}, registry, tmp_path / "evidence"
+    )
+
+    assert "component:open3d" in unresolved
+    assert components[0]["license_status"] == "UNRESOLVED"
+    assert components[0]["source_evidence_required"] is True
+    additional_notice = next(
+        row for row in notices if row["sha256"] == record["additional_license_files"][0]["sha256"]
+    )
+    copied_notice = tmp_path / "evidence" / additional_notice["path"]
+    source_notice = project_root / record["additional_license_files"][0]["path"]
+    assert copied_notice.read_bytes() == source_notice.read_bytes()
 
 
 def test_metadata_only_supplement_uses_exact_distribution_license_file(

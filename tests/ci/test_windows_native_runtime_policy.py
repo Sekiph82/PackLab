@@ -91,6 +91,13 @@ def test_inno_prerequisite_gate_uses_contract_architecture_and_version_fields() 
     policy = json.loads(PREREQUISITE.read_text(encoding="utf-8"))
     minimum = minimum_runtime_version(policy)
     installer = INSTALLER.read_text(encoding="utf-8")
+    guide = (INSTALLER.parent / "windows_licenses/RELINKING_AND_SOURCE_GUIDE.txt").read_text(
+        encoding="utf-8"
+    )
+    assert policy["automatic_download"] is False
+    assert policy["official_prerequisite_download"] == "https://aka.ms/vc14/vc_redist.x64.exe"
+    assert policy["official_prerequisite_download"] in guide
+    assert "does not grant Microsoft redistribution rights" in guide
     assert "RegQueryDWordValue(HKLM64" in installer
     assert "'SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64'" in installer
     assert all(f"'{name}'" in installer for name in ("Installed", "Major", "Minor", "Bld", "Rbld"))
@@ -103,6 +110,8 @@ def test_inno_prerequisite_gate_uses_contract_architecture_and_version_fields() 
     assert not runtime_is_supported(
         installed=True, architecture="x86", version=minimum, minimum=minimum
     )
+    assert "DefaultDirName={localappdata}\\Programs\\PackLab Studio" in installer
+    assert "PrivilegesRequired=lowest" in installer
 
 
 def test_sdk_source_lock_bridge_accepts_only_frozen_origin_projection(tmp_path: Path) -> None:

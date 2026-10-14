@@ -1,0 +1,56 @@
+PackLab Studio corresponding source and replacement guide
+
+Applies to the exact PackLab Studio revision and version recorded in
+source-delivery-manifest.json. The COMPLIANCE/CORRESPONDING_SOURCE directory
+contains each pinned source archive, its upstream URL, source commit/version,
+SHA-256 and byte length. Verify those values against the manifest before use.
+The Open3D SBOM and complete checked-in upstream third-party license corpus
+are in COMPLIANCE/EVIDENCE and COMPLIANCE/THIRD_PARTY_LICENSES.
+
+PackLab Studio is installed per Windows user under that user's Local AppData
+Programs directory. It dynamically loads the Qt 6 shared libraries and Qt
+plugins supplied in the application's _internal directory. To test a modified
+LGPL-covered Qt shared library, retain a backup of the installed directory,
+replace the applicable library/plugin with a compatible build from the exact
+corresponding source, keep the same library name and ABI, and launch
+PackLabStudio.exe again. The PySide6 and Shiboken6 extension modules are also
+separate files in _internal; their corresponding source is included. The Qt
+source archives contain Qt's build files and module sources. Qt's documented
+source-build instructions and the pinned revisions are authoritative for
+building them. Do not replace files from a different Qt release or architecture.
+
+Windows prerequisite: this x64 package requires Microsoft Visual C++ 2015-2022
+Redistributable (x64), version 14.44.35211.0 or later. The PackLab installer
+does not contain or install Microsoft runtime binaries; it checks the installed
+runtime and stops with an actionable message if the prerequisite is missing or
+too old. On an internet-connected administration machine, use Microsoft's
+current x64 download link at https://aka.ms/vc14/vc_redist.x64.exe and verify
+the downloaded file's Microsoft signature and version before installation.
+For controlled offline deployment, obtain and install the prerequisite using a
+distribution method authorized by Microsoft's applicable terms. This guide
+does not grant Microsoft redistribution rights. Re-run the PackLab installer
+after the prerequisite is installed.
+
+The Open3D Python extension and Open3D.dll are dynamically loaded files. The
+exact Open3D source revision, oneTBB source, wheel/native SBOM and third-party
+license corpus are included. The Open3D source repository documents its build
+configuration. The upstream build used additional static third-party inputs
+listed in the SBOM; the exact ZeroMQ and cppzmq sources are included where
+their source archives are listed in the manifest. Preserve and follow each
+upstream license and exception. This guide does not grant rights in a
+third-party component or state that every upstream build is reproducible from
+these archives alone.
+
+The controlled OCP/OCCT component source archives and fmt source archive are
+included with the pinned source lock. Their native files are separate DLL/PYD
+files. Replace only with a compatible build for the same architecture and
+supported ABI. Source-build recipes, locks and native-file manifests are in
+the PackLab source repository at the exact revision in the delivered build
+provenance.
+
+This is engineering information, not a legal opinion or a warranty of
+reproducible builds. The recipient must retain all included license texts,
+notices, source archives and provenance records when transferring or using
+the installer. Legal review remains required for the controlled internal
+factory deployment. No public release or external-customer distribution is
+authorized by this guide.

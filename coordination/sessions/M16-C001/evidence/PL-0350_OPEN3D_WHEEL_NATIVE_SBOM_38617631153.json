@@ -1,0 +1,668 @@
+{
+  "build_config": "_build_config = {\r\n    \"BUILD_TENSORFLOW_OPS\" : False,\r\n    \"BUILD_PYTORCH_OPS\" : True,\r\n    \"BUILD_CUDA_MODULE\" : False,\r\n    \"BUILD_SYCL_MODULE\" : False,\r\n    \"BUILD_AZURE_KINECT\" : True,\r\n    \"BUILD_LIBREALSENSE\" : True,\r\n    \"BUILD_SHARED_LIBS\" : True,\r\n    \"BUILD_GUI\" : True,\r\n    \"BUILD_JUPYTER_EXTENSION\" : True,\r\n    \"BUNDLE_OPEN3D_ML\" : True,\r\n    \"GLIBCXX_USE_CXX11_ABI\" : True,\r\n    \"CMAKE_BUILD_TYPE\" : \"Release\",\r\n    \"CUDA_VERSION\" : \"\",\r\n    \"CUDA_GENCODES\" : \"\",\r\n    \"Tensorflow_VERSION\" : \"\",\r\n    \"Pytorch_VERSION\" : \"2.13.0+cpu\"\r\n}\r\n",
+  "core_build": {
+    "additional_locked_build_inputs": [
+      {
+        "component": "oneMKL static library input",
+        "license_identifier": "Intel Simplified Software License (August 2021)",
+        "link_inputs": [
+          "mkl_intel_ilp64.lib",
+          "mkl_core.lib",
+          "mkl_sequential.lib",
+          "mkl_tbb_thread.lib"
+        ],
+        "redistribution_notice_source": "3rdparty/mkl/LICENSE",
+        "sha256": "524de5395db5b7a9d9f0d9a76b2223c6edac429d4492c6a1cc79a5c22c4f3346",
+        "url": "https://github.com/isl-org/open3d_downloads/releases/download/mkl-static-2024.1/mkl_static-2024.1.0-win_amd64.zip",
+        "version": "2024.1.0"
+      },
+      {
+        "component": "Intel IPP static library input",
+        "license_identifier": "Apache-2.0",
+        "link_inputs": [
+          "ipp_iw.lib",
+          "ippccmt_tl_tbb.lib",
+          "ippccmt.lib",
+          "ippimt_tl_tbb.lib",
+          "ippimt.lib",
+          "ippsmt.lib",
+          "ippvmmt.lib",
+          "ippcoremt_tl_tbb.lib",
+          "ippcoremt.lib"
+        ],
+        "redistribution_notice_source": "3rdparty/ipp/LICENSE",
+        "sha256": "69e8a7dc891609de6fea478a67659d2f874d12b51a47bd2e3e5a7c4c473c53a6",
+        "url": "https://github.com/isl-org/open3d_downloads/releases/download/mkl-static-2024.1/ipp_static-2021.11.0-win_amd64.zip",
+        "version": "2021.11.0"
+      },
+      {
+        "component": "ZeroMQ static library source",
+        "license_identifier": "LGPL-3.0-or-later WITH ZeroMQ-static-linking-exception",
+        "link_inputs": [
+          "libzmq-v143-mt-s-4_3_5.lib"
+        ],
+        "sha256": "6653ef5910f17954861fe72332e68b03ca6e4d9c7160eb3a8de5a5a913bfab43",
+        "url": "https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.tar.gz",
+        "version": "4.3.5"
+      },
+      {
+        "component": "cppzmq header source",
+        "license_identifier": "MIT",
+        "sha256": "c81c81bba8a7644c84932225f018b5088743a22999c6d82a2b5f5cd1e6942b74",
+        "source_role": "header_only_link_dependency",
+        "url": "https://github.com/zeromq/cppzmq/archive/refs/tags/v4.10.0.tar.gz",
+        "version": "4.10.0"
+      }
+    ],
+    "build_features": [
+      {
+        "name": "Azure Kinect Support",
+        "value": "ON"
+      },
+      {
+        "name": "Intel RealSense Support",
+        "value": "ON"
+      },
+      {
+        "name": "CUDA Support",
+        "value": "OFF"
+      },
+      {
+        "name": "SYCL Support",
+        "value": "OFF"
+      },
+      {
+        "name": "ISPC Support",
+        "value": "ON"
+      },
+      {
+        "name": "Build GUI",
+        "value": "ON"
+      },
+      {
+        "name": "Build WebRTC visualizer",
+        "value": "ON"
+      },
+      {
+        "name": "Build Shared Library",
+        "value": "ON"
+      },
+      {
+        "name": "Use Windows Static Runtime",
+        "value": "OFF"
+      },
+      {
+        "name": "Build Unit Tests",
+        "value": "ON"
+      },
+      {
+        "name": "Build Examples",
+        "value": "OFF"
+      },
+      {
+        "name": "Build Python Module",
+        "value": "OFF"
+      },
+      {
+        "name": "Generate Typing Stubs",
+        "value": "ON"
+      },
+      {
+        "name": "Ignore All Stubgen Errors",
+        "value": "OFF"
+      },
+      {
+        "name": "Use Installed Library",
+        "value": "OFF"
+      },
+      {
+        "name": "Build Jupyter Extension",
+        "value": "OFF"
+      },
+      {
+        "name": "Build TensorFlow Ops",
+        "value": "OFF"
+      },
+      {
+        "name": "Build PyTorch Ops",
+        "value": "ON"
+      },
+      {
+        "name": "Build Benchmarks",
+        "value": "OFF"
+      },
+      {
+        "name": "Bundle Open3D-ML",
+        "value": "OFF"
+      }
+    ],
+    "devel_artifact_byte_length": 80538872,
+    "devel_artifact_id": 10376441022,
+    "devel_artifact_sha256": "f776f55e17492f42afd1658133ea72844dd663d3a2aa59b7f5ebaaf98690fa83",
+    "input_artifact_contents": [
+      {
+        "byte_length": 164283904,
+        "name": "Open3D.dll",
+        "sha256": "067921a365a91aabe939ee7764d1cde74cf2e0c8ad55f688d2a05ff87cb065da"
+      },
+      {
+        "byte_length": 328704,
+        "name": "tbb12.dll",
+        "sha256": "a0e2c43bd97b2bece9420c1e179320c195784cf4989192cb53b1434db5f06144"
+      },
+      {
+        "byte_length": 11934720,
+        "name": "open3d_torch_ops.dll",
+        "packlab_staged": false,
+        "sha256": "e667b7d3c4de9e567d10def1316c113aac2d5b2ea8f1889ec6bda4a4dce5779f"
+      }
+    ],
+    "job_conclusion": "success",
+    "job_id": 104184749639,
+    "job_name": "Build lib (ON, OFF, cpu, Release)",
+    "non_system_link_inputs": [
+      "assimp-vc143-mt.lib",
+      "backend.lib",
+      "bluegl.lib",
+      "bluevk.lib",
+      "civetweb-cpp.lib",
+      "civetweb.lib",
+      "draco.lib",
+      "embree4.lib",
+      "embree_avx.lib",
+      "embree_avx2.lib",
+      "filabridge.lib",
+      "filaflat.lib",
+      "filament.lib",
+      "filameshio.lib",
+      "fmt.lib",
+      "fw.lib",
+      "geometry.lib",
+      "glfw3.lib",
+      "ibl.lib",
+      "image.lib",
+      "ipp_iw.lib",
+      "ippccmt.lib",
+      "ippccmt_tl_tbb.lib",
+      "ippcoremt.lib",
+      "ippcoremt_tl_tbb.lib",
+      "ippcvmt.lib",
+      "ippcvmt_tl_tbb.lib",
+      "ippimt.lib",
+      "ippimt_tl_tbb.lib",
+      "ippsmt.lib",
+      "ippvmmt.lib",
+      "jsoncpp.lib",
+      "ktxreader.lib",
+      "lexers.lib",
+      "libcurl.lib",
+      "libpng16_static.lib",
+      "libzmq-v143-mt-s-4_3_5.lib",
+      "math.lib",
+      "meshoptimizer.lib",
+      "mkl_core.lib",
+      "mkl_intel_ilp64.lib",
+      "mkl_sequential.lib",
+      "mkl_tbb_thread.lib",
+      "Open3D.lib",
+      "Open3D_3rdparty_glew.lib",
+      "Open3D_3rdparty_imgui.lib",
+      "Open3D_3rdparty_liblzf.lib",
+      "Open3D_3rdparty_qhull_r.lib",
+      "Open3D_3rdparty_qhullcpp.lib",
+      "Open3D_3rdparty_rply.lib",
+      "Open3D_3rdparty_tinyfiledialogs.lib",
+      "realsense-file.lib",
+      "realsense2.lib",
+      "rsutils.lib",
+      "shaders.lib",
+      "simd.lib",
+      "smol-v.lib",
+      "spz.lib",
+      "sys.lib",
+      "tasking.lib",
+      "tbb12.lib",
+      "turbojpeg-static.lib",
+      "utils.lib",
+      "UVAtlas.lib",
+      "vtkCommonCore-9.1.lib",
+      "vtkCommonDataModel-9.1.lib",
+      "vtkCommonExecutionModel-9.1.lib",
+      "vtkCommonMath-9.1.lib",
+      "vtkCommonMisc-9.1.lib",
+      "vtkCommonSystem-9.1.lib",
+      "vtkCommonTransforms-9.1.lib",
+      "vtkFiltersCore-9.1.lib",
+      "vtkFiltersGeneral-9.1.lib",
+      "vtkFiltersModeling-9.1.lib",
+      "vtkFiltersSources-9.1.lib",
+      "vtkkissfft-9.1.lib",
+      "vtkpugixml-9.1.lib",
+      "vtksys-9.1.lib",
+      "webrtc.lib",
+      "webrtc_extra.lib",
+      "zlibstatic.lib",
+      "zstd.lib",
+      "zstd_static.lib"
+    ],
+    "open3d_dll_link_inputs": [
+      "advapi32.lib",
+      "assimp-vc143-mt.lib",
+      "backend.lib",
+      "bluegl.lib",
+      "bluevk.lib",
+      "civetweb-cpp.lib",
+      "civetweb.lib",
+      "comdlg32.lib",
+      "dmoguids.lib",
+      "draco.lib",
+      "embree4.lib",
+      "embree_avx.lib",
+      "embree_avx2.lib",
+      "filabridge.lib",
+      "filaflat.lib",
+      "filament.lib",
+      "filameshio.lib",
+      "fmt.lib",
+      "fw.lib",
+      "gdi32.lib",
+      "geometry.lib",
+      "glfw3.lib",
+      "ibl.lib",
+      "image.lib",
+      "iphlpapi.lib",
+      "ipp_iw.lib",
+      "ippccmt.lib",
+      "ippccmt_tl_tbb.lib",
+      "ippcoremt.lib",
+      "ippcoremt_tl_tbb.lib",
+      "ippcvmt.lib",
+      "ippcvmt_tl_tbb.lib",
+      "ippimt.lib",
+      "ippimt_tl_tbb.lib",
+      "ippsmt.lib",
+      "ippvmmt.lib",
+      "jsoncpp.lib",
+      "kernel32.lib",
+      "ktxreader.lib",
+      "lexers.lib",
+      "libcurl.lib",
+      "libpng16_static.lib",
+      "libzmq-v143-mt-s-4_3_5.lib",
+      "math.lib",
+      "meshoptimizer.lib",
+      "mkl_core.lib",
+      "mkl_intel_ilp64.lib",
+      "mkl_sequential.lib",
+      "mkl_tbb_thread.lib",
+      "msdmo.lib",
+      "ole32.lib",
+      "oleaut32.lib",
+      "Open3D.lib",
+      "Open3D_3rdparty_glew.lib",
+      "Open3D_3rdparty_imgui.lib",
+      "Open3D_3rdparty_liblzf.lib",
+      "Open3D_3rdparty_qhull_r.lib",
+      "Open3D_3rdparty_qhullcpp.lib",
+      "Open3D_3rdparty_rply.lib",
+      "Open3D_3rdparty_tinyfiledialogs.lib",
+      "opengl32.lib",
+      "realsense-file.lib",
+      "realsense2.lib",
+      "rpcrt4.lib",
+      "rsutils.lib",
+      "secur32.lib",
+      "shaders.lib",
+      "shell32.lib",
+      "simd.lib",
+      "smol-v.lib",
+      "spz.lib",
+      "strmiids.lib",
+      "sys.lib",
+      "tasking.lib",
+      "tbb12.lib",
+      "turbojpeg-static.lib",
+      "user32.lib",
+      "utils.lib",
+      "uuid.lib",
+      "UVAtlas.lib",
+      "vtkCommonCore-9.1.lib",
+      "vtkCommonDataModel-9.1.lib",
+      "vtkCommonExecutionModel-9.1.lib",
+      "vtkCommonMath-9.1.lib",
+      "vtkCommonMisc-9.1.lib",
+      "vtkCommonSystem-9.1.lib",
+      "vtkCommonTransforms-9.1.lib",
+      "vtkFiltersCore-9.1.lib",
+      "vtkFiltersGeneral-9.1.lib",
+      "vtkFiltersModeling-9.1.lib",
+      "vtkFiltersSources-9.1.lib",
+      "vtkkissfft-9.1.lib",
+      "vtkpugixml-9.1.lib",
+      "vtksys-9.1.lib",
+      "webrtc.lib",
+      "webrtc_extra.lib",
+      "winmm.lib",
+      "winspool.lib",
+      "wmcodecdspuuid.lib",
+      "ws2_32.lib",
+      "zlibstatic.lib",
+      "zstd.lib",
+      "zstd_static.lib"
+    ],
+    "third_party_configuration": [
+      {
+        "method": "build from source",
+        "name": "Assimp",
+        "value": "YES"
+      },
+      {
+        "name": "BLAS",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "curl",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "Eigen3",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "filament",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "fmt",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "GLEW",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "GLFW",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "googletest",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "imgui",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "ipp",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "JPEG",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "jsoncpp",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "liblzf",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "msgpack",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "nanoflann",
+        "value": "YES"
+      },
+      {
+        "name": "OpenGL",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "PNG",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "qhullcpp",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "librealsense",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "TBB",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "tinyfiledialogs",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "TinyGLTF",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "tinyobjloader",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "VTK",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "WebRTC",
+        "value": "YES"
+      },
+      {
+        "method": "build from source",
+        "name": "ZeroMQ",
+        "value": "YES"
+      }
+    ],
+    "workflow_run": 34906262077
+  },
+  "corresponding_source": {
+    "byte_length": 52728300,
+    "filename": "open3d-attested-d32b4fce639b3cde284184072796480ef9b528d1.tar.gz",
+    "sha256": "4d527f246843e7a5920433535d0fcfb26f093706ac3fc7642bb57e39a917d0b1",
+    "source_commit": "d32b4fce639b3cde284184072796480ef9b528d1",
+    "url": "https://github.com/isl-org/Open3D/archive/d32b4fce639b3cde284184072796480ef9b528d1.tar.gz"
+  },
+  "direct_pe_imports": {
+    "open3d/Open3D.dll": [
+      "ADVAPI32.dll",
+      "CFGMGR32.dll",
+      "COMDLG32.dll",
+      "CRYPT32.dll",
+      "GDI32.dll",
+      "IMM32.dll",
+      "IPHLPAPI.DLL",
+      "KERNEL32.dll",
+      "MF.dll",
+      "MFPlat.DLL",
+      "MFReadWrite.dll",
+      "MSVCP140.dll",
+      "OLEAUT32.dll",
+      "OPENGL32.dll",
+      "SETUPAPI.dll",
+      "SHELL32.dll",
+      "SHLWAPI.dll",
+      "USER32.dll",
+      "VCOMP140.DLL",
+      "VCRUNTIME140.dll",
+      "VCRUNTIME140_1.dll",
+      "WINMM.dll",
+      "WINUSB.DLL",
+      "WS2_32.dll",
+      "api-ms-win-crt-convert-l1-1-0.dll",
+      "api-ms-win-crt-environment-l1-1-0.dll",
+      "api-ms-win-crt-filesystem-l1-1-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-multibyte-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-crt-string-l1-1-0.dll",
+      "api-ms-win-crt-time-l1-1-0.dll",
+      "api-ms-win-crt-utility-l1-1-0.dll",
+      "ole32.dll",
+      "tbb12.dll"
+    ],
+    "open3d/pybind.cp312-win_amd64.pyd": [
+      "KERNEL32.dll",
+      "MSVCP140.dll",
+      "Open3D.dll",
+      "VCRUNTIME140.dll",
+      "VCRUNTIME140_1.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-locale-l1-1-0.dll",
+      "api-ms-win-crt-math-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-crt-string-l1-1-0.dll",
+      "python312.dll"
+    ],
+    "open3d/tbb12.dll": [
+      "KERNEL32.dll",
+      "MSVCP140.dll",
+      "VCRUNTIME140.dll",
+      "VCRUNTIME140_1.dll",
+      "api-ms-win-crt-environment-l1-1-0.dll",
+      "api-ms-win-crt-heap-l1-1-0.dll",
+      "api-ms-win-crt-runtime-l1-1-0.dll",
+      "api-ms-win-crt-stdio-l1-1-0.dll",
+      "api-ms-win-crt-string-l1-1-0.dll"
+    ]
+  },
+  "evidence_type": "exact-open3d-cp312-windows-wheel-native-sbom",
+  "native_wheel_files": [
+    {
+      "byte_length": 164283904,
+      "sha256": "067921a365a91aabe939ee7764d1cde74cf2e0c8ad55f688d2a05ff87cb065da",
+      "wheel_path": "open3d/Open3D.dll"
+    },
+    {
+      "byte_length": 6747136,
+      "sha256": "70d13ecef013bf4f0ca29d9e51442e01348c37db965a521ea91acb377470a389",
+      "wheel_path": "open3d/pybind.cp312-win_amd64.pyd"
+    },
+    {
+      "byte_length": 328704,
+      "sha256": "a0e2c43bd97b2bece9420c1e179320c195784cf4989192cb53b1434db5f06144",
+      "wheel_path": "open3d/tbb12.dll"
+    }
+  ],
+  "schema_version": 1,
+  "status": "EXACT_WHEEL_BUILD_AND_NATIVE_LINK_INPUTS_BOUND; THIRD_PARTY_NOTICE_BUNDLE_AND_SOURCE_DELIVERY_REQUIRED_BEFORE_ENGINEERING_CLEARANCE",
+  "third_party_notice_sources": {
+    "combined_license_corpus": {
+      "encoding": "UTF-8",
+      "path": "tools/packaging/windows_licenses/Open3D-0.20.0/OPEN3D-THIRD-PARTY-LICENSES.txt",
+      "sha256": "7a396b9b879b9d5ade9aadf505386199ff2a3f84fe6f4e4ec3e1d9f817fd1e34",
+      "source_byte_hashes_recorded_in_corpus": true,
+      "source_license_file_count": 42
+    },
+    "native_third_party_license_tree": "3rdparty/**/(LICENSE*,COPYING*,NOTICE*,COPYRIGHT*)",
+    "notices_bundled_in_wheel": true,
+    "open3d_license_file": "LICENSE",
+    "repository_commit": "d32b4fce639b3cde284184072796480ef9b528d1",
+    "source_archive_sha256": "4d527f246843e7a5920433535d0fcfb26f093706ac3fc7642bb57e39a917d0b1",
+    "wheel_metadata_supplied_notice_count": 8
+  },
+  "wheel": {
+    "byte_length": 77497277,
+    "filename": "open3d-0.20.0-cp312-cp312-win_amd64.whl",
+    "github_attestation": {
+      "source_commit": "d32b4fce639b3cde284184072796480ef9b528d1",
+      "source_repository": "https://github.com/isl-org/Open3D",
+      "verification_time": "2026-10-14",
+      "verified": true,
+      "wheel_job_conclusion": "success",
+      "wheel_job_id": 104215722921,
+      "workflow": ".github/workflows/windows.yml",
+      "workflow_run": 34906262077
+    },
+    "official_release_asset": "https://github.com/isl-org/Open3D/releases/download/v0.20.0/open3d-0.20.0-cp312-cp312-win_amd64.whl",
+    "sha256": "60010f21d44f13557ba007893bc13a69827faa4dc49eedd923d1397096c20d92",
+    "version": "0.20.0"
+  },
+  "wheel_build_configuration": "_build_config = {\r\n    \"BUILD_TENSORFLOW_OPS\" : False,\r\n    \"BUILD_PYTORCH_OPS\" : True,\r\n    \"BUILD_CUDA_MODULE\" : False,\r\n    \"BUILD_SYCL_MODULE\" : False,\r\n    \"BUILD_AZURE_KINECT\" : True,\r\n    \"BUILD_LIBREALSENSE\" : True,\r\n    \"BUILD_SHARED_LIBS\" : True,\r\n    \"BUILD_GUI\" : True,\r\n    \"BUILD_JUPYTER_EXTENSION\" : True,\r\n    \"BUNDLE_OPEN3D_ML\" : True,\r\n    \"GLIBCXX_USE_CXX11_ABI\" : True,\r\n    \"CMAKE_BUILD_TYPE\" : \"Release\",\r\n    \"CUDA_VERSION\" : \"\",\r\n    \"CUDA_GENCODES\" : \"\",\r\n    \"Tensorflow_VERSION\" : \"\",\r\n    \"Pytorch_VERSION\" : \"2.13.0+cpu\"\r\n}\r\n",
+  "wheel_native_files_excluded_by_packlab": [
+    {
+      "byte_length": 11934720,
+      "packlab_staged": false,
+      "reason": "The exact frozen PackLab Studio runtime does not use or stage Open3D-ML PyTorch operators.",
+      "sha256": "e667b7d3c4de9e567d10def1316c113aac2d5b2ea8f1889ec6bda4a4dce5779f",
+      "wheel_path": "open3d/open3d_torch_ops.dll"
+    }
+  ],
+  "wheel_supplied_license_notice_files": [
+    {
+      "byte_length": 336,
+      "sha256": "d33efbdf4d309bfa4448199551371ff81d5f57661b781faf79d256554e038595",
+      "wheel_path": "open3d/labextension/static/543.4b65aaf406c31b253ac6.js.LICENSE.txt"
+    },
+    {
+      "byte_length": 5021,
+      "sha256": "f034d495cc1e72dca290d3ee084ac0583a8bbb2f28fc04424451791f21566dea",
+      "wheel_path": "open3d/labextension/static/third-party-licenses.json"
+    },
+    {
+      "byte_length": 336,
+      "sha256": "d33efbdf4d309bfa4448199551371ff81d5f57661b781faf79d256554e038595",
+      "wheel_path": "open3d/nbextension/index.js.LICENSE.txt"
+    },
+    {
+      "byte_length": 29,
+      "sha256": "db2d034edc53b782d4182950cffc001741485b8f8b9255a779dbe6b7c0b9abfe",
+      "wheel_path": "open3d/resources/Roboto-License.txt"
+    },
+    {
+      "byte_length": 336,
+      "sha256": "d33efbdf4d309bfa4448199551371ff81d5f57661b781faf79d256554e038595",
+      "wheel_path": "open3d-0.20.0.data/data/share/jupyter/labextensions/open3d/static/543.4b65aaf406c31b253ac6.js.LICENSE.txt"
+    },
+    {
+      "byte_length": 5021,
+      "sha256": "f034d495cc1e72dca290d3ee084ac0583a8bbb2f28fc04424451791f21566dea",
+      "wheel_path": "open3d-0.20.0.data/data/share/jupyter/labextensions/open3d/static/third-party-licenses.json"
+    },
+    {
+      "byte_length": 336,
+      "sha256": "d33efbdf4d309bfa4448199551371ff81d5f57661b781faf79d256554e038595",
+      "wheel_path": "open3d-0.20.0.data/data/share/jupyter/nbextensions/open3d/index.js.LICENSE.txt"
+    },
+    {
+      "byte_length": 1131,
+      "sha256": "60d645c667704c72baf2b52126f9e539ded4c286e92a01674bf494b720997192",
+      "wheel_path": "open3d-0.20.0.dist-info/licenses/LICENSE.txt"
+    }
+  ]
+}

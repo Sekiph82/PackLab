@@ -15,11 +15,13 @@ import sys
 from collections import defaultdict
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
+from urllib.parse import urlparse
 
 from tools.packaging.validate_controlled_ocp_manifest import (
     load_and_validate_manifest,
     validate_staged_tree,
 )
+from tools.packaging.validate_windows_native_source_lock import load_source_lock
 from tools.packaging.windows_native_runtime_policy import (
     is_numpy_wheel_msvc_alias,
     is_windows_runtime_dll,
@@ -296,9 +298,11 @@ def license_rows(
     by_name: dict[str, importlib.metadata.Distribution],
     registry: dict[str, Any],
     output_root: Path,
-) -> tuple[list[dict[str, Any]], list[dict[str, str]], set[str]]:
+    delivered_source_ids: set[str] | None = None,
+    source_delivery_valid: bool = False,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str]]:
     component_rows: list[dict[str, Any]] = []
-    notice_rows: list[dict[str, str]] = []
+    notice_rows: list[dict[str, Any]] = []
     unresolved: set[str] = set()
     supplements = registry.get("supplemental_evidence", {})
     native_review = registry.get("native_review", {})
@@ -379,6 +383,16 @@ def license_rows(
                     )
                 ]
                 files.extend(supplemental_files)
+            additional_license_files = supplement.get("additional_license_files", [])
+            if isinstance(additional_license_files, list):
+                for item in additional_license_files:
+                    if isinstance(item, dict) and isinstance(item.get("path"), str):
+                        files.append(
+                            (
+                                "supplemental/" + Path(item["path"]).name,
+                                Path(item["path"]),
+                            )
+                        )
             exception_file = supplement.get("exception_file")
             if exception_file:
                 files.append(("supplemental/" + Path(exception_file).name, Path(exception_file)))
@@ -393,6 +407,16 @@ def license_rows(
         else:
             reason = None
         native_reason = supplement.get("native_unresolved_reason") if supplement else None
+        required_source_ids = (
+            set(supplement.get("required_source_record_ids", [])) if supplement else set()
+        )
+        if (
+            native_reason
+            and required_source_ids
+            and source_delivery_valid
+            and required_source_ids.issubset(delivered_source_ids or set())
+        ):
+            native_reason = None
         if native_reason:
             reason = native_reason
         elif supplement and supplement.get("status", "").startswith("UNRESOLVED"):
@@ -400,8 +424,9 @@ def license_rows(
                 supplement.get("reason")
                 or "The reviewed registry leaves this native component unresolved."
             )
-        copied: list[dict[str, str]] = []
+        copied: list[dict[str, Any]] = []
         for relative_source, source_path in sorted(files, key=lambda row: row[0].casefold()):
+            additional_record = None
             if not source_path.is_file():
                 reason = (
                     reason or "A referenced license text is missing from this exact environment."
@@ -412,6 +437,18 @@ def license_rows(
                     reason = "Supplemental license file has no reviewed registry record."
                     continue
                 expected_sha = supplement.get("license_sha256")
+                additional_record = next(
+                    (
+                        item
+                        for item in supplement.get("additional_license_files", [])
+                        if isinstance(item, dict)
+                        and isinstance(item.get("path"), str)
+                        and Path(item["path"]).name == Path(relative_source).name
+                    ),
+                    None,
+                )
+                if additional_record is not None:
+                    expected_sha = additional_record.get("sha256")
                 if relative_source.endswith(
                     Path(supplement.get("exception_file", "__none__")).name
                 ):
@@ -436,7 +473,9 @@ def license_rows(
                 "path": destination.as_posix(),
                 "sha256": digest,
                 "source_reference": (
-                    supplement.get("upstream_reference")
+                    additional_record.get("upstream_reference")
+                    if additional_record is not None
+                    else supplement.get("upstream_reference")
                     if supplement and relative_source.startswith("supplemental/")
                     else "installed_distribution_file_metadata"
                 ),
@@ -478,14 +517,233 @@ def license_rows(
                         and (
                             supplement.get("native_unresolved_reason")
                             or supplement.get("source_evidence")
+                            or required_source_ids
                         )
                     )
                     or (owner in native_review)
                 ),
+                "required_source_record_ids": sorted(required_source_ids),
                 "notice_files": [row["path"] for row in copied],
             }
         )
     return component_rows, notice_rows, unresolved
+
+
+def _valid_numpy_runtime_normalization_report(report: Any) -> bool:
+    expected_paths = {
+        "numpy/_core/_multiarray_umath.cp312-win_amd64.pyd",
+        "numpy/fft/_pocketfft_umath.cp312-win_amd64.pyd",
+    }
+    if not isinstance(report, dict):
+        return False
+    runtime = report.get("external_prerequisite")
+    removed = report.get("removed_private_msvc_runtime")
+    rewrites = report.get("rewritten_imports")
+    if (
+        not isinstance(runtime, dict)
+        or not isinstance(removed, dict)
+        or not isinstance(rewrites, list)
+    ):
+        return False
+    if {row.get("path") for row in rewrites if isinstance(row, dict)} != expected_paths:
+        return False
+    return (
+        report.get("numpy_version") == "2.5.3"
+        and report.get("numpy_wheel_sha256")
+        == "0a59a421a32580a009e8a1751345bf829631b990dc1794b80514ab722b435def"
+        and removed.get("sha256")
+        == "a4c2229bdc2a2a630acdc095b4d86008e5c3e3bc7773174354f3da4f5beb9cde"
+        and runtime.get("application_payload_contains_microsoft_runtime") is False
+        and runtime.get("canonical_runtime_filename") == "msvcp140.dll"
+        and runtime.get("canonical_runtime_location") == "Windows System32"
+        and all(
+            isinstance(row, dict)
+            and row.get("from_import") == "msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll"
+            and row.get("to_import") == "msvcp140.dll"
+            and re.fullmatch(r"[0-9a-f]{64}", row.get("new_sha256", ""))
+            for row in rewrites
+        )
+    )
+
+
+def _source_record_matches(pinned: dict[str, Any], row: dict[str, Any]) -> bool:
+    return (
+        all(
+            row.get(field) == pinned.get(field)
+            for field in (
+                "component",
+                "version",
+                "revision",
+                "url",
+                "sha256",
+                "license_identifier",
+                "source_availability_role",
+            )
+        )
+        and row.get("source_filename") == Path(urlparse(pinned["url"]).path).name
+    )
+
+
+def _validate_source_delivery(
+    stage_root: Path,
+    project_root: Path,
+    revision: str,
+    studio_version: str,
+) -> tuple[dict[str, dict[str, Any]], set[str], bool]:
+    manifest_path = stage_root / "COMPLIANCE/CORRESPONDING_SOURCE/source-delivery-manifest.json"
+    if not manifest_path.is_file():
+        return {}, set(), False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        lock_path = project_root / "tools/packaging/windows_native_source_lock.json"
+        lock = load_source_lock(lock_path)
+        expected = {
+            row["id"]: row
+            for row in lock["records"]
+            if row["source_availability_role"]
+            in {
+                "SOURCE_BUILD_INPUT",
+                "CORRESPONDING_SOURCE_AND_NOTICES",
+                "CORRESPONDING_SOURCE_AND_THIRD_PARTY_INVENTORY",
+                "CORRESPONDING_SOURCE_AND_NOTICE",
+            }
+            and row["id"] != "open3d-source-0.20.0"
+        }
+        expected.update(
+            {
+                "open3d-attested-source-d32b4fce": {
+                    "component": "Open3D",
+                    "version": "0.20.0",
+                    "revision": "d32b4fce639b3cde284184072796480ef9b528d1",
+                    "url": "https://github.com/isl-org/Open3D/archive/d32b4fce639b3cde284184072796480ef9b528d1.tar.gz",
+                    "sha256": "4d527f246843e7a5920433535d0fcfb26f093706ac3fc7642bb57e39a917d0b1",
+                    "byte_length": 52728300,
+                    "license_identifier": "MIT",
+                    "source_availability_role": "CORRESPONDING_SOURCE_AND_THIRD_PARTY_INVENTORY",
+                },
+                "open3d-libzmq-source-4.3.5": {
+                    "component": "ZeroMQ static link dependency",
+                    "version": "4.3.5",
+                    "revision": "v4.3.5",
+                    "url": "https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.tar.gz",
+                    "sha256": "6653ef5910f17954861fe72332e68b03ca6e4d9c7160eb3a8de5a5a913bfab43",
+                    "license_identifier": "LGPL-3.0-or-later WITH ZeroMQ-static-linking-exception",
+                    "source_availability_role": "CORRESPONDING_SOURCE_AND_THIRD_PARTY_INVENTORY",
+                },
+                "open3d-cppzmq-source-4.10.0": {
+                    "component": "cppzmq header-only link dependency",
+                    "version": "4.10.0",
+                    "revision": "v4.10.0",
+                    "url": "https://github.com/zeromq/cppzmq/archive/refs/tags/v4.10.0.tar.gz",
+                    "sha256": "c81c81bba8a7644c84932225f018b5088743a22999c6d82a2b5f5cd1e6942b74",
+                    "license_identifier": "MIT",
+                    "source_availability_role": "CORRESPONDING_SOURCE_AND_THIRD_PARTY_INVENTORY",
+                },
+            }
+        )
+        expected_components = {
+            "ocp-source-7.9.3.1.1": ["packlab-controlled-ocp"],
+            "ocp-pywrap-source-9251940": ["packlab-controlled-ocp"],
+            "occt-source-7.9.3": ["occt-7.9.3"],
+            "fmt-source-12.1.0": ["fmt-12.1.0"],
+            "pyside-source-6.11.2": [
+                "pyside6-addons",
+                "pyside6-essentials",
+                "shiboken6",
+            ],
+            "qtbase-source-6.11.2": ["pyside6-addons", "pyside6-essentials"],
+            "qtsvg-source-6.11.2": ["pyside6-addons"],
+            "qtpdf-pdfium-source-6.11.2": ["pyside6-addons"],
+            "onetbb-source-2021.12.0": ["open3d"],
+            "open3d-attested-source-d32b4fce": ["open3d"],
+            "open3d-libzmq-source-4.3.5": ["open3d"],
+            "open3d-cppzmq-source-4.10.0": ["open3d"],
+        }
+        if (
+            manifest.get("schema_version") != 1
+            or manifest.get("status") != "PASS"
+            or manifest.get("PACKLAB_BUILD_REVISION") != revision
+            or manifest.get("studio_version") != studio_version
+            or manifest.get("source_lock_sha256") != sha256_file(lock_path)
+            or not isinstance(manifest.get("records"), list)
+            or len(manifest["records"]) != len(expected)
+        ):
+            return {}, set(), False
+        by_path: dict[str, dict[str, Any]] = {}
+        delivered: set[str] = set()
+        for row in manifest["records"]:
+            if not isinstance(row, dict):
+                return {}, set(), False
+            source_id = row.get("id")
+            source_path = row.get("path")
+            if not isinstance(source_id, str) or not isinstance(source_path, str):
+                return {}, set(), False
+            pinned = expected.get(source_id)
+            relative = safe_posix_path(source_path)
+            component_ids = row.get("component_ids")
+            if (
+                pinned is None
+                or source_id in delivered
+                or relative is None
+                or not relative.startswith("COMPLIANCE/CORRESPONDING_SOURCE/")
+                or not _source_record_matches(pinned, row)
+                or not isinstance(component_ids, list)
+                or component_ids != expected_components.get(source_id)
+                or any(not isinstance(item, str) for item in component_ids)
+            ):
+                return {}, set(), False
+            archive = stage_root / PurePosixPath(relative)
+            if (
+                not archive.is_file()
+                or sha256_file(archive) != row["sha256"]
+                or archive.stat().st_size <= 0
+                or (
+                    row.get("byte_length") is not None
+                    and archive.stat().st_size != row["byte_length"]
+                )
+                or (
+                    pinned.get("byte_length") is not None
+                    and archive.stat().st_size != pinned["byte_length"]
+                )
+            ):
+                return {}, set(), False
+            row["path"] = relative
+            by_path[relative.casefold()] = row
+            delivered.add(source_id)
+        if delivered != set(expected):
+            return {}, set(), False
+        evidence_inputs = {
+            "notice_corpus": (
+                "COMPLIANCE/THIRD_PARTY_LICENSES/Open3D/OPEN3D-THIRD-PARTY-LICENSES.txt",
+                "tools/packaging/windows_licenses/Open3D-0.20.0/OPEN3D-THIRD-PARTY-LICENSES.txt",
+                "7a396b9b879b9d5ade9aadf505386199ff2a3f84fe6f4e4ec3e1d9f817fd1e34",
+            ),
+            "open3d_sbom": (
+                "COMPLIANCE/EVIDENCE/PL-0350_OPEN3D_WHEEL_NATIVE_SBOM_38617631153.json",
+                "coordination/sessions/M16-C001/evidence/PL-0350_OPEN3D_WHEEL_NATIVE_SBOM_38617631153.json",
+                None,
+            ),
+            "relinking_guide": (
+                "COMPLIANCE/CORRESPONDING_SOURCE/RELINKING_AND_SOURCE_GUIDE.txt",
+                "tools/packaging/windows_licenses/RELINKING_AND_SOURCE_GUIDE.txt",
+                None,
+            ),
+        }
+        for field, (expected_path, source_path, expected_digest) in evidence_inputs.items():
+            row = manifest.get(field)
+            if not isinstance(row, dict) or not isinstance(row.get("path"), str):
+                return {}, set(), False
+            relative = safe_posix_path(row["path"])
+            expected_source = project_root / PurePosixPath(source_path)
+            expected_digest = expected_digest or sha256_file(expected_source)
+            if relative != expected_path or row.get("sha256") != expected_digest:
+                return {}, set(), False
+            path = stage_root / PurePosixPath(relative)
+            if not path.is_file() or sha256_file(path) != expected_digest:
+                return {}, set(), False
+        return by_path, delivered, True
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return {}, set(), False
 
 
 def build_inventory(
@@ -516,6 +774,9 @@ def build_inventory(
     if any(evidence_root.iterdir()):
         raise ValueError("The compliance evidence directory must be empty")
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    source_delivery, delivered_source_ids, source_delivery_valid = _validate_source_delivery(
+        stage_root, project_root, revision, studio_version
+    )
     controlled_ocp: dict[str, dict[str, Any]] = {}
     controlled_ocp_owner_by_name: dict[str, str] = {}
     if ocp_manifest_path is not None:
@@ -633,9 +894,19 @@ def build_inventory(
         owner_ids: set[str] = set()
         mapping_evidence = "unmapped"
         unresolved_reason: str | None = None
-        if Path(relative).name in {
+        source_record = source_delivery.get(toc_key)
+        if source_record is not None:
+            owner_ids.update(source_record["component_ids"])
+            mapping_evidence = "revision_bound_corresponding_source_manifest_and_file_sha256"
+        elif relative.startswith("COMPLIANCE/"):
+            owner_ids.add("packlab-generated-runtime-evidence")
+            mapping_evidence = "revision_bound_compliance_evidence"
+            if not source_delivery_valid:
+                unresolved_reason = "Corresponding-source delivery or required Open3D evidence failed exact validation."
+        elif Path(relative).name in {
             "qt-staged-surface.json",
             "windows-runtime-capabilities.json",
+            "numpy-runtime-normalization.json",
         }:
             owner_ids.add("packlab-generated-runtime-evidence")
             mapping_evidence = "packlab_generated_revision_bound_runtime_json"
@@ -643,11 +914,16 @@ def build_inventory(
                 generated = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 generated = None
+            normalization_ok = (
+                Path(relative).name != "numpy-runtime-normalization.json"
+                or _valid_numpy_runtime_normalization_report(generated)
+            )
             if (
                 not isinstance(generated, dict)
                 or generated.get("PACKLAB_BUILD_REVISION") != revision
                 or generated.get("studio_version") != studio_version
                 or generated.get("status") != "PASS"
+                or not normalization_ok
             ):
                 unresolved_reason = "Generated runtime evidence is absent, not passing, or not bound to this build revision/version."
         elif any(path == staged_path for staged_path in staged_ocp.values()):
@@ -789,7 +1065,6 @@ def build_inventory(
         for owner in package_owners
         if owner
         not in {
-            "packlab-application",
             "packlab-build-provenance",
             "packlab-compliance-notices",
             "packlab-compliance-license-evidence",
@@ -799,7 +1074,12 @@ def build_inventory(
     if "pyinstaller-bootloader" in owners_to_review:
         owners_to_review.add("pyinstaller")
     component_rows, notice_rows, component_unresolved = license_rows(
-        owners_to_review, by_name, registry, evidence_root
+        owners_to_review,
+        by_name,
+        registry,
+        evidence_root,
+        delivered_source_ids,
+        source_delivery_valid,
     )
     unresolved_items.update(component_unresolved)
     component_by_id = {row["component_id"]: row for row in component_rows}
@@ -906,7 +1186,11 @@ def build_inventory(
     unresolved_shipped_file_count = sum(item["license_status"] == "UNRESOLVED" for item in records)
     missing_notice_count = sum(not row["notice_files"] for row in component_rows)
     missing_source_package_count = sum(
-        bool(row.get("source_evidence_required")) and not row.get("source_evidence")
+        bool(row.get("required_source_record_ids"))
+        and (
+            not source_delivery_valid
+            or not set(row["required_source_record_ids"]).issubset(delivered_source_ids)
+        )
         for row in component_rows
     )
     forbidden_qt_component_count = sum(

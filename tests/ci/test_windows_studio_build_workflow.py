@@ -185,9 +185,11 @@ def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
         "tools.packaging.controlled_ocp_runtime_bundle",
         "tools.packaging.fetch_verify_windows_native_sources",
         "tools.packaging.inspect_retained_occt_sdk",
+        "tools.packaging.normalize_numpy_msvc_runtime",
         "tools.packaging.open3d_pe_dependency_probe",
         "tools.packaging.preflight_occt_sdk_layout",
         "tools.packaging.prepare_official_ocp_generated_sources",
+        "tools.packaging.prepare_pl0350_source_delivery",
         "tools.packaging.probe_fmt_dependency",
         "tools.packaging.recover_pl0350_sdk_artifacts",
         "tools.packaging.validate_controlled_occt_sdk",
@@ -244,10 +246,18 @@ def test_native_pipeline_seals_same_run_occt_and_generated_ocp_stages() -> None:
     assert "needs.controlled-ocp-runtime.outputs.bundle-artifact-name" in packaging
     assert "actions/download-artifact@" in packaging
     assert "Enforce redistribution clearance" in packaging
+    assert "Deliver exact corresponding sources and replacement evidence" in packaging
+    assert "prepare_pl0350_source_delivery" in packaging
+    assert "Install unsigned package and run installed capability smoke" in packaging
     assert "Build versioned unsigned installer" in packaging
     assert "100 MiB artifact budget" in packaging
     assert "1,800 MiB installer budget" in packaging
     assert "Upload cleared versioned installer" in packaging
+    assert (
+        packaging.index("Build versioned unsigned installer")
+        < packaging.index("Install unsigned package and run installed capability smoke")
+        < packaging.index("Upload cleared versioned installer")
+    )
     runtime_identity = ocp.split("Record exact OCP runtime artifact identity", 1)[1].split(
         "Save exact OCP runtime cache after size validation", 1
     )[0]

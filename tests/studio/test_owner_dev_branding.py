@@ -20,6 +20,10 @@ def test_canonical_icon_and_brand_manifest_match() -> None:
     assert asset["path"] == "apps/windows-studio/assets/branding/PackLab.ico"
     assert asset["source_sha256"] == digest
     assert asset["copied_sha256"] == digest
+    assert asset["license_identifier"] == "LicenseRef-PackLab-Proprietary-Internal-Use"
+    assert asset["provenance_class"] == "PACKLAB_OWNED"
+    assert asset["origin"] == "OWNER_DECLARED_ORIGINAL_CUSTOM_AI_GENERATED_ARTWORK"
+    assert "NOT_INDEPENDENTLY_PERFORMED" in asset["third_party_asset_audit"]
 
 
 def test_icon_helper_falls_back_without_crashing(monkeypatch, tmp_path: Path) -> None:

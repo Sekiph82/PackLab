@@ -6,6 +6,7 @@
   "minimum_version_evidence": "14.44.35211.0 is the exact redistributable baseline shipped with the final supported Visual Studio 2022 v17.14 toolset; the controlled OCP build uses MSVC 19.44.35229.0 and locked PySide6/Shiboken runtime evidence is rechecked on the hosted Windows target. Microsoft documents binary compatibility across MSVC 2015-2022 and recommends the latest supported v14 redistributable.",
   "detection": "64-bit HKLM\\SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\x64 Installed, Major, Minor, Bld, and Rbld DWORD values; require x64 architecture and version >= minimum_version",
   "automatic_download": false,
+  "official_prerequisite_download": "https://aka.ms/vc14/vc_redist.x64.exe",
   "deployment_role": "MICROSOFT_SIGNED_PREREQUISITE",
   "deployment_roles": [
     "BUILD_ENV_CONDA_ONLY",

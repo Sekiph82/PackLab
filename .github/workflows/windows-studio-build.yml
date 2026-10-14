@@ -832,6 +832,18 @@ jobs:
           "PACKLAB_PROVENANCE_PATH=$provenancePath" >> $env:GITHUB_ENV
           "PACKLAB_STUDIO_VERSION=$studioVersion" >> $env:GITHUB_ENV
 
+      - name: Normalize NumPy to the system VC++ Redistributable
+        shell: pwsh
+        run: |
+          $reportPath = Join-Path $env:RUNNER_TEMP "numpy-runtime-normalization.json"
+          uv run --locked python -m tools.packaging.normalize_numpy_msvc_runtime `
+            --revision $env:PACKLAB_BUILD_REVISION `
+            --studio-version $env:PACKLAB_STUDIO_VERSION `
+            --runtime-policy tools/packaging/windows-runtime-prerequisite.json `
+            --report $reportPath
+          if ($LASTEXITCODE -ne 0) { throw "NumPy could not be safely normalized to the verified Windows VC++ prerequisite." }
+          "PACKLAB_NUMPY_RUNTIME_EVIDENCE_PATH=$reportPath" >> $env:GITHUB_ENV
+
       - name: Build one-directory production Studio staging output
         shell: pwsh
         run: |
@@ -1037,6 +1049,23 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      - name: Deliver exact corresponding sources and replacement evidence
+        shell: pwsh
+        run: |
+          $sourceRoot = Join-Path $env:RUNNER_TEMP "packlab-compliance-sources"
+          $sourceEvidence = Join-Path $env:RUNNER_TEMP "windows-native-source-evidence.json"
+          uv run --locked python -m tools.packaging.fetch_verify_windows_native_sources `
+            --download-dir $sourceRoot --evidence $sourceEvidence
+          if ($LASTEXITCODE -ne 0) { throw "A locked corresponding-source archive failed verification." }
+          $stagePath = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio"
+          uv run --locked python -m tools.packaging.prepare_pl0350_source_delivery `
+            --source-root $sourceRoot `
+            --stage-root $stagePath `
+            --project-root $env:GITHUB_WORKSPACE `
+            --revision $env:PACKLAB_BUILD_REVISION `
+            --studio-version $env:PACKLAB_STUDIO_VERSION
+          if ($LASTEXITCODE -ne 0) { throw "Exact source archive delivery or evidence verification failed." }
+
       - name: Validate bidirectional controlled OCP manifest
         shell: pwsh
         run: |
@@ -1203,8 +1232,60 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "The installer upload would exceed this run's retained-artifact budget." }
           "PACKLAB_INSTALLER_DIR=$output" >> $env:GITHUB_ENV
 
+      - name: Install unsigned package and run installed capability smoke
+        id: installed_smoke
+        if: steps.installer.outcome == 'success'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $installerDirectory = $env:PACKLAB_INSTALLER_DIR
+          $installers = @(Get-ChildItem -LiteralPath $installerDirectory -Filter "PackLabStudio-*-unsigned-setup.exe" -File)
+          if ($installers.Count -ne 1) { throw "Expected exactly one built unsigned PackLab Studio installer." }
+          $installer = $installers[0]
+          $installerSha = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $setup = Start-Process -FilePath $installer.FullName -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-") -Wait -PassThru
+          if ($setup.ExitCode -ne 0) { throw "The unsigned installer returned exit code $($setup.ExitCode)." }
+          $installedRoot = Join-Path $env:LOCALAPPDATA "Programs\PackLab Studio"
+          $installedExe = Join-Path $installedRoot "PackLabStudio.exe"
+          if (!(Test-Path -LiteralPath $installedExe -PathType Leaf)) { throw "The installed PackLab Studio executable is missing." }
+          $expectedExe = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio\PackLabStudio.exe"
+          $installedExeSha = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expectedExeSha = (Get-FileHash -LiteralPath $expectedExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($installedExeSha -ne $expectedExeSha) { throw "The installed executable does not match the validated staging executable." }
+          $smokeLog = Join-Path $env:RUNNER_TEMP "packlab-installed-studio-smoke.log"
+          $runtimeManifest = Join-Path $env:RUNNER_TEMP "packlab-installed-runtime-capabilities.json"
+          $env:PACKLAB_BUILD_SMOKE_LOG = $smokeLog
+          $env:PACKLAB_RUNTIME_CAPABILITIES_PATH = $runtimeManifest
+          $process = Start-Process -FilePath $installedExe -ArgumentList @("--packlab-build-smoke") -WorkingDirectory $installedRoot -PassThru
+          if (-not $process.WaitForExit(180000)) {
+            $process.Kill()
+            throw "Installed PackLab Studio capability smoke exceeded the 180-second bound."
+          }
+          if ($process.ExitCode -ne 0) {
+            $detail = if (Test-Path -LiteralPath $smokeLog) { (Get-Content -LiteralPath $smokeLog -Raw).Trim() } else { "No installed smoke diagnostic was written." }
+            throw "Installed PackLab Studio capability smoke failed with exit code $($process.ExitCode): $detail"
+          }
+          if (!(Test-Path -LiteralPath $runtimeManifest -PathType Leaf)) { throw "Installed capability manifest is missing." }
+          $capabilities = Get-Content -LiteralPath $runtimeManifest -Raw | ConvertFrom-Json
+          foreach ($group in @("qt_studio_gui", "qt_vector_pdf", "ocp_cad", "step_io", "dxf_export", "open3d_geometry")) {
+            if ($capabilities.capability_groups.$group.status -ne "PASS" -or $capabilities.capability_groups.$group.network -ne "NONE") {
+              throw "Installed capability group $group failed or used network access."
+            }
+          }
+          if ($capabilities.PACKLAB_BUILD_REVISION -ne $env:PACKLAB_BUILD_REVISION -or $capabilities.studio_version -ne $env:PACKLAB_STUDIO_VERSION) {
+            throw "Installed capability manifest does not match the build revision and Studio version."
+          }
+          $capabilitiesSha = (Get-FileHash -LiteralPath $runtimeManifest -Algorithm SHA256).Hash.ToLowerInvariant()
+          Copy-Item -LiteralPath $runtimeManifest -Destination (Join-Path $installerDirectory "installed-runtime-capabilities.json")
+          if (Test-Path -LiteralPath $smokeLog -PathType Leaf) { Copy-Item -LiteralPath $smokeLog -Destination (Join-Path $installerDirectory "installed-studio-smoke.log") }
+          $evidence = [ordered]@{ status = "PASS"; build_revision = $env:PACKLAB_BUILD_REVISION; studio_version = $env:PACKLAB_STUDIO_VERSION; installer = $installer.Name; installer_sha256 = $installerSha; installed_executable_sha256 = $installedExeSha; capability_manifest_sha256 = $capabilitiesSha; signing = "unsigned" } | ConvertTo-Json -Compress
+          [System.IO.File]::WriteAllText((Join-Path $installerDirectory "installed-smoke-evidence.json"), $evidence + "`n", [System.Text.UTF8Encoding]::new($false))
+          "installed_smoke=PASS" >> $env:GITHUB_OUTPUT
+          "Installed package execution and all six no-network capability groups passed." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
       - name: Upload cleared versioned installer
-        if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success' && steps.installer.outcome == 'success'
+        if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success' && steps.installer.outcome == 'success' && steps.installed_smoke.outputs.installed_smoke == 'PASS'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-windows-installer-${{ github.sha }}

@@ -3,8 +3,8 @@
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_dynamic_libs, copy_metadata
+
 from tools.packaging.windows_native_runtime_policy import (
-    is_numpy_wheel_msvc_alias,
     is_windows_runtime_dll,
 )
 
@@ -12,6 +12,7 @@ root = Path(SPECPATH).parents[1]
 entry = root / "tools" / "packaging" / "packlab_studio_entry.py"
 qt_contract = root / "tools" / "packaging" / "qt_module_contract.json"
 provenance = Path(__import__("os").environ["PACKLAB_PROVENANCE_PATH"])
+numpy_runtime_evidence = Path(__import__("os").environ["PACKLAB_NUMPY_RUNTIME_EVIDENCE_PATH"])
 schema_path = root / "schemas"
 branding_path = root / "apps" / "windows-studio" / "assets" / "branding"
 icon_path = branding_path / "PackLab.ico"
@@ -68,6 +69,7 @@ analysis = Analysis(
     binaries=open3d_native,
     datas=[
         (str(provenance), "."),
+        (str(numpy_runtime_evidence), "."),
         (str(root / "tools" / "packaging" / "windows-runtime-prerequisite.json"), "."),
         (str(schema_path), "schemas"),
         (str(branding_path), "apps/windows-studio/assets/branding"),
@@ -100,11 +102,10 @@ def keep_curated_qt_file(destination):
     normalized = destination.replace("\\", "/").casefold()
     base = Path(normalized).name
     # Windows 10/11 services UCRT/API sets. MSVC CRT DLLs use the separately
-    # detected x64 VC++ Redistributable. NumPy's Windows wheel has one
-    # hash-renamed MSVCP140 import that the loader resolves by exact filename;
-    # retain only that wheel-private file so the frozen extension can load.
+    # detected x64 VC++ Redistributable. The exact locked NumPy wheel is
+    # normalized before analysis to import the canonical OS-installed name.
     if is_windows_runtime_dll(base):
-        return is_numpy_wheel_msvc_alias(destination)
+        return False
     # These x64-suffixed OpenSSL files are unrelated Poppler PATH pollution;
     # CPython's own _ssl extension uses the un-suffixed DLLs from Python/DLLs.
     if base in {"libcrypto-3-x64.dll", "libssl-3-x64.dll"}:

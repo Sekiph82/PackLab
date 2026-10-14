@@ -1,0 +1,9 @@
+PackLab Studio - Proprietary Internal-Use Notice
+
+Copyright owner: the PackLab project owner, as declared for this project. The owner's legal name and any separate factory-company legal entity are not verified by this notice. No formal corporate transfer or copyright registration is asserted.
+
+The project owner authorizes PackLab's original project code and custom PackLab artwork for internal factory operations on the owner's controlled Windows computer and managed Windows computers at the owner's Kenya factory, for use by personnel authorized by the owner. The owner has declared no external customer sales, public source-code license, or public binary release.
+
+This project policy applies only to project-originated PackLab material that is identified as such in the source/build provenance. It does not change the rights in third-party code, libraries, fonts, images, reference materials, or other imported content; those retain their own licenses and notices. It does not warrant worldwide originality or freedom from third-party claims. Use is subject to applicable law and the owner's actual rights.
+
+No public license is granted by this notice. Redistribution outside the owner's controlled internal factory operation is not authorized by this notice.

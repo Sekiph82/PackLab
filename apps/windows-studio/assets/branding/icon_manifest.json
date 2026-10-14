@@ -4,6 +4,11 @@
     {
       "path": "apps/windows-studio/assets/branding/PackLab.ico",
       "purpose": "PackLab Studio application, window, taskbar, owner shortcut, and Windows executable icon",
+      "license_identifier": "LicenseRef-PackLab-Proprietary-Internal-Use",
+      "provenance_class": "PACKLAB_OWNED",
+      "origin": "OWNER_DECLARED_ORIGINAL_CUSTOM_AI_GENERATED_ARTWORK",
+      "ownership_basis": "Owner decision for PL-0350 dated 2026-10-14; owner declared original custom PackLab artwork as user-controlled proprietary project output.",
+      "third_party_asset_audit": "NOT_INDEPENDENTLY_PERFORMED; owner declaration does not prove global originality or rule out third-party claims.",
       "source_sha256": "a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1",
       "copied_sha256": "a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1"
     }
