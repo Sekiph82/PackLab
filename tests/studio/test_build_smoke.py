@@ -142,9 +142,12 @@ def test_open3d_first_probe_writes_only_status_and_reports_success(monkeypatch, 
     )
 
     assert packlab_studio_entry._run_open3d_first_probe(("open3d", "numpy.libs")) == 0
-    assert log_path.read_text(encoding="utf-8") == (
-        "status=available;detail=Open3D OK;dll_dirs=open3d,numpy.libs\n"
+    diagnostic = log_path.read_text(encoding="utf-8")
+    assert diagnostic.startswith(
+        "status=available;detail=Open3D OK;dll_dirs=open3d,numpy.libs;loaded_modules="
     )
+    assert diagnostic.endswith("\n")
+    assert str(tmp_path) not in diagnostic
 
 
 def test_open3d_first_probe_failure_log_omits_exception_message(monkeypatch, tmp_path) -> None:
@@ -178,10 +181,12 @@ def test_open3d_first_probe_records_only_safe_capability_detail(monkeypatch, tmp
     )
 
     assert packlab_studio_entry._run_open3d_first_probe(("open3d",)) == 1
-    assert log_path.read_text(encoding="utf-8") == (
+    diagnostic = log_path.read_text(encoding="utf-8")
+    assert diagnostic.startswith(
         "status=unknown;detail=Open3D import failed "
-        "(ImportError;reason=dll_module_missing);dll_dirs=open3d\n"
+        "(ImportError;reason=dll_module_missing);dll_dirs=open3d;loaded_modules="
     )
+    assert "C:\\" not in diagnostic
 
 
 def test_open3d_first_probe_omits_path_like_capability_detail(monkeypatch, tmp_path) -> None:
@@ -198,9 +203,21 @@ def test_open3d_first_probe_omits_path_like_capability_detail(monkeypatch, tmp_p
     )
 
     assert packlab_studio_entry._run_open3d_first_probe() == 1
-    assert log_path.read_text(encoding="utf-8") == (
-        "status=unknown;detail=diagnostic_omitted;dll_dirs=none\n"
+    diagnostic = log_path.read_text(encoding="utf-8")
+    assert diagnostic.startswith(
+        "status=unknown;detail=diagnostic_omitted;dll_dirs=none;loaded_modules="
     )
+    assert "private" not in diagnostic
+
+
+def test_numpy_first_probe_reports_runtime_version_without_paths(monkeypatch, tmp_path) -> None:
+    log_path = tmp_path / "numpy-probe.log"
+    monkeypatch.setenv("PACKLAB_NUMPY_PROBE_LOG", str(log_path))
+
+    assert packlab_studio_entry._run_numpy_probe() == 0
+    diagnostic = log_path.read_text(encoding="utf-8")
+    assert diagnostic.startswith("status=available;version=")
+    assert str(tmp_path) not in diagnostic
 
 
 def test_app_build_smoke_constructs_and_closes_the_real_window(monkeypatch) -> None:

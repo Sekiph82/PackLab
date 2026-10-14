@@ -913,6 +913,31 @@ jobs:
             "- Report: ``packlab-open3d-pe-dependencies.json``; names and classifications only, no machine paths."
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      - name: Probe NumPy in a clean frozen process
+        continue-on-error: true
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $studioExe = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio\PackLabStudio.exe"
+          $probeLog = Join-Path $env:RUNNER_TEMP "packlab-numpy-probe.log"
+          $env:PACKLAB_NUMPY_PROBE_LOG = $probeLog
+          "PACKLAB_NUMPY_PROBE_LOG=$probeLog" >> $env:GITHUB_ENV
+          $probeProcess = Start-Process -FilePath $studioExe -ArgumentList "--packlab-build-numpy-probe" -WorkingDirectory $env:GITHUB_WORKSPACE -PassThru
+          if (!$probeProcess.WaitForExit(120000)) {
+            $probeProcess.Kill()
+            "NumPy frozen probe exceeded the 120-second bound." | Out-File -FilePath $probeLog -Encoding utf8
+            throw "NumPy frozen probe timed out."
+          }
+          $probeDiagnostic = if (Test-Path -LiteralPath $probeLog -PathType Leaf) { (Get-Content -LiteralPath $probeLog -Raw).Trim() } else { "No path-free NumPy diagnostic was written." }
+          @(
+            "## NumPy frozen probe",
+            "",
+            "- Exit code: $($probeProcess.ExitCode)",
+            "- Diagnostic: $probeDiagnostic"
+          ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if ($probeProcess.ExitCode -ne 0) { throw "NumPy frozen probe failed: $probeDiagnostic" }
+
       - name: Probe Open3D first in a clean frozen process
         continue-on-error: true
         shell: pwsh
@@ -1004,6 +1029,7 @@ jobs:
           name: packlab-studio-smoke-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             ${{ runner.temp }}/packlab-studio-smoke.log
+            ${{ runner.temp }}/packlab-numpy-probe.log
             ${{ runner.temp }}/packlab-open3d-first-probe.log
             ${{ runner.temp }}/packlab-open3d-pe-dependencies.json
             build/windows-studio/PackLabStudio/windows-runtime-capabilities.json

@@ -89,3 +89,6 @@ The one-shot continuation now also records hosted packaged run [38502467258](htt
 
 
 Hosted retry [38504978407](https://github.com/Sekiph82/PackLab/actions/runs/38504978407) reused the verified OCCT SDK and quarantined OCP extension, passed native CAD/package staging, and reproduced the Open3D DLL-load failure in a clean frozen process. The one-shot log now records the exact artifact chain and safe-detail diagnostic follow-up; installer/compliance stages did not run.
+
+
+Hosted retry [38571979341](https://github.com/Sekiph82/PackLab/actions/runs/38571979341) again reused the retained SDK and quarantined OCP Pyd and passed native CAD smoke, but the clean frozen Open3D import still fails with a nested `dll_module_missing` cause despite all expected DLL directories being registered. Installer/compliance stages remain blocked by the packaged Studio smoke. The one-shot log records a separate NumPy package probe and import-state diagnostic for the next packaging-only retry.

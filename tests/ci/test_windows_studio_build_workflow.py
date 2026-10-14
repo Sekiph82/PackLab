@@ -290,6 +290,8 @@ def test_packaged_studio_smoke_diagnostics_are_retained_on_failure() -> None:
     assert "- Sanitized diagnostic: $smokeDiagnostic" in packaging
     assert "Inspect staged Open3D PE dependencies" in packaging
     assert "tools.packaging.open3d_pe_dependency_probe" in packaging
+    assert "Probe NumPy in a clean frozen process" in packaging
+    assert "--packlab-build-numpy-probe" in packaging
     assert "Probe Open3D first in a clean frozen process" in packaging
     assert "--packlab-build-open3d-probe" in packaging
     assert "continue-on-error: true" in packaging
@@ -298,6 +300,7 @@ def test_packaged_studio_smoke_diagnostics_are_retained_on_failure() -> None:
         "Validate bidirectional controlled OCP manifest", 1
     )[0]
     assert "${{ runner.temp }}/packlab-studio-smoke.log" in diagnostic_upload
+    assert "${{ runner.temp }}/packlab-numpy-probe.log" in diagnostic_upload
     assert "${{ runner.temp }}/packlab-open3d-first-probe.log" in diagnostic_upload
     assert "windows-runtime-capabilities.json" in diagnostic_upload
     assert "qt-staged-surface.json" in diagnostic_upload

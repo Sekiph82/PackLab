@@ -20,8 +20,45 @@ def _run_open3d_first_probe(native_directories: tuple[str, ...] = ()) -> int:
         if not re.fullmatch(r"[A-Za-z0-9_.;=(), -]{1,600}", detail):
             detail = "diagnostic_omitted"
         registered = ",".join(native_directories) or "none"
-        diagnostic = f"status={status};detail={detail};dll_dirs={registered}\n"
+        loaded_modules = sorted(
+            name
+            for name in sys.modules
+            if (name.startswith("open3d") or name.startswith("numpy"))
+            and all(part.isidentifier() for part in name.split("."))
+        )[:30]
+        module_summary = ",".join(loaded_modules) or "none"
+        if len(module_summary) > 700:
+            module_summary = module_summary[:700]
+        diagnostic = (
+            f"status={status};detail={detail};dll_dirs={registered};"
+            f"loaded_modules={module_summary}\n"
+        )
         exit_code = 0 if status == "available" else 1
+    except Exception as error:
+        diagnostic = f"status=probe_error;error_type={type(error).__name__}\n"
+        exit_code = 1
+    if log_path:
+        try:
+            Path(log_path).write_text(diagnostic, encoding="utf-8")
+        except OSError:
+            pass
+    return exit_code
+
+
+def _run_numpy_probe() -> int:
+    """Probe NumPy native initialization in a separate frozen process."""
+    log_path = os.environ.get("PACKLAB_NUMPY_PROBE_LOG")
+    try:
+        import numpy as np
+
+        values = np.asarray((1.0, 2.0, 3.0), dtype=np.float64)
+        if values.shape != (3,) or values.sum() != 6.0:
+            raise RuntimeError("numpy_array_contract_failed")
+        version = np.__version__
+        if not re.fullmatch(r"[0-9A-Za-z.+-]{1,40}", version):
+            version = "version_omitted"
+        diagnostic = f"status=available;version={version}\n"
+        exit_code = 0
     except Exception as error:
         diagnostic = f"status=probe_error;error_type={type(error).__name__}\n"
         exit_code = 1
@@ -43,6 +80,8 @@ if __name__ == "__main__":
         native_directories = register_frozen_native_directories()
         if "--packlab-build-open3d-probe" in sys.argv:
             raise SystemExit(_run_open3d_first_probe(native_directories))
+        if "--packlab-build-numpy-probe" in sys.argv:
+            raise SystemExit(_run_numpy_probe())
         from packlab_studio.app import main
     except Exception as error:
         if "--packlab-build-smoke" in sys.argv:
