@@ -1030,7 +1030,10 @@ def build_inventory(
         elif (
             not owner_ids
             and relative.startswith("THIRD_PARTY_LICENSES/")
-            and path.suffix.lower() in TEXT_LICENSE_SUFFIXES
+            and (
+                path.suffix.lower() in TEXT_LICENSE_SUFFIXES
+                or LICENSE_NAME.search(path.name) is not None
+            )
         ):
             owner_ids.add("packlab-compliance-license-evidence")
             mapping_evidence = "generated_compliance_license_text"

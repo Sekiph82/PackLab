@@ -461,6 +461,10 @@ def test_generated_runtime_json_must_match_build_revision_and_version(
     (internal / "numpy-runtime-normalization.json").write_text(
         json.dumps(normalization), encoding="utf-8"
     )
+    license_evidence = stage / "THIRD_PARTY_LICENSES" / "sample-component"
+    license_evidence.mkdir(parents=True)
+    for name in ("LICENSE", "LICENSE.apache", "LICENSE.bsd"):
+        (license_evidence / name).write_text("Validated license evidence\n", encoding="utf-8")
     toc = tmp_path / "COLLECT-00.toc"
     toc.write_text(
         repr(
@@ -505,5 +509,14 @@ def test_generated_runtime_json_must_match_build_revision_and_version(
     )
     assert normalization_row["component_ids"] == ["packlab-generated-runtime-evidence"]
     assert normalization_row["license_status"] == "EVIDENCE_PRESENT"
+    license_rows = [
+        row for row in files["files"] if row["relative_path"].startswith("THIRD_PARTY_LICENSES/")
+    ]
+    assert len(license_rows) == 3
+    assert all(
+        row["component_ids"] == ["packlab-compliance-license-evidence"]
+        and row["license_status"] == "EVIDENCE_PRESENT"
+        for row in license_rows
+    )
     assert output[0]["unresolved_count"] == 0
     assert not any(item.startswith("toc:") for item in output[0]["unresolved_items"])
