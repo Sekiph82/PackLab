@@ -12,6 +12,56 @@ Required reading ONCE at start: live `origin/main:TASKS.md`, this prompt, matchi
 - Latest accepted R05 evidence: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_FMT_PROVENANCE_R05_CHATGPT_AUDIT_V01.md
 - Historical R01–R05 reports/implementation, R06 master, `tools/packaging/windows_native_source_lock.json`, `tools/packaging/packlab-ocp-bindings-win.lock`, `tools/packaging/controlled_ocp_runtime_contract.json`, `.github/workflows/windows-studio-build.yml`.
 
+## OWNER-APPROVED RESUME / INTERNAL KENYA FACTORY DEPLOYMENT (2026-10-14)
+
+**THIS SECTION IS THE CURRENT CONTINUATION HANDOFF AND OVERRIDES any older R05/R06 "personal-only" assumption, stale pending owner-usage questions, or calls for a new R-number prompt. Continue all remaining PL-0350 work under THIS SAME ONE-SHOT master.**
+
+Authoritative new owner decision:
+https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_OWNER_INTERNAL_FACTORY_DEPLOYMENT_DECISION.md
+
+Latest independent audit:
+https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_ALL_REMAINING_WORK_ONE_SHOT_CHATGPT_AUDIT_V01.md
+
+Last builder report:
+https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_ALL_REMAINING_WORK_ONE_SHOT_REPORT.md
+
+Last exact-SHA hosted source `bb50690b8e932cbd8bb9f04504f36ed798698faa`; hosted production run https://github.com/Sekiph82/PackLab/actions/runs/38617631153 and Quality https://github.com/Sekiph82/PackLab/actions/runs/38617544058 .
+
+### DECISIONS NOW SETTLED. DO NOT REASK.
+
+- **Product intended use = `PROPRIETARY_INTERNAL_BUSINESS_USE` / `MULTI_WORKSTATION_KENYA_FACTORY`**. Now owner's own Windows PC; ~2 months later multiple managed Windows PCs for authorized personnel in the owner's Kenya factory. No external customer sales, no public GitHub binary release, no public source license, no signing. This **IS BUSINESS/COMMERCIAL-PURPOSE USE**, even without product sales. Do not fake `PERSONAL_USE_ONLY` or `NONCOMMERCIAL` to pass library licenses. Support repeatable controlled internal installation on many managed PCs and documented offline prerequisites.
+- **PackLab original source and custom AI-generated art/code:** choose a proprietary user-controlled project policy for demonstrably original material produced at owner's direction by ChatGPT/Codex. Under applicable OpenAI ChatGPT terms, ownership of Output as between user and OpenAI passes to user to extent allowed by law. DO NOT claim ChatGPT itself owns/charges royalties; do not claim this proves worldwide copyright originality or automatically transfers third-party assets/independent tools/company IP. For `component:packlab`, inventory actual PackLab-owned vs imported code/images, record provenance and accurate proprietary-internal-use notice with owner placeholder if a specific legal entity isn't verified. Do NOT require owner to buy a license for the original ChatGPT-generated material or re-answer personal-vs-sold software. Keep distinct corporate legal-person assignment unresolved if relevant; no fabricated copyright assignment.
+- **Qt/PySide/Shiboken policy:** default *candidate* LGPLv3 open-source engineering route, not an unpurchased commercial Qt license. Exact PySide6 Essentials/Addons 6.11.2 and Shiboken6 6.11.2 actual wheel/component/module list, GPL-only exclusions, Qt notices/sources, LGPL user ability to replace/relink the libraries and other applicable conditions MUST be verified and satisfied for the frozen Installer. Proprietary PackLab itself need not be relicensed as open-source merely because a qualifying LGPL dynamic library is included. STOP on a genuinely unresolvable LGPL obligation or if a specific shipped component needs an actual commercial license; DO NOT invent one. Official Qt component terms govern.
+- **Open3D 0.20.0:** top-level Open3D MIT source/license alone is not sufficient for wheel's native/transitive libraries. Build exact wheel/binary/3rd-party SBOM, notices, hashes, required matching source/relinking evidence per actual component and distribution policy.
+- **NumPy hashed Microsoft DLL:** `_internal/numpy.libs/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll` is actually shipped in current staging. Need exact file/publisher/REDIST rights or provenance-backed packaging exclusion/replacement WITH true clean frozen NumPy/Open3D/Qt/STEP smoke and prerequisite validation. Do not whitelist/rename/ignore it or assume the VC redist prerequisite grants automatic app-local redistribution rights.
+- **Output controls:** `public_release_authorized=false`, `legal_review_required=true`; engineering compliance MUST remain fail-closed for real unlicensed/unknown third-party binaries or modules. Aim for an unsigned **internal factory installer**, not a public release. Multi-PC install intention does not eliminate third-party license obligations.
+
+### EXACT VERIFIED FRONTIER. DO NOT REPEAT SOLVED WORK.
+
+- Hosted W07 package and all six no-network frozen groups **PASS**: PySide6 Qt GUI/PDF, 315 source-built OCCT/OCP CAD, STEP, DXF, clean NumPy 2.5.3 + Open3D 0.20.0 geometry. No OCCT or OCP compile was needed in run `38617631153`. Full Quality **2,149 passed, 10 skipped, 1 deselected**. Do not re-debug Open3D or launch expensive native compiles.
+- Preclearance `BLOCKED`: 479 staged files / 514,901,343 bytes; **9 unresolved top-level items**, 6 component cases, 28 unresolved shipped files, 2 missing notices, 1 missing source package. Exact nine identifiers:
+  `component:microsoft-vc-runtime`;
+  `component:open3d`;
+  `component:packlab`;
+  `component:pyside6-addons`;
+  `component:pyside6-essentials`;
+  `component:shiboken6`;
+  `evidence:missing-notices`;
+  `evidence:missing-source-packages`;
+  `_internal/numpy.libs/msvcp140-a4c2229bdc2a2a630acdc095b4d86008.dll`.
+  `component:packlab` **deployment intention decided**, but the specific per-file ownership and project license notice remain subject to actual provenance proof; don't call it cleared by inserting boilerplate.
+- No Installer/real full cold-to-warm proof yet. Do not assert their existence until actual Actions artifacts and required notices are verified.
+
+### RESUME ORDER. KEEP IT ONE COHESIVE ASSIGNMENT.
+
+**P0 artifact rescue IMMEDIATE, no native compile:** latest run `38617631153` SDK artifact `11921297195` expires **2026-10-15 19:03:30 UTC**, source `11921068651` **19:03:38**, OCP runtime `11922382361` **19:09:52**, compliance evidence `11922367788` **19:12:44**. Verify live API/outer+inner hashes and carry immutable provenance into noncompiling hosted retained checkpoint and small sanitized source-controlled evidence before expiry. Preserve older SDK recovery `11796717315` (expires 2026-10-27 07:59:40 UTC), and quarantined OCP Pyd lineage. Do not download giant artifacts to owner's Desktop or recompile to extend retention. If already expired, report that precisely and seek byte-verifiable alternate validated checkpoint.
+**P1 exact rights/evidence matrix:** inspect specific 28 staged unresolved files grouped by 6 component owners, fetch exact upstream manifests/source/licenses/NOTICE and actual wheel SBOM, including required relink/install instructions for Qt LGPL route, exact Microsoft hash-renamed DLL entitlement or demonstrably equivalent compliant packaging plan, and every missing NOTICE/source archive. Work on ALL components concurrently where independent. Gather vendor evidence yourself. User already answered what is known; only an actual new legal-entity/third-party license purchase decision merits another owner question. Keep any truly unproven claim BLOCKED.
+**P2 implement ALL policy/packaging fixes together:** update evidence schema, source/license inventory, actual staged file mapping, license texts and installer prerequisite checks; preserve meaningful negative tests (tampered/unknown file, wrong notices, unsupported Qt, DLL collision/version, omission of source/relinking info). No blanket allowlist or invented rights; ensure exact clean Windows targets and managed Kenya factory multi-PC installation.
+**P3 preflight then bounded hosted production:** cheap local quality, full relevant tests once, manual-only hosted no-native compliance check where possible; only after all noncompiling rights/NOTICE tests PASS, rerun **packaging/installer stages using validated existing OCCT SDK + OCP controlled runtime/cache**. Do not recompile CAD sources for license texts alone. If full redistributable inventory zero unresolved, actually emit unsigned Inno Setup PackLab Installer and sha256/bytes/Actions artifact; exercise offline packaged smoke, source/license/legal_review statuses. Only after true cold Installer PASS run a genuine warm cache HIT.
+**P4 one final evidence delivery:** append status to the existing `PL-0350_ALL_REMAINING_WORK_ONE_SHOT_CODEX_LOG.md`, update its report and builder master handoff. No new numbered prompt/task, no root TASKS.md edits, no ChatGPT audit edits, no public release, no PL-0351/M17/PL-0368. Remediate routine issues autonomously in this same run. If documented license/rights evidence is **genuinely impossible** or further unapproved expensive compilation is needed, stop at that exact owner/security boundary with all artifact evidence and one concise decision request.
+
+**SUCCESS ONLY WHEN** source/NOTICE/vendor owners are demonstrably cleared, real unsigned internal multi-PC Installer artifact exists, full offline smoke and actual warm-cache proof PASS. Do not claim success merely from successful existing Studio staging.
+
 ## ONE TASK, ALL REMAINING WORKPACKAGES
 
 Execute **W01–W12 within this ONE assignment**. Work on *independent* W02/W03/W05/W07 readiness items in parallel/separate logical passes where useful; respect actual dependencies when compiling, sealing and packaging. Each workpackage gets a concise builder log subsection and local acceptance tests, **not a new ChatGPT prompt**. Automatically correct narrow issues found during implementation/test and continue to next workpackage. Codex may create its own brief code-level todo notes only within its required log, never new tracking dashboards, new milestones or extra owner prompts. Do not move to PL-0351, M17 or PL-0368.
