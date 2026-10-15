@@ -85,7 +85,7 @@ private final class DeviceARSessionDriver: ARSessionLifecycleDriver {
 }
 
 @MainActor
-public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
+public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDelegate {
     public static let shared = SharedARSessionOwner()
     public let session: ARSession
     private let driver: any ARSessionLifecycleDriver
@@ -96,7 +96,7 @@ public final class SharedARSessionOwner: NSObject, ARSessionDelegate {
     private var degradedFrames = 0
     private var isStarted = false
     private init(driver: any ARSessionLifecycleDriver) { self.driver = driver; session = driver.session; super.init(); session.delegate = self }
-    private convenience init() { self.init(driver: DeviceARSessionDriver()) }
+    private override convenience init() { self.init(driver: DeviceARSessionDriver()) }
     public convenience init(injectedDriver: any ARSessionLifecycleDriver) { self.init(driver: injectedDriver) }
 
     public func start() {

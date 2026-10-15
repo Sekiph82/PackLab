@@ -74,7 +74,7 @@ public final class PackScanShareActivityItem: NSObject, UIActivityItemSource {
         guard FileManager.default.fileExists(atPath: packageURL.path) else { return nil }
         return packageURL
     }
-    public func activityViewController(_ activityViewController: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?) -> String? {
+    public func activityViewController(_ activityViewController: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?) -> String {
         packageURL.deletingPathExtension().lastPathComponent
     }
 }

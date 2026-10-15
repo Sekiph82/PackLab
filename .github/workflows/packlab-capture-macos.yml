@@ -108,6 +108,7 @@ jobs:
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "$DESTINATION" \
+            -arch arm64 \
             -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
@@ -122,6 +123,7 @@ jobs:
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "$DESTINATION" \
+            -arch arm64 \
             -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data" \
             -resultBundlePath "$RUNNER_TEMP/PackLabCapture.xcresult" \
             CODE_SIGNING_ALLOWED=NO \

@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import SwiftUI
 #if canImport(ImageIO)
 import ImageIO
 #endif
@@ -579,7 +580,7 @@ public enum AcceptedPhotoMetadataFactory {
 }
 
 public enum PackScanOrientationValue: String, Codable, Sendable { case portrait, landscape, square, unknown }
-public enum PackScanMeasurementSource: String, Codable, Sendable { case exif, deviceAPI = "device_api", operator, derived, unknown }
+public enum PackScanMeasurementSource: String, Codable, Sendable { case exif, deviceAPI = "device_api", `operator`, derived, unknown }
 
 public struct PackScanNumericMeasurement: Codable, Sendable, Equatable {
     public let status: SourceValueStatus
@@ -1314,7 +1315,7 @@ import AVFoundation
 #endif
 
 @MainActor
-private final class NextLevelStillPhotoDriver: NSObject, StillPhotoDriver, NextLevelPhotoDelegate {
+private final class NextLevelStillPhotoDriver: NSObject, StillPhotoDriver, @preconcurrency NextLevelPhotoDelegate {
     private let nextLevel: NextLevel
     weak var delegate: (any StillPhotoDriverDelegate)?
     var canCapturePhoto: Bool { nextLevel.canCapturePhoto }

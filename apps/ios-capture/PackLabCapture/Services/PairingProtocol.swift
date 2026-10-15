@@ -180,7 +180,7 @@ public struct PairingQRScannerView: UIViewControllerRepresentable {
     public func updateUIViewController(_ controller: PairingQRScannerController, context: Context) {}
 }
 
-public final class PairingQRScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+public final class PairingQRScannerController: UIViewController, @preconcurrency AVCaptureMetadataOutputObjectsDelegate {
     private let onPayload: @Sendable (Data) -> Void
     private let session = AVCaptureSession()
     public init(onPayload: @escaping @Sendable (Data) -> Void) { self.onPayload = onPayload; super.init(nibName: nil, bundle: nil) }
