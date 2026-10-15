@@ -349,7 +349,7 @@ public actor SessionGalleryStore {
         let canonicalRecord = (try? JSONDecoder().decode(AcceptedCaptureRecord.self, from: metadata)) ?? record
         let oldEntry = try load().first { $0.id == id }
         let oldFiles = [layout.photoRecords.appendingPathComponent("\(id).json"), layout.images.appendingPathComponent(oldEntry?.sourcePath.split(separator: "/").last.map(String.init) ?? "\(id).heic"), oldEntry?.previewPath.map(URL.init(fileURLWithPath:))].compactMap { $0 }
-        var state = try loadState()
+        let state = try loadState()
         let accepted = state.acceptedIDs.map { $0 == id ? record.captureID : $0 }
         let trace = state.replacementTrace.merging([id: record.captureID]) { _, replacement in replacement }
         let next = max(state.nextSequence, record.sequence + 1)
@@ -552,7 +552,7 @@ public struct SessionFinalizer: Sendable {
                 let committedRecord = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: .exported, packagePath: input.destination.path, packageBytes: packageData.count, packageSHA256: SourceIntegrity.digest(packageData))
                 if failureInjector?("finalization.recordCommit") == true { throw FinalizationError.packagingFailed }
                 try JSONEncoder().encode(committedRecord).write(to: recordTemp, options: .atomic)
-                if fileManager.fileExists(atPath: finalizationURL.path) { try fileManager.replaceItemAt(finalizationURL, withItemAt: recordTemp, backupItemName: nil, options: .usingNewMetadataOnly) } else { try fileManager.moveItem(at: recordTemp, to: finalizationURL) }
+                if fileManager.fileExists(atPath: finalizationURL.path) { _ = try fileManager.replaceItemAt(finalizationURL, withItemAt: recordTemp, backupItemName: nil, options: .usingNewMetadataOnly) } else { try fileManager.moveItem(at: recordTemp, to: finalizationURL) }
             } catch {
                 try? fileManager.removeItem(at: packageTemp)
                 if packageCommitted { try? fileManager.removeItem(at: input.destination) }
