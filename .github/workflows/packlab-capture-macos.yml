@@ -30,7 +30,6 @@ jobs:
       PROJECT: apps/ios-capture/PackLabCapture.xcodeproj
       SCHEME: PackLabCapture
       DESTINATION: platform=iOS Simulator,name=iPhone 16,OS=18.0
-      DERIVED_DATA: ${{ runner.temp }}/packlab-capture-derived-data
 
     steps:
       - name: Check out source
@@ -72,11 +71,12 @@ jobs:
       - name: Resolve pinned NextLevel and preserve its Swift 5 source compatibility
         run: |
           set -euo pipefail
+          derived_data="$RUNNER_TEMP/packlab-capture-derived-data"
           xcodebuild -resolvePackageDependencies \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -derivedDataPath "$DERIVED_DATA"
-          package_manifest="$DERIVED_DATA/SourcePackages/checkouts/NextLevel/Package.swift"
+            -derivedDataPath "$derived_data"
+          package_manifest="$derived_data/SourcePackages/checkouts/NextLevel/Package.swift"
           test -f "$package_manifest"
           python3 - "$package_manifest" <<'PY'
           from pathlib import Path
@@ -107,7 +107,7 @@ jobs:
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "$DESTINATION" \
-            -derivedDataPath "$DERIVED_DATA" \
+            -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -121,7 +121,7 @@ jobs:
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "$DESTINATION" \
-            -derivedDataPath "$DERIVED_DATA" \
+            -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data" \
             -resultBundlePath "$RUNNER_TEMP/PackLabCapture.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
