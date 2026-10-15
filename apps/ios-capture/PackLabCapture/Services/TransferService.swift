@@ -56,7 +56,7 @@ public final class URLSessionTransferClient: NSObject, ProductionTransferClient,
             let offset = status.nextOffset; let end = min(data.count, offset + 256 * 1024); let chunk = data.subdata(in: offset..<end)
             let chunkMessage = TransferChunkMessage(transferID: transferID, offset: offset, length: chunk.count, chunkSHA256: SourceIntegrity.digest(chunk))
             _ = try await send(path: "/v1/transfers/\(transferID)/chunks", method: "POST", body: chunk, token: token, headers: ["X-PackLab-Offset": String(offset), "X-PackLab-Chunk-SHA256": chunkMessage.chunkSHA256])
-            status = try await status(transferID: transferID, token: token); progress(status)
+            status = try await self.status(transferID: transferID, token: token); progress(status)
         }
         let response = try await send(path: "/v1/transfers/\(transferID)/complete", method: "POST", body: nil, token: token)
         let acknowledgement = try JSONDecoder().decode(TransferCompletionAcknowledgement.self, from: response)

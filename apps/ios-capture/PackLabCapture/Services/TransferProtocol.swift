@@ -88,6 +88,13 @@ public struct TransferChunkMessage: Codable, Sendable, Equatable {
     public let chunkSHA256: String
     enum CodingKeys: String, CodingKey { case message, protocolName = "protocol", protocolVersion = "protocol_version", transferID = "transfer_id", offset, length, chunkSHA256 = "chunk_sha256" }
 
+    public init(transferID: String, offset: Int, length: Int, chunkSHA256: String) {
+        self.transferID = transferID
+        self.offset = offset
+        self.length = length
+        self.chunkSHA256 = chunkSHA256
+    }
+
     public init(from decoder: Decoder) throws {
         let (_, _, values) = try TransferWireDecoder.envelope(decoder, message: "put_chunk")
         transferID = try values.decode(String.self, forKey: AnyCodingKey("transfer_id"))
