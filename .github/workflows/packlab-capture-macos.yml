@@ -30,6 +30,7 @@ jobs:
       PROJECT: apps/ios-capture/PackLabCapture.xcodeproj
       SCHEME: PackLabCapture
       DESTINATION: platform=iOS Simulator,name=iPhone 16,OS=18.0
+      DERIVED_DATA: ${{ runner.temp }}/packlab-capture-derived-data
 
     steps:
       - name: Check out source
@@ -68,6 +69,37 @@ jobs:
           xcrun simctl list runtimes --json | jq -e '.runtimes[] | select(.identifier == "com.apple.CoreSimulator.SimRuntime.iOS-18-0" and .isAvailable)' >/dev/null
           xcodebuild -showdestinations -project "$PROJECT" -scheme "$SCHEME" | grep -F 'iPhone 16' | grep -F '18.0'
 
+      - name: Resolve pinned NextLevel and preserve its Swift 5 source compatibility
+        run: |
+          set -euo pipefail
+          xcodebuild -resolvePackageDependencies \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -derivedDataPath "$DERIVED_DATA"
+          package_manifest="$DERIVED_DATA/SourcePackages/checkouts/NextLevel/Package.swift"
+          test -f "$package_manifest"
+          python3 - "$package_manifest" <<'PY'
+          from pathlib import Path
+          import sys
+
+          manifest_path = Path(sys.argv[1])
+          manifest = manifest_path.read_text()
+          expected = [
+              '// swift-tools-version:6.0',
+              '.enableUpcomingFeature("ExistentialAny")',
+              'swiftLanguageModes: [.version("6")]',
+          ]
+          if any(manifest.count(value) != 1 for value in expected):
+              raise SystemExit('Resolved NextLevel manifest differs from the reviewed 0.19.1 compatibility boundary.')
+          manifest = manifest.replace('              .enableUpcomingFeature("ExistentialAny")\n', '')
+          manifest = manifest.replace('swiftLanguageModes: [.version("6")]', 'swiftLanguageModes: [.version("5")]')
+          manifest_path.write_text(manifest)
+          if '.enableUpcomingFeature("ExistentialAny")' in manifest or 'swiftLanguageModes: [.version("5")]' not in manifest:
+              raise SystemExit('Could not apply the scoped NextLevel Swift 5 compatibility adjustment.')
+          print('NextLevel source version: 0.19.1 (resolved from the exact Xcode project pin)')
+          print('Runner-local package language mode: Swift 5; dependency source files remain unchanged')
+          PY
+
       - name: Build PackLabCapture for iOS Simulator without signing
         run: |
           set -euo pipefail
@@ -75,7 +107,7 @@ jobs:
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "$DESTINATION" \
-            -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data" \
+            -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -89,7 +121,7 @@ jobs:
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "$DESTINATION" \
-            -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data" \
+            -derivedDataPath "$DERIVED_DATA" \
             -resultBundlePath "$RUNNER_TEMP/PackLabCapture.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
