@@ -17,8 +17,8 @@ from typing import Any
 
 _SEMVER = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
-    r"(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
+    r"(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+(?P<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
 
 _STUDIO_PY = "apps/windows-studio/src/packlab_studio/__init__.py"
@@ -40,11 +40,16 @@ def _read(root: Path, relative: str) -> bytes:
 
 
 def _semver(value: Any) -> str:
-    if not isinstance(value, str) or not _SEMVER.fullmatch(value):
+    if not isinstance(value, str):
         raise SourceVersionError("INVALID_SEMVER")
-    prerelease = value.split("+", 1)[0].partition("-")[2]
-    if prerelease and any(
-        identifier.isdigit() and len(identifier) > 1 and identifier.startswith("0")
+    match = _SEMVER.fullmatch(value)
+    if match is None:
+        raise SourceVersionError("INVALID_SEMVER")
+    prerelease = match.group("prerelease")
+    if prerelease is not None and any(
+        re.fullmatch(r"[0-9]+", identifier)
+        and len(identifier) > 1
+        and identifier[0] == "0"
         for identifier in prerelease.split(".")
     ):
         raise SourceVersionError("INVALID_SEMVER")

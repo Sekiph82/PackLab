@@ -69,6 +69,54 @@ class SigningMaterialSafetyTests(unittest.TestCase):
             findings = scan_signing_material(root, [private_file])
             self.assertEqual([finding.code for finding in findings], ["APPLE_SIGNING_MATERIAL_FILENAME"])
 
+    def test_case_insensitive_pem_and_key_extensions_scan_private_key_headers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pem = root / "reviewed.PEM"
+            key = root / "opaque.Key"
+            header = "-----BEGIN " + "PRIVATE KEY-----"
+            pem.write_text(header, encoding="utf-8")
+            encrypted_header = "-----BEGIN ENCRYPTED " + "PRIVATE KEY-----"
+            key.write_text(encrypted_header, encoding="utf-8")
+
+            findings = scan_signing_material(root, [pem, key])
+            self.assertEqual(
+                [finding.code for finding in findings],
+                ["PRIVATE_KEY_BLOCK_PRESENT", "PRIVATE_KEY_BLOCK_PRESENT"],
+            )
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(_report(findings), 1)
+            self.assertNotIn(str(pem), output.getvalue())
+            self.assertNotIn(str(key), output.getvalue())
+            self.assertNotIn(header, output.getvalue())
+            self.assertNotIn(encrypted_header, output.getvalue())
+
+    def test_public_pem_certificate_is_not_treated_as_a_private_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            certificate = root / "public.PEM"
+            certificate.write_text(
+                "-----BEGIN CERTIFICATE-----\nSYNTHETIC_PUBLIC_CERTIFICATE\n"
+                "-----END CERTIFICATE-----\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(scan_signing_material(root, [certificate]), [])
+
+    def test_undecodable_pem_or_key_payload_fails_closed_without_echoing_data(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            protected = root / "opaque.key"
+            protected.write_bytes(b"\xff\xfeSYNTHETIC_BINARY_CANARY")
+
+            findings = scan_signing_material(root, [protected])
+            self.assertEqual([finding.code for finding in findings], ["SIGNING_SCAN_UNREADABLE"])
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(_report(findings), 1)
+            self.assertNotIn(str(protected), output.getvalue())
+            self.assertNotIn("SYNTHETIC_BINARY_CANARY", output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

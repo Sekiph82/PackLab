@@ -126,6 +126,39 @@ class OfflineVersionInventoryTests(unittest.TestCase):
             with self.assertRaisesRegex(SourceVersionError, "AMBIGUOUS_SCHEMA_VERSION_SOURCE"):
                 inventory(root)
 
+    def test_dotted_prerelease_and_build_identifiers_are_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_fixture(root)
+            version = "1.2.3-rc.1+build.42"
+            _write(
+                root,
+                "pyproject.toml",
+                f'[project]\nname = "packlab"\nversion = "{version}"\n'.encode(),
+            )
+            _write(root, STUDIO, f'__version__ = "{version}"\n'.encode())
+            _write(root, APP, _project(version, version).encode("utf-8"))
+            result = inventory(root)
+            self.assertEqual(result["studio_version"], version)
+            self.assertEqual(result["capture_version"], version)
+
+    def test_semver_rejects_invalid_prerelease_identifiers(self) -> None:
+        invalid_versions = (
+            "1.2.3-rc.",
+            "1.2.3-.rc",
+            "1.2.3-rc..1",
+            "1.2.3-rc.01",
+            "1.2.3-rc.١",
+            "1.2.3-rc_1",
+        )
+        for version in invalid_versions:
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                _make_fixture(root)
+                _write(root, STUDIO, f'__version__ = "{version}"\n'.encode("utf-8"))
+                with self.assertRaisesRegex(SourceVersionError, "INVALID_SEMVER"):
+                    inventory(root)
+
     def test_info_plist_substitution_must_remain_source_bound(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

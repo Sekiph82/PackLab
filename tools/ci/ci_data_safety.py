@@ -89,12 +89,14 @@ TEXT_SUFFIXES = {".txt", ".log", ".json", ".yaml", ".yml", ".csv", ".xml", ".md"
 SIGNING_TEXT_SUFFIXES = TEXT_SUFFIXES | {
     ".py", ".toml", ".plist", ".pbxproj", ".sh", ".ps1", ".swift",
     ".ini", ".cfg", ".properties", ".entitlements", ".env",
+    ".pem", ".key",
 }
 SIGNING_MATERIAL_SUFFIXES = {
     ".p8", ".p12", ".pfx", ".mobileprovision", ".provisionprofile"
 }
 PRIVATE_KEY_HEADER = re.compile(
-    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", re.IGNORECASE
+    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----",
+    re.IGNORECASE,
 )
 SECRET_ASSIGNMENT = re.compile(
     r"(?im)^\s*(?:APPLE|APP_STORE|APPSTORE|ASC|GITHUB|GH|SIGNING|PROVISIONING|"
