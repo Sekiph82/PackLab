@@ -56,6 +56,8 @@ def test_pl0351_smokes_installed_app_under_sanitized_environment_and_always_unin
         "source-delivery-manifest.json",
         "OPEN3D-THIRD-PARTY-LICENSES.txt",
         "INSTALLED_CORRESPONDING_SOURCE_INCOMPLETE",
+        "diagnostic_omitted_path_detected",
+        "no_path_free_app_diagnostic",
         "automatic_download=none",
     ):
         assert fragment in workflow

@@ -150,7 +150,13 @@ jobs:
           $errorText = $errTask.Result
           if ($process.ExitCode -ne 0) {
             $safeType = if ($errorText -match '(?i)specified procedure|entry point') { 'missing_entry_point' } elseif ($errorText -match '(?i)DLL load failed|module could not be found|126') { 'native_module_load_failure' } elseif ($errorText -match '(?i)Qt platform plugin|plugin.*load') { 'qt_plugin_load_failure' } elseif ($errorText -match '(?i)ICU|Shiboken') { 'qt_icu_or_shiboken_mismatch' } else { 'capability_smoke_failure' }
-            "installed_smoke=FAIL class=$safeType exit_code=$($process.ExitCode) path=redacted" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            $safeDetail = 'no_path_free_app_diagnostic'
+            if (Test-Path -LiteralPath $smokeLog -PathType Leaf) {
+              $candidate = (Get-Content -LiteralPath $smokeLog -Raw).Trim()
+              if ($candidate -match '(?i)(?:[A-Z]:\\|\\\\)') { $safeDetail = 'diagnostic_omitted_path_detected' }
+              else { $safeDetail = ([regex]::Replace($candidate,'[\x00-\x1f\x7f]',' ')).Substring(0,[Math]::Min(240,$candidate.Length)) }
+            }
+            "installed_smoke=FAIL class=$safeType exit_code=$($process.ExitCode) detail=$safeDetail path=redacted" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
             throw "PL0351_INSTALLED_SMOKE_FAILED_$safeType"
           }
           if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'PL0351_CAPABILITY_MANIFEST_MISSING' }
