@@ -30,8 +30,6 @@ jobs:
       PROJECT: apps/ios-capture/PackLabCapture.xcodeproj
       SCHEME: PackLabCapture
       DESTINATION: platform=iOS Simulator,name=iPhone 16,OS=18.5
-      DERIVED_DATA: ${{ runner.temp }}/packlab-capture-derived-data
-      RESULT_BUNDLE: ${{ runner.temp }}/PackLabCapture.xcresult
 
     steps:
       - name: Check out source
@@ -63,7 +61,7 @@ jobs:
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "$DESTINATION" \
-            -derivedDataPath "$DERIVED_DATA" \
+            -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -77,8 +75,8 @@ jobs:
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "$DESTINATION" \
-            -derivedDataPath "$DERIVED_DATA" \
-            -resultBundlePath "$RESULT_BUNDLE" \
+            -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data" \
+            -resultBundlePath "$RUNNER_TEMP/PackLabCapture.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -88,11 +86,11 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          if [[ ! -d "$RESULT_BUNDLE" ]]; then
+          if [[ ! -d "$RUNNER_TEMP/PackLabCapture.xcresult" ]]; then
             echo 'XCTest result bundle is missing.' | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          summary="$(xcrun xcresulttool get test-results summary --path "$RESULT_BUNDLE" --format json)"
+          summary="$(xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/PackLabCapture.xcresult" --format json)"
           safe_summary="$(printf '%s' "$summary" | jq '{result, totalTestCount, passedTests, failedTests, skippedTests}')"
           printf '\n## XCTest summary\n\n```json\n%s\n```\n' "$safe_summary" | tee -a "$GITHUB_STEP_SUMMARY"
           result="$(printf '%s' "$safe_summary" | jq -r '.result // "Unknown"')"
