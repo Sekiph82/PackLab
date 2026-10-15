@@ -5,12 +5,12 @@
       "sha256": "a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1"
     },
     "assets/calibration/a3-packlab-calibration-mat.svg": {
-      "bytes": 5208,
-      "sha256": "20f50423cdad1e0340963624671d023b04388544f70acb703c1d98fa3d8a72ad"
+      "bytes": 5197,
+      "sha256": "738f90746d4e897cc328bc7c3386dde37fbd5a34abe183de8e2d48a42b05a078"
     },
     "assets/calibration/a4-packlab-calibration-mat.svg": {
-      "bytes": 5199,
-      "sha256": "db4aabcb0263a2a5b31d94c4b57391a73f2dcbd4b6a4f9b50f9be8a079260583"
+      "bytes": 5188,
+      "sha256": "465faf01032931b781eab878dc543ec7172f9a7cc1145ef92c46922947babbec"
     }
   },
   "approved_synthetic_fixtures": {

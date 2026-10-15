@@ -7,7 +7,6 @@ import zipfile
 from pathlib import Path
 
 import pytest
-
 from tools.ci.ci_data_safety import (
     TAINTED_ENVIRONMENT,
     check_environment,
@@ -107,6 +106,22 @@ def test_changed_bytes_under_a_safe_fixture_name_fail_the_hash_allowlist(tmp_pat
     )
 
     assert "UNAPPROVED_SENSITIVE_PAYLOAD" in _codes(scan_paths(repository, [candidate]))
+
+
+def test_allowlisted_svg_is_stable_across_windows_and_linux_line_endings(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "repository"
+    policy = repository / "tools" / "ci"
+    relative = "assets/calibration/a3-packlab-calibration-mat.svg"
+    candidate = repository / relative
+    policy.mkdir(parents=True)
+    candidate.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "tools/ci/ci_safe_data_policy.json", policy / "ci_safe_data_policy.json")
+    source = (ROOT / relative).read_bytes()
+    candidate.write_bytes(source.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+
+    assert scan_paths(repository, [candidate]) == []
 
 
 def test_archive_with_scan_member_is_rejected_without_extraction(tmp_path: Path) -> None:

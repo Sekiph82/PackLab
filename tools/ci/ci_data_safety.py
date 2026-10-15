@@ -198,16 +198,26 @@ def _matches_hash_manifest(
     except OSError:
         return False
     max_bytes = policy.get("maximum_manifested_payload_bytes")
-    if not isinstance(max_bytes, int) or size != entry.get("bytes") or size > max_bytes:
+    if not isinstance(max_bytes, int) or size > max_bytes:
         return False
     digest = hashlib.sha256()
     try:
         with path.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(64 * 1024), b""):
-                digest.update(chunk)
+            if path.suffix.casefold() == ".svg":
+                # SVG source is text. Hash its LF-canonical form so the exact
+                # allowlist survives Windows autocrlf and Linux hosted checkouts.
+                contents = stream.read(max_bytes + 1)
+                if len(contents) > max_bytes:
+                    return False
+                canonical = contents.replace(b"\r\n", b"\n")
+                size = len(canonical)
+                digest.update(canonical)
+            else:
+                for chunk in iter(lambda: stream.read(64 * 1024), b""):
+                    digest.update(chunk)
     except OSError:
         return False
-    return digest.hexdigest() == entry.get("sha256")
+    return size == entry.get("bytes") and digest.hexdigest() == entry.get("sha256")
 
 
 def _archive_has_unsafe_member(path: Path) -> bool:
