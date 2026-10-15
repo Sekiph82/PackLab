@@ -120,6 +120,16 @@ Do not reset, rebase, force-push, destructive-checkout or silently stash in norm
 - Do not rewrite governance/audit files unless the active prompt explicitly authorizes the exact file.
 - If actual repository state contradicts the prompt or TASKS.md, stop and report the mismatch.
 
+## Mandatory Codex worktree lifecycle (owner rule)
+
+For **every PackLab task**, use Git worktrees only when needed. **After the task's code, tests, evidence, log-only commit and push to private `origin/main` are finished, remove every PackLab worktree created for that task before final handoff.** The current task's worktree must remain intact until all of its work and publication are complete; cleanup is never concurrent with active work.
+
+From a stable PackLab checkout outside the target, inventory with `git worktree list --porcelain`; verify the **exact** task worktree is inactive, clean, and fully pushed/merged into `origin/main`, with no owner changes, untracked or unique ignored files, sole-copy builds, SDK/OCP checkpoints, Installer, evidence, or other protected data. Check running processes, reparse points/junctions, and owner-owned checkout/workspaces. Only then use normal `git worktree remove <verified-path>` **without force** and verify the worktree and its directory are gone. Do not use blanket folder removal, `git clean -fdx`, destructive reset, cache cleanup or permission bypass.
+
+Never delete Desktop/PackLab, OwnerDev, active or dirty/unmerged worktrees, shared caches, or other projects. Older worktrees require the same independent checks; historical R07 worktrees may contain unique or unmerged work. If deletion cannot be proved safe or is blocked, preserve the worktree and report `WORKTREE_CLEANUP_BLOCKED` with the specific reason, rather than claiming success. Log worktrees removed/skipped and **actual** C: free bytes before/after (logical file lengths are not verified disk recovery). When no local worktree was used, report `NO_LOCAL_WORKTREE_CREATED`.
+
+This is a persistent **operational policy**, not a second task/progress tracker. The PL-0354 in-flight owner addendum is at `coordination/sessions/M16-C001/PL-0354_POST_TASK_WORKTREE_CLEANUP_ADDENDUM_V01.md`. Codex must never edit root `TASKS.md`.
+
 ## Evidence requirements
 
 Codex runtime checks are implementer evidence, not independent audit proof.
