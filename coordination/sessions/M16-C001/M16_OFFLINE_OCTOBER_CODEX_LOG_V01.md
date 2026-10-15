@@ -60,7 +60,9 @@ No full `pytest`, Xcode/XCTest, installer, OCCT/OCP, native or hosted build was 
 - Implementation commit: `7a60cf2824fa01c65c6355b47c925f4b6ef67ba0` (`offline(M16): add release preparation validators`).
 - Pushed normally to `origin/offline/packlab-2026-10-no-actions`; remote accepted `0a4b0572..7a60cf28`.
 - `ZERO_ACTIONS_DISPATCHED`; no Actions run/rerun, paid CI, PR, workflow dispatch, workflow edit, `main` push, billing action, signing, release artifact, or external file upload occurred.
-- The worktree used was task-created at `C:\Users\sekip\.codex\worktrees\packlab-october-offline\PackLab` (logical file length measured at 17,622,290 bytes). Cleanup is pending this log-only commit and push; the exact C: free bytes before and after non-forced worktree removal will be appended in a log-only update after the removal.
+- The single task-created worktree was at C:\Users\sekip\.codex\worktrees\packlab-october-offline\PackLab. Immediately before removal it was clean and at 0/0 parity with the remote branch at log commit 5c386e9be719e6963930d8f06fed8b52d6a3b2fc; its 17,629,644 logical file bytes were source, docs, tests, and regenerated Python bytecode.
+- Cleanup checks found zero reparse points, zero other processes using the task path, and only regenerated __pycache__ directories among ignored files. Non-forced git worktree remove succeeded from the stable Desktop checkout; the task worktree path no longer exists. Older pre-existing R07, OwnerDev-launcher, PL0350, PL0352, and PL0353 worktrees were left untouched.
+- Actual C: free bytes immediately before removal: 119,513,899,008. Immediately after removal: 119,540,162,560. Measured increase: 26,263,552 bytes. C: free space before task worktree creation was not captured.
 
 ## Limits and handoff
 
