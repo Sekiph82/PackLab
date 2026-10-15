@@ -127,7 +127,7 @@ private final class FakeProductionTransferClient: @unchecked Sendable, Productio
 }
 
 private final class StubTransferURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) -> (Int, Data))?
+    nonisolated(unsafe) static var handler: ((URLRequest) -> (Int, Data))?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -1991,7 +1991,7 @@ final class PackLabCaptureTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let layout = SessionStorageLayout(root: root, sessionID: "corrupt-runtime")
         let sessionStore = ScanSessionStore(layout: layout)
-        try await sessionStore.create(NewScanDraft(sessionID: "corrupt-runtime", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        try await sessionStore.create(NewScanDraft(sessionID: "corrupt-runtime", packageName: "Bottle", packageType: .bottle, captureMode: .guidedOrbit))
         let record = AcceptedCaptureRecord(captureID: "accepted", sequence: 0, sourceFilename: "accepted.heic", metadataFilename: "accepted.json")
         let recordData = try JSONEncoder().encode(record)
         let stateData = try Data(contentsOf: layout.state)
@@ -2194,7 +2194,7 @@ final class PackLabCaptureTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
         let layout = SessionStorageLayout(root: root, sessionID: "auto")
         let store = ScanSessionStore(layout: layout)
-        try await store.create(NewScanDraft(sessionID: "auto", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        try await store.create(NewScanDraft(sessionID: "auto", packageName: "Bottle", packageType: .bottle, captureMode: .guidedOrbit))
         vm.configureM04QualityRuntime(preset: preset, layout: layout)
         await vm.bindStillCaptureBackend(Backend())
         await vm.start(); await vm.refresh()
@@ -2381,7 +2381,7 @@ final class PackLabCaptureTests: XCTestCase {
         await vm.bindStillCaptureBackend(Backend())
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
         let layout = SessionStorageLayout(root: root, sessionID: "detail")
-        let store = ScanSessionStore(layout: layout); try await store.create(NewScanDraft(sessionID: "detail", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        let store = ScanSessionStore(layout: layout); try await store.create(NewScanDraft(sessionID: "detail", packageName: "Bottle", packageType: .bottle, captureMode: .guidedOrbit))
         let record = AcceptedCaptureRecord(captureID: "detail", sequence: 0, sourceFilename: "detail.heic", metadataFilename: "detail.json")
         let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "detail", nextSequence: 1, epoch: 0, acceptedIDs: ["detail"]))
         let outcome = try await vm.captureAndPersistDetailPass(passID: .neck, quality: quality, framing: framing, poseBinding: binding, duplicateDecision: useful, record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
@@ -2424,7 +2424,7 @@ final class PackLabCaptureTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let layout = SessionStorageLayout(root: root, sessionID: "boundary-detail")
         let store = ScanSessionStore(layout: layout)
-        try await store.create(NewScanDraft(sessionID: "boundary-detail", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        try await store.create(NewScanDraft(sessionID: "boundary-detail", packageName: "Bottle", packageType: .bottle, captureMode: .guidedOrbit))
         let record = AcceptedCaptureRecord(captureID: "boundary-detail", sequence: 0, sourceFilename: "boundary-detail.heic", metadataFilename: "boundary-detail.json")
         let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "boundary-detail", nextSequence: 1, epoch: 0, acceptedIDs: ["boundary-detail"]))
         let persisted = try await vm.captureAndPersistDetailPass(passID: .neck, quality: quality, framing: framingAt, poseBinding: pose, duplicateDecision: useful, record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
@@ -2460,7 +2460,7 @@ final class PackLabCaptureTests: XCTestCase {
         let preset = PackagingPreset(id: .matteHDPE, version: "test", displayName: "Test", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: configuration), lightingGuidance: [], preparationGuidance: [], requiresPreparationAcknowledgement: false)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
         let layout = SessionStorageLayout(root: root, sessionID: "base")
-        let store = ScanSessionStore(layout: layout); try await store.create(NewScanDraft(sessionID: "base", packageName: "Bottle", packageType: .bottle, captureMode: .guided)); try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset))
+        let store = ScanSessionStore(layout: layout); try await store.create(NewScanDraft(sessionID: "base", packageName: "Bottle", packageType: .bottle, captureMode: .guidedOrbit)); try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset))
         vm.configureM04QualityRuntime(preset: preset, layout: layout); vm.setBasePassAvailability(BasePassAvailability(physicallyFeasible: true, reasonCode: "operator_confirmed_feasible")); await vm.bindStillCaptureBackend(Backend())
         let binding = acceptedPoseBinding(captureID: "base", pose: first)
         let record = AcceptedCaptureRecord(captureID: "base", sequence: 0, sourceFilename: "base.heic", metadataFilename: "base.json")
@@ -2521,7 +2521,7 @@ final class PackLabCaptureTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let layout = SessionStorageLayout(root: root, sessionID: "rejected-base")
         let store = ScanSessionStore(layout: layout)
-        try await store.create(NewScanDraft(sessionID: "rejected-base", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        try await store.create(NewScanDraft(sessionID: "rejected-base", packageName: "Bottle", packageType: .bottle, captureMode: .guidedOrbit))
         let record = AcceptedCaptureRecord(captureID: "rejected-base", sequence: 0, sourceFilename: "rejected-base.heic", metadataFilename: "rejected-base.json")
         let state = try Data(contentsOf: layout.state)
         let outcome = try await vm.captureAndPersistBasePass(quality: rejected, poseBinding: pose, duplicateDecision: DuplicateDecision(isDuplicate: false, reasonCode: "useful_candidate"), record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
@@ -2750,7 +2750,7 @@ final class PackLabCaptureTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let layout = SessionStorageLayout(root: root, sessionID: "manual")
         let store = ScanSessionStore(layout: layout)
-        try await store.create(NewScanDraft(sessionID: "manual", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        try await store.create(NewScanDraft(sessionID: "manual", packageName: "Bottle", packageType: .bottle, captureMode: .guidedOrbit))
         let vm = CaptureRuntimeViewModel(trackingService: SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal)]), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
         vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
         await vm.bindStillCaptureBackend(Backend())
@@ -2777,7 +2777,7 @@ final class PackLabCaptureTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let layout = SessionStorageLayout(root: root, sessionID: "manual-block")
         let store = ScanSessionStore(layout: layout)
-        try await store.create(NewScanDraft(sessionID: "manual-block", packageName: "Bottle", packageType: .bottle, captureMode: .guided))
+        try await store.create(NewScanDraft(sessionID: "manual-block", packageName: "Bottle", packageType: .bottle, captureMode: .guidedOrbit))
         let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
         vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
         let frame = QualityImageFrame(width: 10, height: 10, luminance: [Double](repeating: 0.5, count: 100), objectMask: (0..<100).map { $0 == 44 })
@@ -3086,6 +3086,8 @@ final class PackLabCaptureTests: XCTestCase {
     }
 
 }
+
+#endif
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
 // xcodebuild execution on simulator/macOS CI is intentionally deferred to the authorized M16 runner.
