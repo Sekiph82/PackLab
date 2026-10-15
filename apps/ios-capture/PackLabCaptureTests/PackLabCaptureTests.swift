@@ -2215,8 +2215,9 @@ final class PackLabCaptureTests: XCTestCase {
 
     @MainActor
     func testPL0104ProductionAutoCaptureUsesHealthGatedBackendAndAcceptedTransaction() async throws {
-        struct Backend: StillPhotoBackend, Sendable {
+        struct Backend: TimestampedStillPhotoBackend, Sendable {
             func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (Data([1, 2, 3]), CaptureDimensions(width: 2, height: 1)) }
+            func lastCaptureMonotonicTimestamp() async -> TimeInterval? { 10 }
         }
         let vm = CaptureRuntimeViewModel(trackingService: SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal)]), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
         let configuration = OrbitCoverageConfiguration(azimuthBinCount: 2, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 10)])
@@ -2294,8 +2295,9 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-useful", pose: sameAzimuthUseful), accepted: [accepted], policy: translationPolicy).isDuplicate)
 
         let signaturePolicy = DuplicatePolicy(maximumTranslationMeters: 0, maximumElevationDifference: 0, maximumSignatureDistance: 2)
-        let signatureAt = DuplicateEvidence(captureID: "signature-at", pose: basePose, visualSignature: [0, 0, 1, 1])
-        let signaturePast = DuplicateEvidence(captureID: "signature-past", pose: basePose, visualSignature: [0, 1, 1, 1])
+        let signaturePose = PoseSample(timestamp: 6, transform: CoordinateTransform.translation(x: 0.001, y: 0, z: -1).values, tracking: .normal)
+        let signatureAt = DuplicateEvidence(captureID: "signature-at", pose: signaturePose, visualSignature: [0, 0, 1, 1])
+        let signaturePast = DuplicateEvidence(captureID: "signature-past", pose: signaturePose, visualSignature: [0, 1, 1, 1])
         XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: signatureAt, accepted: [accepted], policy: signaturePolicy).isDuplicate)
         XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: signaturePast, accepted: [accepted], policy: signaturePolicy).isDuplicate)
     }
@@ -2628,7 +2630,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(vm.m04Completion.status, .incomplete)
         XCTAssertTrue(vm.m04Completion.mandatoryMissingAreas.contains("middle"))
         vm.setBasePassAvailability(BasePassAvailability(physicallyFeasible: false, reasonCode: "base_unavailable"))
-        for _ in 0..<3 { await Task.yield() }
+        await vm.waitForM04ContextPersistence()
         let loaded = try await M04SessionContextStore(layout: layout).load()
         XCTAssertEqual(loaded.completion, vm.m04Completion)
         XCTAssertTrue(loaded.completion?.mandatoryMissingAreas.contains("middle") == true)
@@ -2670,7 +2672,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(vm.m04Completion.mandatoryMissingAreas.contains("neck"))
         XCTAssertEqual(vm.m04Completion.score, 0.5, accuracy: 0.000001)
 
-        for _ in 0..<8 { await Task.yield() }
+        await vm.waitForM04ContextPersistence()
         let persisted = try await M04SessionContextStore(layout: layout).load()
         XCTAssertEqual(persisted.completion, vm.m04Completion)
         XCTAssertEqual(Set(persisted.completion?.mandatoryMissingAreas ?? []), Set(["shoulder", "closure"]))

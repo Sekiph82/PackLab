@@ -156,7 +156,8 @@ public actor ScanSessionStore {
     public func storeAcceptedCapture(still: AcceptedStill, record: AcceptedCaptureRecord, metadata: Data, state: Data, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) throws {
         let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
         let enriched = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit, turntableEvidence: record.turntableEvidence)
-        try storeAcceptedCapture(source: still.sourceBytes, record: enriched, metadata: metadata, state: state)
+        let enrichedMetadata = try JSONEncoder().encode(enriched)
+        try storeAcceptedCapture(source: still.sourceBytes, record: enriched, metadata: enrichedMetadata, state: state)
     }
 
     public func reopen(requiredSourceIDs: Set<String>, supportedVersion: String = "1.0.0") throws -> SessionReopenDisposition {

@@ -526,6 +526,10 @@ final class CaptureRuntimeViewModel: ObservableObject {
         }
     }
 
+    func waitForM04ContextPersistence() async {
+        await m04PersistenceTask?.value
+    }
+
     var m04QualityGuidanceState: M04QualityGuidanceState {
         M04QualityGuidanceState(presetID: m04ActivePreset.id, consecutiveHighlightBlocks: m04ConsecutiveHighlightBlocks, triggerThreshold: m04HighlightGuidanceThreshold, guidanceActive: !m04ReflectionGuidance.isEmpty, guidance: m04ReflectionGuidance)
     }
