@@ -20,6 +20,7 @@ on:
         default: all
         options:
           - all
+          - recovery_all
           - session_integrity
           - camera_pose
           - capture_coverage
@@ -136,6 +137,9 @@ jobs:
           test_selection=()
           case "$FOCUSED_GROUP" in
             all) ;;
+            recovery_all)
+              names=(testAuthoritativeDeletionRemovesSessionAndRejectsTraversal testDeletionPlanRequiresConfirmationAndStaysInsideRoot testFinalizationGateDistinguishesBindingAndChecksumFailures testPL0088EveryTransactionFailureStageRecoversCleanPreCaptureState testPL0089RetakeCallbackAndDeleteRetakeFailureStagesRollbackCoherently testPL0090DiscoveryUsesRecoveredStateBlocksCorruptionAndDiscardsOnlyResumableSessions testSessionDiscoveryReconstructsHistoryAndBlocksMissingOrVersionMismatch testPL0073FocusCannotLockBeforeObservedStabilization testPL0080AndPL0081AcceptedStillOrchestrationPersistsPoseMotionAndReopens testPL0083AndPL0085RuntimeRefreshUsesInjectedServicesAndStops testPL0085OverlayPropagatesNewestPoseMotionAndEpochThenStops testPoseClockBridgeBindsAcceptedStillAndExactBoundaries testPL0095CandidateRuntimePublishesAlignedMotionWarningsAndHighRisk testPL0097CandidateRuntimePublishesShadowBandsAndRawObjectFraction testPL0102CoverageUsesExactElevationBoundariesAndAdjacentValuesDeterministically testPL0104ProductionAutoCaptureUsesHealthGatedBackendAndAcceptedTransaction testPL0104ProductionGateMatrixNeverInvokesBackendWhenBlocked testPL0105DuplicateDetectorProvesTranslationElevationAndSignatureBoundaries testPL0106RingAndSectorBoundariesAreDeterministicInLiveGuidance testPL0109ActiveCompletionPropagatesAndPersistsWithOptionalBaseState testPL0109CompletionDiagnosticsDistinguishesCompleteAndUnavailableEvidence testPL0118PreflightIsTableDrivenAcrossPresetsAndHealthConditions testPL0120ProductionSharePresentationStateCoversCancelCompletionFailureAndReplacement testPL0120ShareEligibilityRejectsMissingOrNonPackscanFiles testPL0121SwiftWireModelsMatchSharedGoldenFields)
+              ;;
             session_integrity)
               names=(testAuthoritativeDeletionRemovesSessionAndRejectsTraversal testDeletionPlanRequiresConfirmationAndStaysInsideRoot testFinalizationGateDistinguishesBindingAndChecksumFailures testPL0088EveryTransactionFailureStageRecoversCleanPreCaptureState testPL0089RetakeCallbackAndDeleteRetakeFailureStagesRollbackCoherently testPL0090DiscoveryUsesRecoveredStateBlocksCorruptionAndDiscardsOnlyResumableSessions testSessionDiscoveryReconstructsHistoryAndBlocksMissingOrVersionMismatch)
               ;;
@@ -184,6 +188,7 @@ jobs:
           skipped="$(printf '%s' "$safe_summary" | jq -r '.skippedTests // 0')"
           case "$FOCUSED_GROUP" in
             all) expected=205 ;;
+            recovery_all) expected=25 ;;
             session_integrity) expected=7 ;;
             camera_pose) expected=5 ;;
             capture_coverage) expected=9 ;;
