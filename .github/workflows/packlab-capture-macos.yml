@@ -29,7 +29,7 @@ jobs:
     env:
       PROJECT: apps/ios-capture/PackLabCapture.xcodeproj
       SCHEME: PackLabCapture
-      DESTINATION: platform=iOS Simulator,name=iPhone 16,OS=18.5
+      DESTINATION: platform=iOS Simulator,name=iPhone 16,OS=18.0
 
     steps:
       - name: Check out source
@@ -38,8 +38,8 @@ jobs:
       - name: Select Xcode and record runner provenance
         run: |
           set -euo pipefail
-          test -d /Applications/Xcode_16.4.app
-          sudo xcode-select --switch /Applications/Xcode_16.4.app
+          test -d /Applications/Xcode_16.app
+          sudo xcode-select --switch /Applications/Xcode_16.app
           {
             echo '## Runner provenance'
             echo
