@@ -51,8 +51,11 @@ jobs:
           $runtime = Get-ItemProperty -LiteralPath $runtimeKey -ErrorAction SilentlyContinue
           $runtimeVersion = if ($runtime) { '{0}.{1}.{2}.{3}' -f $runtime.Major,$runtime.Minor,$runtime.Bld,$runtime.Rbld } else { 'absent' }
           if (!$runtime -or $runtime.Installed -ne 1 -or [version]$runtimeVersion -lt [version]'14.44.35211.0') { throw 'PL0351_MICROSOFT_VC_X64_PREREQUISITE_NOT_SATISFIED' }
+          "vc_runtime_version=$runtimeVersion" >> $env:GITHUB_OUTPUT
           "producer_run=$($artifact.workflow_run.id) artifact_id=$($artifact.id) archive_bytes=$($artifact.size_in_bytes) archive_sha256=$($artifact.digest) source_revision=$($artifact.workflow_run.head_sha) expires_at=$($artifact.expires_at)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Write-Output "producer_run=$($artifact.workflow_run.id) artifact_id=$($artifact.id) archive_bytes=$($artifact.size_in_bytes) archive_sha256=$($artifact.digest) source_revision=$($artifact.workflow_run.head_sha) expires_at=$($artifact.expires_at)"
           "microsoft_vc_redist_x64=present version=$runtimeVersion installer_automatic_download=none" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Write-Output "microsoft_vc_redist_x64=present version=$runtimeVersion installer_automatic_download=none"
 
       - name: Download the exact PL-0350 Installer artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -83,6 +86,7 @@ jobs:
           "installer_bytes=$($setup.Length)" >> $env:GITHUB_OUTPUT
           "producer_executable_sha256=$($producerEvidence.installed_executable_sha256)" >> $env:GITHUB_OUTPUT
           "installer_sha256=$hash bytes=$($setup.Length) signing=unsigned source_revision=$($metadata.build_revision) studio_version=$($metadata.studio_version)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Write-Output "installer_sha256=$hash bytes=$($setup.Length) signing=unsigned source_revision=$($metadata.build_revision) studio_version=$($metadata.studio_version)"
 
       - name: Install to isolated runner location and run sanitized installed-app smoke
         id: installed_smoke
@@ -175,6 +179,7 @@ jobs:
           "installed_executable_sha256=$installedHash capability_manifest_sha256=$capHash" >> $env:GITHUB_OUTPUT
           "installed_app=PASS executable_sha256=$installedHash QtCore_loader=PASS_via_QApplication_StudioMainWindow QtPdf=PASS notices=present corresponding_source_records=$($sourceManifest.records.Count) network=NONE capabilities=qt_studio_gui,qt_vector_pdf,ocp_cad,step_io,dxf_export,open3d_geometry Open3D=$($manifest.capability_groups.open3d_geometry.observed_version) offline=PASS duration_seconds=$([int]([DateTimeOffset]::UtcNow-$started).TotalSeconds)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           "sanitized_PATH=Windows_system_directories_and_isolated_install_only checkout_venv_conda_Qt_Python_dll_paths=absent developer_overrides=cleared manifest_sha256=$capHash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Write-Output "installed_app=PASS executable_sha256=$installedHash capability_manifest_sha256=$capHash QtCore_loader=PASS_via_QApplication_StudioMainWindow QtPdf=PASS notices=present corresponding_source_records=$($sourceManifest.records.Count) capabilities=qt_studio_gui,qt_vector_pdf,ocp_cad,step_io,dxf_export,open3d_geometry Open3D=$($manifest.capability_groups.open3d_geometry.observed_version) network=NONE offline=PASS sanitized_PATH=Windows_system_directories_and_isolated_install_only developer_overrides=cleared duration_seconds=$([int]([DateTimeOffset]::UtcNow-$started).TotalSeconds)"
 
       - name: Always uninstall and remove only the isolated CI installation
         id: cleanup
@@ -195,9 +200,11 @@ jobs:
             if (Test-Path -LiteralPath $installRoot) { throw 'PL0351_INSTALL_TREE_RESIDUE' }
           }
           "installer_uninstall=PASS install_tree_residue=NONE owner_host_untouched=true" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Write-Output "installer_uninstall=PASS install_tree_residue=NONE owner_host_untouched=true"
 
       - name: Require both successful installed smoke and safe cleanup
         if: always()
         shell: pwsh
         run: |
           if ('${{ steps.installed_smoke.outcome }}' -ne 'success' -or '${{ steps.cleanup.outcome }}' -ne 'success') { throw 'PL0351_FINAL_ACCEPTANCE_GATE_FAILED' }
+          Write-Output "PL0351_HOSTED_ACCEPTANCE=PASS run_id=$env:GITHUB_RUN_ID producer_run=38649528145 artifact_id=11935390977 source_revision=452fe8934b0d56011af8c117555dd059d5c63462 installer_sha256=${{ steps.installer.outputs.installer_sha256 }} installer_bytes=${{ steps.installer.outputs.installer_bytes }} installed_executable_sha256=${{ steps.installed_smoke.outputs.installed_executable_sha256 }} capability_manifest_sha256=${{ steps.installed_smoke.outputs.capability_manifest_sha256 }} vc_runtime_x64=${{ steps.preflight.outputs.vc_runtime_version }} smoke=PASS uninstall=PASS network=NONE"
