@@ -41,12 +41,13 @@ public actor FoundationCameraService: CameraService {
     }
 
     public func start() async throws {
-        guard authorization == .authorized else {
+        if authorization != .authorized {
+            currentState = .unavailable
             switch authorization {
-            case .denied: currentState = .unavailable; throw CameraServiceError.permissionDenied
-            case .restricted: currentState = .unavailable; throw CameraServiceError.restricted
-            case .unknown: currentState = .unavailable; throw CameraServiceError.unavailable
-            case .authorized: break
+            case .denied: throw CameraServiceError.permissionDenied
+            case .restricted: throw CameraServiceError.restricted
+            case .unknown: throw CameraServiceError.unavailable
+            case .authorized: return
             }
         }
         currentState = .running

@@ -99,14 +99,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         admission.update(health)
         if let service = captureAdmissionService { await service.updateAdmission(admission) }
         await healthMonitor.start { [weak self] gate in
-            await MainActor.run {
-                self?.health = gate
-                self?.admission.update(gate)
-            }
-            if let service = await MainActor.run(body: { self?.captureAdmissionService }) {
-                let current = await MainActor.run(body: { self?.admission ?? CaptureAdmissionController() })
-                await service.updateAdmission(current)
-            }
+            await self?.applyHealthUpdate(gate)
         }
         updateTask?.cancel()
         updateTask = Task { [weak self] in
@@ -138,6 +131,12 @@ final class CaptureRuntimeViewModel: ObservableObject {
         epoch = await trackingService.localizationEpoch()
         resetDiagnostics = await trackingService.resetDiagnostics()
         await diagnostics.record(category: "tracking", code: raw.quality.rawValue, message: raw.message)
+    }
+
+    private func applyHealthUpdate(_ gate: DeviceHealthCaptureGate) async {
+        health = gate
+        admission.update(gate)
+        if let captureAdmissionService { await captureAdmissionService.updateAdmission(admission) }
     }
 
     func admitCapture() -> Bool {

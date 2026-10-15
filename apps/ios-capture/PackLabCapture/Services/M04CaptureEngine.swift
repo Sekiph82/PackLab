@@ -623,7 +623,7 @@ public struct OrbitCoverageSnapshot: Codable, Sendable, Equatable {
     public let completionFraction: Double
     public let isComplete: Bool
     public init(configuration: OrbitCoverageConfiguration, capturedSectors: [CoverageSector], missingSectors: [CoverageSector], duplicateCaptureIDs: [String], invalidCaptureIDs: [String], observations: [CoveragePoseObservation]) {
-        self.configuration = configuration; self.capturedSectors = capturedSectors; self.missingSectors = missingSectors; self.duplicateCaptureIDs = duplicateCaptureIDs; self.invalidCaptureIDs = invalidCaptureIDs; self.completionFraction = missingSectors.isEmpty && !capturedSectors.isEmpty ? 1 : Double(capturedSectors.count) / Double(max(1, capturedSectors.count + missingSectors.count)); self.isComplete = missingSectors.isEmpty && !capturedSectors.isEmpty
+        self.configuration = configuration; self.capturedSectors = capturedSectors; self.missingSectors = missingSectors; self.duplicateCaptureIDs = duplicateCaptureIDs; self.invalidCaptureIDs = invalidCaptureIDs; self.observations = observations; self.completionFraction = missingSectors.isEmpty && !capturedSectors.isEmpty ? 1 : Double(capturedSectors.count) / Double(max(1, capturedSectors.count + missingSectors.count)); self.isComplete = missingSectors.isEmpty && !capturedSectors.isEmpty
     }
 }
 
@@ -898,7 +898,7 @@ public struct DetailPassAcceptanceDecision: Sendable, Equatable {
     public let reasons: [String]
     public init(snapshot: OrbitCoverageSnapshot, policy: DetailPassPolicy, quality: QualityDecision, framing: FramingMetric, poseBinding: PoseCaptureBinding?, duplicateDecision: DuplicateDecision?) {
         var reasons: [String] = []
-        guard let poseBinding, poseBinding.aligned.status == "available", poseBinding.aligned.sample != nil else { reasons.append("pose_evidence_unavailable") }
+        if poseBinding?.aligned.status != "available" || poseBinding?.aligned.sample == nil { reasons.append("pose_evidence_unavailable") }
         if !quality.isAcceptable { reasons.append(contentsOf: quality.reasons) }
         if framing.band != .acceptable || (framing.objectFraction ?? 0) < policy.minimumFramingFraction { reasons.append("detail_framing_unacceptable") }
         if duplicateDecision == nil { reasons.append("duplicate_evidence_unavailable") }
@@ -948,7 +948,7 @@ public struct BasePassAcceptanceDecision: Sendable, Equatable {
         var reasons: [String] = []
         if availability.operatorSkipped { reasons.append(availability.reasonCode) }
         else if !availability.physicallyFeasible { reasons.append(availability.reasonCode) }
-        guard let poseBinding, poseBinding.aligned.status == "available", poseBinding.aligned.sample != nil else { reasons.append("pose_evidence_unavailable") }
+        if poseBinding?.aligned.status != "available" || poseBinding?.aligned.sample == nil { reasons.append("pose_evidence_unavailable") }
         if !quality.isAcceptable { reasons.append(contentsOf: quality.reasons) }
         if duplicateDecision == nil { reasons.append("duplicate_evidence_unavailable") }
         else if duplicateDecision?.isDuplicate == true { reasons.append(duplicateDecision?.reasonCode ?? "near_duplicate_candidate") }
@@ -992,8 +992,9 @@ public struct CompletionDiagnostics: Codable, Sendable, Equatable {
         let additionalComplete = max(0, additionalRequired - additionalMandatoryMissingAreas.count)
         let denominator = max(1, requiredRingCount + requiredDetails.count + (requiredBase ? 1 : 0) + additionalRequired)
         score = Double(completeRingCount + completeDetails + completeBase + additionalComplete) / Double(denominator)
-        mandatoryMissingAreas = rings.missingRingIDs + requiredDetails.filter { !$0.isComplete }.map { $0.metadata.passID.rawValue } + additionalMandatoryMissingAreas
-        if requiredBase, base?.isComplete != true { mandatoryMissingAreas.append(CapturePassID.base.rawValue) }
+        var missingAreas = rings.missingRingIDs + requiredDetails.filter { !$0.isComplete }.map { $0.metadata.passID.rawValue } + additionalMandatoryMissingAreas
+        if requiredBase, base?.isComplete != true { missingAreas.append(CapturePassID.base.rawValue) }
+        mandatoryMissingAreas = missingAreas
         optionalUnavailableAreas = (base?.status == "unavailable" || base?.status == "skipped") ? [CapturePassID.base.rawValue] : []
         let optionalGuidance: [String]
         if base?.status == "skipped" {
