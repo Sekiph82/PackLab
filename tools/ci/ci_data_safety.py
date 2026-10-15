@@ -85,6 +85,17 @@ ARCHIVE_SUFFIXES = {".zip", ".7z", ".rar", ".tar", ".gz", ".tgz"}
 UNKNOWN_RAW_SUFFIXES = {".bin", ".dat", ".data", ".capture", ".rawscan"}
 STRUCTURED_DATA_SUFFIXES = {".json", ".csv", ".xml", ".txt", ".log", ".yaml", ".yml"}
 TEXT_SUFFIXES = {".txt", ".log", ".json", ".yaml", ".yml", ".csv", ".xml", ".md"}
+LINE_ENDING_CANONICAL_SUFFIXES = {
+    ".svg",
+    ".step",
+    ".stp",
+    ".dxf",
+    ".ply",
+    ".stl",
+    ".obj",
+    ".pcd",
+    ".xyz",
+}
 PRIVATE_PATH_COMPONENTS = {
     "supplier",
     "suppliers",
@@ -204,9 +215,9 @@ def _matches_hash_manifest(
     digest = hashlib.sha256()
     try:
         with path.open("rb") as stream:
-            if path.suffix.casefold() == ".svg":
-                # SVG source is text. Hash its LF-canonical form so the exact
-                # allowlist survives Windows autocrlf and Linux hosted checkouts.
+            if path.suffix.casefold() in LINE_ENDING_CANONICAL_SUFFIXES:
+                # These allowlisted source formats are text. Hash their
+                # LF-canonical form across Windows and Linux checkouts.
                 contents = stream.read(max_bytes + 1)
                 if len(contents) > max_bytes:
                     return False

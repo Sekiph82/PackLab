@@ -108,12 +108,22 @@ def test_changed_bytes_under_a_safe_fixture_name_fail_the_hash_allowlist(tmp_pat
     assert "UNAPPROVED_SENSITIVE_PAYLOAD" in _codes(scan_paths(repository, [candidate]))
 
 
-def test_allowlisted_svg_is_stable_across_windows_and_linux_line_endings(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "assets/calibration/a3-packlab-calibration-mat.svg",
+        "assets/calibration/a4-packlab-calibration-mat.svg",
+        "tests/fixtures/ci-safe-synthetic/synthetic-box.step",
+        "tests/fixtures/ci-safe-synthetic/synthetic-line.dxf",
+        "tests/fixtures/ci-safe-synthetic/synthetic-triangle.ply",
+        "tests/fixtures/ci-safe-synthetic/synthetic-triangle.stl",
+    ],
+)
+def test_allowlisted_text_payloads_are_stable_across_windows_and_linux_line_endings(
+    tmp_path: Path, relative: str
 ) -> None:
     repository = tmp_path / "repository"
     policy = repository / "tools" / "ci"
-    relative = "assets/calibration/a3-packlab-calibration-mat.svg"
     candidate = repository / relative
     policy.mkdir(parents=True)
     candidate.parent.mkdir(parents=True)
