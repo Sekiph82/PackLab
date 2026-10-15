@@ -12,6 +12,18 @@ on:
       - '.github/workflows/packlab-capture-macos.yml'
       - 'apps/ios-capture/**'
   workflow_dispatch:
+    inputs:
+      focused_group:
+        description: Run all 205 tests or one bounded recovery family
+        type: choice
+        required: true
+        default: all
+        options:
+          - all
+          - session_integrity
+          - camera_pose
+          - capture_coverage
+          - preflight_transfer
 
 permissions:
   contents: read
@@ -30,6 +42,7 @@ jobs:
       PROJECT: apps/ios-capture/PackLabCapture.xcodeproj
       SCHEME: PackLabCapture
       DESTINATION: platform=iOS Simulator,name=iPhone 16,OS=18.0
+      FOCUSED_GROUP: ${{ inputs.focused_group || 'all' }}
 
     steps:
       - name: Check out source
@@ -117,8 +130,30 @@ jobs:
           echo '- Simulator app build: PASS' | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Run PackLabCaptureTests on iOS Simulator without signing
+        id: run-xctests
         run: |
           set -euo pipefail
+          test_selection=()
+          case "$FOCUSED_GROUP" in
+            all) ;;
+            session_integrity)
+              names=(testAuthoritativeDeletionRemovesSessionAndRejectsTraversal testDeletionPlanRequiresConfirmationAndStaysInsideRoot testFinalizationGateDistinguishesBindingAndChecksumFailures testPL0088EveryTransactionFailureStageRecoversCleanPreCaptureState testPL0089RetakeCallbackAndDeleteRetakeFailureStagesRollbackCoherently testPL0090DiscoveryUsesRecoveredStateBlocksCorruptionAndDiscardsOnlyResumableSessions testSessionDiscoveryReconstructsHistoryAndBlocksMissingOrVersionMismatch)
+              ;;
+            camera_pose)
+              names=(testPL0073FocusCannotLockBeforeObservedStabilization testPL0080AndPL0081AcceptedStillOrchestrationPersistsPoseMotionAndReopens testPL0083AndPL0085RuntimeRefreshUsesInjectedServicesAndStops testPL0085OverlayPropagatesNewestPoseMotionAndEpochThenStops testPoseClockBridgeBindsAcceptedStillAndExactBoundaries)
+              ;;
+            capture_coverage)
+              names=(testPL0095CandidateRuntimePublishesAlignedMotionWarningsAndHighRisk testPL0097CandidateRuntimePublishesShadowBandsAndRawObjectFraction testPL0102CoverageUsesExactElevationBoundariesAndAdjacentValuesDeterministically testPL0104ProductionAutoCaptureUsesHealthGatedBackendAndAcceptedTransaction testPL0104ProductionGateMatrixNeverInvokesBackendWhenBlocked testPL0105DuplicateDetectorProvesTranslationElevationAndSignatureBoundaries testPL0106RingAndSectorBoundariesAreDeterministicInLiveGuidance testPL0109ActiveCompletionPropagatesAndPersistsWithOptionalBaseState testPL0109CompletionDiagnosticsDistinguishesCompleteAndUnavailableEvidence)
+              ;;
+            preflight_transfer)
+              names=(testPL0118PreflightIsTableDrivenAcrossPresetsAndHealthConditions testPL0120ProductionSharePresentationStateCoversCancelCompletionFailureAndReplacement testPL0120ShareEligibilityRejectsMissingOrNonPackscanFiles testPL0121SwiftWireModelsMatchSharedGoldenFields)
+              ;;
+            *) echo "Unknown focused group: $FOCUSED_GROUP" >&2; exit 2 ;;
+          esac
+          for name in "${names[@]}"; do
+            test_selection+=("-only-testing:PackLabCaptureTests/PackLabCaptureTests/$name")
+          done
+          echo "- XCTest selection: $FOCUSED_GROUP" | tee -a "$GITHUB_STEP_SUMMARY"
           xcodebuild test \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
@@ -129,6 +164,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            "${test_selection[@]}" \
             | tee "$RUNNER_TEMP/packlab-capture-test.log"
 
       - name: Verify and record XCTest summary
@@ -145,7 +181,16 @@ jobs:
           result="$(printf '%s' "$safe_summary" | jq -r '.result // "Unknown"')"
           total="$(printf '%s' "$safe_summary" | jq -r '.totalTestCount // 0')"
           failed="$(printf '%s' "$safe_summary" | jq -r '.failedTests // 0')"
-          if [[ "$result" != "Passed" || "$total" -lt 1 || "$failed" -ne 0 ]]; then
-            echo "XCTest did not pass with at least one executed test (result=$result, total=$total, failed=$failed)." >&2
+          skipped="$(printf '%s' "$safe_summary" | jq -r '.skippedTests // 0')"
+          case "$FOCUSED_GROUP" in
+            all) expected=205 ;;
+            session_integrity) expected=7 ;;
+            camera_pose) expected=5 ;;
+            capture_coverage) expected=9 ;;
+            preflight_transfer) expected=4 ;;
+            *) echo "Unknown focused group in result verification: $FOCUSED_GROUP" >&2; exit 2 ;;
+          esac
+          if [[ "$result" != "Passed" || "$total" -ne "$expected" || "$failed" -ne 0 || "$skipped" -ne 0 ]]; then
+            echo "XCTest selection did not pass with its expected count (group=$FOCUSED_GROUP, result=$result, total=$total, expected=$expected, failed=$failed, skipped=$skipped)." >&2
             exit 1
           fi

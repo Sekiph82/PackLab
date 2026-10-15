@@ -78,7 +78,11 @@ private final class SequenceMotionService: MotionService {
     func start() async { stopped = false }
     func stop() async { stopped = true }
     func latestSample() async -> MotionSample? { stopped ? nil : MotionSample(timestamp: Double(index), accelerationX: 0, accelerationY: 0, accelerationZ: 0) }
-    func latestRecord() async -> MotionSampleRecord? { stopped ? nil : MotionSampleRecord(monotonicTimestamp: Double(index), attitude: [0, 0, 0, 1], rotationRate: [0, 0, 0]) }
+    func latestRecord() async -> MotionSampleRecord? {
+        guard !stopped else { return nil }
+        defer { index += 1 }
+        return MotionSampleRecord(monotonicTimestamp: Double(index), attitude: [0, 0, 0, 1], rotationRate: [0, 0, 0])
+    }
     func state() async -> MotionServiceState { stopped ? .idle : .running }
     func advance() { index += 1 }
 }
@@ -151,7 +155,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(try object(TransferControlMessage(action: "cancel", transferID: "transfer-1"))["message"] as? String, "cancel")
         XCTAssertEqual(try object(TransferControlMessage(action: "resume", transferID: "transfer-1"))["message"] as? String, "resume")
         XCTAssertEqual(try object(TransferCompletionAcknowledgement(transferID: "transfer-1", packageSHA256: digest, verified: true, authenticated: true, state: "complete"))["verified"] as? Bool, true)
-        let errorData = Data("{\"message\":\"error\",\"protocol\":\"packlab-transfer\",\"protocol_version\":\"1.0.0\",\"error_code\":\"unpaired\",\"error\":\"authorization is required\"}".utf8)
+        let errorData = Data("{\"message\":\"error\",\"protocol\":\"packlab-transfer\",\"protocol_version\":\"1\",\"error_code\":\"unpaired\",\"error\":\"authorization is required\"}".utf8)
         let error = try JSONDecoder().decode(TransferErrorEnvelope.self, from: errorData)
         XCTAssertEqual(error.errorCode, "unpaired")
     }
@@ -899,6 +903,7 @@ final class PackLabCaptureTests: XCTestCase {
         try JSONEncoder().encode(NewScanDraft(sessionID: "s1", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: layout.metadata)
         try JSONEncoder().encode(PersistedSessionState(sessionID: "s1", nextSequence: 2, epoch: 3, acceptedIDs: ["a"], rejectedIDs: ["r"], replacementTrace: ["a": "b"])).write(to: layout.state)
         try Data([1]).write(to: layout.images.appendingPathComponent("a.heic"))
+        try JSONEncoder().encode(AcceptedCaptureRecord(captureID: "a", sequence: 0, sourceFilename: "a.heic", metadataFilename: "a.json")).write(to: layout.photoRecords.appendingPathComponent("a.json"))
         let candidates = await SessionDiscoveryService(root: root).discover()
         XCTAssertEqual(candidates.first?.state?.rejectedIDs, ["r"])
         XCTAssertEqual(candidates.first?.state?.replacementTrace["a"], "b")
@@ -957,12 +962,12 @@ final class PackLabCaptureTests: XCTestCase {
         let unavailable = PackScanNumericMeasurement(status: .unavailable)
         let wire = PackScanPhotoMetadataWire(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: PackScanOrientation(value: .unknown, source: .unknown), focalLengthMM: unavailable, exposure: unavailable, iso: PackScanISOMeasurement(status: .unavailable), whiteBalanceKelvin: unavailable)
         let validMetadata = try JSONEncoder().encode(PackScanPhotoMetadataDocument(photos: [wire]))
-        let manifestObject: [String: Any] = ["schema_version": "1.0.0", "checksums": ["algorithm": "sha256"], "payloads": [["path": "metadata/photos.json", "size_bytes": validMetadata.count, "sha256": SourceIntegrity.digest(validMetadata)], ["path": "images/p.heic", "size_bytes": image.count, "sha256": "bad"]]]
+        let manifestObject: [String: Any] = ["schema_version": "1.0.0", "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization], "payloads": [["path": "metadata/photos.json", "size_bytes": validMetadata.count, "sha256": SourceIntegrity.digest(validMetadata)], ["path": "images/p.heic", "size_bytes": image.count, "sha256": "bad"]]]
         let manifest = try JSONSerialization.data(withJSONObject: manifestObject)
         let input = FinalizationInput(manifest: manifest, payloads: ["metadata/photos.json": validMetadata, "images/p.heic": image], destination: URL(fileURLWithPath: "/tmp/out.packscan"))
         XCTAssertThrowsError(try SessionFinalizer().validate(input)) { error in XCTAssertEqual(error as? FinalizationError, .checksumFailure) }
         let empty = try JSONEncoder().encode(PackScanPhotoMetadataDocument(photos: []))
-        let emptyManifestObject: [String: Any] = ["schema_version": "1.0.0", "checksums": ["algorithm": "sha256"], "payloads": [["path": "metadata/photos.json", "size_bytes": empty.count, "sha256": SourceIntegrity.digest(empty)], ["path": "images/p.heic", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)]]]
+        let emptyManifestObject: [String: Any] = ["schema_version": "1.0.0", "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization], "payloads": [["path": "metadata/photos.json", "size_bytes": empty.count, "sha256": SourceIntegrity.digest(empty)], ["path": "images/p.heic", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)]]]
         let emptyInput = FinalizationInput(manifest: try JSONSerialization.data(withJSONObject: emptyManifestObject), payloads: ["metadata/photos.json": empty, "images/p.heic": image], destination: URL(fileURLWithPath: "/tmp/out.packscan"))
         XCTAssertThrowsError(try SessionFinalizer().validate(emptyInput)) { error in XCTAssertEqual(error as? FinalizationError, .invalidMetadataBinding) }
     }
@@ -1111,6 +1116,7 @@ final class PackLabCaptureTests: XCTestCase {
         var focus = FocusPolicy()
         XCTAssertEqual(focus.begin(capabilities: FocusCapabilities(point: true, lock: true)), .focusing)
         XCTAssertEqual(focus.lock(capabilities: FocusCapabilities(point: true, lock: true)), .failed)
+        XCTAssertEqual(focus.state, .focusing)
         XCTAssertEqual(focus.stabilize(), .continuous)
         XCTAssertEqual(focus.lock(capabilities: FocusCapabilities(point: true, lock: true)), .locked)
     }
@@ -1349,7 +1355,7 @@ final class PackLabCaptureTests: XCTestCase {
         buffer.append(PoseSample(timestamp: 10.2, transform: CoordinateTransform.identity.values, tracking: .normal))
         XCTAssertEqual(AcceptedStillPoseBinder.bind(still: still, buffer: buffer, bridge: bridge)?.aligned.status, "available")
         XCTAssertEqual(PoseAligner.nearest(to: 10.1, samples: [PoseSample(timestamp: 10.2, transform: CoordinateTransform.identity.values, tracking: .normal)], tolerance: 0.1).status, "available")
-        XCTAssertEqual(PoseAligner.nearest(to: 10.101, samples: [PoseSample(timestamp: 10.2, transform: CoordinateTransform.identity.values, tracking: .normal)], tolerance: 0.1).status, "stale")
+        XCTAssertEqual(PoseAligner.nearest(to: 10.301, samples: [PoseSample(timestamp: 10.2, transform: CoordinateTransform.identity.values, tracking: .normal)], tolerance: 0.1).status, "stale")
     }
 
     func testCoordinateGoldensAndBasisContract() {
@@ -1533,7 +1539,7 @@ final class PackLabCaptureTests: XCTestCase {
 
     @MainActor
     func testPL0083AndPL0085RuntimeRefreshUsesInjectedServicesAndStops() async {
-        let tracking = SequenceTrackingService([TrackingQualityClassifier.classify(state: .limited), TrackingQualityClassifier.classify(state: .normal), TrackingQualityClassifier.classify(state: .normal)]); let motion = SequenceMotionService(); let vm = CaptureRuntimeViewModel(trackingService: tracking, motionService: motion, healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())); await vm.start(); await vm.refresh(); XCTAssertFalse(vm.tracking.poseEvidenceEligible); await vm.refresh(); XCTAssertFalse(vm.tracking.poseEvidenceEligible); await vm.refresh(); XCTAssertTrue(vm.tracking.poseEvidenceEligible); let count = vm.trackingDiagnostics.count; await vm.stop(); await vm.refresh(); XCTAssertEqual(vm.trackingDiagnostics.count, count)
+        let tracking = SequenceTrackingService([TrackingQualityClassifier.classify(state: .limited), TrackingQualityClassifier.classify(state: .normal), TrackingQualityClassifier.classify(state: .normal)]); let motion = SequenceMotionService(); let vm = CaptureRuntimeViewModel(trackingService: tracking, motionService: motion, healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()), automaticallyPoll: false); await vm.start(); await vm.refresh(); XCTAssertFalse(vm.tracking.poseEvidenceEligible); await vm.refresh(); XCTAssertFalse(vm.tracking.poseEvidenceEligible); await vm.refresh(); XCTAssertTrue(vm.tracking.poseEvidenceEligible); let count = vm.trackingDiagnostics.count; await vm.stop(); await vm.refresh(); XCTAssertEqual(vm.trackingDiagnostics.count, count)
     }
 
     @MainActor
@@ -1556,7 +1562,7 @@ final class PackLabCaptureTests: XCTestCase {
         await vm.bindStillCaptureBackend(Backend())
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }
         let layout = SessionStorageLayout(root: root, sessionID: "evidence"); let store = ScanSessionStore(layout: layout); try await store.create(NewScanDraft(sessionID: "evidence", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
-        var poses = PoseBuffer(); poses.append(PoseSample(timestamp: 11, transform: CoordinateTransform.identity.values, tracking: .normal)); poses.append(PoseSample(timestamp: 9, transform: CoordinateTransform.identity.values, tracking: .normal))
+        var poses = PoseBuffer(); poses.append(PoseSample(timestamp: 10.05, transform: CoordinateTransform.identity.values, tracking: .normal)); poses.append(PoseSample(timestamp: 9.95, transform: CoordinateTransform.identity.values, tracking: .normal))
         var motion = MotionBuffer(); motion.append(MotionSampleRecord(monotonicTimestamp: 10.05, attitude: [0, 0, 0, 1], rotationRate: [1, 2, 3]))
         let record = AcceptedCaptureRecord(captureID: "capture", sequence: 0, sourceFilename: "capture.heic", metadataFilename: "capture.json")
         let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "evidence", nextSequence: 1, epoch: 0, acceptedIDs: ["capture"]))
@@ -1763,8 +1769,8 @@ final class PackLabCaptureTests: XCTestCase {
     }
 
     func testPL0095CandidateRuntimePublishesAlignedMotionWarningsAndHighRisk() {
-        let sharpFrame = QualityImageFrame(width: 64, height: 64, luminance: (0..<64).flatMap { y in (0..<64).map { x in ((x + y) % 2 == 0) ? 1.0 : 0.0 } }, objectMask: (0..<64).flatMap { y in (0..<64).map { x in (16..<48).contains(x) && (16..<48).contains(y) } })
-        let blurredFrame = QualityImageFrame(width: 8, height: 8, luminance: [Double](repeating: 0.5, count: 64))
+        let sharpFrame = QualityImageFrame(width: 64, height: 64, luminance: (0..<64).flatMap { y in (0..<64).map { x in ((x + y) % 2 == 0) ? 0.8 : 0.2 } }, objectMask: (0..<64).flatMap { y in (0..<64).map { x in (16..<48).contains(x) && (16..<48).contains(y) } })
+        let blurredFrame = QualityImageFrame(width: 64, height: 64, luminance: [Double](repeating: 0.5, count: 64 * 64))
         let sharpRuntime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
         let missing = sharpRuntime.evaluate(M04CandidateFrameInput(sessionID: "s", captureID: "missing", sequence: 0, monotonicTimestamp: 10, frame: sharpFrame))
         XCTAssertEqual(missing.quality.decision, .accept)
@@ -1841,7 +1847,7 @@ final class PackLabCaptureTests: XCTestCase {
             return pixels
         }
         let localized = withClippedObjectPixels(1)
-        let warning = withClippedObjectPixels(6)
+        let warning = withClippedObjectPixels(8)
         let broad = withClippedObjectPixels(16)
         let runtime = M04CandidateQualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
         func evaluate(_ luminance: [Double], id: String) -> ClippingMetric {
@@ -2221,8 +2227,8 @@ final class PackLabCaptureTests: XCTestCase {
         try await store.create(NewScanDraft(sessionID: "auto", packageName: "Bottle", packageType: .bottle, captureMode: .guidedOrbit))
         vm.configureM04QualityRuntime(preset: preset, layout: layout)
         await vm.bindStillCaptureBackend(Backend())
-        await vm.start(); await vm.refresh()
-        let frame = QualityImageFrame(width: 10, height: 10, luminance: (0..<100).map { (($0 / 10 + $0 % 10) % 2 == 0) ? 0.2 : 0.8 }, objectMask: (0..<100).map { index in let x = index % 10; let y = index / 10; return (2...7).contains(x) && (2...7).contains(y) })
+        await vm.start(); await vm.refresh(); await vm.refresh()
+        let frame = QualityImageFrame(width: 64, height: 64, luminance: (0..<4096).map { (($0 / 64 + $0 % 64) % 2 == 0) ? 0.2 : 0.8 }, objectMask: (0..<4096).map { index in let x = index % 64; let y = index / 64; return (16...47).contains(x) && (16...47).contains(y) })
         _ = await vm.analyzeM04Candidate(M04CandidateFrameInput(sessionID: "auto", captureID: "candidate", sequence: 0, monotonicTimestamp: 10, frame: frame))
         var poses = PoseBuffer(); poses.append(PoseSample(timestamp: 10, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
         let record = AcceptedCaptureRecord(captureID: "auto-capture", sequence: 0, sourceFilename: "auto-capture.heic", metadataFilename: "auto-capture.json")
@@ -2601,7 +2607,9 @@ final class PackLabCaptureTests: XCTestCase {
         let complete = CompletionDiagnostics(rings: RingCoverageEvaluation(snapshot: completeSnapshot, policy: policy))
         XCTAssertEqual(complete.status, .complete)
         XCTAssertEqual(complete.score, 1)
-        let unavailable = CompletionDiagnostics(rings: RingCoverageEvaluation(snapshot: OrbitCoverageModel().snapshot()))
+        let unavailableCoverage = OrbitCoverageModel(configuration: OrbitCoverageConfiguration(rings: [])).snapshot()
+        let unavailableRings = RingCoverageEvaluation(snapshot: unavailableCoverage, policy: StandardBottleCoveragePolicy(requirements: []))
+        let unavailable = CompletionDiagnostics(rings: unavailableRings)
         XCTAssertEqual(unavailable.status, .unavailable)
         XCTAssertEqual(unavailable.score, 0)
     }
@@ -3077,7 +3085,8 @@ final class PackLabCaptureTests: XCTestCase {
 
     func testPL0118PreflightIsTableDrivenAcrossPresetsAndHealthConditions() {
         for id in PackagingPresetID.allCases {
-            let result = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: PackagingPresetCatalog.preset(for: id), cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerVerified, preparationAcknowledged: true, environmentGuidanceAcknowledged: true))
+            let treatment: TransparentTreatmentMode = id == .transparent ? .temporaryMatte : .none
+            let result = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: PackagingPresetCatalog.preset(for: id), cameraReady: true, sessionReady: true, storageAvailable: true, calibration: .ownerVerified, preparationAcknowledged: true, environmentGuidanceAcknowledged: true, transparentTreatment: treatment))
             XCTAssertTrue(result.canStart, id.rawValue)
             XCTAssertTrue(result.issues.contains { $0.severity == .information && $0.code == "environment_guidance_acknowledged" })
             if id == .transparent { XCTAssertTrue(result.issues.contains { $0.code == "transparent_reconstruction_unproven" && $0.severity == .warning }) }

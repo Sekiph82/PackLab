@@ -141,6 +141,11 @@ public actor ScanSessionStore {
             try writeMarker(SessionTransactionMarker(captureID: record.captureID, sourceFilename: sourceName, recordFilename: recordName, stage: .committed), to: markerURL)
             try fileManager.removeItem(at: transaction)
         } catch {
+            // Before the first marker, no accepted file has been committed and
+            // recovery has no journal to read. Remove only this unmarked txn.
+            if !fileManager.fileExists(atPath: markerURL.path) {
+                try? fileManager.removeItem(at: transaction)
+            }
             throw error
         }
     }
@@ -386,13 +391,16 @@ public actor SessionGalleryStore {
     private func mutate(files: [URL], operation: () throws -> Void) throws {
         let stateURL = layout.state
         let auditURL = layout.galleryAudit
-        var backup: [String: Data?] = [:]
-        for url in files + [stateURL, auditURL] { backup[url.path] = try? Data(contentsOf: url) }
+        let affectedPaths = Set((files + [stateURL, auditURL]).map(\.path))
+        var backup: [String: Data] = [:]
+        for url in files + [stateURL, auditURL] {
+            if let data = try? Data(contentsOf: url) { backup[url.path] = data }
+        }
         do { try operation() }
         catch {
-            for (path, data) in backup {
+            for path in affectedPaths {
                 let url = URL(fileURLWithPath: path)
-                if let data { try? data.write(to: url, options: .atomic) }
+                if let data = backup[path] { try? data.write(to: url, options: .atomic) }
                 else { try? fileManager.removeItem(at: url) }
             }
             throw error
@@ -654,13 +662,13 @@ public struct SessionDeletionPlan: Sendable, Equatable {
     public init(root: URL, candidate: SessionResumeCandidate) { self.root = root.standardizedFileURL; self.session = root.appendingPathComponent(candidate.id, isDirectory: true).standardizedFileURL; self.sessionID = candidate.id; self.authoritative = true; self.candidateDisposition = candidate.disposition }
     public func validate(confirmed: Bool, fileManager: FileManager = .default) throws {
         guard confirmed else { throw DeletionError.confirmationRequired }
-        guard authoritative else { throw DeletionError.nonAuthoritative }
-        guard candidateDisposition == .resumable else { throw DeletionError.outsideRoot }
         let rootPath = root.resolvingSymlinksInPath().path
         let sessionPath = session.resolvingSymlinksInPath().path
         guard sessionPath != rootPath, sessionPath.hasPrefix(rootPath + "/") || sessionPath.hasPrefix(rootPath + "\\") else { throw DeletionError.outsideRoot }
-        guard sessionPath == session.path else { throw DeletionError.symlinkEscape }
         guard !sessionID.isEmpty, sessionID == session.lastPathComponent, sessionID.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { throw DeletionError.outsideRoot }
+        guard authoritative else { throw DeletionError.nonAuthoritative }
+        guard candidateDisposition == .resumable else { throw DeletionError.outsideRoot }
+        guard sessionPath == session.path else { throw DeletionError.symlinkEscape }
         if let enumerator = fileManager.enumerator(at: session, includingPropertiesForKeys: [.isSymbolicLinkKey], options: []) {
             for case let url as URL in enumerator where (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true { throw DeletionError.symlinkEscape }
         }

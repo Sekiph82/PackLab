@@ -699,7 +699,7 @@ public actor AcceptedPhotoMetadataStore {
 
     public init(sourceRoot: URL, metadataURL: URL, fileManager: FileManager = .default) {
         self.sourceRoot = sourceRoot
-        self.sourceStore = OriginalSourceStore(root: sourceRoot)
+        self.sourceStore = OriginalSourceStore(root: sourceRoot, fileManager: fileManager)
         self.metadataURL = metadataURL
         self.fileManager = fileManager
     }
@@ -1017,7 +1017,9 @@ public struct FocusPolicy: Sendable, Equatable {
     }
     public mutating func stabilize() -> FocusState { if state == .focusing { state = .continuous }; return state }
     public mutating func lock(capabilities: FocusCapabilities) -> FocusState {
-        state = state == .continuous && capabilities.lock ? .locked : .failed; return state
+        guard state == .continuous, capabilities.lock else { return .failed }
+        state = .locked
+        return state
     }
 }
 

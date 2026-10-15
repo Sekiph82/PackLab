@@ -634,7 +634,12 @@ public enum CoveragePoseMapper {
         let radius = sqrt(x * x + z * z)
         guard radius > 1e-9 else { return CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: "pose_radius_unavailable") }
         let azimuth = (atan2(x, -z) * 180 / Double.pi + 360).truncatingRemainder(dividingBy: 360)
-        let elevation = atan2(y, radius) * 180 / Double.pi
+        let rawElevation = atan2(y, radius) * 180 / Double.pi
+        // A pose synthesized from tan(boundary) can round a few ulps below its
+        // configured edge. Snap only machine-noise-sized deltas so half-open
+        // ring boundaries remain deterministic without swallowing real neighbors.
+        let boundaries = configuration.rings.flatMap { [$0.minimumElevation, $0.maximumElevation] }
+        let elevation = boundaries.first(where: { abs(rawElevation - $0) <= 1e-10 }) ?? rawElevation
         guard let ring = configuration.rings.first(where: { elevation >= $0.minimumElevation && elevation < $0.maximumElevation }) else { return CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: azimuth, elevationDegrees: elevation, status: "elevation_out_of_range") }
         let index = min(configuration.azimuthBinCount - 1, max(0, Int(azimuth / 360 * Double(configuration.azimuthBinCount))))
         return CoveragePoseObservation(captureID: captureID, sector: CoverageSector(ringID: ring.id, azimuthIndex: index), azimuthDegrees: azimuth, elevationDegrees: elevation, status: "available")
@@ -751,7 +756,7 @@ public actor GuidedAutoCaptureService {
         let decision = controller.begin(input)
         guard decision.allowed else { return (decision, nil) }
         let result = await stillCapture.capture(captureID: captureID)
-        if case .accepted(let still) = result { controller.complete(success: true, monotonicTimestamp: still.monotonicTimestamp ?? input.monotonicTimestamp) }
+        if case .accepted = result { controller.complete(success: true, monotonicTimestamp: input.monotonicTimestamp) }
         else { controller.resetAfterRejectedCandidate() }
         return (decision, result)
     }
@@ -804,7 +809,9 @@ public enum NearDuplicateDetector {
             let distance = sqrt(squaredDistances.reduce(0, +))
             let elevationDelta = abs((candidateObservation.elevationDegrees ?? 0) - (previousObservation.elevationDegrees ?? 0))
             let signatureMatch = signaturesMatch(candidate.visualSignature, previous.visualSignature, maximumDistance: policy.maximumSignatureDistance)
-            if candidateObservation.sector != nil, candidateObservation.sector == previousObservation.sector, (distance <= policy.maximumTranslationMeters && elevationDelta <= policy.maximumElevationDifference) || signatureMatch {
+            let withinTranslation = distance <= policy.maximumTranslationMeters + 1e-10
+            let withinElevation = elevationDelta <= policy.maximumElevationDifference + 1e-10
+            if candidateObservation.sector != nil, candidateObservation.sector == previousObservation.sector, (withinTranslation && withinElevation) || signatureMatch {
                 return DuplicateDecision(isDuplicate: true, reasonCode: "near_duplicate_candidate", matchedCaptureID: previous.captureID)
             }
         }

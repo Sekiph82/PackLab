@@ -34,6 +34,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private let trackingService: any ARTrackingService
     private let motionService: any MotionService
     private let healthMonitor: DeviceHealthMonitor
+    private let automaticallyPoll: Bool
     private let diagnostics = DiagnosticsLogger()
     private var trackingRecoveryPolicy = TrackingRecoveryPolicy(requiredStableNormalFrames: 3)
     private var updateTask: Task<Void, Never>?
@@ -48,6 +49,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var m04BaseCoverageModel = OrbitCoverageModel(configuration: OrbitCoverageConfiguration(rings: [CoverageRingDefinition(id: "base", minimumElevation: -90, maximumElevation: 90)]))
     private var m04BaseAvailability = BasePassAvailability(physicallyFeasible: false, reasonCode: "base_pass_unavailable")
     private var m04SessionLayout: SessionStorageLayout?
+    private var m04PersistenceTask: Task<Void, Never>?
     private var m04AsymmetricPolicy: AsymmetricCoveragePolicy?
     private var m04AsymmetricObservedRegions: [AsymmetricCoverageRegion: Int] = [:]
     private var m04TurntableModel: TurntableCoverageModel?
@@ -64,6 +66,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var isRunning = false
 
     init() {
+        automaticallyPoll = true
         #if targetEnvironment(simulator)
         trackingService = SimulatorARTrackingService()
         motionService = SimulatorMotionService()
@@ -82,10 +85,11 @@ final class CaptureRuntimeViewModel: ObservableObject {
         #endif
     }
 
-    init(trackingService: any ARTrackingService, motionService: any MotionService, healthMonitor: DeviceHealthMonitor) {
+    init(trackingService: any ARTrackingService, motionService: any MotionService, healthMonitor: DeviceHealthMonitor, automaticallyPoll: Bool = true) {
         self.trackingService = trackingService
         self.motionService = motionService
         self.healthMonitor = healthMonitor
+        self.automaticallyPoll = automaticallyPoll
         #if canImport(AVFoundation)
         cameraRecoveryOwner.onStateChange = { [weak self] state, message in self?.updateCameraRecovery(state: state, message: message) }
         #endif
@@ -102,10 +106,12 @@ final class CaptureRuntimeViewModel: ObservableObject {
             await self?.applyHealthUpdate(gate)
         }
         updateTask?.cancel()
-        updateTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.refresh()
-                try? await Task.sleep(nanoseconds: 100_000_000)
+        if automaticallyPoll {
+            updateTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.refresh()
+                    try? await Task.sleep(nanoseconds: 100_000_000)
+                }
             }
         }
         await refresh()
@@ -512,6 +518,14 @@ final class CaptureRuntimeViewModel: ObservableObject {
         try? await M04SessionContextStore(layout: layout).persist(context)
     }
 
+    private func scheduleM04ContextPersistence() {
+        let previous = m04PersistenceTask
+        m04PersistenceTask = Task { [weak self] in
+            await previous?.value
+            await self?.persistBasePassContext()
+        }
+    }
+
     var m04QualityGuidanceState: M04QualityGuidanceState {
         M04QualityGuidanceState(presetID: m04ActivePreset.id, consecutiveHighlightBlocks: m04ConsecutiveHighlightBlocks, triggerThreshold: m04HighlightGuidanceThreshold, guidanceActive: !m04ReflectionGuidance.isEmpty, guidance: m04ReflectionGuidance)
     }
@@ -534,7 +548,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let asymmetricMissing = m04AsymmetricCoverage?.missingRegions.map { "asymmetric_\($0.rawValue)" } ?? []
         let turntableMissing = m04TurntableCoverage?.missingSectorIndices.map { "turntable_sector_\($0)" } ?? []
         m04Completion = CompletionDiagnostics(rings: m04RingCoverage, detailPasses: Array(m04DetailEvaluations.values), base: m04BasePass, additionalMandatoryMissingAreas: asymmetricMissing + turntableMissing, additionalMandatoryAreaCount: (m04AsymmetricPolicy?.requiredRegions.count ?? 0) + (m04TurntableCoverage?.policy.expectedAngleCount ?? 0))
-        Task { await persistBasePassContext() }
+        scheduleM04ContextPersistence()
     }
 
     #if canImport(AVFoundation) && canImport(NextLevel)

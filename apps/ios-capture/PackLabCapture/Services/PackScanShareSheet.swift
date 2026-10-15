@@ -30,15 +30,19 @@ public struct PackScanShareCoordinator: Sendable {
         guard finalization?.state == .exported, finalization?.packagePath == url.path else {
             throw PackScanShareError.notFinalized
         }
-        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
-        guard values.isRegularFile == true else { throw PackScanShareError.missingPackage }
+        guard FileManager.default.fileExists(atPath: url.path),
+              let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attributes[.type] as? FileAttributeType == .typeRegular else { throw PackScanShareError.missingPackage }
         guard url.pathExtension.lowercased() == "packscan" else { throw PackScanShareError.unsupportedPackage }
-        guard finalization?.packageBytes == nil || finalization?.packageBytes == values.fileSize else { throw PackScanShareError.notFinalized }
-        return FinalizedPackScanShare(packageURL: url, packageName: url.lastPathComponent, packageBytes: values.fileSize ?? 0, packageSHA256: finalization?.packageSHA256)
+        let packageBytes = attributes[.size] as? Int ?? 0
+        guard finalization?.packageBytes == nil || finalization?.packageBytes == packageBytes else { throw PackScanShareError.notFinalized }
+        return FinalizedPackScanShare(packageURL: url, packageName: url.lastPathComponent, packageBytes: packageBytes, packageSHA256: finalization?.packageSHA256)
     }
 
     public func packageStillAvailable(_ share: FinalizedPackScanShare) -> Bool {
-        guard let values = try? share.packageURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]), values.isRegularFile == true, values.fileSize == share.packageBytes else { return false }
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: share.packageURL.path),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              attributes[.size] as? Int == share.packageBytes else { return false }
         guard let expected = share.packageSHA256 else { return true }
         guard let data = try? Data(contentsOf: share.packageURL) else { return false }
         return SourceIntegrity.digest(data) == expected
