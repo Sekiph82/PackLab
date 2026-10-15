@@ -60,7 +60,7 @@ jobs:
           if ! xcrun simctl list runtimes --json | jq -e '.runtimes[] | select(.identifier == "com.apple.CoreSimulator.SimRuntime.iOS-18-0" and .isAvailable)' >/dev/null; then
             runtime_dir="$RUNNER_TEMP/ios-18.0-simulator-runtime"
             mkdir -p "$runtime_dir"
-            xcodebuild -downloadPlatform iOS -exportPath "$runtime_dir" -buildVersion 18.0
+            xcodebuild -downloadPlatform iOS -exportPath "$runtime_dir"
             runtime_image="$(find "$runtime_dir" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
             test -n "$runtime_image"
             xcodebuild -importPlatform "$runtime_image"
