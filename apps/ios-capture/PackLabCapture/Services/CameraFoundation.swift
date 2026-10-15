@@ -699,7 +699,7 @@ public actor AcceptedPhotoMetadataStore {
 
     public init(sourceRoot: URL, metadataURL: URL, fileManager: FileManager = .default) {
         self.sourceRoot = sourceRoot
-        self.sourceStore = OriginalSourceStore(root: sourceRoot, fileManager: fileManager)
+        self.sourceStore = OriginalSourceStore(root: sourceRoot)
         self.metadataURL = metadataURL
         self.fileManager = fileManager
     }
