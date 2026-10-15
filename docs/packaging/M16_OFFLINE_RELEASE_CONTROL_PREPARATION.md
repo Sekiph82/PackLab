@@ -6,7 +6,7 @@
 
 | Domain | Authoritative source inspected | Observed development value | Meaning |
 | --- | --- | --- | --- |
-| `StudioVersion` | PL0350 Installer/report and release-policy references | `0.1.0` in last accepted engineering packaging | Windows Studio application; re-read actual source before locking a future release |
+| `StudioVersion` | `pyproject.toml` and `apps/windows-studio/src/packlab_studio/__init__.py` | `0.1.0` in both checked-in source declarations | Windows Studio source identity only; not a built or released application |
 | `CaptureVersion` | `apps/ios-capture/PackLabCapture.xcodeproj/project.pbxproj` and `Info.plist` | `0.1.0`; numeric app build `1` | iOS app version/build; **not** a signed/shipped binary |
 | `PackScanSchemaVersion` | `schemas/packscan/manifest.schema.json` | `1.0.0` | Canonical `.packscan` capture-container contract |
 
@@ -26,11 +26,11 @@ rights: { formal_legal_review: PENDING, factory_distribution: NOT_AUTHORIZED }
 acceptance: { pl0354_full_xctest: BLOCKED, m17: NOT_ACCEPTED, pl0368_release: DEFERRED }
 ```
 
-**Null is deliberately a failure/incompleteness marker.** A future validated generator must populate exact source/build-provenance facts and fail closed on missing required artifact hashes, source and notices, supported schema range, signing state or independent audit. Do not treat the example as a real release manifest.
+**Null is deliberately a failure/incompleteness marker.** The offline candidate-description validator accepts explicit version/source/artifact/provenance/notice/audit inputs only; it does not inspect or create a binary. A future validated generator must populate exact source/build-provenance facts and fail closed on missing required artifact hashes, source and notices, supported schema range, signing state or independent audit. Even synthetically complete validator input is preparation evidence, not a real release manifest or authorization.
 
 ## 2. Changelog policy prepared for PL-0365
 
-Use explicit, reviewed task IDs (e.g., `PL-0350`) and separately approved human summaries. Cross-check each against root `TASKS.md` and independent ChatGPT audit, never Codex `READY` alone. Reject duplicate/unknown/unaccepted IDs, incompatible release scope, unverifiable milestone acceptance and notes that expose private data. Sort by milestone/task ID into `Added`, `Changed`, `Fixed`, `Security`, `Known limitations`. Cite exact SHA and affected version domain; no arbitrary commit-message scraping. No public `CHANGELOG` publication or release tag before PL-0368 owner/M17 gate.
+Use explicit, reviewed task IDs (e.g., `PL-0350`) and summaries present in a hash-verified source fragment. Cross-check each ID against accepted checkboxes in root `TASKS.md` and a cited `AUDITED_PASS` ChatGPT audit; never use Codex `READY` alone. Reject duplicate/unknown/unaccepted IDs, source-digest mismatches, unsupported summary text, and arbitrary extra fields such as commit-message inferences. Keep private data out. Sort by milestone/task ID into `Added`, `Changed`, `Fixed`, `Security`, `Known limitations`. Cite the source fragment digest and accepted audit; no arbitrary commit-message scraping. No public `CHANGELOG` publication or release tag before PL-0368 owner/M17 gate.
 
 ## 3. PL-0366 release checklist, explicit current BLOCKED status
 
