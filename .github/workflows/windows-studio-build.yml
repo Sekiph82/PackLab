@@ -174,7 +174,7 @@ jobs:
             ${{ runner.temp }}/pl0350-retained-sdk-inspection/windows-native-runtime-policy.json
             ${{ runner.temp }}/pl0350-retained-sdk-inspection/generated-source-patch-manifest.json
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 3
 
   capacity-preflight:
     name: Measure hosted storage and build inputs
@@ -626,7 +626,7 @@ jobs:
           path: ${{ runner.temp }}/pl0350-quarantine/**
           if-no-files-found: ignore
           compression-level: 1
-          retention-days: 14
+          retention-days: 7
       - name: Seal the newly built controlled OCP runtime
         if: steps.bundle_cache_check.outputs.valid != 'true'
         shell: pwsh
@@ -1047,7 +1047,7 @@ jobs:
             build/windows-studio/PackLabStudio/windows-runtime-capabilities.json
             build/windows-studio/PackLabStudio/qt-staged-surface.json
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 3
 
       - name: Deliver exact corresponding sources and replacement evidence
         shell: pwsh

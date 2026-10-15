@@ -1,0 +1,348 @@
+name: PL-0352 Private Installer Retention Bridge
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: pl0352-private-installer-retention
+  cancel-in-progress: false
+
+jobs:
+  preserve-exact-candidate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out the pinned PL-0352 verifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Retrieve and verify the exact private source artifact
+        id: preserve
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REF: ${{ github.ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import shutil
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import zipfile
+          from datetime import datetime, timezone
+
+          from tools.packaging.pl0352_artifact_retention import (
+              ACTIVE_ARTIFACT_STORAGE_CAP_BYTES,
+              INSTALLER_BASENAME,
+              INSTALLER_BYTES,
+              INSTALLER_SHA256,
+              RETAINED_ARTIFACT_NAME,
+              SOURCE_ARCHIVE_BYTES,
+              SOURCE_ARCHIVE_SHA256,
+              SOURCE_ARTIFACT_ID,
+              SOURCE_ARTIFACT_NAME,
+              SOURCE_REVISION,
+              SOURCE_RUN_ID,
+              validate_bundle_evidence,
+              validate_installer_evidence,
+              validate_source_artifact,
+              validate_storage_and_uniqueness,
+          )
+
+          token = os.environ["GH_TOKEN"]
+          repo = os.environ["GITHUB_REPOSITORY"]
+          api = "https://api.github.com"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2026-03-10",
+          }
+
+          def get_json(url: str) -> dict:
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  return json.load(response)
+
+          if os.environ["GITHUB_REF"] != "refs/heads/main":
+              raise SystemExit("PL0352_WRONG_REF")
+          owner_repo = get_json(f"{api}/repos/{repo}")
+          if owner_repo.get("private") is not True:
+              raise SystemExit("PL0352_PUBLIC_REPOSITORY_SCOPE")
+          settings = get_json(f"{api}/repos/{repo}/actions/permissions/artifact-and-log-retention")
+          if int(settings.get("days", 0)) < 60 or int(settings.get("maximum_allowed_days", 0)) < 60:
+              raise SystemExit("PL0352_RETENTION_HORIZON_NOT_ALLOWED")
+          source = get_json(f"{api}/repos/{repo}/actions/artifacts/{SOURCE_ARTIFACT_ID}")
+          validate_source_artifact(
+              source,
+              repository_private=owner_repo["private"],
+              ref=os.environ["GITHUB_REF"],
+              now=datetime.now(timezone.utc),
+          )
+
+          active_artifacts = []
+          for page in range(1, 101):
+              page_data = get_json(
+                  f"{api}/repos/{repo}/actions/artifacts?per_page=100&page={page}"
+              )
+              active_artifacts.extend(page_data.get("artifacts", []))
+              if len(active_artifacts) >= int(page_data.get("total_count", 0)):
+                  break
+          else:
+              raise SystemExit("PL0352_ARTIFACT_INVENTORY_PAGINATION_CAP")
+
+          temp = pathlib.Path(os.environ["RUNNER_TEMP"])
+          archive = temp / "pl0352-original-installer-artifact.zip"
+          request = urllib.request.Request(
+              source["archive_download_url"], headers=headers
+          )
+          digest = hashlib.sha256()
+          byte_count = 0
+          with urllib.request.urlopen(request, timeout=120) as response, archive.open("wb") as out:
+              while chunk := response.read(8 * 1024 * 1024):
+                  out.write(chunk)
+                  digest.update(chunk)
+                  byte_count += len(chunk)
+          if byte_count != SOURCE_ARCHIVE_BYTES or digest.hexdigest() != SOURCE_ARCHIVE_SHA256:
+              raise SystemExit("PL0352_ORIGINAL_ARCHIVE_SHA_OR_SIZE_MISMATCH")
+
+          bundle_dir = temp / "pl0352-retained-candidate"
+          bundle_dir.mkdir()
+          required = {
+              INSTALLER_BASENAME,
+              "installer-metadata.json",
+              "installed-smoke-evidence.json",
+          }
+          selected: dict[str, zipfile.ZipInfo] = {}
+          with zipfile.ZipFile(archive) as source_zip:
+              for info in source_zip.infolist():
+                  basename = pathlib.PurePosixPath(info.filename).name
+                  if basename in required:
+                      if basename in selected or info.is_dir():
+                          raise SystemExit("PL0352_REQUIRED_MEMBER_DUPLICATE_OR_DIRECTORY")
+                      selected[basename] = info
+              if set(selected) != required:
+                  raise SystemExit("PL0352_REQUIRED_MEMBER_OR_NOTICE_EVIDENCE_MISSING")
+              for name, info in selected.items():
+                  with source_zip.open(info) as source_file, (bundle_dir / name).open("wb") as target_file:
+                      shutil.copyfileobj(source_file, target_file, length=8 * 1024 * 1024)
+
+          installer = bundle_dir / INSTALLER_BASENAME
+          metadata = json.loads((bundle_dir / "installer-metadata.json").read_text(encoding="utf-8"))
+          installed_smoke = json.loads((bundle_dir / "installed-smoke-evidence.json").read_text(encoding="utf-8"))
+          validate_installer_evidence(installer, metadata, installed_smoke)
+          installer_digest = hashlib.sha256()
+          with installer.open("rb") as installer_file:
+              while chunk := installer_file.read(8 * 1024 * 1024):
+                  installer_digest.update(chunk)
+          installer_hash = installer_digest.hexdigest()
+
+          docs = [
+              "coordination/sessions/M16-C001/PL-0350_ALL_REMAINING_WORK_ONE_SHOT_REPORT.md",
+              "coordination/sessions/M16-C001/PL-0351_CHATGPT_AUDIT_V01.md",
+          ]
+          notice_evidence = []
+          for relative in docs:
+              path = pathlib.Path(relative)
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit("PL0352_NOTICE_OR_PROVENANCE_EVIDENCE_MISSING")
+              notice_evidence.append({
+                  "repository_path": relative,
+                  "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+              })
+          bundle = {
+              "schema": "packlab-private-installer-retention-origin-v1",
+              "repository": repo,
+              "repository_private": True,
+              "retention_run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "retention_workflow_revision": os.environ["GITHUB_SHA"],
+              "retained_artifact_name": RETAINED_ARTIFACT_NAME,
+              "retention_days": 60,
+              "source_run_id": SOURCE_RUN_ID,
+              "source_artifact_id": SOURCE_ARTIFACT_ID,
+              "source_artifact_name": SOURCE_ARTIFACT_NAME,
+              "source_revision": SOURCE_REVISION,
+              "source_archive_bytes": SOURCE_ARCHIVE_BYTES,
+              "source_archive_sha256": SOURCE_ARCHIVE_SHA256,
+              "installer_name": INSTALLER_BASENAME,
+              "installer_bytes": INSTALLER_BYTES,
+              "installer_sha256": INSTALLER_SHA256,
+              "installed_smoke_evidence": "installed-smoke-evidence.json",
+              "notice_evidence": notice_evidence,
+              "legal_review_required": True,
+              "public_release_authorized": False,
+              "approved_for_reupload": True,
+              "active_artifact_bytes_before_upload": sum(
+                  int(item.get("size_in_bytes", 0))
+                  for item in active_artifacts if item.get("expired") is False
+              ),
+              "active_artifact_storage_cap_bytes": ACTIVE_ARTIFACT_STORAGE_CAP_BYTES,
+          }
+          validate_bundle_evidence(bundle)
+          validate_storage_and_uniqueness(
+              active_artifacts, projected_bytes=installer.stat().st_size
+          )
+          if any(item.get("name") == RETAINED_ARTIFACT_NAME for item in active_artifacts
+                 if item.get("expired") is False):
+              raise SystemExit("PL0352_DUPLICATE_REUPLOAD_FORBIDDEN")
+          (bundle_dir / "retention-origin.json").write_text(
+              json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          print(
+              f"source_artifact={SOURCE_ARTIFACT_ID} source_archive_bytes={byte_count} "
+              f"source_archive_sha256={digest.hexdigest()} source_revision={SOURCE_REVISION}"
+          )
+          print(
+              f"installer_bytes={installer.stat().st_size} installer_sha256={installer_hash} "
+              f"active_artifact_bytes_before_upload={bundle['active_artifact_bytes_before_upload']} "
+              f"projected_artifact_bytes={bundle['active_artifact_bytes_before_upload'] + installer.stat().st_size} "
+              f"artifact_storage_cap_bytes={ACTIVE_ARTIFACT_STORAGE_CAP_BYTES}"
+          )
+          print(f"bundle_directory={bundle_dir}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"bundle_directory={bundle_dir}\n")
+          PY
+
+      - name: Upload one bounded private retained candidate
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-internal-installer-candidate-pl0350-warm-452fe8934b0d56011af8c117555dd059d5c63462
+          path: ${{ steps.preserve.outputs.bundle_directory }}/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 60
+
+      - name: Verify private artifact identity, origin, and retention
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+          RUNNER_TEMP: ${{ runner.temp }}
+          RETAINED_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import urllib.request
+          import zipfile
+          from datetime import datetime, timedelta, timezone
+
+          from tools.packaging.pl0352_artifact_retention import (
+              INSTALLER_BYTES,
+              INSTALLER_SHA256,
+              RETAINED_ARTIFACT_NAME,
+              RETAINED_DAYS,
+              SOURCE_REVISION,
+          )
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}/actions/artifacts/{os.environ['RETAINED_ARTIFACT_ID']}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "X-GitHub-Api-Version": "2026-03-10",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=60) as response:
+              item = json.load(response)
+          if item.get("id") != int(os.environ["RETAINED_ARTIFACT_ID"]) or item.get("name") != RETAINED_ARTIFACT_NAME:
+              raise SystemExit("PL0352_RETAINED_ARTIFACT_IDENTITY_MISMATCH")
+          if item.get("expired") or item.get("workflow_run", {}).get("id") != int(os.environ["GITHUB_RUN_ID"]):
+              raise SystemExit("PL0352_RETAINED_ARTIFACT_RUN_OR_EXPIRY_MISMATCH")
+          if item.get("workflow_run", {}).get("head_sha") != os.environ["GITHUB_SHA"] or item.get("workflow_run", {}).get("head_branch") != "main":
+              raise SystemExit("PL0352_RETAINED_ARTIFACT_SOURCE_SCOPE_MISMATCH")
+          private_check = urllib.request.Request(
+              f"https://api.github.com/repos/{repo}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "X-GitHub-Api-Version": "2026-03-10",
+              },
+          )
+          with urllib.request.urlopen(private_check, timeout=60) as response:
+              if json.load(response).get("private") is not True:
+                  raise SystemExit("PL0352_RETAINED_REPOSITORY_NOT_PRIVATE")
+          if not item.get("digest", "").startswith("sha256:") or item.get("size_in_bytes", 0) < INSTALLER_BYTES:
+              raise SystemExit("PL0352_RETAINED_OUTER_ARCHIVE_IDENTITY_INVALID")
+          expires = datetime.fromisoformat(item["expires_at"].replace("Z", "+00:00"))
+          if expires < datetime.now(timezone.utc) + timedelta(days=RETAINED_DAYS - 2):
+              raise SystemExit("PL0352_RETAINED_EXPIRY_SHORTER_THAN_POLICY")
+          archive = pathlib.Path(os.environ["RUNNER_TEMP"]) / "pl0352-retained-readback.zip"
+          read_request = urllib.request.Request(
+              item["archive_download_url"],
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "X-GitHub-Api-Version": "2026-03-10",
+              },
+          )
+          outer_hash = hashlib.sha256()
+          outer_bytes = 0
+          with urllib.request.urlopen(read_request, timeout=120) as response, archive.open("wb") as out:
+              while chunk := response.read(8 * 1024 * 1024):
+                  out.write(chunk)
+                  outer_hash.update(chunk)
+                  outer_bytes += len(chunk)
+          if outer_bytes != item["size_in_bytes"] or f"sha256:{outer_hash.hexdigest()}" != item["digest"]:
+              raise SystemExit("PL0352_RETAINED_ARCHIVE_READBACK_SHA_OR_SIZE_MISMATCH")
+          required_members = {
+              INSTALLER_BASENAME,
+              "installer-metadata.json",
+              "installed-smoke-evidence.json",
+              "retention-origin.json",
+          }
+          found = {}
+          with zipfile.ZipFile(archive) as retained_zip:
+              for info in retained_zip.infolist():
+                  basename = pathlib.PurePosixPath(info.filename).name
+                  if basename in required_members:
+                      if basename in found or info.is_dir():
+                          raise SystemExit("PL0352_RETAINED_CONTENT_DUPLICATE_OR_DIRECTORY")
+                      found[basename] = info
+              if set(found) != required_members:
+                  raise SystemExit("PL0352_RETAINED_CONTENT_MISSING")
+              origin = json.loads(retained_zip.read(found["retention-origin.json"]))
+              if (
+                  origin.get("repository") != repo
+                  or origin.get("source_artifact_id") != 11935390977
+                  or origin.get("source_revision") != SOURCE_REVISION
+                  or origin.get("installer_sha256") != INSTALLER_SHA256
+                  or origin.get("legal_review_required") is not True
+              ):
+                  raise SystemExit("PL0352_RETAINED_ORIGIN_CHAIN_MISMATCH")
+              installer_hash = hashlib.sha256()
+              installer_bytes = 0
+              with retained_zip.open(found[INSTALLER_BASENAME]) as installer:
+                  while chunk := installer.read(8 * 1024 * 1024):
+                      installer_hash.update(chunk)
+                      installer_bytes += len(chunk)
+              if installer_bytes != INSTALLER_BYTES or installer_hash.hexdigest() != INSTALLER_SHA256:
+                  raise SystemExit("PL0352_RETAINED_INSTALLER_READBACK_SHA_OR_SIZE_MISMATCH")
+          print(
+              f"retained_artifact_id={item['id']} name={item['name']} "
+              f"size_bytes={outer_bytes} archive_digest=sha256:{outer_hash.hexdigest()} "
+              f"expires_at={item['expires_at']} retention_days={RETAINED_DAYS} "
+              f"source_revision={SOURCE_REVISION} installer_bytes={installer_bytes} "
+              f"installer_sha256={installer_hash.hexdigest()} private_read=PASS"
+          )
+          PY
