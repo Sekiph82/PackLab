@@ -132,6 +132,35 @@ jobs:
           else:
               raise SystemExit("PL0352_ARTIFACT_INVENTORY_PAGINATION_CAP")
 
+          existing = [
+              item for item in active_artifacts
+              if item.get("name") == RETAINED_ARTIFACT_NAME and item.get("expired") is False
+          ]
+          if existing:
+              if len(existing) != 1:
+                  raise SystemExit("PL0352_DUPLICATE_RETAINED_ARTIFACTS_FORBIDDEN")
+              item = existing[0]
+              run = item.get("workflow_run", {})
+              exact = (
+                  item.get("id") == 11959245441
+                  and item.get("size_in_bytes") == 877601969
+                  and item.get("digest") == "sha256:b976c7d4e48985329c8f51a68b250ff6e565930ed993b0409b9c5d561c3da4ac"
+                  and run.get("id") == 38707054365
+                  and run.get("head_sha") == "602dfed427d1f82eea17e7ce2e2faac750189570"
+                  and run.get("head_branch") == "main"
+              )
+              if not exact or datetime.fromisoformat(item["expires_at"].replace("Z", "+00:00")) <= datetime.now(timezone.utc):
+                  raise SystemExit("PL0352_EXISTING_RETAINED_ARTIFACT_IDENTITY_OR_EXPIRY_MISMATCH")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                  output.write(f"skip_upload=true\nretained_artifact_id={item['id']}\n")
+                  output.write(f"retained_origin_run_id={run['id']}\nretained_origin_sha={run['head_sha']}\n")
+              print(
+                  f"existing_retained_artifact_id={item['id']} size_bytes={item['size_in_bytes']} "
+                  f"archive_digest={item['digest']} expires_at={item['expires_at']} "
+                  "duplicate_upload=skipped"
+              )
+              raise SystemExit(0)
+
           temp = pathlib.Path(os.environ["RUNNER_TEMP"])
           archive = temp / "pl0352-original-installer-artifact.zip"
           byte_count, archive_sha = download_private_archive(source["archive_download_url"], archive)
@@ -237,6 +266,7 @@ jobs:
 
       - name: Upload one bounded private retained candidate
         id: upload
+        if: steps.preserve.outputs.skip_upload != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-internal-installer-candidate-pl0350-warm-452fe8934b0d56011af8c117555dd059d5c63462
@@ -253,7 +283,9 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SHA: ${{ github.sha }}
           RUNNER_TEMP: ${{ runner.temp }}
-          RETAINED_ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          RETAINED_ARTIFACT_ID: ${{ steps.preserve.outputs.retained_artifact_id || steps.upload.outputs.artifact-id }}
+          EXPECTED_RETENTION_RUN_ID: ${{ steps.preserve.outputs.retained_origin_run_id || github.run_id }}
+          EXPECTED_RETENTION_SHA: ${{ steps.preserve.outputs.retained_origin_sha || github.sha }}
         run: |
           python - <<'PY'
           import hashlib
@@ -268,6 +300,7 @@ jobs:
 
           from tools.packaging.pl0352_artifact_retention import (
               INSTALLER_BYTES,
+              INSTALLER_BASENAME,
               INSTALLER_SHA256,
               RETAINED_ARTIFACT_NAME,
               RETAINED_DAYS,
@@ -322,9 +355,9 @@ jobs:
               item = json.load(response)
           if item.get("id") != int(os.environ["RETAINED_ARTIFACT_ID"]) or item.get("name") != RETAINED_ARTIFACT_NAME:
               raise SystemExit("PL0352_RETAINED_ARTIFACT_IDENTITY_MISMATCH")
-          if item.get("expired") or item.get("workflow_run", {}).get("id") != int(os.environ["GITHUB_RUN_ID"]):
+          if item.get("expired") or item.get("workflow_run", {}).get("id") != int(os.environ["EXPECTED_RETENTION_RUN_ID"]):
               raise SystemExit("PL0352_RETAINED_ARTIFACT_RUN_OR_EXPIRY_MISMATCH")
-          if item.get("workflow_run", {}).get("head_sha") != os.environ["GITHUB_SHA"] or item.get("workflow_run", {}).get("head_branch") != "main":
+          if item.get("workflow_run", {}).get("head_sha") != os.environ["EXPECTED_RETENTION_SHA"] or item.get("workflow_run", {}).get("head_branch") != "main":
               raise SystemExit("PL0352_RETAINED_ARTIFACT_SOURCE_SCOPE_MISMATCH")
           private_check = urllib.request.Request(
               f"https://api.github.com/repos/{repo}",
@@ -368,6 +401,8 @@ jobs:
                   or origin.get("source_artifact_id") != 11935390977
                   or origin.get("source_revision") != SOURCE_REVISION
                   or origin.get("installer_sha256") != INSTALLER_SHA256
+                  or origin.get("retention_run_id") != int(os.environ["EXPECTED_RETENTION_RUN_ID"])
+                  or origin.get("retention_workflow_revision") != os.environ["EXPECTED_RETENTION_SHA"]
                   or origin.get("legal_review_required") is not True
               ):
                   raise SystemExit("PL0352_RETAINED_ORIGIN_CHAIN_MISMATCH")
