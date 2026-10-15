@@ -78,6 +78,7 @@ jobs:
             -derivedDataPath "$derived_data"
           package_manifest="$derived_data/SourcePackages/checkouts/NextLevel/Package.swift"
           test -f "$package_manifest"
+          chmod u+w "$package_manifest"
           python3 - "$package_manifest" <<'PY'
           from pathlib import Path
           import sys
