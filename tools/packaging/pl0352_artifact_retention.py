@@ -43,6 +43,8 @@ def validate_source_artifact(
     if artifact.get("digest") != f"sha256:{SOURCE_ARCHIVE_SHA256}":
         raise RetentionBridgeError("wrong_archive_digest")
     expires_at = artifact.get("expires_at")
+    if not isinstance(expires_at, str):
+        raise RetentionBridgeError("invalid_expiry")
     try:
         expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
     except (AttributeError, TypeError, ValueError) as exc:
