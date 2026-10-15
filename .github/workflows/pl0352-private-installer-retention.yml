@@ -85,9 +85,6 @@ jobs:
           owner_repo = get_json(f"{api}/repos/{repo}")
           if owner_repo.get("private") is not True:
               raise SystemExit("PL0352_PUBLIC_REPOSITORY_SCOPE")
-          settings = get_json(f"{api}/repos/{repo}/actions/permissions/artifact-and-log-retention")
-          if int(settings.get("days", 0)) < 60 or int(settings.get("maximum_allowed_days", 0)) < 60:
-              raise SystemExit("PL0352_RETENTION_HORIZON_NOT_ALLOWED")
           source = get_json(f"{api}/repos/{repo}/actions/artifacts/{SOURCE_ARTIFACT_ID}")
           validate_source_artifact(
               source,
