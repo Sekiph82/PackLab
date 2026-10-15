@@ -10,7 +10,7 @@
 - PL-0350 builder result: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_ALL_REMAINING_WORK_ONE_SHOT_REPORT.md
 - Owner rights/deployment decision: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0350_OWNER_INTERNAL_FACTORY_DEPLOYMENT_DECISION.md
 - Prior PL-0351 V01 requirements (maintain its QtCore native loader regression): https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0351_CODEX_PROMPT_V01.md
-- This task's matching independent audit contract V02: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0351_CHATGPT_AUDIT_CRITERIA_V02.md
+- This task's matching independent audit contract V02: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0351_CHATGPT_AUDIT_CRITERIA_V01.md
 - Existing `.github/workflows/windows-studio-build.yml`, source/build lock, installed runtime smoke seam, license/relinking notices, native prerequisite guard. Do not make changes to the frozen PL0350 source or rebuild it just to test portability.
 
 ### Exact accepted binary inputs. NO MIXUP.
