@@ -151,8 +151,9 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(try object(TransferControlMessage(action: "cancel", transferID: "transfer-1"))["message"] as? String, "cancel")
         XCTAssertEqual(try object(TransferControlMessage(action: "resume", transferID: "transfer-1"))["message"] as? String, "resume")
         XCTAssertEqual(try object(TransferCompletionAcknowledgement(transferID: "transfer-1", packageSHA256: digest, verified: true, authenticated: true, state: "complete"))["verified"] as? Bool, true)
-        let error = try object(TransferErrorEnvelope(errorCode: "unpaired", error: "authorization is required"))
-        XCTAssertEqual(error["error_code"] as? String, "unpaired")
+        let errorData = Data("{\"message\":\"error\",\"protocol\":\"packlab-transfer\",\"protocol_version\":\"1.0.0\",\"error_code\":\"unpaired\",\"error\":\"authorization is required\"}".utf8)
+        let error = try JSONDecoder().decode(TransferErrorEnvelope.self, from: errorData)
+        XCTAssertEqual(error.errorCode, "unpaired")
     }
 
     func testPL0121SwiftConsumesEveryObjectFromTheBundledGoldenFixture() throws {
@@ -203,10 +204,12 @@ final class PackLabCaptureTests: XCTestCase {
         vm.prepare(package: share)
         vm.pair(receiverIdentity: "receiver", transferID: "transfer", packageSHA256: String(repeating: "a", count: 64))
         vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 4, totalBytes: 10, verified: false, packageSHA256: String(repeating: "a", count: 64)))
-        XCTAssertEqual(vm.state?.confirmedBytes, 4)
-        XCTAssertEqual(vm.state?.percentage, 40)
+        let confirmedState = vm.state
+        XCTAssertEqual(confirmedState?.confirmedBytes, 4)
+        XCTAssertEqual(confirmedState?.percentage, 40)
         vm.cancel()
-        XCTAssertEqual(vm.state?.phase, .cancelled)
+        let cancelledState = vm.state
+        XCTAssertEqual(cancelledState?.phase, .cancelled)
         XCTAssertTrue(vm.sourceStillAvailable())
     }
 
@@ -221,10 +224,12 @@ final class PackLabCaptureTests: XCTestCase {
         vm.pair(receiverIdentity: "receiver", transferID: "transfer", packageSHA256: digest)
         vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 1, totalBytes: 1, verified: true, packageSHA256: digest))
         vm.applyCompletion(verified: true, authenticated: false, packageSHA256: digest)
-        XCTAssertEqual(vm.state?.phase, .retryableFailure)
+        let rejectedState = vm.state
+        XCTAssertEqual(rejectedState?.phase, .retryableFailure)
         vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 1, totalBytes: 1, verified: true, packageSHA256: digest))
         vm.applyCompletion(verified: true, authenticated: true, packageSHA256: digest)
-        XCTAssertEqual(vm.state?.phase, .completed)
+        let completedState = vm.state
+        XCTAssertEqual(completedState?.phase, .completed)
     }
     func testPL0120ShareEligibilityRequiresExportedPackageAndPreservesSource() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -284,17 +289,31 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertThrowsError(try PairingOffer(data: Data("not-json".utf8)))
         var wrongVersion = try XCTUnwrap(JSONSerialization.jsonObject(with: try offer.payloadData()) as? [String: Any]); wrongVersion["protocol_version"] = "2"
         XCTAssertThrowsError(try PairingOffer(data: JSONSerialization.data(withJSONObject: wrongVersion))) { XCTAssertEqual($0 as? PairingProtocolError, .unsupportedVersion) }
-        XCTAssertTrue(await ownership.beginCapture()); XCTAssertFalse(await coordinator.beginQRScan()); await ownership.endCapture()
+        let captureStarted = await ownership.beginCapture()
+        XCTAssertTrue(captureStarted)
+        let scanWhileCapturing = await coordinator.beginQRScan()
+        XCTAssertFalse(scanWhileCapturing)
+        await ownership.endCapture()
         lifecycle.stopAllowed = false
-        XCTAssertFalse(await coordinator.beginQRScan())
+        let deniedScan = await coordinator.beginQRScan()
+        XCTAssertFalse(deniedScan)
         lifecycle.stopAllowed = true
-        XCTAssertTrue(await coordinator.beginQRScan())
-        XCTAssertEqual(await ownership.currentOwner(), .pairingScanner)
+        let beganScan = await coordinator.beginQRScan()
+        XCTAssertTrue(beganScan)
+        let scannerOwner = await ownership.currentOwner()
+        XCTAssertEqual(scannerOwner, .pairingScanner)
         await coordinator.finishQRScan()
-        XCTAssertEqual(await ownership.currentOwner(), .idle)
+        let releasedOwner = await ownership.currentOwner()
+        XCTAssertEqual(releasedOwner, .idle)
         XCTAssertEqual(lifecycle.stopCount, 2); XCTAssertEqual(lifecycle.restoreCount, 1)
         let idleLifecycle = TestProductionCameraLifecycle(); idleLifecycle.state = .idle; let idleOwnership = PairingCameraOwnership(lifecycle: idleLifecycle); let idleCoordinator = PairingCoordinator(cameraOwnership: idleOwnership, identityStore: ReceiverReconnectIdentityStore(defaults: defaults), now: { now })
-        XCTAssertTrue(await idleCoordinator.beginQRScan()); XCTAssertEqual(idleLifecycle.stopCount, 0); await idleCoordinator.finishQRScan(); XCTAssertEqual(idleLifecycle.restoreCount, 0); XCTAssertEqual(await idleOwnership.currentOwner(), .idle)
+        let idleScanStarted = await idleCoordinator.beginQRScan()
+        XCTAssertTrue(idleScanStarted)
+        XCTAssertEqual(idleLifecycle.stopCount, 0)
+        await idleCoordinator.finishQRScan()
+        XCTAssertEqual(idleLifecycle.restoreCount, 0)
+        let idleOwner = await idleOwnership.currentOwner()
+        XCTAssertEqual(idleOwner, .idle)
     }
 
     @MainActor
@@ -310,17 +329,18 @@ final class PackLabCaptureTests: XCTestCase {
         let store = SenderTransferIdentityStore(defaults: defaults)
         let vm = TransferViewModel(client: client, store: store)
         await vm.startNetworkTransfer(request)
-        let saved = try XCTUnwrap(store.load()); XCTAssertEqual(saved.transferID, client.lastRequestID); XCTAssertEqual(vm.state?.phase, .retryableFailure)
-        vm.applyReceiverStatus(TransferReceiverStatus(transferID: saved.transferID, confirmedBytes: 2, totalBytes: 10, verified: false, packageSHA256: status.packageSHA256)); XCTAssertEqual(vm.state?.confirmedBytes, 4)
-        await vm.cancelNetworkTransfer(); XCTAssertEqual(vm.state?.phase, .cancelled); XCTAssertNotNil(store.load())
+        let saved = try XCTUnwrap(store.load()); XCTAssertEqual(saved.transferID, client.lastRequestID); let initialState = vm.state; XCTAssertEqual(initialState?.phase, .retryableFailure)
+        vm.applyReceiverStatus(TransferReceiverStatus(transferID: saved.transferID, confirmedBytes: 2, totalBytes: 10, verified: false, packageSHA256: status.packageSHA256)); let updatedState = vm.state; XCTAssertEqual(updatedState?.confirmedBytes, 4)
+        await vm.cancelNetworkTransfer(); let cancelledState = vm.state; XCTAssertEqual(cancelledState?.phase, .cancelled); XCTAssertNotNil(store.load())
         await vm.retryNetworkTransfer(); XCTAssertEqual(client.lastRequestID, saved.transferID); XCTAssertTrue(client.calls.contains("status:\(saved.transferID)"))
         let restoredClient = FakeProductionTransferClient(status: status)
         let restored = TransferViewModel(client: restoredClient, store: store)
         await restored.restorePersistedTransfer(request)
         XCTAssertEqual(restoredClient.lastRequestID, saved.transferID)
-        XCTAssertEqual(restored.state?.receiverIdentity, receiver.receiverInstanceID)
-        XCTAssertEqual(restored.state?.confirmedBytes, status.confirmedBytes)
-        XCTAssertEqual(restored.state?.phase, .retryableFailure)
+        let restoredState = restored.state
+        XCTAssertEqual(restoredState?.receiverIdentity, receiver.receiverInstanceID)
+        XCTAssertEqual(restoredState?.confirmedBytes, status.confirmedBytes)
+        XCTAssertEqual(restoredState?.phase, .retryableFailure)
         XCTAssertFalse(restoredClient.calls.contains { $0.hasPrefix("transfer:") && !$0.contains(saved.transferID) })
     }
 
@@ -328,8 +348,8 @@ final class PackLabCaptureTests: XCTestCase {
     func testPL0126FakeProductionClientCoversChecksumRetryTerminalFailureAndVerifiedClear() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true); let package = root.appendingPathComponent("capture.packscan"); let bytes = Data(repeating: 7, count: 4); try bytes.write(to: package); let digest = SourceIntegrity.digest(bytes)
         let receiver = ReceiverReconnectIdentity(receiverInstanceID: "receiver", host: "127.0.0.1", port: 8443, tlsCertificateFingerprint: String(repeating: "a", count: 64)); let record = SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: package.path, packageBytes: bytes.count, packageSHA256: digest); let request = TransferRequest(source: package, receiver: receiver, finalization: record); let status = TransferStatusMessage(transferID: "transfer", confirmedBytes: bytes.count, totalBytes: bytes.count, state: "verified", packageSHA256: digest, nextOffset: bytes.count)
-        let retrySuite = "PackLabPL0126Retry-\(UUID().uuidString)"; let retryDefaults = try XCTUnwrap(UserDefaults(suiteName: retrySuite)); defer { retryDefaults.removePersistentDomain(forName: retrySuite) }; let retryStore = SenderTransferIdentityStore(defaults: retryDefaults); let retryClient = FakeProductionTransferClient(status: status, acknowledgementState: "complete", acknowledgementPackageSHA256: String(repeating: "b", count: 64)); let retryVM = TransferViewModel(client: retryClient, store: retryStore); await retryVM.startNetworkTransfer(request); XCTAssertEqual(retryVM.state?.phase, .retryableFailure); XCTAssertNotNil(retryStore.load()); retryClient.acknowledgementPackageSHA256 = digest; await retryVM.retryNetworkTransfer(); XCTAssertEqual(retryVM.state?.phase, .completed); XCTAssertNil(retryStore.load())
-        let terminalSuite = "PackLabPL0126Terminal-\(UUID().uuidString)"; let terminalDefaults = try XCTUnwrap(UserDefaults(suiteName: terminalSuite)); defer { terminalDefaults.removePersistentDomain(forName: terminalSuite) }; let terminalStore = SenderTransferIdentityStore(defaults: terminalDefaults); let terminalClient = FakeProductionTransferClient(status: status, transferError: .networkFailure); let terminalVM = TransferViewModel(client: terminalClient, store: terminalStore); await terminalVM.startNetworkTransfer(request); XCTAssertEqual(terminalVM.state?.phase, .terminalFailure); XCTAssertNotNil(terminalStore.load())
+        let retrySuite = "PackLabPL0126Retry-\(UUID().uuidString)"; let retryDefaults = try XCTUnwrap(UserDefaults(suiteName: retrySuite)); defer { retryDefaults.removePersistentDomain(forName: retrySuite) }; let retryStore = SenderTransferIdentityStore(defaults: retryDefaults); let retryClient = FakeProductionTransferClient(status: status, acknowledgementState: "complete", acknowledgementPackageSHA256: String(repeating: "b", count: 64)); let retryVM = TransferViewModel(client: retryClient, store: retryStore); await retryVM.startNetworkTransfer(request); let retryFailureState = retryVM.state; XCTAssertEqual(retryFailureState?.phase, .retryableFailure); XCTAssertNotNil(retryStore.load()); retryClient.acknowledgementPackageSHA256 = digest; await retryVM.retryNetworkTransfer(); let retryCompletedState = retryVM.state; XCTAssertEqual(retryCompletedState?.phase, .completed); XCTAssertNil(retryStore.load())
+        let terminalSuite = "PackLabPL0126Terminal-\(UUID().uuidString)"; let terminalDefaults = try XCTUnwrap(UserDefaults(suiteName: terminalSuite)); defer { terminalDefaults.removePersistentDomain(forName: terminalSuite) }; let terminalStore = SenderTransferIdentityStore(defaults: terminalDefaults); let terminalClient = FakeProductionTransferClient(status: status, transferError: .networkFailure); let terminalVM = TransferViewModel(client: terminalClient, store: terminalStore); await terminalVM.startNetworkTransfer(request); let terminalState = terminalVM.state; XCTAssertEqual(terminalState?.phase, .terminalFailure); XCTAssertNotNil(terminalStore.load())
     }
 
     @MainActor
@@ -338,9 +358,9 @@ final class PackLabCaptureTests: XCTestCase {
         let package = root.appendingPathComponent("capture.packscan"); try Data([1, 2]).write(to: package)
         let suite = "PackLabCompletion-\(UUID().uuidString)"; let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
         let store = SenderTransferIdentityStore(defaults: defaults); try store.save(SenderTransferIdentity(transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2])), receiverInstanceID: "receiver"))
-        let vm = TransferViewModel(store: store); vm.prepare(package: FinalizedPackScanShare(packageURL: package, packageName: package.lastPathComponent, packageBytes: 2)); vm.pair(receiverIdentity: "receiver", transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2]))); vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 2, totalBytes: 2, verified: true, packageSHA256: SourceIntegrity.digest(Data([1, 2])))
-        vm.applyCompletion(TransferCompletionAcknowledgement(transferID: "other", packageSHA256: SourceIntegrity.digest(Data([1, 2])), verified: true, authenticated: true, state: "complete")); XCTAssertEqual(vm.state?.phase, .retryableFailure); XCTAssertNotNil(store.load())
-        vm.applyCompletion(TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2])), verified: true, authenticated: true, state: "receiving")); XCTAssertEqual(vm.state?.phase, .retryableFailure); XCTAssertNotNil(store.load())
+        let vm = TransferViewModel(store: store); vm.prepare(package: FinalizedPackScanShare(packageURL: package, packageName: package.lastPathComponent, packageBytes: 2)); vm.pair(receiverIdentity: "receiver", transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2]))); vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: 2, totalBytes: 2, verified: true, packageSHA256: SourceIntegrity.digest(Data([1, 2]))))
+        vm.applyCompletion(TransferCompletionAcknowledgement(transferID: "other", packageSHA256: SourceIntegrity.digest(Data([1, 2])), verified: true, authenticated: true, state: "complete")); let wrongIdentityState = vm.state; XCTAssertEqual(wrongIdentityState?.phase, .retryableFailure); XCTAssertNotNil(store.load())
+        vm.applyCompletion(TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2])), verified: true, authenticated: true, state: "receiving")); let nonterminalState = vm.state; XCTAssertEqual(nonterminalState?.phase, .retryableFailure); XCTAssertNotNil(store.load())
     }
 
     func testPL0125URLSessionProductionClientAckAndDeclaredDigestMatrix() async throws {
@@ -369,7 +389,7 @@ final class PackLabCaptureTests: XCTestCase {
         let mismatchCounter = RequestCounter(); let mismatch = client(for: good, counter: mismatchCounter); let wrongDeclaration = TransferRequest(source: package, receiver: receiver, transferID: "transfer", finalization: SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: package.path, packageBytes: bytes.count, packageSHA256: String(repeating: "c", count: 64)))
         do { _ = try await mismatch.transfer(wrongDeclaration, progress: { _ in }); XCTFail("wrong declared digest must fail before network") } catch { XCTAssertEqual(error as? URLSessionTransferError, .sourceDigestMismatch) }; XCTAssertEqual(mismatchCounter.value, 0)
 
-        let suite = "PackLabPL0125-\(UUID().uuidString)"; let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }; let store = SenderTransferIdentityStore(defaults: defaults); let vm = TransferViewModel(store: store); vm.prepare(package: FinalizedPackScanShare(packageURL: package, packageName: package.lastPathComponent, packageBytes: bytes.count)); vm.pair(receiverIdentity: receiver.receiverInstanceID, transferID: "transfer", packageSHA256: digest); vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: bytes.count, totalBytes: bytes.count, verified: true, packageSHA256: digest)); vm.applyCompletion(rejected[1]); XCTAssertEqual(vm.state?.phase, .retryableFailure); XCTAssertNotNil(store.load()); vm.applyCompletion(good); XCTAssertEqual(vm.state?.phase, .completed); XCTAssertNil(store.load())
+        let suite = "PackLabPL0125-\(UUID().uuidString)"; let defaults = try XCTUnwrap(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }; let store = SenderTransferIdentityStore(defaults: defaults); let vm = TransferViewModel(store: store); vm.prepare(package: FinalizedPackScanShare(packageURL: package, packageName: package.lastPathComponent, packageBytes: bytes.count)); vm.pair(receiverIdentity: receiver.receiverInstanceID, transferID: "transfer", packageSHA256: digest); vm.applyReceiverStatus(TransferReceiverStatus(transferID: "transfer", confirmedBytes: bytes.count, totalBytes: bytes.count, verified: true, packageSHA256: digest)); vm.applyCompletion(rejected[1]); let rejectedPhase = vm.state?.phase; XCTAssertEqual(rejectedPhase, .retryableFailure); XCTAssertNotNil(store.load()); vm.applyCompletion(good); let completedPhase = vm.state?.phase; XCTAssertEqual(completedPhase, .completed); XCTAssertNil(store.load())
     }
     func testPreviewLifecyclePolicyIsIdempotent() {
         var policy = PreviewLifecyclePolicy()
@@ -465,7 +485,8 @@ final class PackLabCaptureTests: XCTestCase {
         let store = OriginalSourceStore(root: root)
         let url = try await store.persist(record: record, bytes: bytes)
         XCTAssertEqual(try Data(contentsOf: url), bytes)
-        XCTAssertEqual(try await store.load(recordID: "capture-1"), record)
+        let loadedRecord = try await store.load(recordID: "capture-1")
+        XCTAssertEqual(loadedRecord, record)
         let repeatURL = try await store.persist(record: record, bytes: bytes)
         XCTAssertEqual(repeatURL, url)
         do {
@@ -850,7 +871,8 @@ final class PackLabCaptureTests: XCTestCase {
         let record = AcceptedCaptureRecord(captureID: "a", sequence: 0, sourceFilename: "a.heic", metadataFilename: "a.json")
         try await session.storeAcceptedCapture(source: Data([1]), record: record, metadata: Data("{}".utf8), state: try JSONEncoder().encode(PersistedSessionState(sessionID: "s1", nextSequence: 1, epoch: 0, acceptedIDs: ["a"])))
         let gallery = SessionGalleryStore(layout: layout)
-        XCTAssertEqual(try await gallery.load().first?.status, "degraded")
+        let degradedEntries = try await gallery.load()
+        XCTAssertEqual(degradedEntries.first?.status, "degraded")
         let replacement = AcceptedCaptureRecord(captureID: "b", sequence: 1, sourceFilename: "b.heic", metadataFilename: "b.json")
         try await gallery.retake(replacing: "a", source: Data([2]), record: replacement, metadata: Data("{}".utf8))
         try await gallery.delete(id: "b", confirmed: true)
@@ -1119,8 +1141,10 @@ final class PackLabCaptureTests: XCTestCase {
         model.signal(.runtimeError)
         XCTAssertNil(model.inFlightCaptureID)
         XCTAssertEqual(model.machine.state, .restarting)
-        XCTAssertEqual(model.machine.apply(.restartFailed), .restarting)
-        XCTAssertEqual(model.machine.apply(.restartFailed), .failed)
+        model.signal(.restartFailed)
+        XCTAssertEqual(model.machine.state, .restarting)
+        model.signal(.restartFailed)
+        XCTAssertEqual(model.machine.state, .failed)
     }
 
     func testPL0078HealthMonitorGateIsTheCaptureAdmissionBoundary() {
@@ -1650,7 +1674,7 @@ final class PackLabCaptureTests: XCTestCase {
         let unknown = Data("{\"sessionID\":\"s\",\"state\":\"unknown\"}".utf8); XCTAssertNil(try? JSONDecoder().decode(SessionFinalizationRecord.self, from: unknown))
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; let sessionRoot = root.appendingPathComponent("real"); try FileManager.default.createDirectory(at: sessionRoot.appendingPathComponent("previews"), withIntermediateDirectories: true); try Data([1]).write(to: sessionRoot.appendingPathComponent("previews/preview.jpg")); try JSONEncoder().encode(NewScanDraft(sessionID: "real", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: sessionRoot.appendingPathComponent("metadata.json")); try JSONEncoder().encode(SessionFinalizationRecord(sessionID: "real", state: .inProgress)).write(to: sessionRoot.appendingPathComponent("finalization.json"))
         let metadata = try JSONEncoder().encode(PackScanPhotoMetadataDocument(photos: [PackScanPhotoMetadataWire(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: PackScanOrientation(value: .unknown, source: .unknown), focalLengthMM: PackScanNumericMeasurement(status: .unavailable), exposure: PackScanNumericMeasurement(status: .unavailable), iso: PackScanISOMeasurement(status: .unavailable), whiteBalanceKelvin: PackScanNumericMeasurement(status: .unavailable))])); let image = Data([1]); let payloads = ["metadata/photos.json": metadata, "images/p.heic": image]; let manifest = try JSONSerialization.data(withJSONObject: ["schema_version": "1.0.0", "capture_id": "real", "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization], "payloads": [["path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": metadata.count, "sha256": SourceIntegrity.digest(metadata)], ["path": "images/p.heic", "kind": "image", "required": true, "authority": "source", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)]]]); let destination = root.appendingPathComponent("real.packscan"); try SessionFinalizer().finalize(FinalizationInput(manifest: manifest, payloads: payloads, destination: destination, sessionRoot: sessionRoot)); let history = await LocalScanHistoryStore(root: root).load(); XCTAssertEqual(history.first?.exportState, "exported"); XCTAssertEqual(history.first?.degradedReason, nil); XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
-        let corruptRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: corruptRoot) }; let corruptSession = corruptRoot.appendingPathComponent("corrupt"); try FileManager.default.createDirectory(at: corruptSession.appendingPathComponent("previews"), withIntermediateDirectories: true); try Data([1]).write(to: corruptSession.appendingPathComponent("previews/preview.jpg")); try JSONEncoder().encode(NewScanDraft(sessionID: "corrupt", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: corruptSession.appendingPathComponent("metadata.json")); try Data("{\"state\":\"unknown\"}".utf8).write(to: corruptSession.appendingPathComponent("finalization.json")); XCTAssertEqual((await LocalScanHistoryStore(root: corruptRoot).load()).first?.degradedReason, "corrupt_finalization")
+        let corruptRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: corruptRoot) }; let corruptSession = corruptRoot.appendingPathComponent("corrupt"); try FileManager.default.createDirectory(at: corruptSession.appendingPathComponent("previews"), withIntermediateDirectories: true); try Data([1]).write(to: corruptSession.appendingPathComponent("previews/preview.jpg")); try JSONEncoder().encode(NewScanDraft(sessionID: "corrupt", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)).write(to: corruptSession.appendingPathComponent("metadata.json")); try Data("{\"state\":\"unknown\"}".utf8).write(to: corruptSession.appendingPathComponent("finalization.json")); let corruptHistory = await LocalScanHistoryStore(root: corruptRoot).load(); XCTAssertEqual(corruptHistory.first?.degradedReason, "corrupt_finalization")
     }
 
     func testPL0119ProductionFinalizeActionUsesCanonicalAcceptedSessionAndLeavesMissingAuthorityUnexported() async throws {
@@ -1663,9 +1687,9 @@ final class PackLabCaptureTests: XCTestCase {
         try await store.storeAcceptedCapture(source: Data([1, 2, 3]), record: record, metadata: recordData, state: try JSONEncoder().encode(PersistedSessionState(sessionID: "active", nextSequence: 1, epoch: 0, acceptedIDs: ["p"])))
         try FileManager.default.createDirectory(at: layout.photoMetadata.deletingLastPathComponent(), withIntermediateDirectories: true); try photoMetadata().write(to: layout.photoMetadata); try Data([1]).write(to: layout.previews.appendingPathComponent("p-thumbnail.jpg"))
         let destination = root.appendingPathComponent("exports/active.packscan"); let finalization = try await ProductionScanFinalizeAction(root: root).finalize(sessionID: "active", destination: destination)
-        XCTAssertEqual(finalization.state, .exported); XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path)); XCTAssertEqual((await LocalScanHistoryStore(root: root).load()).first?.exportState, "exported"); XCTAssertNoThrow(try PackScanShareCoordinator().eligiblePackage(at: destination, finalization: finalization))
+        XCTAssertEqual(finalization.state, .exported); XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path)); let exportedHistory = await LocalScanHistoryStore(root: root).load(); XCTAssertEqual(exportedHistory.first?.exportState, "exported"); XCTAssertNoThrow(try PackScanShareCoordinator().eligiblePackage(at: destination, finalization: finalization))
 
-        let missingRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: missingRoot) }; let missingLayout = SessionStorageLayout(root: missingRoot, sessionID: "missing"); let missingStore = ScanSessionStore(layout: missingLayout); try await missingStore.create(NewScanDraft(sessionID: "missing", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); try await missingStore.storeAcceptedCapture(source: Data([1]), record: record, metadata: recordData, state: try JSONEncoder().encode(PersistedSessionState(sessionID: "missing", nextSequence: 1, epoch: 0, acceptedIDs: ["p"]))); try Data([1]).write(to: missingLayout.previews.appendingPathComponent("p-thumbnail.jpg")); let missingDestination = missingRoot.appendingPathComponent("exports/missing.packscan"); do { _ = try await ProductionScanFinalizeAction(root: missingRoot).finalize(sessionID: "missing", destination: missingDestination); XCTFail("missing photo metadata must not export") } catch { }; XCTAssertFalse(FileManager.default.fileExists(atPath: missingDestination.path)); XCTAssertEqual((await LocalScanHistoryStore(root: missingRoot).load()).first?.exportState, "in_progress")
+        let missingRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: missingRoot) }; let missingLayout = SessionStorageLayout(root: missingRoot, sessionID: "missing"); let missingStore = ScanSessionStore(layout: missingLayout); try await missingStore.create(NewScanDraft(sessionID: "missing", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); try await missingStore.storeAcceptedCapture(source: Data([1]), record: record, metadata: recordData, state: try JSONEncoder().encode(PersistedSessionState(sessionID: "missing", nextSequence: 1, epoch: 0, acceptedIDs: ["p"]))); try Data([1]).write(to: missingLayout.previews.appendingPathComponent("p-thumbnail.jpg")); let missingDestination = missingRoot.appendingPathComponent("exports/missing.packscan"); do { _ = try await ProductionScanFinalizeAction(root: missingRoot).finalize(sessionID: "missing", destination: missingDestination); XCTFail("missing photo metadata must not export") } catch { }; XCTAssertFalse(FileManager.default.fileExists(atPath: missingDestination.path)); let missingHistory = await LocalScanHistoryStore(root: missingRoot).load(); XCTAssertEqual(missingHistory.first?.exportState, "in_progress")
     }
 
     func testPL0093DeletionAPIThrowsOnPartialFailure() async throws {
@@ -1706,12 +1730,11 @@ final class PackLabCaptureTests: XCTestCase {
     }
 
     func testPL0094SharpnessFrameFixturesProduceWarnAndRejectBands() {
-        let warnPixels = (0..<48).flatMap { y in
-            (0..<48).map { x in 0.5 + 0.5 * sin(2 * Double.pi * Double(x) / 6.0) }
-        }
+        var warnPixels: [Double] = []
+        for _ in 0..<48 { for x in 0..<48 { warnPixels.append(0.5 + 0.5 * sin(2 * Double.pi * Double(x) / 6.0)) } }
         let warn = SharpnessAnalyzer.analyze(QualityImageFrame(width: 48, height: 48, luminance: warnPixels))
         let reject = SharpnessAnalyzer.analyze(QualityImageFrame(width: 48, height: 48, luminance: [Double](repeating: 0.5, count: 48 * 48)))
-        XCTAssertEqual(warn.band, .warn)
+        XCTAssertEqual(warn.band, SharpnessBand.warn)
         XCTAssertEqual(warn.reasonCode, "sharpness_warn")
         XCTAssertEqual(reject.band, .reject)
         XCTAssertEqual(reject.reasonCode, "sharpness_reject")
@@ -2788,7 +2811,8 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(outcome.decision.allowed)
         XCTAssertTrue(outcome.decision.blockingReasons.contains("camera_not_ready"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: layout.photoRecords.appendingPathComponent("blocked.json").path))
-        XCTAssertTrue((try await QualityCandidateLogStore(layout: layout).snapshot()).contains { $0.manualAudit?.blockingReasons.contains("camera_not_ready") == true })
+        let qualityLog = try await QualityCandidateLogStore(layout: layout).snapshot()
+        XCTAssertTrue(qualityLog.contains { $0.manualAudit?.blockingReasons.contains("camera_not_ready") == true })
     }
 
     func testPL0111MattePresetIsVersionedConfigDrivenAndPersisted() async throws {
