@@ -58,6 +58,10 @@ def test_pl0351_smokes_installed_app_under_sanitized_environment_and_always_unin
         "INSTALLED_CORRESPONDING_SOURCE_INCOMPLETE",
         "diagnostic_omitted_path_detected",
         "no_path_free_app_diagnostic",
+        "$expectedRevision = $env:PACKLAB_EXPECTED_SOURCE_REVISION",
+        "$expectedStudioVersion = $env:PACKLAB_STUDIO_VERSION",
+        "$env:PACKLAB_BUILD_REVISION = $expectedRevision",
+        "$env:PACKLAB_STUDIO_VERSION = $expectedStudioVersion",
         "automatic_download=none",
     ):
         assert fragment in workflow

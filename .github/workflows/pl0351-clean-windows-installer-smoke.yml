@@ -122,6 +122,8 @@ jobs:
 
           $smokeLog = Join-Path $env:RUNNER_TEMP 'pl0351-installed-smoke.log'
           $manifestPath = Join-Path $env:RUNNER_TEMP 'pl0351-runtime-capabilities.json'
+          $expectedRevision = $env:PACKLAB_EXPECTED_SOURCE_REVISION
+          $expectedStudioVersion = $env:PACKLAB_STUDIO_VERSION
           $cleanPath = "$env:SystemRoot\System32;$env:SystemRoot;$installRoot"
           $foreignNames = @('PYTHONPATH','PYTHONHOME','QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH','QML2_IMPORT_PATH','QML_IMPORT_PATH','PYSIDE_DESIGNER_PLUGINS')
           foreach ($name in $foreignNames) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
@@ -129,8 +131,8 @@ jobs:
           $env:PATH = $cleanPath
           $env:PACKLAB_BUILD_SMOKE_LOG = $smokeLog
           $env:PACKLAB_RUNTIME_CAPABILITIES_PATH = $manifestPath
-          $env:PACKLAB_BUILD_REVISION = $env:PACKLAB_EXPECTED_SOURCE_REVISION
-          $env:PACKLAB_STUDIO_VERSION = $env:PACKLAB_STUDIO_VERSION
+          $env:PACKLAB_BUILD_REVISION = $expectedRevision
+          $env:PACKLAB_STUDIO_VERSION = $expectedStudioVersion
           $env:QT_QPA_PLATFORM = 'offscreen'
           $started = [DateTimeOffset]::UtcNow
           $start = [Diagnostics.ProcessStartInfo]::new()
@@ -157,6 +159,7 @@ jobs:
               else { $safeDetail = ([regex]::Replace($candidate,'[\x00-\x1f\x7f]',' ')).Substring(0,[Math]::Min(240,$candidate.Length)) }
             }
             "installed_smoke=FAIL class=$safeType exit_code=$($process.ExitCode) detail=$safeDetail path=redacted" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            Write-Output "installed_smoke=FAIL class=$safeType exit_code=$($process.ExitCode) detail=$safeDetail path=redacted"
             throw "PL0351_INSTALLED_SMOKE_FAILED_$safeType"
           }
           if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'PL0351_CAPABILITY_MANIFEST_MISSING' }
