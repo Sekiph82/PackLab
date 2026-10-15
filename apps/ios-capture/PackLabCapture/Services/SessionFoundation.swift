@@ -207,7 +207,7 @@ public actor ScanSessionStore {
         let temporary = layout.temporary.appendingPathComponent(".\(destination.lastPathComponent).tmp-\(UUID().uuidString)")
         do {
             try data.write(to: temporary, options: .atomic)
-            if fileManager.fileExists(atPath: destination.path) { try fileManager.replaceItemAt(destination, withItemAt: temporary, backupItemName: nil, options: .usingNewMetadataOnly) }
+            if fileManager.fileExists(atPath: destination.path) { _ = try fileManager.replaceItemAt(destination, withItemAt: temporary, backupItemName: nil, options: .usingNewMetadataOnly) }
             else { try fileManager.moveItem(at: temporary, to: destination) }
         }
         catch { try? fileManager.removeItem(at: temporary); if errorIsInterruption(error) { throw SessionStorageError.interruptedWrite }; throw error }
@@ -379,8 +379,8 @@ public actor SessionGalleryStore {
         let auditTemp = layout.temporary.appendingPathComponent(".gallery-audit-\(UUID().uuidString).tmp")
         try perform("mutation.stateStage") { try stateData.write(to: stateTemp, options: .atomic) }
         try perform("mutation.auditStage") { try auditData.write(to: auditTemp, options: .atomic) }
-        if fileManager.fileExists(atPath: layout.state.path) { try perform("mutation.stateCommit") { try fileManager.replaceItemAt(layout.state, withItemAt: stateTemp, backupItemName: nil, options: .usingNewMetadataOnly) } } else { try perform("mutation.stateCommit") { try fileManager.moveItem(at: stateTemp, to: layout.state) } }
-        if fileManager.fileExists(atPath: url.path) { try perform("mutation.auditCommit") { try fileManager.replaceItemAt(url, withItemAt: auditTemp, backupItemName: nil, options: .usingNewMetadataOnly) } } else { try perform("mutation.auditCommit") { try fileManager.moveItem(at: auditTemp, to: url) } }
+        if fileManager.fileExists(atPath: layout.state.path) { try perform("mutation.stateCommit") { _ = try fileManager.replaceItemAt(layout.state, withItemAt: stateTemp, backupItemName: nil, options: .usingNewMetadataOnly) } } else { try perform("mutation.stateCommit") { try fileManager.moveItem(at: stateTemp, to: layout.state) } }
+        if fileManager.fileExists(atPath: url.path) { try perform("mutation.auditCommit") { _ = try fileManager.replaceItemAt(url, withItemAt: auditTemp, backupItemName: nil, options: .usingNewMetadataOnly) } } else { try perform("mutation.auditCommit") { try fileManager.moveItem(at: auditTemp, to: url) } }
     }
 
     private func mutate(files: [URL], operation: () throws -> Void) throws {
@@ -445,21 +445,23 @@ public actor SessionDiscoveryService {
     public init(root: URL, fileManager: FileManager = .default) { self.root = root; self.fileManager = fileManager }
     public func discover() async -> [SessionResumeCandidate] {
         guard let directories = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
-        return directories.filter { $0.hasDirectoryPath }.map { directory in
+        var candidates: [SessionResumeCandidate] = []
+        for directory in directories where directory.hasDirectoryPath {
             let id = directory.lastPathComponent
             let layout = SessionStorageLayout(root: root, sessionID: id)
             let draft = (try? Data(contentsOf: layout.metadata)).flatMap { try? JSONDecoder().decode(NewScanDraft.self, from: $0) }
-            var state = (try? Data(contentsOf: layout.state)).flatMap { try? JSONDecoder().decode(PersistedSessionState.self, from: $0) }
-            let sourceIDs = Set((try? fileManager.contentsOfDirectory(at: layout.images, includingPropertiesForKeys: nil).map { $0.deletingPathExtension().lastPathComponent }) ?? [])
+            let decodedState = (try? Data(contentsOf: layout.state)).flatMap { try? JSONDecoder().decode(PersistedSessionState.self, from: $0) }
+            var state = decodedState
             let disposition: ResumeDisposition
-            if let state {
+            if state != nil {
                 do {
                     let reopened = try await ScanSessionStore(layout: layout).reopen(requiredSourceIDs: [])
                     switch reopened { case .resumable(let authoritative): state = authoritative; disposition = .resumable; case .blocked(let reason): disposition = .blocked(reason) }
                 } catch { disposition = .blocked("corrupt_transaction") }
             } else { disposition = .blocked("missing_state") }
-            return SessionResumeCandidate(id: id, draft: draft, disposition: disposition, state: state)
-        }.sorted { $0.id < $1.id }
+            candidates.append(SessionResumeCandidate(id: id, draft: draft, disposition: disposition, state: state))
+        }
+        return candidates.sorted { $0.id < $1.id }
     }
 }
 
@@ -493,10 +495,10 @@ public struct CanonicalFinalizationSource: Sendable {
     }
     public func input(manifest: Data, payloads: [String: Data], destination: URL) throws -> FinalizationInput {
         guard !records.isEmpty else { throw FinalizationError.invalidManifest }
-        guard records.allSatisfy { record in
+        guard records.allSatisfy({ record in
             guard let source = immutableSourceBytes[record.sourceFilename], let metadata = immutableSourceBytes[record.metadataFilename] else { return false }
             return payloads.values.contains(source) && payloads.values.contains(metadata)
-        } else { throw FinalizationError.invalidMetadataBinding }
+        }) else { throw FinalizationError.invalidMetadataBinding }
         return FinalizationInput(manifest: manifest, payloads: payloads, destination: destination, sessionRoot: sessionRoot)
     }
 }
@@ -654,8 +656,8 @@ public struct SessionDeletionPlan: Sendable, Equatable {
         guard confirmed else { throw DeletionError.confirmationRequired }
         guard authoritative else { throw DeletionError.nonAuthoritative }
         guard candidateDisposition == .resumable else { throw DeletionError.outsideRoot }
-        let rootPath = root.resolvingSymlinksInPath.path
-        let sessionPath = session.resolvingSymlinksInPath.path
+        let rootPath = root.resolvingSymlinksInPath().path
+        let sessionPath = session.resolvingSymlinksInPath().path
         guard sessionPath != rootPath, sessionPath.hasPrefix(rootPath + "/") || sessionPath.hasPrefix(rootPath + "\\") else { throw DeletionError.outsideRoot }
         guard sessionPath == session.path else { throw DeletionError.symlinkEscape }
         guard !sessionID.isEmpty, sessionID == session.lastPathComponent, sessionID.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { throw DeletionError.outsideRoot }
@@ -779,7 +781,7 @@ public struct AcceptedFrameGalleryView: View {
             HStack {
                 if let previewPath = entry.previewPath, FileManager.default.fileExists(atPath: previewPath), let image = UIImage(contentsOfFile: previewPath) { Image(uiImage: image).resizable().scaledToFit().frame(width: 64, height: 64) }
                 else { Image(systemName: "photo.badge.exclamationmark").frame(width: 64, height: 64) }
-                VStack(alignment: .leading) { Text(entry.id); Text(entry.status).font(.caption).foregroundStyle(entry.status == "accepted" ? .secondary : .orange) }
+                VStack(alignment: .leading) { Text(entry.id); Text(entry.status).font(.caption).foregroundStyle(entry.status == "accepted" ? Color.secondary : Color.orange) }
                 Spacer()
                 Button("Retake") {
                     guard let onRetake else { message = "Retake is unavailable for \(entry.id)."; return }
@@ -793,7 +795,7 @@ public struct AcceptedFrameGalleryView: View {
                 }
                 Button("Delete", role: .destructive) { deleteTarget = entry }
             }
-        }.overlay { if let message { Text(message).foregroundStyle(.red) } }.confirmationDialog("Delete this accepted frame?", item: $deleteTarget) { entry in
+        }.overlay { if let message { Text(message).foregroundStyle(.red) } }.confirmationDialog("Delete this accepted frame?", isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }), titleVisibility: .visible, presenting: deleteTarget) { entry in
             Button("Delete \(entry.id)", role: .destructive) { Task { do { try await store.delete(id: entry.id, confirmed: true); entries = try await store.load() } catch { message = "Delete failed; no state was accepted." } } }
         }.task { do { entries = try await store.load() } catch { message = "Gallery data is unavailable." } }
             .navigationTitle("Accepted Frames")

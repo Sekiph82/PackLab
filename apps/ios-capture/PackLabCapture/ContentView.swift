@@ -130,7 +130,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     func refresh() async {
         guard isRunning else { return }
         let raw = await trackingService.snapshot()
-        trackingRecoveryPolicy.update(state: raw.quality, limitation: raw.limitation)
+        _ = trackingRecoveryPolicy.update(state: raw.quality, limitation: raw.limitation)
         trackingDiagnostics = trackingRecoveryPolicy.diagnostics
         tracking = trackingRecoveryPolicy.snapshot
         pose = await trackingService.latestPose()

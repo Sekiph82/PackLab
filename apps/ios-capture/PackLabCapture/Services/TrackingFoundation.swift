@@ -173,7 +173,15 @@ public struct CoordinateTransform: Codable, Sendable, Equatable {
     }
     public func inverted() throws -> CoordinateTransform {
         guard isFinite else { throw CoordinateTransformError.invalidShapeOrValue }
-        var a = (0..<4).map { row in (0..<8).map { column in column < 4 ? values[row * 4 + column] : (column - 4 == row ? 1.0 : 0.0) } }
+        var a: [[Double]] = []
+        for row in 0..<4 {
+            var augmentedRow: [Double] = []
+            for column in 0..<8 {
+                if column < 4 { augmentedRow.append(values[row * 4 + column]) }
+                else { augmentedRow.append(column - 4 == row ? 1.0 : 0.0) }
+            }
+            a.append(augmentedRow)
+        }
         for pivot in 0..<4 {
             guard let row = (pivot..<4).max(by: { abs(a[$0][pivot]) < abs(a[$1][pivot]) }), abs(a[row][pivot]) > 1e-12 else { throw CoordinateTransformError.singular }
             a.swapAt(pivot, row)
@@ -184,7 +192,9 @@ public struct CoordinateTransform: Codable, Sendable, Equatable {
                 for column in 0..<8 { a[rowIndex][column] -= factor * a[pivot][column] }
             }
         }
-        return CoordinateTransform(values: (0..<4).flatMap { row in (0..<4).map { a[row][$0 + 4] } })
+        var inverse: [Double] = []
+        for row in 0..<4 { for column in 0..<4 { inverse.append(a[row][column + 4]) } }
+        return CoordinateTransform(values: inverse)
     }
     public static func translation(x: Double, y: Double, z: Double) -> CoordinateTransform { CoordinateTransform(values: [1,0,0,x, 0,1,0,y, 0,0,1,z, 0,0,0,1]) }
     public static func rotationX(_ radians: Double) -> CoordinateTransform { let c = cos(radians), s = sin(radians); return CoordinateTransform(values: [1,0,0,0, 0,c,-s,0, 0,s,c,0, 0,0,0,1]) }

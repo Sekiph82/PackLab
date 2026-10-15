@@ -441,7 +441,7 @@ public struct OriginalSourceRecord: Codable, Sendable, Equatable {
 
     public static func fromSource(captureID: String, filename: String, dimensions: CaptureDimensions, orientation: String, bytes: Data) throws -> OriginalSourceRecord {
         if let decoded = SourceMetadataExtractor.decodedDimensions(from: bytes), decoded != dimensions { throw SourceMetadataError.dimensionMismatch }
-        OriginalSourceRecord(captureID: captureID, filename: filename, dimensions: dimensions, orientation: orientation, sha256: SourceIntegrity.digest(bytes), metadataBytes: try SourceMetadataExtractor.extract(from: bytes))
+        return OriginalSourceRecord(captureID: captureID, filename: filename, dimensions: dimensions, orientation: orientation, sha256: SourceIntegrity.digest(bytes), metadataBytes: try SourceMetadataExtractor.extract(from: bytes))
     }
 }
 
@@ -723,7 +723,7 @@ public actor AcceptedPhotoMetadataStore {
             let temp = metadataURL.deletingLastPathComponent().appendingPathComponent(".photos-\(UUID().uuidString).tmp")
             do {
                 try encoder.encode(document).write(to: temp, options: .atomic)
-                if fileManager.fileExists(atPath: metadataURL.path) { try fileManager.replaceItemAt(metadataURL, withItemAt: temp, backupItemName: nil, options: .usingNewMetadataOnly) }
+                if fileManager.fileExists(atPath: metadataURL.path) { _ = try fileManager.replaceItemAt(metadataURL, withItemAt: temp, backupItemName: nil, options: .usingNewMetadataOnly) }
                 else { try fileManager.moveItem(at: temp, to: metadataURL) }
                 try? fileManager.removeItem(at: markerURL)
             } catch {
@@ -998,10 +998,10 @@ public struct PhysicalDeviceHealthProvider: DeviceHealthProvider {
         @unknown default: thermal = .unavailable
         }
         let capacity = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage
-        let device = UIDevice.current
-        device.isBatteryMonitoringEnabled = true
-        let batteryAvailable = device.batteryState != .unknown && device.batteryLevel >= 0
-        return DeviceHealthSnapshot(thermal: thermal, availableStorageBytes: capacity, batteryLevel: batteryAvailable ? Double(device.batteryLevel) : nil, batteryStateAvailable: batteryAvailable)
+        // UIDevice battery APIs are main-actor isolated in current SDKs. This synchronous,
+        // Sendable provider can be queried from the health monitor actor, so report battery
+        // as unavailable instead of crossing actor isolation unsafely.
+        return DeviceHealthSnapshot(thermal: thermal, availableStorageBytes: capacity, batteryLevel: nil, batteryStateAvailable: false)
     }
 }
 #endif
@@ -1238,7 +1238,7 @@ public final class CameraDeviceConfigurationCoordinator {
 public final class AVFoundationCameraControlComposition {
     public let coordinator: CameraDeviceConfigurationCoordinator
     public let controls: CameraControlRuntimeBridge
-    public init(device: AVCaptureDevice, selectedLens: CameraLensIdentity) { self.init(driver: AVFoundationCameraDeviceControlDriver(device: device), selectedLens: selectedLens) }
+    public convenience init(device: AVCaptureDevice, selectedLens: CameraLensIdentity) { self.init(driver: AVFoundationCameraDeviceControlDriver(device: device), selectedLens: selectedLens) }
     public init(driver: any CameraDeviceControlDriver, selectedLens: CameraLensIdentity) { coordinator = CameraDeviceConfigurationCoordinator(driver: driver, selectedLens: selectedLens); controls = CameraControlRuntimeBridge(lens: selectedLens) }
     public var selectedDeviceIdentifier: String { coordinator.selectedDeviceIdentifier }
     public func configureFocus() { do { controls.setFocus(try AVFoundationFocusAdapter.configure(driver: coordinator.driver, point: nil, coordinator: coordinator)) } catch { controls.setFocus(.failed); controls.setMessage("Focus unavailable") } }
@@ -1261,7 +1261,7 @@ public final class AVFoundationCameraControlComposition {
 @MainActor
 public enum AVFoundationFocusAdapter {
     public static func configure(driver: any CameraDeviceControlDriver, point: CGPoint?, lock: Bool = false, coordinator: CameraDeviceConfigurationCoordinator) throws -> FocusState {
-        try coordinator.requireSelected(driver); guard driver.supportsContinuousFocus else { return .unavailable }; guard !lock else { return try lock(driver: driver, coordinator: coordinator) }
+        try coordinator.requireSelected(driver); guard driver.supportsContinuousFocus else { return .unavailable }; guard !lock else { return try Self.lock(driver: driver, coordinator: coordinator) }
         return try coordinator.withLockedDevice { configuredDriver in
             if let point { guard configuredDriver.supportsFocusPoint else { return .unavailable }; configuredDriver.setFocusPoint(point) }
             configuredDriver.setFocusMode(.continuousAutoFocus); return .focusing
@@ -1497,7 +1497,10 @@ public final class NextLevelPreviewViewController: UIViewController {
     }
 
     deinit {
-        if let recoveryObserverToken { recoveryOwner.removeStateObserver(recoveryObserverToken) }
+        if let recoveryObserverToken {
+            let owner = recoveryOwner
+            Task { @MainActor in owner.removeStateObserver(recoveryObserverToken) }
+        }
         nextLevel.stop()
     }
 

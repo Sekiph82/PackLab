@@ -794,13 +794,14 @@ public struct DuplicateDecision: Sendable, Equatable {
 
 public enum NearDuplicateDetector {
     public static func evaluate(candidate: DuplicateEvidence, accepted: [DuplicateEvidence], configuration: OrbitCoverageConfiguration = OrbitCoverageConfiguration(), policy: DuplicatePolicy = .provisional) -> DuplicateDecision {
-        guard let pose = pose(for: candidate), pose.tracking == .normal, pose.hasValidTransform else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
-        guard let candidatePosition = position(pose) else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
-        let candidateObservation = CoveragePoseMapper.map(captureID: candidate.captureID, pose: pose, configuration: configuration)
+        guard let candidatePose = pose(for: candidate), candidatePose.tracking == .normal, candidatePose.hasValidTransform else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
+        guard let candidatePosition = position(candidatePose) else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
+        let candidateObservation = CoveragePoseMapper.map(captureID: candidate.captureID, pose: candidatePose, configuration: configuration)
         for previous in accepted {
             guard let previousPose = pose(for: previous), previousPose.tracking == .normal, let previousPosition = position(previousPose) else { continue }
             let previousObservation = CoveragePoseMapper.map(captureID: previous.captureID, pose: previousPose, configuration: configuration)
-            let distance = sqrt(zip(candidatePosition, previousPosition).reduce(0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) })
+            let squaredDistances = zip(candidatePosition, previousPosition).map { lhs, rhs in (lhs - rhs) * (lhs - rhs) }
+            let distance = sqrt(squaredDistances.reduce(0, +))
             let elevationDelta = abs((candidateObservation.elevationDegrees ?? 0) - (previousObservation.elevationDegrees ?? 0))
             let signatureMatch = signaturesMatch(candidate.visualSignature, previous.visualSignature, maximumDistance: policy.maximumSignatureDistance)
             if candidateObservation.sector != nil, candidateObservation.sector == previousObservation.sector, (distance <= policy.maximumTranslationMeters && elevationDelta <= policy.maximumElevationDifference) || signatureMatch {
