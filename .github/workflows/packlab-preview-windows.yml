@@ -16,26 +16,61 @@ jobs:
   build-preview:
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      PYTHONPATH: ""
+      PYTHONHOME: ""
+      PYTHONUSERBASE: ""
+      PYTHONNOUSERSITE: "1"
+      VIRTUAL_ENV: ""
+      QT_PLUGIN_PATH: ""
+      QT_QPA_PLATFORM_PLUGIN_PATH: ""
+      QT_API: ""
+      PYSIDE6_PLUGIN_PATH: ""
+      QML2_IMPORT_PATH: ""
+      CONDA_PREFIX: ""
+      CONDA_DEFAULT_ENV: ""
+      CONDA_EXE: ""
+      CONDA_PYTHON_EXE: ""
+      MAMBA_ROOT_PREFIX: ""
+      PACKLAB_DATA_ROOT: ""
+      PACKLAB_SCAN_ROOT: ""
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.26"
+          enable-cache: false
+
+      - name: Guard source and developer-runtime boundaries
+        shell: pwsh
+        run: |
+          python -m tools.ci.ci_data_safety --repository $env:GITHUB_WORKSPACE --tracked --check-workflows --check-environment
+          if ($LASTEXITCODE -ne 0) { throw "CI data-safety guard rejected a tracked or ambient input." }
 
       - name: Install PyInstaller
         shell: pwsh
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install "pyinstaller>=6.10,<7"
+          uv lock --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          uv sync --locked --only-group dev --no-install-project
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build standalone preview EXE
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name PackLabStudioPreview preview/windows/packlab_preview.py
+          uv run --locked --no-sync pyinstaller --noconfirm --clean --onefile --windowed --name PackLabStudioPreview preview/windows/packlab_preview.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path "dist/PackLabStudioPreview.exe")) { throw "Preview EXE was not produced." }
 
       - name: Install Inno Setup
@@ -51,6 +86,12 @@ jobs:
           & $iscc "preview\windows\installer.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (!(Test-Path "dist-installer/PackLabStudioPreviewSetup.exe")) { throw "Installer EXE was not produced." }
+
+      - name: Guard preview artifact inputs
+        shell: pwsh
+        run: |
+          python -m tools.ci.ci_data_safety --repository $env:GITHUB_WORKSPACE --path dist/PackLabStudioPreview.exe --path dist-installer/PackLabStudioPreviewSetup.exe
+          if ($LASTEXITCODE -ne 0) { throw "CI data-safety guard rejected a preview artifact input." }
 
       - name: Upload preview artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0

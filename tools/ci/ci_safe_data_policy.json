@@ -1,0 +1,44 @@
+{
+  "approved_project_assets": {
+    "apps/windows-studio/assets/branding/PackLab.ico": {
+      "bytes": 61122,
+      "sha256": "a4a655fc92796413130633703602885671f5b1a0773d045ebc79d6bd522c7fc1"
+    },
+    "assets/calibration/a3-packlab-calibration-mat.svg": {
+      "bytes": 5208,
+      "sha256": "20f50423cdad1e0340963624671d023b04388544f70acb703c1d98fa3d8a72ad"
+    },
+    "assets/calibration/a4-packlab-calibration-mat.svg": {
+      "bytes": 5199,
+      "sha256": "db4aabcb0263a2a5b31d94c4b57391a73f2dcbd4b6a4f9b50f9be8a079260583"
+    }
+  },
+  "approved_synthetic_fixtures": {
+    "tests/fixtures/ci-safe-synthetic/synthetic-box.step": {
+      "bytes": 352,
+      "sha256": "89d9c2d298b30b557dd5933ce2c9c61b4f1057a9806c2f3d1eb3f97b2783292d"
+    },
+    "tests/fixtures/ci-safe-synthetic/synthetic-line.dxf": {
+      "bytes": 123,
+      "sha256": "ad5b137c9b24c65f620d961cc04b836beb65e4ba61d4968452b036622fbd74ed"
+    },
+    "tests/fixtures/ci-safe-synthetic/synthetic-triangle.ply": {
+      "bytes": 180,
+      "sha256": "63b20ee04952175933ef1fb50ad90c6e1cd47c3f66106e9a0a51d88941e9abd8"
+    },
+    "tests/fixtures/ci-safe-synthetic/synthetic-triangle.stl": {
+      "bytes": 154,
+      "sha256": "533fd2606f35fbc68025617c146c83a5adc6e9f1ac12652ba4aea54a4f4cec74"
+    },
+    "tests/fixtures/ci-safe-synthetic/synthetic-white.jpg": {
+      "bytes": 631,
+      "sha256": "254dd521882fd4c99511d5a8f7992fd70c2b0a6b4b1806e621f664a5a51e84b9"
+    },
+    "tests/fixtures/ci-safe-synthetic/synthetic-white.png": {
+      "bytes": 69,
+      "sha256": "e878950f8091ec010cf5cc723bdea027a8539cf7147cfea199c2f666232dcd4e"
+    }
+  },
+  "maximum_manifested_payload_bytes": 65536,
+  "schema": "packlab-ci-safe-data-v1"
+}

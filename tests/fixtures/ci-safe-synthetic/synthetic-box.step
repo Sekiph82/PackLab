@@ -1,0 +1,10 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('synthetic CI fixture'),'2;1');
+FILE_NAME('synthetic-box.step','2026-01-01T00:00:00',(),(),'PackLab synthetic fixture','PackLab','');
+FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;
+#1=APPLICATION_CONTEXT('configuration controlled 3d designs of mechanical parts and assemblies');
+ENDSEC;
+END-ISO-10303-21;

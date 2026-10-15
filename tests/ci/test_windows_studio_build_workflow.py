@@ -315,3 +315,54 @@ def test_packaged_studio_smoke_diagnostics_are_retained_on_failure() -> None:
     assert "windows-runtime-capabilities.json" in diagnostic_upload
     assert "qt-staged-surface.json" in diagnostic_upload
     assert "packlab-open3d-pe-dependencies.json" in diagnostic_upload
+
+
+def test_every_studio_build_artifact_upload_has_an_adjacent_data_guard() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    upload_blocks = workflow.split("uses: actions/upload-artifact@")
+
+    assert len(upload_blocks) == 10
+    assert workflow.count("tools/ci/scan_artifact_inputs.ps1") == 10
+    assert "Guard production Studio staged payload" in workflow
+    for preceding in upload_blocks[:-1]:
+        prior_guard = preceding.rsplit("- name: Guard ", 1)
+        assert len(prior_guard) == 2
+        assert (
+            "scan_artifact_inputs.ps1"
+            in prior_guard[1].split("uses: actions/upload-artifact@", 1)[0]
+        )
+
+
+def test_native_and_installer_workflows_remain_manual_and_do_not_change_retention() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    preview = (ROOT / ".github/workflows/packlab-preview-windows.yml").read_text(encoding="utf-8")
+    installer_smoke = (
+        ROOT / ".github/workflows/pl0351-clean-windows-installer-smoke.yml"
+    ).read_text(encoding="utf-8")
+    retention = (ROOT / ".github/workflows/pl0352-private-installer-retention.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "  push:" not in workflow and "  pull_request:" not in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "  workflow_dispatch:" in installer_smoke and "  push:" not in installer_smoke
+    assert "artifact-ids: 11959245441" in installer_smoke
+    assert "actions/upload-artifact@" not in installer_smoke
+    assert "11959245441" in retention and "skip_upload=true" in retention
+    assert "if: steps.preserve.outputs.skip_upload != 'true'" in retention
+    assert "workflow_dispatch:" in preview
+
+
+def test_remaining_manual_preflight_artifact_inputs_are_guarded_without_new_triggers() -> None:
+    workflow_dir = ROOT / ".github/workflows"
+    fmt = (workflow_dir / "pl0350-fmt-dependency-probe.yml").read_text(encoding="utf-8")
+    recovery = (workflow_dir / "pl0350-sdk-checkpoint-recovery.yml").read_text(encoding="utf-8")
+
+    for workflow in (fmt, recovery):
+        assert "  workflow_dispatch:" in workflow
+        assert "  push:" not in workflow and "  pull_request:" not in workflow
+        assert workflow.index("scan_artifact_inputs.ps1") < workflow.index(
+            "actions/upload-artifact@"
+        )
+    assert "fmt-dependency-preflight.json" in fmt
+    assert '"pl0350-r04-sdk-recovery"' in recovery

@@ -162,6 +162,12 @@ jobs:
           )
           $missing = @($required | Where-Object { !(Test-Path -LiteralPath $_ -PathType Leaf) })
           if ($missing.Count -gt 0) { throw "Hosted diagnostic evidence is incomplete: $($missing -join ', ')" }
+      - name: Guard precompile diagnostic artifact inputs
+        if: always()
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -AllowMissing -ScanText -Path (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection.json"), (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection/retained-sdk-dependency-audit.json"), (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection/fmt-dependency-probe.json"), (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection/windows-native-runtime-policy.json"), (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection/generated-source-patch-manifest.json")
+          if ($LASTEXITCODE -ne 0) { throw "Precompile evidence failed the CI data-safety guard." }
       - name: Upload noncompiling SDK and native runtime diagnostic evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
@@ -417,6 +423,11 @@ jobs:
           "producer_attempt=$($metadata.producer_run_attempt)" >> $env:GITHUB_OUTPUT
           $free = (Get-PSDrive C).Free
           @("## OCCT SDK checkpoint", "", "- Cache: `${{ steps.sdk_cache.outputs.cache-hit }}`", "- SDK files: $($metadata.file_count)", "- SDK payload bytes: $($metadata.byte_count)", "- SDK payload SHA-256: ``$($metadata.payload_sha256)``", "- C: free bytes before upload: $free", "- Source lock SHA-256: ``$($metadata.source_lock_sha256)``", "- Producer run/job: ``$env:GITHUB_RUN_ID/$env:GITHUB_JOB``") | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+      - name: Guard OCCT SDK artifact inputs
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -Path (Join-Path $env:RUNNER_TEMP "occt-sdk")
+          if ($LASTEXITCODE -ne 0) { throw "OCCT SDK artifact failed the CI data-safety guard." }
       - name: Upload validated OCCT SDK checkpoint
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
@@ -434,6 +445,11 @@ jobs:
           $bytes = (Get-Item -LiteralPath $env:PACKLAB_NATIVE_SOURCE_EVIDENCE).Length
           uv run --locked python -m tools.packaging.assert_actions_run_artifact_budget --max-bytes "${{ needs.capacity-preflight.outputs.max-run-artifact-bytes }}" --additional-bytes $bytes
           if ($LASTEXITCODE -ne 0) { throw "The source-evidence upload would exceed this run's retained-artifact budget." }
+      - name: Guard corresponding-source evidence artifact input
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -ScanText -Path (Join-Path $env:RUNNER_TEMP "windows-native-source-evidence.json")
+          if ($LASTEXITCODE -ne 0) { throw "Source evidence failed the CI data-safety guard." }
       - name: Upload corresponding-source verification evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
@@ -618,6 +634,12 @@ jobs:
           }
           & micromamba run -n packlab-ocp-bindings python @builderArgs
           if ($LASTEXITCODE -ne 0) { throw "The official generated-source OCP compile failed or exceeded its 270-minute budget." }
+      - name: Guard OCP quarantine artifact inputs
+        if: always()
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -AllowMissing -ScanText -Path (Join-Path $env:RUNNER_TEMP "pl0350-quarantine")
+          if ($LASTEXITCODE -ne 0) { throw "OCP quarantine artifact failed the CI data-safety guard." }
       - name: Upload post-link OCP quarantine before any downstream failure can discard it
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
@@ -703,6 +725,11 @@ jobs:
         with:
           path: ${{ runner.temp }}/controlled-ocp-runtime
           key: ${{ steps.controlled_cache.outputs.cache-primary-key }}
+      - name: Guard controlled OCP runtime artifact inputs
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -ScanText -Path (Join-Path $env:RUNNER_TEMP "controlled-ocp-runtime")
+          if ($LASTEXITCODE -ne 0) { throw "OCP runtime artifact failed the CI data-safety guard." }
       - name: Upload same-run verified controlled runtime
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
@@ -874,6 +901,12 @@ jobs:
           })
           if ($forbidden.Count -gt 0) { throw "Private-data/checkpoint/external-engine content was found in the staging output." }
 
+      - name: Guard production Studio staged payload
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -ScanText -Path (Join-Path $env:GITHUB_WORKSPACE "build/windows-studio/PackLabStudio")
+          if ($LASTEXITCODE -ne 0) { throw "Production Studio staging failed the CI data-safety guard." }
+
       - name: Assert staged Qt module surface
         shell: pwsh
         run: |
@@ -1034,6 +1067,12 @@ jobs:
             "- Redistribution: NOT CLEARED; PL-0350 owns native/runtime inventory and notice review. The staging output is not uploaded or a release."
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      - name: Guard packaged Studio smoke diagnostic inputs
+        if: always()
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -AllowMissing -ScanText -Path (Join-Path $env:RUNNER_TEMP "packlab-studio-smoke.log"), (Join-Path $env:RUNNER_TEMP "packlab-numpy-probe.log"), (Join-Path $env:RUNNER_TEMP "packlab-open3d-first-probe.log"), (Join-Path $env:RUNNER_TEMP "packlab-open3d-pe-dependencies.json"), (Join-Path $env:GITHUB_WORKSPACE "build/windows-studio/PackLabStudio/windows-runtime-capabilities.json"), (Join-Path $env:RUNNER_TEMP "qt-staged-surface.json")
+          if ($LASTEXITCODE -ne 0) { throw "Studio diagnostic artifact failed the CI data-safety guard." }
       - name: Upload packaged Studio smoke diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
@@ -1117,6 +1156,12 @@ jobs:
           uv run --locked python -m tools.packaging.assert_actions_run_artifact_budget --max-bytes "${{ needs.controlled-ocp-runtime.outputs.max-run-artifact-bytes }}" --additional-bytes $bytes
           if ($LASTEXITCODE -ne 0) { throw "Pre-clearance evidence would exceed this run's retained-artifact budget." }
           "byte_count=$bytes" >> $env:GITHUB_OUTPUT
+      - name: Guard pre-clearance evidence artifact inputs
+        if: always() && steps.inventory.outcome != 'skipped' && steps.preclearance_size.outcome == 'success'
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -ScanText -Path (Join-Path $env:RUNNER_TEMP "packlab-compliance-preclearance")
+          if ($LASTEXITCODE -ne 0) { throw "Pre-clearance evidence failed the CI data-safety guard." }
       - name: Upload text-only pre-clearance evidence
         if: always() && steps.inventory.outcome != 'skipped' && steps.preclearance_size.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
@@ -1187,6 +1232,12 @@ jobs:
           uv run --locked python -m tools.packaging.assert_actions_run_artifact_budget --max-bytes "${{ needs.controlled-ocp-runtime.outputs.max-run-artifact-bytes }}" --additional-bytes $bytes
           if ($LASTEXITCODE -ne 0) { throw "Final compliance evidence would exceed this run's retained-artifact budget." }
           "byte_count=$bytes" >> $env:GITHUB_OUTPUT
+      - name: Guard final compliance evidence artifact inputs
+        if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success' && steps.final_compliance_size.outcome == 'success'
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -ScanText -Path (Join-Path $env:RUNNER_TEMP "packlab-compliance-final")
+          if ($LASTEXITCODE -ne 0) { throw "Final compliance evidence failed the CI data-safety guard." }
       - name: Upload final text-only compliance evidence
         if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success' && steps.final_compliance_size.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
@@ -1284,6 +1335,12 @@ jobs:
           "installed_smoke=PASS" >> $env:GITHUB_OUTPUT
           "Installed package execution and all six no-network capability groups passed." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+      - name: Guard cleared Installer artifact inputs
+        if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success' && steps.installer.outcome == 'success' && steps.installed_smoke.outputs.installed_smoke == 'PASS'
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -ScanText -Path (Join-Path $env:RUNNER_TEMP "packlab-installer")
+          if ($LASTEXITCODE -ne 0) { throw "Installer artifact failed the CI data-safety guard." }
       - name: Upload cleared versioned installer
         if: steps.clearance.outputs.cleared == 'true' && steps.final_inventory.outcome == 'success' && steps.installer.outcome == 'success' && steps.installed_smoke.outputs.installed_smoke == 'PASS'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0

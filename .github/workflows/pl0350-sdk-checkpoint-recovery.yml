@@ -49,6 +49,11 @@ jobs:
           "Verified recovery payload bytes: $size" >> $env:GITHUB_STEP_SUMMARY
           "Original SDK artifact: $($lineage.origin_artifacts[0].id), $($lineage.origin_artifacts[0].sha256)" >> $env:GITHUB_STEP_SUMMARY
           "Original source evidence: $($lineage.origin_artifacts[1].id), $($lineage.origin_artifacts[1].sha256)" >> $env:GITHUB_STEP_SUMMARY
+      - name: Guard recovered SDK artifact inputs
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -ScanText -Path (Join-Path $env:RUNNER_TEMP "pl0350-r04-sdk-recovery")
+          if ($LASTEXITCODE -ne 0) { throw "Recovered SDK artifact failed the CI data-safety guard." }
       - name: Upload verified checkpoint with lineage
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:

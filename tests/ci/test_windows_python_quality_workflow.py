@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tools.ci.ci_data_safety import TAINTED_ENVIRONMENT
+
 WORKFLOW = (
     Path(__file__).resolve().parents[2] / ".github" / "workflows" / "windows-python-quality.yml"
 )
@@ -39,6 +41,14 @@ def test_windows_python_quality_workflow_has_locked_least_privilege_contract() -
     assert "uv run --locked mypy core apps tools" in workflow
     assert "uv run --locked pytest -q" in workflow
     assert workflow.count("steps.locked-env.outcome == 'success'") == 4
+    assert "Guard tracked data and developer-runtime boundaries" in workflow
+    assert "--tracked --check-workflows --check-environment" in workflow
+    assert workflow.index("Set up Python 3.12") < workflow.index("ci_data_safety")
+    assert workflow.index("ci_data_safety") < workflow.index("Install pinned uv")
+    assert workflow.index("ci_data_safety") < workflow.index("Unit and repository tests")
+    assert 'PYTHONNOUSERSITE: "1"' in workflow
+    for name in TAINTED_ENVIRONMENT:
+        assert f'{name}: ""' in workflow
 
     action_refs = re.findall(r"^\s+uses:\s+[^@\s]+@([^\s]+)", workflow, re.MULTILINE)
     assert len(action_refs) == 4
@@ -76,4 +86,30 @@ def test_existing_preview_workflow_remains_separate() -> None:
 
     assert preview.is_file()
     assert "Build standalone preview EXE" not in workflow
-    assert "PackLab Studio Preview Windows" in preview.read_text(encoding="utf-8")
+    preview_text = preview.read_text(encoding="utf-8")
+    assert "PackLab Studio Preview Windows" in preview_text
+    assert "actions/checkout@v4" not in preview_text
+    assert "actions/setup-python@v5" not in preview_text
+    assert 'version = "6.22.3"' in (WORKFLOW.parents[2] / "uv.lock").read_text(encoding="utf-8")
+    assert "uv lock --check" in preview_text
+    assert "uv sync --locked --only-group dev --no-install-project" in preview_text
+    assert "uv run --locked --no-sync pyinstaller" in preview_text
+    assert "python -m pip install" not in preview_text
+    assert "Guard source and developer-runtime boundaries" in preview_text
+    assert "Guard preview artifact inputs" in preview_text
+    assert 'PYTHONNOUSERSITE: "1"' in preview_text
+    for name in TAINTED_ENVIRONMENT:
+        assert f'{name}: ""' in preview_text
+    assert preview_text.index("ci_data_safety") < preview_text.index("Install PyInstaller")
+    assert (
+        "--path dist/PackLabStudioPreview.exe --path dist-installer/PackLabStudioPreviewSetup.exe"
+        in preview_text
+    )
+    assert preview_text.index("Guard preview artifact inputs") < preview_text.index(
+        "actions/upload-artifact@"
+    )
+    preview_action_refs = re.findall(r"^\s+uses:\s+[^@\s]+@([^\s]+)", preview_text, re.MULTILINE)
+    assert len(preview_action_refs) == 4
+    assert all(re.fullmatch(r"[0-9a-f]{40}", revision) for revision in preview_action_refs)
+    assert "permissions:\n  contents: read" in preview_text
+    assert "secrets." not in preview_text

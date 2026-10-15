@@ -37,6 +37,23 @@ jobs:
     timeout-minutes: 45
     env:
       UV_NO_PROGRESS: "1"
+      PYTHONPATH: ""
+      PYTHONHOME: ""
+      PYTHONUSERBASE: ""
+      PYTHONNOUSERSITE: "1"
+      VIRTUAL_ENV: ""
+      QT_PLUGIN_PATH: ""
+      QT_QPA_PLATFORM_PLUGIN_PATH: ""
+      QT_API: ""
+      PYSIDE6_PLUGIN_PATH: ""
+      QML2_IMPORT_PATH: ""
+      CONDA_PREFIX: ""
+      CONDA_DEFAULT_ENV: ""
+      CONDA_EXE: ""
+      CONDA_PYTHON_EXE: ""
+      MAMBA_ROOT_PREFIX: ""
+      PACKLAB_DATA_ROOT: ""
+      PACKLAB_SCAN_ROOT: ""
 
     steps:
       - name: Check out source
@@ -49,6 +66,12 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+
+      - name: Guard tracked data and developer-runtime boundaries
+        shell: pwsh
+        run: |
+          python -m tools.ci.ci_data_safety --repository $env:GITHUB_WORKSPACE --tracked --check-workflows --check-environment
+          if ($LASTEXITCODE -ne 0) { throw "CI data-safety guard rejected a tracked or ambient input." }
 
       - name: Install pinned uv
         uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
