@@ -17,6 +17,18 @@ public struct PairingOffer: Codable, Sendable, Equatable {
         case tlsCertificateFingerprint = "tls_certificate_fingerprint"
     }
 
+    public init(protocolName: String, protocolVersion: String, receiverInstanceID: String, host: String, port: Int, pairingID: String, pairingCode: String, expiresAt: Double, tlsCertificateFingerprint: String) {
+        self.protocolName = protocolName
+        self.protocolVersion = protocolVersion
+        self.receiverInstanceID = receiverInstanceID
+        self.host = host
+        self.port = port
+        self.pairingID = pairingID
+        self.pairingCode = pairingCode
+        self.expiresAt = expiresAt
+        self.tlsCertificateFingerprint = tlsCertificateFingerprint
+    }
+
     public init(data: Data) throws {
         self = try JSONDecoder().decode(Self.self, from: data)
         guard protocolName == PackLabTransferProtocol.name, protocolVersion == PackLabTransferProtocol.version else { throw PairingProtocolError.unsupportedVersion }
@@ -174,16 +186,16 @@ import AVFoundation
 import UIKit
 
 public struct PairingQRScannerView: UIViewControllerRepresentable {
-    public let onPayload: @Sendable (Data) -> Void
-    public init(onPayload: @escaping @Sendable (Data) -> Void) { self.onPayload = onPayload }
+    public let onPayload: @MainActor @Sendable (Data) -> Void
+    public init(onPayload: @escaping @MainActor @Sendable (Data) -> Void) { self.onPayload = onPayload }
     public func makeUIViewController(context: Context) -> PairingQRScannerController { PairingQRScannerController(onPayload: onPayload) }
     public func updateUIViewController(_ controller: PairingQRScannerController, context: Context) {}
 }
 
 public final class PairingQRScannerController: UIViewController, @preconcurrency AVCaptureMetadataOutputObjectsDelegate {
-    private let onPayload: @Sendable (Data) -> Void
+    private let onPayload: @MainActor @Sendable (Data) -> Void
     private let session = AVCaptureSession()
-    public init(onPayload: @escaping @Sendable (Data) -> Void) { self.onPayload = onPayload; super.init(nibName: nil, bundle: nil) }
+    public init(onPayload: @escaping @MainActor @Sendable (Data) -> Void) { self.onPayload = onPayload; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { return nil }
     public override func viewDidLoad() {
         super.viewDidLoad(); view.backgroundColor = .black

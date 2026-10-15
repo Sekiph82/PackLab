@@ -11,7 +11,7 @@ public final class PinnedReceiverSessionDelegate: NSObject, URLSessionDelegate {
     public func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
         guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust,
               let trust = challenge.protectionSpace.serverTrust,
-              let certificate = SecTrustGetCertificateAtIndex(trust, 0),
+              let certificate = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first,
               let data = SecCertificateCopyData(certificate) as Data?,
               let digest = Self.sha256(data),
               digest == expectedFingerprint else {
