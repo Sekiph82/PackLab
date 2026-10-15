@@ -1,0 +1,194 @@
+name: PL-0351 Clean Windows Installer Portability Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  clean-windows-install:
+    name: Exact PL-0350 warm Installer on fresh Windows 2022
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    env:
+      PACKLAB_EXPECTED_SOURCE_REVISION: 452fe8934b0d56011af8c117555dd059d5c63462
+      PACKLAB_EXPECTED_PRODUCER_RUN_ID: '38649528145'
+      PACKLAB_EXPECTED_ARTIFACT_ID: '11935390977'
+      PACKLAB_EXPECTED_ARTIFACT_NAME: packlab-windows-installer-452fe8934b0d56011af8c117555dd059d5c63462
+      PACKLAB_EXPECTED_ARCHIVE_BYTES: '877253435'
+      PACKLAB_EXPECTED_ARCHIVE_SHA256: 3e9762e4d3faf6d0363f9714bfbdcb0d0b2d9dc9e73769ebfaac757c9af23e15
+      PACKLAB_EXPECTED_INSTALLER_BYTES: '877598790'
+      PACKLAB_EXPECTED_INSTALLER_SHA256: 3e7c13c18674fbe0a4de843a2ac329055850d07901a7e33fac8a3dc742d92da6
+      PACKLAB_STUDIO_VERSION: 0.1.0
+
+    steps:
+      - name: Check out PL-0351 harness only
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate exact private producer artifact identity and host prerequisite
+        id: preflight
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'PL0351_WRONG_REF' }
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          $artifact = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts/$env:PACKLAB_EXPECTED_ARTIFACT_ID"
+          if ($artifact.id -ne [long]$env:PACKLAB_EXPECTED_ARTIFACT_ID -or $artifact.name -ne $env:PACKLAB_EXPECTED_ARTIFACT_NAME -or $artifact.expired) { throw 'PL0351_ARTIFACT_IDENTITY_OR_EXPIRY_MISMATCH' }
+          if ($artifact.size_in_bytes -ne [long]$env:PACKLAB_EXPECTED_ARCHIVE_BYTES -or $artifact.digest -ne "sha256:$env:PACKLAB_EXPECTED_ARCHIVE_SHA256") { throw 'PL0351_ARTIFACT_ARCHIVE_DIGEST_OR_SIZE_MISMATCH' }
+          if ($artifact.workflow_run.id -ne [long]$env:PACKLAB_EXPECTED_PRODUCER_RUN_ID -or $artifact.workflow_run.head_sha -ne $env:PACKLAB_EXPECTED_SOURCE_REVISION -or $artifact.workflow_run.head_branch -ne 'main') { throw 'PL0351_PRODUCER_PROVENANCE_MISMATCH' }
+          if ([DateTimeOffset]::Parse($artifact.expires_at) -le [DateTimeOffset]::UtcNow) { throw 'PL0351_ARTIFACT_EXPIRED' }
+
+          $runtimeKey = 'HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64'
+          $runtime = Get-ItemProperty -LiteralPath $runtimeKey -ErrorAction SilentlyContinue
+          $runtimeVersion = if ($runtime) { '{0}.{1}.{2}.{3}' -f $runtime.Major,$runtime.Minor,$runtime.Bld,$runtime.Rbld } else { 'absent' }
+          if (!$runtime -or $runtime.Installed -ne 1 -or [version]$runtimeVersion -lt [version]'14.44.35211.0') { throw 'PL0351_MICROSOFT_VC_X64_PREREQUISITE_NOT_SATISFIED' }
+          "producer_run=$($artifact.workflow_run.id) artifact_id=$($artifact.id) archive_bytes=$($artifact.size_in_bytes) archive_sha256=$($artifact.digest) source_revision=$($artifact.workflow_run.head_sha) expires_at=$($artifact.expires_at)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "microsoft_vc_redist_x64=present version=$runtimeVersion installer_automatic_download=none" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Download the exact PL-0350 Installer artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          repository: ${{ github.repository }}
+          run-id: 38649528145
+          artifact-ids: 11935390977
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/pl0351-artifact
+
+      - name: Verify downloaded Installer and install metadata
+        id: installer
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'pl0351-artifact') -File -Recurse)
+          $setups = @($files | Where-Object { $_.Name -eq 'PackLabStudio-0.1.0-452fe8934b0d56011af8c117555dd059d5c63462-unsigned-setup.exe' })
+          $metadataFiles = @($files | Where-Object { $_.Name -eq 'installer-metadata.json' })
+          $installedEvidenceFiles = @($files | Where-Object { $_.Name -eq 'installed-smoke-evidence.json' })
+          if ($setups.Count -ne 1 -or $metadataFiles.Count -ne 1 -or $installedEvidenceFiles.Count -ne 1) { throw 'PL0351_ARTIFACT_CONTENT_SHAPE_MISMATCH' }
+          $setup = $setups[0]
+          $metadata = Get-Content -LiteralPath $metadataFiles[0].FullName -Raw | ConvertFrom-Json
+          $producerEvidence = Get-Content -LiteralPath $installedEvidenceFiles[0].FullName -Raw | ConvertFrom-Json
+          $hash = (Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($setup.Length -ne [long]$env:PACKLAB_EXPECTED_INSTALLER_BYTES -or $hash -ne $env:PACKLAB_EXPECTED_INSTALLER_SHA256) { throw 'PL0351_INSTALLER_HASH_OR_LENGTH_MISMATCH' }
+          if ($metadata.sha256 -ne $hash -or $metadata.byte_length -ne $setup.Length -or $metadata.build_revision -ne $env:PACKLAB_EXPECTED_SOURCE_REVISION -or $metadata.studio_version -ne $env:PACKLAB_STUDIO_VERSION -or $metadata.signing -ne 'unsigned') { throw 'PL0351_INSTALLER_METADATA_MISMATCH' }
+          if ($producerEvidence.installed_executable_sha256 -notmatch '^[0-9a-f]{64}$' -or $producerEvidence.installer_sha256 -ne $hash -or $producerEvidence.build_revision -ne $env:PACKLAB_EXPECTED_SOURCE_REVISION) { throw 'PL0351_PRODUCER_INSTALLED_EVIDENCE_MISMATCH' }
+          "installer_sha256=$hash" >> $env:GITHUB_OUTPUT
+          "installer_bytes=$($setup.Length)" >> $env:GITHUB_OUTPUT
+          "producer_executable_sha256=$($producerEvidence.installed_executable_sha256)" >> $env:GITHUB_OUTPUT
+          "installer_sha256=$hash bytes=$($setup.Length) signing=unsigned source_revision=$($metadata.build_revision) studio_version=$($metadata.studio_version)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Install to isolated runner location and run sanitized installed-app smoke
+        id: installed_smoke
+        if: steps.installer.outcome == 'success'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'pl0351-isolated-install'
+          if (Test-Path -LiteralPath $installRoot) { throw 'PL0351_INSTALL_PATH_NOT_FRESH' }
+          $installerMatches = @(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'pl0351-artifact') -Filter 'PackLabStudio-0.1.0-452fe8934b0d56011af8c117555dd059d5c63462-unsigned-setup.exe' -File -Recurse)
+          if ($installerMatches.Count -ne 1) { throw 'PL0351_DOWNLOADED_INSTALLER_MISSING_OR_AMBIGUOUS' }
+          $installerPath = $installerMatches[0].FullName
+          $install = Start-Process -FilePath $installerPath -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',"/DIR=$installRoot") -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw 'PL0351_INSTALLER_EXIT_NONZERO' }
+          $installedExe = Join-Path $installRoot 'PackLabStudio.exe'
+          if (!(Test-Path -LiteralPath $installedExe -PathType Leaf)) { throw 'PL0351_INSTALLED_EXECUTABLE_MISSING' }
+          $installedHash = (Get-FileHash -LiteralPath $installedExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($installedHash -ne '${{ steps.installer.outputs.producer_executable_sha256 }}') { throw 'PL0351_INSTALLED_EXECUTABLE_PROVENANCE_MISMATCH' }
+          $signature = Get-AuthenticodeSignature -FilePath $installerPath
+          if ($signature.Status -ne 'NotSigned') { throw 'PL0351_INSTALLER_SIGNING_STATE_MISMATCH' }
+          $noticePath = Join-Path $installRoot 'THIRD_PARTY_NOTICES.txt'
+          $sourceGuidePath = Join-Path $installRoot 'COMPLIANCE\CORRESPONDING_SOURCE\RELINKING_AND_SOURCE_GUIDE.txt'
+          $sourceManifestPath = Join-Path $installRoot 'COMPLIANCE\CORRESPONDING_SOURCE\source-delivery-manifest.json'
+          $open3dNoticePath = Join-Path $installRoot 'COMPLIANCE\THIRD_PARTY_LICENSES\Open3D\OPEN3D-THIRD-PARTY-LICENSES.txt'
+          foreach ($requiredFile in @($noticePath,$sourceGuidePath,$sourceManifestPath,$open3dNoticePath)) {
+            if (!(Test-Path -LiteralPath $requiredFile -PathType Leaf)) { throw 'PL0351_INSTALLED_NOTICE_OR_SOURCE_EVIDENCE_MISSING' }
+          }
+          $sourceManifest = Get-Content -LiteralPath $sourceManifestPath -Raw | ConvertFrom-Json
+          if ($sourceManifest.status -ne 'PASS' -or $sourceManifest.PACKLAB_BUILD_REVISION -ne $env:PACKLAB_EXPECTED_SOURCE_REVISION -or $sourceManifest.studio_version -ne $env:PACKLAB_STUDIO_VERSION) { throw 'PL0351_INSTALLED_SOURCE_MANIFEST_IDENTITY_MISMATCH' }
+          foreach ($record in $sourceManifest.records) {
+            if (!$record.path -or !$record.sha256 -or $record.byte_length -le 0 -or !(Test-Path -LiteralPath (Join-Path $installRoot ($record.path -replace '/', '\')) -PathType Leaf)) { throw 'PL0351_INSTALLED_CORRESPONDING_SOURCE_INCOMPLETE' }
+          }
+          $qtCoreFiles = @(Get-ChildItem -LiteralPath $installRoot -Filter 'QtCore.pyd' -File -Recurse)
+          $qtCoreDlls = @(Get-ChildItem -LiteralPath $installRoot -Filter 'Qt6Core.dll' -File -Recurse)
+          if ($qtCoreFiles.Count -ne 1 -or $qtCoreDlls.Count -ne 1) { throw 'PL0351_QTCORE_NATIVE_FILES_MISSING_OR_AMBIGUOUS' }
+
+          $smokeLog = Join-Path $env:RUNNER_TEMP 'pl0351-installed-smoke.log'
+          $manifestPath = Join-Path $env:RUNNER_TEMP 'pl0351-runtime-capabilities.json'
+          $cleanPath = "$env:SystemRoot\System32;$env:SystemRoot;$installRoot"
+          $foreignNames = @('PYTHONPATH','PYTHONHOME','QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH','QML2_IMPORT_PATH','QML_IMPORT_PATH','PYSIDE_DESIGNER_PLUGINS')
+          foreach ($name in $foreignNames) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+          Get-ChildItem Env: | Where-Object { $_.Name -like 'PACKLAB_*' } | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" -ErrorAction SilentlyContinue }
+          $env:PATH = $cleanPath
+          $env:PACKLAB_BUILD_SMOKE_LOG = $smokeLog
+          $env:PACKLAB_RUNTIME_CAPABILITIES_PATH = $manifestPath
+          $env:PACKLAB_BUILD_REVISION = $env:PACKLAB_EXPECTED_SOURCE_REVISION
+          $env:PACKLAB_STUDIO_VERSION = $env:PACKLAB_STUDIO_VERSION
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $started = [DateTimeOffset]::UtcNow
+          $start = [Diagnostics.ProcessStartInfo]::new()
+          $start.FileName = $installedExe
+          $start.Arguments = '--packlab-build-smoke'
+          $start.WorkingDirectory = $installRoot
+          $start.UseShellExecute = $false
+          $start.RedirectStandardOutput = $true
+          $start.RedirectStandardError = $true
+          $process = [Diagnostics.Process]::new()
+          $process.StartInfo = $start
+          if (!$process.Start()) { throw 'PL0351_INSTALLED_PROCESS_START_FAILED' }
+          $outTask = $process.StandardOutput.ReadToEndAsync()
+          $errTask = $process.StandardError.ReadToEndAsync()
+          if (!$process.WaitForExit(180000)) { $process.Kill(); throw 'PL0351_INSTALLED_SMOKE_TIMEOUT' }
+          $null = $outTask.Result
+          $errorText = $errTask.Result
+          if ($process.ExitCode -ne 0) {
+            $safeType = if ($errorText -match '(?i)specified procedure|entry point') { 'missing_entry_point' } elseif ($errorText -match '(?i)DLL load failed|module could not be found|126') { 'native_module_load_failure' } elseif ($errorText -match '(?i)Qt platform plugin|plugin.*load') { 'qt_plugin_load_failure' } elseif ($errorText -match '(?i)ICU|Shiboken') { 'qt_icu_or_shiboken_mismatch' } else { 'capability_smoke_failure' }
+            "installed_smoke=FAIL class=$safeType exit_code=$($process.ExitCode) path=redacted" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            throw "PL0351_INSTALLED_SMOKE_FAILED_$safeType"
+          }
+          if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'PL0351_CAPABILITY_MANIFEST_MISSING' }
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          if ($manifest.status -ne 'PASS' -or $manifest.network -ne 'NONE' -or $manifest.PACKLAB_BUILD_REVISION -ne $env:PACKLAB_EXPECTED_SOURCE_REVISION -or $manifest.studio_version -ne $env:PACKLAB_STUDIO_VERSION) { throw 'PL0351_CAPABILITY_PROVENANCE_OR_NETWORK_MISMATCH' }
+          foreach ($group in @('qt_studio_gui','qt_vector_pdf','ocp_cad','step_io','dxf_export','open3d_geometry')) {
+            if ($manifest.capability_groups.$group.status -ne 'PASS' -or $manifest.capability_groups.$group.network -ne 'NONE') { throw "PL0351_CAPABILITY_GROUP_FAILED_$group" }
+          }
+          if ($manifest.capability_groups.qt_studio_gui.observed_module -notmatch 'PySide6\.QtWidgets') { throw 'PL0351_QT_GUI_MODULE_UNPROVEN' }
+          if ($manifest.capability_groups.qt_vector_pdf.observed_module -notmatch 'PySide6\.QtPdf') { throw 'PL0351_QTPDF_MODULE_UNPROVEN' }
+          if ($manifest.capability_groups.open3d_geometry.observed_version -ne '0.20.0') { throw 'PL0351_OPEN3D_VERSION_MISMATCH' }
+          $capHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "installed_executable_sha256=$installedHash capability_manifest_sha256=$capHash" >> $env:GITHUB_OUTPUT
+          "installed_app=PASS executable_sha256=$installedHash QtCore_loader=PASS_via_QApplication_StudioMainWindow QtPdf=PASS notices=present corresponding_source_records=$($sourceManifest.records.Count) network=NONE capabilities=qt_studio_gui,qt_vector_pdf,ocp_cad,step_io,dxf_export,open3d_geometry Open3D=$($manifest.capability_groups.open3d_geometry.observed_version) offline=PASS duration_seconds=$([int]([DateTimeOffset]::UtcNow-$started).TotalSeconds)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "sanitized_PATH=Windows_system_directories_and_isolated_install_only checkout_venv_conda_Qt_Python_dll_paths=absent developer_overrides=cleared manifest_sha256=$capHash" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Always uninstall and remove only the isolated CI installation
+        id: cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:RUNNER_TEMP 'pl0351-isolated-install'
+          $runnerRoot = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+          $fullTarget = [IO.Path]::GetFullPath($installRoot)
+          $installItem = Get-Item -LiteralPath $installRoot -Force -ErrorAction SilentlyContinue
+          if (!$fullTarget.StartsWith($runnerRoot, [StringComparison]::OrdinalIgnoreCase) -or ($installItem -and ($installItem.Attributes -band [IO.FileAttributes]::ReparsePoint))) { throw 'PL0351_CLEANUP_TARGET_NOT_OWNED' }
+          if (Test-Path -LiteralPath $installRoot) {
+            $uninstallers = @(Get-ChildItem -LiteralPath $installRoot -Filter 'unins*.exe' -File)
+            if ($uninstallers.Count -ne 1) { throw 'PL0351_UNINSTALLER_MISSING_OR_AMBIGUOUS' }
+            $uninstall = Start-Process -FilePath $uninstallers[0].FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
+            if ($uninstall.ExitCode -ne 0) { throw 'PL0351_UNINSTALL_EXIT_NONZERO' }
+            if (Test-Path -LiteralPath $installRoot) { Remove-Item -LiteralPath $installRoot -Recurse -Force }
+            if (Test-Path -LiteralPath $installRoot) { throw 'PL0351_INSTALL_TREE_RESIDUE' }
+          }
+          "installer_uninstall=PASS install_tree_residue=NONE owner_host_untouched=true" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Require both successful installed smoke and safe cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          if ('${{ steps.installed_smoke.outcome }}' -ne 'success' -or '${{ steps.cleanup.outcome }}' -ne 'success') { throw 'PL0351_FINAL_ACCEPTANCE_GATE_FAILED' }
