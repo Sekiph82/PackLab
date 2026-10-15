@@ -363,6 +363,7 @@ final class PackLabCaptureTests: XCTestCase {
         vm.applyCompletion(TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: SourceIntegrity.digest(Data([1, 2])), verified: true, authenticated: true, state: "receiving")); let nonterminalState = vm.state; XCTAssertEqual(nonterminalState?.phase, .retryableFailure); XCTAssertNotNil(store.load())
     }
 
+    @MainActor
     func testPL0125URLSessionProductionClientAckAndDeclaredDigestMatrix() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: root) }; try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let package = root.appendingPathComponent("capture.packscan"); let bytes = Data([1, 2, 3]); try bytes.write(to: package); let digest = SourceIntegrity.digest(bytes)
