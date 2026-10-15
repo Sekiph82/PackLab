@@ -135,6 +135,7 @@ jobs:
         run: |
           set -euo pipefail
           test_selection=()
+          names=()
           case "$FOCUSED_GROUP" in
             all) ;;
             recovery_all)
