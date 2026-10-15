@@ -153,6 +153,7 @@ MAX_ARCHIVE_MEMBERS = 50_000
 @dataclass(frozen=True)
 class Finding:
     code: str
+    detail: str | None = None
 
 
 def _load_policy(root: Path) -> dict[str, object]:
@@ -292,12 +293,12 @@ def _inspect_file(
         return Finding("PRIVATE_OR_RAW_SCAN_FORMAT")
     if suffix in SENSITIVE_PAYLOAD_SUFFIXES:
         if relative_to_repo is None:
-            return Finding("UNAPPROVED_SENSITIVE_PAYLOAD")
+            return Finding("UNAPPROVED_SENSITIVE_PAYLOAD", f"suffix={suffix}")
         if _matches_hash_manifest(
             path, relative_to_repo, policy, "approved_synthetic_fixtures"
         ) or _matches_hash_manifest(path, relative_to_repo, policy, "approved_project_assets"):
             return None
-        return Finding("UNAPPROVED_SENSITIVE_PAYLOAD")
+        return Finding("UNAPPROVED_SENSITIVE_PAYLOAD", f"suffix={suffix}")
     if suffix in UNKNOWN_RAW_SUFFIXES and size > MAX_UNKNOWN_RAW_BYTES:
         return Finding("OVERSIZED_UNKNOWN_RAW_PAYLOAD")
     if suffix in STRUCTURED_DATA_SUFFIXES and size > MAX_TEXT_SCAN_BYTES:
@@ -385,7 +386,8 @@ def check_environment(environment: dict[str, str] | None = None) -> list[Finding
 def _report(findings: list[Finding]) -> int:
     if findings:
         for finding in findings:
-            print(f"PACKLAB_CI_DATA_GUARD=BLOCK code={finding.code}")
+            detail = f" {finding.detail}" if finding.detail else ""
+            print(f"PACKLAB_CI_DATA_GUARD=BLOCK code={finding.code}{detail}")
         return 1
     print("PACKLAB_CI_DATA_GUARD=PASS")
     return 0
