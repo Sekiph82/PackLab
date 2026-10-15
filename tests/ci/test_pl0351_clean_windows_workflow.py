@@ -11,9 +11,14 @@ def test_pl0351_uses_exact_private_installer_in_separate_pinned_windows_job() ->
     assert "if: github.ref == 'refs/heads/main'" in workflow
     assert "permissions:\n  actions: read\n  contents: read" in workflow
     assert "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c" in workflow
+    assert "38707054365" in workflow
+    assert "11959245441" in workflow
+    assert "b976c7d4e48985329c8f51a68b250ff6e565930ed993b0409b9c5d561c3da4ac" in workflow
     assert "38649528145" in workflow
     assert "11935390977" in workflow
     assert "3e9762e4d3faf6d0363f9714bfbdcb0d0b2d9dc9e73769ebfaac757c9af23e15" in workflow
+    assert "38707367887" in workflow
+    assert "retention-origin.json" in workflow
     assert "3e7c13c18674fbe0a4de843a2ac329055850d07901a7e33fac8a3dc742d92da6" in workflow
     assert "452fe8934b0d56011af8c117555dd059d5c63462" in workflow
     assert "38649528145" in workflow and "artifact.workflow_run.head_sha" in workflow

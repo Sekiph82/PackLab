@@ -67,6 +67,13 @@ def test_pl0352_bridge_is_manual_private_main_only_and_bounded() -> None:
     assert "public_release_authorized=false" in policy
 
 
+def test_disposable_windows_preview_is_sha_pinned_and_short_lived() -> None:
+    workflow = (ROOT / ".github/workflows/packlab-preview-windows.yml").read_text()
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in workflow
+    assert "retention-days: 1" in workflow
+    assert "if-no-files-found: error" in workflow
+
+
 def test_source_artifact_exact_provenance_passes() -> None:
     validate_source_artifact(
         source_artifact(), repository_private=True, ref="refs/heads/main", now=datetime.now(UTC)
