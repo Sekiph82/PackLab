@@ -1,0 +1,31 @@
+# PL-0354 | Independent ChatGPT Audit V02 | R01 Swift XCTest Recovery (2026-10-15)
+
+**VERDICT: AUDITED_PARTIAL_BLOCKED_HOSTED_CI_BILLING / FOCUSED_25_OF_25_PASS / FULL_205_UNVERIFIED.**
+PL-0354 remains **OPEN**. This is not `READY_FOR_INDEPENDENT_AUDIT` for full acceptance, and not `AUDITED_PASS`.
+
+## Independently inspected evidence
+
+Authenticated connector reads: private GitHub repository metadata, immutable source commits, final R01 builder log, actual `packlab-capture-macos.yml` code and test-selection conditions, exact successful hosted focused-run job/complete job log, attempted full-run job metadata, comparison of focused tested revision with final implementation, and earlier 205-test failing run.
+
+1. Repo `Sekiph82/PackLab` is PRIVATE. Initial `main=3dd51193ffb5becdb6bd7dbe98c7d82b2f05e9e3`, separate Codex log-only commit. Implementation revision `4b1cf5168c6a2c461e4b31735763393c5ea0f53c`.
+2. **Focused real success:** https://github.com/Sekiph82/PackLab/actions/runs/38767357450, `macos-15` job `116533938190`: unsigned iOS Simulator build PASS, NextLevel 0.19.1 preserved, actual `xcodebuild test` and `xcresulttool` summary **`result=Passed, totalTestCount=25, passedTests=25, failedTests=0, skippedTests=0`**. Full log independently read; every job step success. These are the **25 distinct methods** identified in the prior 32-failure result; do not mischaracterize as the whole 205.
+3. **No source difference between focused tested app and final implementation:** authenticated GitHub compare `ce422ebfda4b016d476386d16450e8004c59e090...4b1cf5168c6a2c461e4b31735763393c5ea0f53c` shows exactly ONE commit modifying **only** `.github/workflows/packlab-capture-macos.yml` (one added Bash initialization). No Swift product/test source changed between the 25-test green run and the final attempted full run. Thus the 25-test result is meaningful for the final source, while the newly fixed `all` workflow path has **not** been executed successfully.
+4. **Canonical full suite blocked BEFORE runner allocation:** https://github.com/Sekiph82/PackLab/actions/runs/38770566255 at final exact implementation `4b1cf516...`, job `116544966691` concluded failure with **zero steps**, `runner_id=0`, `runner_name` empty and a 14-second execution window; GitHub annotation reported: `The job was not started because recent account payments have failed or your spending limit needs to be increased.` No Xcode or XCTest ran; **not** a Swift regression or red 205-test outcome.
+5. Prior valid **full** test run https://github.com/Sekiph82/PackLab/actions/runs/38755083949 executed **205**, 173 passed/32 failed on the earlier source. It remains an actual historic failure, NOT a green result for R01. The 180 unselected tests on final R01 source remain unverified. Prior default full-attempt https://github.com/Sekiph82/PackLab/actions/runs/38768830642 stopped due Bash `set -u` array initialization; final workflow addresses it, but the fix could not be rerun after billing block.
+6. Current workflow requires for `all`: no `-only-testing` selectors, exactly `205` tests, `result=Passed`, `failedTests=0`, `skippedTests=0`; `set -euo pipefail` preserves nonzero failed XCTest status. No signing keys or owner private assets required. Do not bypass GitHub billing enforcement or fake `all` by rerunning `recovery_all`.
+
+## Implementation boundaries
+
+Builder V02 log https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0354_CODEX_LOG_V02.md describes fixes in session persistence, injected file-manager actor state, focus, pose timing, coverage boundaries, missing file share eligibility, synthetic fixture quality, transfer protocol expectations and deterministic async testing. These repairs explain focused green evidence but are not independently certified by a full 205-test run. No user-approved product redesign, signing, Windows Installer/OCCT/OCP or M17 work occurred.
+
+**Worktree lifecycle:** Builder reports one new R01 physical worktree removed with normal `git worktree remove` after publishing; Git metadata no longer listed target. Actual C: free measurement increased from **97,366,904,832** to **97,392,947,200** bytes, **+26,042,368 bytes** (approx. 24.84 MiB). Stale Codex app attachment cannot be archived because UI says `owned by another task`; that UI object does not independently prove a remaining physical worktree. Older unpublished/ignored-data PackLab worktrees deliberately preserved. Audit did NOT directly read laptop filesystem; owner-local outcomes are builder-reported. Persistent worktree rule in root `AGENTS.md`.
+
+## Sole remaining acceptance gate and owner action
+
+**GitHub billing/spending-control issue is an account-level external blocker.** Cannot change payment methods, settle unpaid balances, raise a user's monetary spending budget or infer exact cause from available repo API. The owner should review personal-account `Settings → Billing & licensing → Budgets and alerts`, Actions usage, spending stop/limits, outstanding invoices and payment method. A positive permitted Actions budget *may* resolve limit exhaustion; if payment hold persists contact GitHub Support. Owner chooses any monetary cap. Official: https://docs.github.com/en/actions/how-tos/troubleshoot-workflows and https://docs.github.com/en/billing/how-tos/set-up-budgets .
+
+Only **after owner confirms Actions billing is unblocked**, Codex should use the prepared single-run follow-up: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0354_R02_BILLING_UNBLOCK_FULL_XCTEST_CODEX_PROMPT.md .
+
+Exact eligible proof: **one** canonical re-run of workflow 38770566255 using tested `4b1cf516...` final code, or one manual workflow_dispatch `focused_group=all` with independently verified equivalent Swift code + workflow. Need new real `macos-15` runner, unsigned build, `205` executed/`205` passed/`0` failed/`0` skipped and job SUCCESS. If 205 suite fails, triage actual new failure list rather than force green. No repeated billing-blocked dispatch, hidden skipped tests, or unapproved product/owner Desktop edits.
+
+**PL-0354 engineering audit status stays PARTIAL/EXTERNAL_BILLING_BLOCKED.** Do not start PL-0355/M17. `legal_review_required=true`; `public_release_authorized=false`; Kenya factory deployment not approved.
