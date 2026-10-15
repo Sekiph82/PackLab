@@ -42,8 +42,8 @@ jobs:
           import os
           import pathlib
           import shutil
-          import urllib.error
-          import urllib.parse
+          from urllib.error import HTTPError
+          from urllib.request import HTTPRedirectHandler, build_opener
           import urllib.request
           import zipfile
           from datetime import datetime, timezone
@@ -80,6 +80,34 @@ jobs:
               with urllib.request.urlopen(request, timeout=60) as response:
                   return json.load(response)
 
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, response_headers, new_url):
+                  return None
+
+          def download_private_archive(url: str, destination: pathlib.Path) -> tuple[int, str]:
+              api_request = urllib.request.Request(url, headers=headers)
+              try:
+                  response = build_opener(NoRedirect).open(api_request, timeout=120)
+              except HTTPError as redirect:
+                  if redirect.code not in (301, 302, 303, 307, 308):
+                      raise
+                  signed_url = redirect.headers.get("Location")
+                  redirect.close()
+                  if not signed_url:
+                      raise SystemExit("PL0352_ARCHIVE_REDIRECT_LOCATION_MISSING")
+                  # The private GitHub token is deliberately not forwarded to the signed blob host.
+                  response = urllib.request.urlopen(
+                      urllib.request.Request(signed_url), timeout=120
+                  )
+              digest = hashlib.sha256()
+              size = 0
+              with response, destination.open("wb") as output_file:
+                  while chunk := response.read(8 * 1024 * 1024):
+                      output_file.write(chunk)
+                      digest.update(chunk)
+                      size += len(chunk)
+              return size, digest.hexdigest()
+
           if os.environ["GITHUB_REF"] != "refs/heads/main":
               raise SystemExit("PL0352_WRONG_REF")
           owner_repo = get_json(f"{api}/repos/{repo}")
@@ -106,17 +134,8 @@ jobs:
 
           temp = pathlib.Path(os.environ["RUNNER_TEMP"])
           archive = temp / "pl0352-original-installer-artifact.zip"
-          request = urllib.request.Request(
-              source["archive_download_url"], headers=headers
-          )
-          digest = hashlib.sha256()
-          byte_count = 0
-          with urllib.request.urlopen(request, timeout=120) as response, archive.open("wb") as out:
-              while chunk := response.read(8 * 1024 * 1024):
-                  out.write(chunk)
-                  digest.update(chunk)
-                  byte_count += len(chunk)
-          if byte_count != SOURCE_ARCHIVE_BYTES or digest.hexdigest() != SOURCE_ARCHIVE_SHA256:
+          byte_count, archive_sha = download_private_archive(source["archive_download_url"], archive)
+          if byte_count != SOURCE_ARCHIVE_BYTES or archive_sha != SOURCE_ARCHIVE_SHA256:
               raise SystemExit("PL0352_ORIGINAL_ARCHIVE_SHA_OR_SIZE_MISMATCH")
 
           bundle_dir = temp / "pl0352-retained-candidate"
@@ -203,7 +222,7 @@ jobs:
           )
           print(
               f"source_artifact={SOURCE_ARTIFACT_ID} source_archive_bytes={byte_count} "
-              f"source_archive_sha256={digest.hexdigest()} source_revision={SOURCE_REVISION}"
+              f"source_archive_sha256={archive_sha} source_revision={SOURCE_REVISION}"
           )
           print(
               f"installer_bytes={installer.stat().st_size} installer_sha256={installer_hash} "
@@ -241,6 +260,8 @@ jobs:
           import json
           import os
           import pathlib
+          from urllib.error import HTTPError
+          from urllib.request import HTTPRedirectHandler, build_opener
           import urllib.request
           import zipfile
           from datetime import datetime, timedelta, timezone
@@ -254,6 +275,41 @@ jobs:
           )
 
           repo = os.environ["GITHUB_REPOSITORY"]
+
+          class NoRedirect(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, response_headers, new_url):
+                  return None
+
+          def download_private_archive(url: str, destination: pathlib.Path) -> tuple[int, str]:
+              api_request = urllib.request.Request(
+                  url,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                      "X-GitHub-Api-Version": "2026-03-10",
+                  },
+              )
+              try:
+                  response = build_opener(NoRedirect).open(api_request, timeout=120)
+              except HTTPError as redirect:
+                  if redirect.code not in (301, 302, 303, 307, 308):
+                      raise
+                  signed_url = redirect.headers.get("Location")
+                  redirect.close()
+                  if not signed_url:
+                      raise SystemExit("PL0352_RETAINED_READ_REDIRECT_LOCATION_MISSING")
+                  response = urllib.request.urlopen(
+                      urllib.request.Request(signed_url), timeout=120
+                  )
+              digest = hashlib.sha256()
+              size = 0
+              with response, destination.open("wb") as output_file:
+                  while chunk := response.read(8 * 1024 * 1024):
+                      output_file.write(chunk)
+                      digest.update(chunk)
+                      size += len(chunk)
+              return size, digest.hexdigest()
+
           request = urllib.request.Request(
               f"https://api.github.com/repos/{repo}/actions/artifacts/{os.environ['RETAINED_ARTIFACT_ID']}",
               headers={
@@ -287,22 +343,8 @@ jobs:
           if expires < datetime.now(timezone.utc) + timedelta(days=RETAINED_DAYS - 2):
               raise SystemExit("PL0352_RETAINED_EXPIRY_SHORTER_THAN_POLICY")
           archive = pathlib.Path(os.environ["RUNNER_TEMP"]) / "pl0352-retained-readback.zip"
-          read_request = urllib.request.Request(
-              item["archive_download_url"],
-              headers={
-                  "Accept": "application/vnd.github+json",
-                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
-                  "X-GitHub-Api-Version": "2026-03-10",
-              },
-          )
-          outer_hash = hashlib.sha256()
-          outer_bytes = 0
-          with urllib.request.urlopen(read_request, timeout=120) as response, archive.open("wb") as out:
-              while chunk := response.read(8 * 1024 * 1024):
-                  out.write(chunk)
-                  outer_hash.update(chunk)
-                  outer_bytes += len(chunk)
-          if outer_bytes != item["size_in_bytes"] or f"sha256:{outer_hash.hexdigest()}" != item["digest"]:
+          outer_bytes, outer_hash = download_private_archive(item["archive_download_url"], archive)
+          if outer_bytes != item["size_in_bytes"] or f"sha256:{outer_hash}" != item["digest"]:
               raise SystemExit("PL0352_RETAINED_ARCHIVE_READBACK_SHA_OR_SIZE_MISMATCH")
           required_members = {
               INSTALLER_BASENAME,
@@ -339,7 +381,7 @@ jobs:
                   raise SystemExit("PL0352_RETAINED_INSTALLER_READBACK_SHA_OR_SIZE_MISMATCH")
           print(
               f"retained_artifact_id={item['id']} name={item['name']} "
-              f"size_bytes={outer_bytes} archive_digest=sha256:{outer_hash.hexdigest()} "
+              f"size_bytes={outer_bytes} archive_digest=sha256:{outer_hash} "
               f"expires_at={item['expires_at']} retention_days={RETAINED_DAYS} "
               f"source_revision={SOURCE_REVISION} installer_bytes={installer_bytes} "
               f"installer_sha256={installer_hash.hexdigest()} private_read=PASS"
