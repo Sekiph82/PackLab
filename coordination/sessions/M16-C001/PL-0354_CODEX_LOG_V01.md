@@ -42,7 +42,16 @@ No Windows Installer, OCCT, or OCP rebuild was run. No private sample scans, sup
 
 ## Post-task PackLab worktree cleanup
 
-Initial log publication precedes cleanup as required. Final removal outcome and actual C: free-byte measurements will be recorded in a separate log-only follow-up commit after individually checking the task-created worktree. At this point no cleanup has been performed.
+The initial log was published before cleanup. A separate log-only follow-up records the verified result:
+
+- Task-created worktrees: 1 (`codex/pl-0354-macos-ci`).
+- Verified safe and removable: 1. It was clean, had no untracked or ignored files, contained no reparse points, had no active process/agent use, and its complete HEAD was an ancestor of `origin/main`.
+- Removed: 1 using normal `git -C <stable PackLab checkout> worktree remove <exact task path>` without force. The exact directory is absent and the task worktree is absent from `git worktree list --porcelain`.
+- Blocked removals among task-created worktrees: none.
+- Older/unrelated worktrees were preserved. Three available historical PL0350/PL0352/PL0353 worktrees have unpublished branch commits and 19,522–20,903 ignored local environment/cache records; three stale R07/ownerdev entries have no corresponding directory. None was created for this task, and none was removed.
+- C: free space before removal: `97,186,861,056` bytes. After removal: `97,222,111,232` bytes. Actual net increase: `35,250,176` bytes (about 33.6 MiB).
+- Private `origin/main` contained implementation and the initial separate log commit before removal; the log-only cleanup follow-up is also being published to `main`.
+- Owner Desktop originals were not edited or removed. No disk/cache cleanup was performed.
 
 ## Handoff
 
