@@ -32,6 +32,7 @@ Relates to **PL-0359, PL-0362 and PL-0367 documentation preparation only**. NOT 
 - Compare **three independent domains**: `StudioVersion`, `CaptureVersion`, and `PackScanSchemaVersion`, per `docs/architecture/VERSIONING_POLICY.md`. Do not equate their numeric versions.
 - On unsupported `.packscan` schema, STOP ingestion and report observed exact version, supported reader range, original SHA-256 and diagnostic category. Do not guess version compatibility or silently rewrite manifest/schema/coordinate semantics.
 - Snapshot/copy original capture evidence and its complete checksum-valid ZIP to read-only, owner-controlled backup. Never modify `images/`, timestamps, calibration or manifest in place.
+- Rollback may restore a separately verified application build or derived representation; it must never restore over, rewrite, or delete the immutable original `.packscan` package or its original image bytes.
 - For a **declared and implemented** migration, produce a **new derived** output with an explicit source/target schema path and retained original package; otherwise do not convert.
 - Select a previously owner-approved Studio/Capture build **only by reviewed release manifest, original source SHA, artifact/executable hash, version/build, dependencies and schema compatibility**. Do not substitute an arbitrary old Installer or privately downloaded IPA.
 - Before downgrading Capture, export and verify every current package and application state the older version may not understand. An older binary is **not assumed able to read newer projects or schema**.

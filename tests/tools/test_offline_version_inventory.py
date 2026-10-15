@@ -70,6 +70,7 @@ class OfflineVersionInventoryTests(unittest.TestCase):
         self.assertEqual(result["capture_version"], "0.1.0")
         self.assertEqual(result["capture_build"], 1)
         self.assertEqual(result["packscan_schema_version"], "1.0.0")
+        self.assertEqual(result["status"], "OFFLINE_UNVERIFIED_BUILD")
         self.assertIsNone(result["artifact_sha256"])
         self.assertFalse(result["hosted_build_verified"])
         self.assertEqual(result["factory_release"], "NOT_AUTHORIZED")
@@ -107,6 +108,22 @@ class OfflineVersionInventoryTests(unittest.TestCase):
                 inventory(root)
             (root / SCHEMA).unlink()
             with self.assertRaisesRegex(SourceVersionError, "REQUIRED_SOURCE_UNAVAILABLE"):
+                inventory(root)
+
+    def test_invalid_semver_and_duplicate_schema_keys_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _make_fixture(root)
+            _write(root, SCHEMA, b'{"properties":{"schema_version":{"const":"1.0.0-01"}}}')
+            with self.assertRaisesRegex(SourceVersionError, "INVALID_SEMVER"):
+                inventory(root)
+            _write(
+                root,
+                SCHEMA,
+                b'{"properties":{"schema_version":{"const":"1.0.0"}},'
+                b'"properties":{"schema_version":{"const":"2.0.0"}}}',
+            )
+            with self.assertRaisesRegex(SourceVersionError, "AMBIGUOUS_SCHEMA_VERSION_SOURCE"):
                 inventory(root)
 
     def test_info_plist_substitution_must_remain_source_bound(self) -> None:

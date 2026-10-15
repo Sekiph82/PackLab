@@ -17,7 +17,7 @@ from typing import Any
 
 _SEMVER = re.compile(
     r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-    r"(?:-((?:0|[1-9][0-9]*|[0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*))*))?"
+    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
     r"(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$"
 )
 
@@ -41,6 +41,12 @@ def _read(root: Path, relative: str) -> bytes:
 
 def _semver(value: Any) -> str:
     if not isinstance(value, str) or not _SEMVER.fullmatch(value):
+        raise SourceVersionError("INVALID_SEMVER")
+    prerelease = value.split("+", 1)[0].partition("-")[2]
+    if prerelease and any(
+        identifier.isdigit() and len(identifier) > 1 and identifier.startswith("0")
+        for identifier in prerelease.split(".")
+    ):
         raise SourceVersionError("INVALID_SEMVER")
     return value
 
@@ -82,7 +88,7 @@ def _capture_versions(project: str) -> tuple[str, int, str]:
             values.append(fields[0].strip().strip('"'))
         version, build_text, identifier = values
         _semver(version)
-        if not build_text.isdigit() or int(build_text) < 1:
+        if not re.fullmatch(r"[0-9]+", build_text) or int(build_text) < 1:
             raise SourceVersionError("INVALID_CAPTURE_BUILD")
         matches.append((version, int(build_text), identifier))
     if len(matches) != 2 or matches[0] != matches[1]:
@@ -110,7 +116,17 @@ def inventory(root: Path) -> dict[str, Any]:
             if info.get(key) != expected:
                 raise SourceVersionError("CAPTURE_PLIST_VERSION_BINDING_MISMATCH")
 
-        schema = json.loads(_read(root, _SCHEMA).decode("utf-8"))
+        def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    raise SourceVersionError("AMBIGUOUS_SCHEMA_VERSION_SOURCE")
+                result[key] = value
+            return result
+
+        schema = json.loads(
+            _read(root, _SCHEMA).decode("utf-8"), object_pairs_hook=reject_duplicate_keys
+        )
         schema_version = _semver(schema["properties"]["schema_version"]["const"])
     except SourceVersionError:
         raise
@@ -118,7 +134,7 @@ def inventory(root: Path) -> dict[str, Any]:
         raise SourceVersionError("SOURCE_VERSION_READ_FAILED") from exc
 
     return {
-        "status": "OFFLINE_SOURCE_INVENTORY_NOT_RELEASE_ACCEPTANCE",
+        "status": "OFFLINE_UNVERIFIED_BUILD",
         "studio_version": studio_toml,
         "capture_version": version,
         "capture_build": build,

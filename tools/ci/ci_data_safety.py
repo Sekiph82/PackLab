@@ -3,8 +3,9 @@
 This is a data-stewardship guard, not a general secret scanner. It rejects
 known scan/media/document formats outside exact, hash-pinned fixture and
 project-asset sets, private-data path families, oversized unknown payloads,
-escaping symlinks, and owner-specific workflow roots. Diagnostics
-intentionally omit paths and file contents.
+escaping symlinks, owner-specific workflow roots, and a narrow set of Apple
+signing/private-key indicators. Diagnostics intentionally omit paths and file
+contents.
 """
 
 from __future__ import annotations
@@ -85,6 +86,22 @@ ARCHIVE_SUFFIXES = {".zip", ".7z", ".rar", ".tar", ".gz", ".tgz"}
 UNKNOWN_RAW_SUFFIXES = {".bin", ".dat", ".data", ".capture", ".rawscan"}
 STRUCTURED_DATA_SUFFIXES = {".json", ".csv", ".xml", ".txt", ".log", ".yaml", ".yml"}
 TEXT_SUFFIXES = {".txt", ".log", ".json", ".yaml", ".yml", ".csv", ".xml", ".md"}
+SIGNING_TEXT_SUFFIXES = TEXT_SUFFIXES | {
+    ".py", ".toml", ".plist", ".pbxproj", ".sh", ".ps1", ".swift",
+    ".ini", ".cfg", ".properties", ".entitlements", ".env",
+}
+SIGNING_MATERIAL_SUFFIXES = {
+    ".p8", ".p12", ".pfx", ".mobileprovision", ".provisionprofile"
+}
+PRIVATE_KEY_HEADER = re.compile(
+    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", re.IGNORECASE
+)
+SECRET_ASSIGNMENT = re.compile(
+    r"(?im)^\s*(?:APPLE|APP_STORE|APPSTORE|ASC|GITHUB|GH|SIGNING|PROVISIONING|"
+    r"DISTRIBUTION|PRIVATE|CLIENT|ACCESS|API|DEPLOY|CERTIFICATE)"
+    r"[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PRIVATE_KEY|API_KEY|SIGNING_KEY|ID|EMAIL|ACCOUNT)"
+    r"\s*[:=]\s*(?:([\"'])([^\"'\r\n]+)\1|([^\s#]+))"
+)
 LINE_ENDING_CANONICAL_SUFFIXES = {
     ".svg",
     ".step",
@@ -394,6 +411,73 @@ def check_environment(environment: dict[str, str] | None = None) -> list[Finding
     return []
 
 
+def scan_signing_material(repository_root: Path, paths: Iterable[Path]) -> list[Finding]:
+    """Inspect explicit source paths; return codes only, never matched values."""
+    root = repository_root.resolve(strict=True)
+    findings: list[Finding] = []
+    for supplied in paths:
+        path = supplied if supplied.is_absolute() else root / supplied
+        try:
+            path.resolve(strict=True).relative_to(root)
+            if _is_link_or_junction(path):
+                findings.append(Finding("SIGNING_SCAN_LINK_INPUT"))
+                continue
+            if not path.is_file():
+                continue
+            relative = _relative_posix(path, root)
+            if relative is None:
+                findings.append(Finding("SIGNING_SCAN_OUTSIDE_REPOSITORY"))
+                continue
+            suffix = path.suffix.casefold()
+            name = path.name.casefold()
+            if suffix in SIGNING_MATERIAL_SUFFIXES:
+                findings.append(Finding("APPLE_SIGNING_MATERIAL_FILENAME"))
+                continue
+            if suffix not in SIGNING_TEXT_SUFFIXES:
+                continue
+            contents = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError, ValueError):
+            findings.append(Finding("SIGNING_SCAN_UNREADABLE"))
+            continue
+
+        # Filename checks use only explicit private-key phrases, so ordinary
+        # names such as private_key_policy.md do not trigger this guard.
+        if re.search(r"(?:^|[._-])(?:apple[-_.]?signing|distribution[-_.]?key|private[-_.]?key)(?:[._-]|$)", name):
+            findings.append(Finding("APPLE_SIGNING_MATERIAL_FILENAME"))
+            continue
+        if PRIVATE_KEY_HEADER.search(contents):
+            findings.append(Finding("PRIVATE_KEY_BLOCK_PRESENT"))
+            continue
+        for match in SECRET_ASSIGNMENT.finditer(contents):
+            value = match.group(2) or match.group(3) or ""
+            marker = value.upper()
+            if "EXAMPLE" in marker or "TEST" in marker or "REDACTED" in marker or "PLACEHOLDER" in marker:
+                continue
+            if value.startswith("<") and value.endswith(">"):
+                continue
+            if value.startswith("$") or marker in {"NONE", "NULL", "OS.ENVIRON", "ENV_VAR"}:
+                continue
+            if re.fullmatch(r"[A-Z_][A-Z0-9_]*(?:\.[A-Z_][A-Z0-9_]*)*", marker):
+                continue
+            if any(character in value for character in "\\[](){}"):
+                continue
+            findings.append(Finding("DIRECT_SECRET_ASSIGNMENT"))
+            break
+    return findings
+
+
+def tracked_source_paths(root: Path) -> list[Path]:
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--cached"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if result.returncode != 0:
+        raise ValueError("GIT_FILE_INVENTORY_FAILED")
+    return [root / os.fsdecode(item) for item in result.stdout.split(b"\0") if item]
+
+
 def _report(findings: list[Finding]) -> int:
     if findings:
         for finding in findings:
@@ -418,10 +502,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--check-workflows", action="store_true")
     parser.add_argument("--check-environment", action="store_true")
+    parser.add_argument(
+        "--check-signing-secrets",
+        action="store_true",
+        help="Scan tracked source for narrow Apple signing/private-key indicators.",
+    )
     args = parser.parse_args(argv)
     root = args.repository.resolve()
-    if not args.tracked and not args.path:
-        parser.error("at least one of --tracked or --path is required")
+    if not any((
+        args.tracked, args.path, args.check_workflows, args.check_environment,
+        args.check_signing_secrets,
+    )):
+        parser.error("select at least one scan or check")
     findings: list[Finding] = []
     try:
         if args.tracked:
@@ -434,6 +526,11 @@ def main(argv: list[str] | None = None) -> int:
         findings.extend(check_workflow_sources(root))
     if args.check_environment:
         findings.extend(check_environment())
+    if args.check_signing_secrets:
+        try:
+            findings.extend(scan_signing_material(root, tracked_source_paths(root)))
+        except (OSError, ValueError):
+            findings.append(Finding("SIGNING_SCAN_INCOMPLETE"))
     return _report(findings)
 
 
