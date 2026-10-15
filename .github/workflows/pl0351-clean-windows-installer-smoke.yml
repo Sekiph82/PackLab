@@ -164,7 +164,7 @@ jobs:
           }
           if (!(Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'PL0351_CAPABILITY_MANIFEST_MISSING' }
           $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-          if ($manifest.status -ne 'PASS' -or $manifest.network -ne 'NONE' -or $manifest.PACKLAB_BUILD_REVISION -ne $env:PACKLAB_EXPECTED_SOURCE_REVISION -or $manifest.studio_version -ne $env:PACKLAB_STUDIO_VERSION) { throw 'PL0351_CAPABILITY_PROVENANCE_OR_NETWORK_MISMATCH' }
+          if ($manifest.status -ne 'PASS' -or $manifest.network -ne 'NONE' -or $manifest.PACKLAB_BUILD_REVISION -ne $expectedRevision -or $manifest.studio_version -ne $expectedStudioVersion) { throw 'PL0351_CAPABILITY_PROVENANCE_OR_NETWORK_MISMATCH' }
           foreach ($group in @('qt_studio_gui','qt_vector_pdf','ocp_cad','step_io','dxf_export','open3d_geometry')) {
             if ($manifest.capability_groups.$group.status -ne 'PASS' -or $manifest.capability_groups.$group.network -ne 'NONE') { throw "PL0351_CAPABILITY_GROUP_FAILED_$group" }
           }

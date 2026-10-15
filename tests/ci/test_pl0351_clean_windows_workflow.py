@@ -62,6 +62,8 @@ def test_pl0351_smokes_installed_app_under_sanitized_environment_and_always_unin
         "$expectedStudioVersion = $env:PACKLAB_STUDIO_VERSION",
         "$env:PACKLAB_BUILD_REVISION = $expectedRevision",
         "$env:PACKLAB_STUDIO_VERSION = $expectedStudioVersion",
+        "$manifest.PACKLAB_BUILD_REVISION -ne $expectedRevision",
+        "$manifest.studio_version -ne $expectedStudioVersion",
         "automatic_download=none",
     ):
         assert fragment in workflow
