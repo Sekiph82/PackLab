@@ -84,13 +84,14 @@ jobs:
           "PACKLAB_FMT_PROBE_REPORT=$report" >> $env:GITHUB_ENV
           Get-Content -LiteralPath $report -Raw | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
       - name: Guard dependency probe artifact input
+        id: guard_fmt_probe_artifact
         if: always()
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -AllowMissing -ScanText -Path (Join-Path $env:RUNNER_TEMP "fmt-dependency-preflight.json")
           if ($LASTEXITCODE -ne 0) { throw "fmt dependency evidence failed the CI data-safety guard." }
       - name: Upload dependency probe evidence
-        if: always()
+        if: always() && steps.guard_fmt_probe_artifact.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-pl0350-fmt-dependency-probe-${{ github.run_id }}-${{ github.run_attempt }}

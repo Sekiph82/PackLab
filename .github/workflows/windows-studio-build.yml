@@ -163,13 +163,14 @@ jobs:
           $missing = @($required | Where-Object { !(Test-Path -LiteralPath $_ -PathType Leaf) })
           if ($missing.Count -gt 0) { throw "Hosted diagnostic evidence is incomplete: $($missing -join ', ')" }
       - name: Guard precompile diagnostic artifact inputs
+        id: guard_precompile_diagnostics
         if: always()
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -AllowMissing -ScanText -Path (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection.json"), (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection/retained-sdk-dependency-audit.json"), (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection/fmt-dependency-probe.json"), (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection/windows-native-runtime-policy.json"), (Join-Path $env:RUNNER_TEMP "pl0350-retained-sdk-inspection/generated-source-patch-manifest.json")
           if ($LASTEXITCODE -ne 0) { throw "Precompile evidence failed the CI data-safety guard." }
       - name: Upload noncompiling SDK and native runtime diagnostic evidence
-        if: always()
+        if: always() && steps.guard_precompile_diagnostics.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-pl0350-precompile-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
@@ -635,13 +636,14 @@ jobs:
           & micromamba run -n packlab-ocp-bindings python @builderArgs
           if ($LASTEXITCODE -ne 0) { throw "The official generated-source OCP compile failed or exceeded its 270-minute budget." }
       - name: Guard OCP quarantine artifact inputs
+        id: guard_ocp_quarantine
         if: always()
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -AllowMissing -ScanText -Path (Join-Path $env:RUNNER_TEMP "pl0350-quarantine")
           if ($LASTEXITCODE -ne 0) { throw "OCP quarantine artifact failed the CI data-safety guard." }
       - name: Upload post-link OCP quarantine before any downstream failure can discard it
-        if: always()
+        if: always() && steps.guard_ocp_quarantine.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-pl0350-ocp-quarantine-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1068,13 +1070,14 @@ jobs:
           ) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Guard packaged Studio smoke diagnostic inputs
+        id: guard_studio_smoke_diagnostics
         if: always()
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -AllowMissing -ScanText -Path (Join-Path $env:RUNNER_TEMP "packlab-studio-smoke.log"), (Join-Path $env:RUNNER_TEMP "packlab-numpy-probe.log"), (Join-Path $env:RUNNER_TEMP "packlab-open3d-first-probe.log"), (Join-Path $env:RUNNER_TEMP "packlab-open3d-pe-dependencies.json"), (Join-Path $env:GITHUB_WORKSPACE "build/windows-studio/PackLabStudio/windows-runtime-capabilities.json"), (Join-Path $env:RUNNER_TEMP "qt-staged-surface.json")
           if ($LASTEXITCODE -ne 0) { throw "Studio diagnostic artifact failed the CI data-safety guard." }
       - name: Upload packaged Studio smoke diagnostics
-        if: always()
+        if: always() && steps.guard_studio_smoke_diagnostics.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-studio-smoke-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1157,13 +1160,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Pre-clearance evidence would exceed this run's retained-artifact budget." }
           "byte_count=$bytes" >> $env:GITHUB_OUTPUT
       - name: Guard pre-clearance evidence artifact inputs
+        id: guard_preclearance_evidence
         if: always() && steps.inventory.outcome != 'skipped' && steps.preclearance_size.outcome == 'success'
         shell: pwsh
         run: |
           & "$env:GITHUB_WORKSPACE/tools/ci/scan_artifact_inputs.ps1" -ScanText -Path (Join-Path $env:RUNNER_TEMP "packlab-compliance-preclearance")
           if ($LASTEXITCODE -ne 0) { throw "Pre-clearance evidence failed the CI data-safety guard." }
       - name: Upload text-only pre-clearance evidence
-        if: always() && steps.inventory.outcome != 'skipped' && steps.preclearance_size.outcome == 'success'
+        if: always() && steps.inventory.outcome != 'skipped' && steps.preclearance_size.outcome == 'success' && steps.guard_preclearance_evidence.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-windows-compliance-preclearance-${{ github.sha }}

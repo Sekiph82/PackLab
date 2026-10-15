@@ -23,6 +23,9 @@ dev = [
     "cryptography>=43,<46",
     "pyinstaller==6.22.3",
 ]
+workflow-tests = [
+    "pyyaml==6.0.3",
+]
 
 [tool.setuptools.packages.find]
 where = ["core/src", "apps/windows-studio/src"]
