@@ -4,7 +4,7 @@
 
 ## Permanent rule for PackLab Codex tasks
 
-Every PackLab Codex task that creates a **new local Git worktree on the owner's laptop** MUST remove that task-created worktree **after the task is fully finished and verified**, so completed Codex worktrees do not accumulate and consume C: storage. This applies to PL-0354 and all later PackLab tasks. **This GitHub policy file is the standing rule until the ChatGPT-owned root `TASKS.md` can be synchronized.** Its separate tracker update was blocked by a platform safety review; do NOT claim root tracker synchronization. Codex NEVER edits `TASKS.md`.
+Every PackLab Codex task that creates a **new local Git worktree on the owner's laptop** MUST remove that task-created worktree **after the task is fully finished and verified**, so completed Codex worktrees do not accumulate and consume C: storage. This applies to PL-0354 and all later PackLab tasks. **The persistent agent rule is now recorded in the repository root `AGENTS.md`, section `Mandatory Codex worktree lifecycle`.** This PL-0354 addendum supplies the current in-flight execution details. A separate root `TASKS.md` edit was blocked by a platform safety review; no tracker synchronization is claimed. Codex NEVER edits `TASKS.md`.
 
 ### Execution sequence: finish first, clean second
 
