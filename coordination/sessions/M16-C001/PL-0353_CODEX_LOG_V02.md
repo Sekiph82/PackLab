@@ -63,3 +63,50 @@ The V02 Codex log is published as a separate log-only commit. `origin/main` is t
 ## Handoff
 
 `READY_FOR_INDEPENDENT_AUDIT`
+
+## PL-0353-R01 remediation addendum — fail-closed upload gates
+
+**R01 result: READY_FOR_INDEPENDENT_AUDIT**
+
+### Scope, synchronization, and preservation
+
+Executed the R01 remediation prompt at `coordination/sessions/M16-C001/PL-0353_R01_FAIL_CLOSED_UPLOAD_GATE_CODEX_PROMPT.md` and checked the matching PL-0353 audit context. At remediation start, the worktree was synchronized after a safe fast-forward from `6b7f32d` through `a3ec18e3` to current private `origin/main`; no local changes were reset or discarded. The existing V02 log content above is retained verbatim. The R01 implementation is commit `ba6b4b0647ee69d8ef1320717ea257ce468eac45`.
+
+`TASKS.md`, audit verdicts, Desktop files, and the retained Installer were not modified. No OCCT/OCP/native compilation, Installer rebuild, full-suite rerun, cleanup, or hosted build workflow was performed. The repository remains private.
+
+### Guard remediations and workflow audit
+
+The four confirmed unsafe pairs now bind every corresponding uploader to the exact preceding guard step's successful outcome:
+
+- Studio precompile diagnostics: `guard_precompile_diagnostics` → `upload-precompile-diagnostics`.
+- OCP quarantine diagnostics: `guard_ocp_quarantine` → `upload-ocp-quarantine-diagnostics`.
+- Studio smoke diagnostics: `guard_studio_smoke_diagnostics` → `upload-studio-smoke-diagnostics`.
+- FMT dependency probe report: `guard_fmt_probe_artifact` → `upload-fmt-dependency-probe`.
+
+A workflow-wide audit found one additional analogous `always()` bypass in pre-clearance evidence upload; it is also fixed with `guard_preclearance_evidence` → `upload-preclearance-evidence`. Each upload condition explicitly uses `always() && steps.<guard-id>.outcome == 'success'`. Existing diagnostic inventory/size predicates and upload action pins, artifact names, retention periods, and payload inputs were preserved.
+
+Parsed and reviewed all eight GitHub Actions workflow YAML files and all artifact-upload/status-override combinations. Exactly these five uploads use status-function overrides; each now requires its own identified guard to succeed. The other artifact uploads retain default success gating or depend on ordinary outputs, so prior failures suppress upload. Uploads configured with missing-file warning/ignore behavior were checked for an independent guard-success condition. Other always-run steps were inspected: they are fail-closed summaries/validators or diagnostic collection and do not create an upload bypass.
+
+### Focused regression and static checks
+
+- `uv lock --check` — pass.
+- `uv run --locked --group workflow-tests pytest tests/ci/test_artifact_upload_guard_conditions.py tests/ci/test_windows_studio_build_workflow.py -q` — **22 passed**. Regression coverage evaluates guard failure, skipped/absent outcomes, safe diagnostics after unrelated earlier failures, the five exact upload/guard pairs, and discovery of status-overridden uploads across all workflows.
+- Ruff lint for the new tests and workflow contract test — pass.
+- Ruff formatting check using workflow line-ending configuration — pass.
+- `uv run mypy tools/ci/ci_data_safety.py tools/packaging/pl0352_artifact_retention.py` — pass.
+- `compileall` on the new regression test and scanner — pass.
+- PyYAML structured parse of all eight workflow YAML files, including preservation of the `on` key — pass.
+- `python -m tools.ci.ci_data_safety --repository . --tracked --check-workflows --check-environment` — `PACKLAB_CI_DATA_GUARD=PASS`.
+- `git diff --check` — pass.
+
+No full default suite or hosted CI was repeated: the narrow R01 conditions were exercised by focused regression tests, and the prior V02 hosted Windows Quality/Preview evidence remains as recorded above. No Installer/OCCT/OCP workflow was dispatched.
+
+### Retained artifact, privacy, and boundaries
+
+The retained Installer remains artifact `11959245441`; prior metadata in the V02 verification records it as unexpired with SHA-256 `b976c7d4e48985329c8f51a68b250ff6e565930ed993b0409b9c5d561c3da4ac`. It was not downloaded or changed during R01. The data-safety guard passed on the tracked checkout. No secrets, proprietary sample scans, owner path values, or private files were included in commits. This workflow-gating remediation is not a legal redistribution clearance, product release authorization, or factory deployment approval.
+
+### Publication and handoff
+
+The R01 implementation was pushed to private `main` as `ba6b4b0647ee69d8ef1320717ea257ce468eac45`. This addendum is to be published in the separate log-only commit. No `TASKS.md` change is part of this work.
+
+`READY_FOR_INDEPENDENT_AUDIT`
