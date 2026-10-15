@@ -493,6 +493,14 @@ public enum SourceMetadataExtractor {
 
 public enum SourcePersistenceError: Error, Sendable, Equatable { case invalidName, sourceOverwritten, recordWriteFailed }
 
+/// Foundation's FileManager supports concurrent file operations, but does not
+/// declare Sendable. This wrapper allows the same injected manager to be used
+/// by the serialized metadata and source-store actors.
+fileprivate final class SendableFileManager: @unchecked Sendable {
+    let value: FileManager
+    init(_ value: FileManager) { self.value = value }
+}
+
 /// Persists the immutable original and its source record together. The source
 /// file is never replaced; derivatives are intentionally outside this API.
 public actor OriginalSourceStore {
@@ -502,6 +510,11 @@ public actor OriginalSourceStore {
     public init(root: URL, fileManager: FileManager = .default) {
         self.root = root
         self.fileManager = fileManager
+    }
+
+    fileprivate init(root: URL, fileManagerBox: SendableFileManager) {
+        self.root = root
+        self.fileManager = fileManagerBox.value
     }
 
     public func persist(record: OriginalSourceRecord, bytes: Data) throws -> URL {
@@ -699,7 +712,8 @@ public actor AcceptedPhotoMetadataStore {
 
     public init(sourceRoot: URL, metadataURL: URL, fileManager: FileManager = .default) {
         self.sourceRoot = sourceRoot
-        self.sourceStore = OriginalSourceStore(root: sourceRoot, fileManager: fileManager)
+        let fileManagerBox = SendableFileManager(fileManager)
+        self.sourceStore = OriginalSourceStore(root: sourceRoot, fileManagerBox: fileManagerBox)
         self.metadataURL = metadataURL
         self.fileManager = fileManager
     }
