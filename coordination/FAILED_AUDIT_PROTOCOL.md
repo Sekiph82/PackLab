@@ -1,5 +1,8 @@
 # PackLab Failed-Audit Protocol
 
+> **OPERATING AUTHORITY UPDATED 2026-11-04:** This file's historical ChatGPT-only TASKS editor, one-task handoff, mandatory frozen prompt, stop-on-any-blocker and cross-milestone prohibitions are superseded by the owner's `AGENTS.md`, `TASKS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Codex may independently schedule ready PL tasks, use distinct peer-review/testing/security subagents, record real `AUTO_AUDITED_PASS` and update the sole tracker, then continue. GitHub Actions are allowed. Prior historical audits, genuine test failures, secrets/privacy, technical contracts, physical/owner/legal gates and safe Git operations are NOT waived. New Codex peer review is NOT a forged ChatGPT audit. 
+
+
 ## Preserve task identity and evidence
 
 An audit failure does not create a replacement task. The same permanent
