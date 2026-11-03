@@ -56,6 +56,9 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var m04ConsecutiveHighlightBlocks = 0
     private let m04HighlightGuidanceThreshold = 3
     private var m04DetailEvaluations: [CapturePassID: DetailPassEvaluation] = [:]
+    private var m04SortedDetailEvaluations: [DetailPassEvaluation] {
+        m04DetailEvaluations.values.sorted { $0.metadata.passID.rawValue < $1.metadata.passID.rawValue }
+    }
     private var m04DetailFraming: [CapturePassID: FramingMetric] = [:]
     private var m04AcceptedDuplicateEvidence: [DuplicateEvidence] = []
     private var cameraControlBridge: CameraControlRuntimeBridge?
@@ -172,7 +175,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
             m04DetailPolicies = [.shoulder: DetailPassPolicy(passID: .shoulder, minimumFramingFraction: 0.18), .neck: DetailPassPolicy(passID: .neck, minimumFramingFraction: 0.20), .closure: DetailPassPolicy(passID: .closure, minimumFramingFraction: 0.22)]
         }
         m04DetailCoverageModels = Dictionary(uniqueKeysWithValues: m04DetailPolicies.keys.map { passID in (passID, OrbitCoverageModel(configuration: detailCoverageConfiguration(for: passID))) })
-        m04DetailGuidance = m04DetailPolicies.values.map { "Capture missing \($0.passID.rawValue) detail sectors" }
+        m04DetailGuidance = m04DetailPolicies.values.sorted { $0.passID.rawValue < $1.passID.rawValue }.map { "Capture missing \($0.passID.rawValue) detail sectors" }
         m04BaseCoverageModel = OrbitCoverageModel(configuration: OrbitCoverageConfiguration(azimuthBinCount: 4, rings: [CoverageRingDefinition(id: "base", minimumElevation: -90, maximumElevation: 90)]))
         m04BaseAvailability = BasePassAvailability(physicallyFeasible: false, reasonCode: "base_pass_unavailable")
         m04BasePass = BasePassEvaluation(snapshot: m04BaseCoverageModel.snapshot(), availability: m04BaseAvailability)
@@ -196,13 +199,13 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04DetailCoverageModels = Dictionary(uniqueKeysWithValues: m04DetailPolicies.keys.map { passID in (passID, OrbitCoverageModel(configuration: detailCoverageConfiguration(for: passID))) })
         m04DetailEvaluations = [:]
         m04DetailFraming = [:]
-        for policy in m04DetailPolicies.values {
+        for policy in m04DetailPolicies.values.sorted(by: { $0.passID.rawValue < $1.passID.rawValue }) {
             let framing = defaultDetailFraming(for: policy)
             let evaluation = DetailPassEvaluation(snapshot: m04DetailCoverageModels[policy.passID]?.snapshot() ?? OrbitCoverageModel(configuration: detailCoverageConfiguration(for: policy.passID)).snapshot(), framing: framing, policy: policy)
             m04DetailFraming[policy.passID] = framing
             m04DetailEvaluations[policy.passID] = evaluation
         }
-        m04DetailGuidance = m04DetailEvaluations.values.flatMap { $0.missingGuidance }
+        m04DetailGuidance = m04SortedDetailEvaluations.flatMap { $0.missingGuidance }
     }
 
     private func makeM04DetailResumeState() -> [M04DetailPassResumeState] {
@@ -257,7 +260,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04DetailCoverageModels = restoredModels
         m04DetailEvaluations = restoredEvaluations
         m04DetailFraming = restoredFraming
-        m04DetailGuidance = restoredEvaluations.values.flatMap { $0.missingGuidance }
+        m04DetailGuidance = restoredEvaluations.values.sorted { $0.metadata.passID.rawValue < $1.metadata.passID.rawValue }.flatMap { $0.missingGuidance }
         recomputeM04Completion()
         return true
     }
@@ -288,7 +291,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
             if let policy = m04DetailPolicies[passID] {
                 let evaluation = DetailPassEvaluation(snapshot: detailModel.snapshot(), framing: FramingMetric(availability: .available, objectFraction: policy.minimumFramingFraction, bounds: nil, margins: [:], band: .acceptable, reasons: []), policy: policy)
                 m04DetailEvaluations[passID] = evaluation
-                m04DetailGuidance = m04DetailGuidance.filter { !$0.contains("\(passID.rawValue) detail") } + evaluation.missingGuidance
+                m04DetailGuidance = m04SortedDetailEvaluations.flatMap { $0.missingGuidance }
             }
         }
         if record.passMetadata?.passID == .base {
@@ -558,7 +561,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private func recomputeM04Completion() {
         let asymmetricMissing = m04AsymmetricCoverage?.missingRegions.map { "asymmetric_\($0.rawValue)" } ?? []
         let turntableMissing = m04TurntableCoverage?.missingSectorIndices.map { "turntable_sector_\($0)" } ?? []
-        m04Completion = CompletionDiagnostics(rings: m04RingCoverage, detailPasses: Array(m04DetailEvaluations.values), base: m04BasePass, additionalMandatoryMissingAreas: asymmetricMissing + turntableMissing, additionalMandatoryAreaCount: (m04AsymmetricPolicy?.requiredRegions.count ?? 0) + (m04TurntableCoverage?.policy.expectedAngleCount ?? 0))
+        m04Completion = CompletionDiagnostics(rings: m04RingCoverage, detailPasses: m04SortedDetailEvaluations, base: m04BasePass, additionalMandatoryMissingAreas: asymmetricMissing + turntableMissing, additionalMandatoryAreaCount: (m04AsymmetricPolicy?.requiredRegions.count ?? 0) + (m04TurntableCoverage?.policy.expectedAngleCount ?? 0))
         scheduleM04ContextPersistence()
     }
 
