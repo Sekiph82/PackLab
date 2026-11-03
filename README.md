@@ -1,5 +1,8 @@
 # PackLab
 
+> **2026-11-04 CURRENT MODE:** The owner authorized Codex to select all dependency-safe PL tasks, use GitHub Actions, assign separate peer reviews and update the sole `TASKS.md` tracker after genuine task acceptance. Any older ChatGPT-only, stop-after-child or zero-Actions instructions below are historical, superseded as workflow restrictions by `AGENTS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`; engineering, secrets, licensing, physical and release evidence obligations remain.
+
+
 PackLab is a GitHub-first monorepo for turning packaging captures into traceable, editable digital-twin work. The product separates source evidence, reconstructed reference geometry, and editable design truth so that a visual scan is never silently treated as an engineering solid.
 
 ## Product flow
