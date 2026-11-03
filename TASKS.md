@@ -4,12 +4,12 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M16
-- Current Sprint: M16-C001 — CI/CD, Signing & Distribution
-- Current Task: PL-0354 remains OPEN, because the required REAL full 205 iOS Xcode/XCTest suite has not run on final Swift code. Earlier hosted focused 25/25 PASS; historical full old-source 173/205 FAIL; latest canonical full run blocked by GitHub Actions billing; Windows 11 laptop lacks xcodebuild/xcrun/iOS Simulator and cannot run the 205 XCTest locally. The separate owner-authorized local main TEMP52 and Xcode-capability Codex handoff is independently AUDITED PASS on builder evidence: 52 PackLab TEMP direct-child items inspected; 5 safe inactive/duplicate/transient entries removed, 47 protected due unique evidence/native source/compliance/OwnerDev provenance; recorded T0-T1 actual net C: free +71,462,912 bytes (68.15 MiB), not equivalent to logical bytes removed. ChatGPT audit https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL0354_MAIN_LOCAL_CAPABILITY_AND_TEMP52_CHATGPT_AUDIT_V01.md. Repo PRIVATE main; ZERO Actions and no paid CI.
-- Current Task Status: MAIN_CANONICAL / TEMP52_LOCAL_CLEANUP_AND_XCODE_CAPABILITY_HANDOFF_INDEPENDENT_AUDIT_PASS_BUILDER_EVIDENCE / TEMP52_5_REMOVED_47_UNIQUE_EVIDENCE_PROTECTED / T0_T1_REAL_NET_C_FREE_PLUS_71462912_BYTES_REPORTED / PL0354_FULL_205_XCTEST_BLOCKED_MACOS_XCODE_REQUIRED / NO_NEW_ACTIONS_OR_PAID_CI / LEGAL_REVIEW_PENDING / NO_PUBLIC_OR_FACTORY_RELEASE.
-- Next Task/Action: No further Codex cleanup or local Windows XCTest runs required now. Preserve 47 unique protected PackLab TEMP evidence/OwnerDev/OCP/SDK/diagnostic items unless individually backed up durably and hash-verified before any later owner-authorized deletion. Record 5 removed, measured C: delta +71,462,912 bytes as Codex-attested, source full 205 method count independently verified (not executed), and no worktree created. Audit https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL0354_MAIN_LOCAL_CAPABILITY_AND_TEMP52_CHATGPT_AUDIT_V01.md. Work from PRIVATE main only; do not alter owner Desktop dirty local worktree, no reset/force-sync. PL0354 genuine full 205 XCTest requires real macOS with Xcode, not Windows; GitHub Actions and paid CI remain forbidden without new explicit owner authorization. PL0355/M17/release remain unaccepted.
-- Required Actor: CHATGPT independent audit/TASKS update DONE for the local TEMP52 and Windows Xcode capability handoff; no new Codex task scheduled. OWNER alone authorizes any future Mac/CI arrangements or deletion of verified sole-copy provenance evidence.
+- Current Milestone: M16 (owner-authorized autonomous execution may cross milestones where dependency-safe)
+- Current Sprint: AUTONOMOUS / M16-C001 and other dependency-safe sprints
+- Current Task: PL-0354 OPEN: attempt final full 205 iOS XCTest on hosted macOS; if CI unavailable move to next independent task
+- Current Task Status: CODEX_AUTONOMY_ENABLED_2026-11-04 / GITHUB_ACTIONS_REAUTHORIZED / 205_XCTEST_NOT_YET_PROVEN_ON_FINAL_SHA
+- Next Task/Action: Codex resumes from current GitHub main, inspects safe Desktop state, tries real PL-0354 hosted full XCTest, fixes actual failures, otherwise records EXTERNAL_PENDING_CI and continues a dependency-safe PL task; peer-review, log, update TASKS, commit/push, verify Desktop sync and OwnerDev refresh for every pass.
+- Required Actor: CODEX_ORCHESTRATOR_WITH_TEST_REVIEW_SECURITY_SUBAGENTS; owner only for genuinely external/physical/legal/account decisions
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL0354_MAIN_LOCAL_CAPABILITY_AND_TEMP52_CHATGPT_AUDIT_V01.md — AUDITED_PASS narrowly scoped TEMP52 cleanup and Windows local XCTest feasibility on Codex evidence: 52 screened, 5 removed/47 protected, +71,462,912 reported C: free T0-T1. ChatGPT independently verified 205 named Swift test methods in source, NOT 205 executed XCTest. PL0354 full suite blocked, M17/legal/factory rollout held.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
 - Latest PL-0186 Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M08-C001/PL-0186_CHATGPT_AUDIT_V02.md - AUDITED_PASS; V03 independently closed expected-vs-observed SAM 2 runtime identity and executed-Hydra-config provenance findings.
@@ -108,6 +108,8 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - Open Owner Gate: PL-0068 remains unchecked / OWNER_REQUIRED because no printer is currently available. Owner previously authorized continued implementation while this physical-evidence gate remains open.
 - Tracking Repository: Sekiph82/PackLab
 - Tracking Branch: main
+
+- **ACTIVE OWNER AUTHORIZATION 2026-11-04:** Codex can update this tracker, select/implement/review all remaining tasks across milestones and use GitHub Actions. The older ChatGPT-only/stop/batch restriction and October no-Actions moratorium are superseded as OPERATING RULES. See `AGENTS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Historical bullet lines below remain time-stamped evidence, not present-day prohibitions. Physical/legal/device validation remains real and cannot be manufactured.
 
 ## Tasks
 # PackLab - Master Task Plan
@@ -716,6 +718,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Sprint M16-S02 - GitHub Actions macOS/iOS
 
 - [ ] **PL-0354** — AUDITED_PARTIAL_BLOCKED_HOSTED_CI_BILLING. Real targeted macOS XCTest recovery 25/25 PASS via https://github.com/Sekiph82/PackLab/actions/runs/38767357450; final full suite at revision 4b1cf516 not executed, https://github.com/Sekiph82/PackLab/actions/runs/38770566255 failed before runner allocation with GitHub billing restriction. Previous full 205 remained 173 passed/32 failed. Independent https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0354_CHATGPT_AUDIT_V02.md; owner billing gate and ONE controlled retry https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0354_R02_BILLING_UNBLOCK_FULL_XCTEST_CODEX_PROMPT.md. R01 task worktree safe removal reported, net C: +26,042,368 bytes; Codex UI stale attachment left untouched due other-task owner. No PL0355 or M17.
+  - **2026-11-04 autonomy re-entry:** full final-source hosted 205 XCTest authorized via GitHub Actions; keep open until real green and peer review. If external runner/billing blocks, record EXTERNAL_PENDING_CI and work next dependency-independent task.
 - [ ] **PL-0355** Resolve/cache Swift Package Manager dependencies including NextLevel.
 - [ ] **PL-0356** Build simulator target on every relevant change with no signing secrets.
 - [ ] **PL-0357** Create device archive job for PackLab Capture.
@@ -849,21 +852,13 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ---
 
-# Execution Rules
+# Execution Rules (owner-revised 2026-11-04)
 
-1. GitHub `Sekiph82/PackLab` branch `main` is repository truth. Root `TASKS.md` is the only live H!veAI/project-status tracker.
-2. ChatGPT is the sole writer of task lifecycle/progress/closure state in this file.
-3. Codex reads this file to confirm authorization but must not edit it.
-4. Exact implementation scope is frozen in `coordination/sessions/<CYCLE_ID>/CODEX_PROMPT_VNN.md` with matching `CHATGPT_AUDIT_CRITERIA_VNN.md`.
-5. Codex implements only that frozen scope, runs every required check, writes the matching `CODEX_LOG_VNN.md`, commits/pushes authorized changes, returns `AWAITING_AUDIT`, and stops.
-6. ChatGPT independently audits actual GitHub source/diff/evidence and writes the matching `CHATGPT_AUDIT_VNN.md`.
-7. After every Codex log/audit cycle, ChatGPT updates this file to the audited truth whether the result is PASS, CHANGES_REQUIRED, BLOCKED, or OWNER_REQUIRED.
-8. Only `AUDITED_PASS` permits ChatGPT to check the matching task `[x]` and advance the H!veAI frontier.
-9. A failed audit keeps the task unchecked and produces the next versioned remediation prompt/criteria in the same cycle; prior evidence is never overwritten.
-10. Session artifacts, `AUDIT.md`, `handoff.md`, `AUDIT_INDEX.md`, dashboards, and historical `.hiveai/*` files are evidence/guidance only and never competing live trackers.
-11. Work proceeds in task-ID order unless the owner explicitly reprioritizes or an audited ADR records an approved dependency-safe exception.
-12. No secret, private key, Apple credential, provisioning private material, private Kenya scan, confidential supplier asset, or other protected data may be committed to this public repository.
-13. Owner-authorized milestone batches are permitted only when the Project Status block explicitly names the batch and points to a frozen master prompt/criteria. Each child PL task must retain separate prompt, criteria, implementation/evidence boundary and Codex log.
-14. During an authorized milestone batch Codex may continue sequential child tasks without interim ChatGPT audit only while each child is validation-green and no STOP condition exists. Codex never marks child tasks complete, never edits this tracker, and must stop before the next milestone.
-15. ChatGPT independently audits every batch child and only then writes the milestone audit and updates this tracker to the audited truth.
-16. A task line containing `Mandatory pre-read` creates a binding implementation contract: Codex/Claude must read that linked file in full before material work, and the frozen prompt/audit criteria must preserve its architecture, authority, licensing, provenance and test requirements.
+1. GitHub `Sekiph82/PackLab` `main` is source truth; this is the only live H!veAI task ledger. Preserve permanent PL IDs and parsable Project Status fields.
+2. Codex is authorized to implement, test, choose next dependency-safe task, use separate peer-review/test/security subagents, update this tracker and continue across milestones; ChatGPT-only tracker and mandatory stop-after-handoff have been revoked for new work.
+3. Task `[x] AUTO_AUDITED_PASS` requires actual required tests/hosted CI where appropriate and non-implementing peer reviewer/security evidence. Do not mislabel autonomous review as historical ChatGPT audit or mark unproven physical/legal/device work complete.
+4. On correctable failure, fix/retest/re-review same task. On genuinely external blockers record `EXTERNAL_PENDING`, exact re-entry condition and dependencies, leave `[ ]` and continue another INDEPENDENT task.
+5. GitHub Actions is owner-re-enabled as of 2026-11-04; run relevant Windows/macOS jobs deliberately, inspect actual results, avoid repeated expensive builds. No automatic account-billing/signing modifications.
+6. After every truly accepted task commit/push `origin/main`, verify remote, safely fast-forward/verify `C:\Users\sekip\Desktop\PackLab`, and refresh OwnerDev runtime where relevant. Preserve owner dirty files; report `LOCAL_SYNC_PENDING` when actual parity is impossible.
+7. No secret/private signing/scan/supplier data in the current PUBLIC repo. No destructive reset, force-push, broad clean or loss of evidence. Architecture, license, device, dimensional accuracy and release gates retain their real requirements.
+8. Operating specifics: `coordination/AUTONOMOUS_EXECUTION_POLICY.md`; Codex master instruction: `coordination/AUTONOMOUS_CODEX_GOAL.md`.

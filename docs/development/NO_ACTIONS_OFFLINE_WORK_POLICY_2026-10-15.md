@@ -1,5 +1,8 @@
 # PackLab | Zero-New-GitHub-Actions Work Mode | 15 October–31 October 2026
 
+> **HISTORICAL ONLY / SUPERSEDED ON 2026-11-04.** The owner has explicitly reauthorized GitHub Actions and continuous Codex task progression. The 2026-10-15 ban below is retained as dated evidence, not a current operational restriction. Current authority: root `AGENTS.md`, `TASKS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Actual billing/runner limits and honest test/physical/legal gates remain.
+
+
 **Owner decision, 2026-10-15.** GitHub Actions spending reported by owner: **USD 56.92 in approximately one week**, unacceptable. **No paid CI spending is approved.** The owner later authorized continuing work that does NOT use GitHub Actions through October, while hosted workflows remain paused. This note records that scope without altering approved PL-0354 acceptance.
 
 ## Hard boundary
