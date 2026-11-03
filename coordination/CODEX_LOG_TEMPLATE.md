@@ -1,4 +1,7 @@
 ---
+
+> **2026-11-04 CURRENT MODE:** The owner authorized Codex to select all dependency-safe PL tasks, use GitHub Actions, assign separate peer reviews and update the sole `TASKS.md` tracker after genuine task acceptance. Any older ChatGPT-only, stop-after-child or zero-Actions instructions below are historical, superseded as workflow restrictions by `AGENTS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`; engineering, secrets, licensing, physical and release evidence obligations remain.
+
 coordinationSchema: packlab-coordination/v1
 artifactType: codex-log
 cycleId: <CYCLE_ID>
