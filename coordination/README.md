@@ -1,5 +1,8 @@
 # PackLab Coordination Protocol
 
+> **CURRENT OWNER AUTHORIZATION (2026-11-04):** The single-task ChatGPT-only, frozen-prompt, stop-after-handoff model described below is HISTORICAL and superseded for future execution by root `AGENTS.md`, `TASKS.md`, and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Codex may now update the tracker after real autonomous peer review, select subsequent dependency-safe tasks across milestones, and use GitHub Actions. Older audits and technical/security/physical/legal acceptance requirements remain factual and binding. 
+
+
 ## Authority model
 
 - Canonical repository: `Sekiph82/PackLab`.
