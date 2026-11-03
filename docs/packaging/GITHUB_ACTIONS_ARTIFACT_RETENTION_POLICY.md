@@ -1,5 +1,8 @@
 # PackLab GitHub Actions artifact retention
 
+> **2026-11-04 CURRENT MODE AND PRIVACY WARNING:** GitHub's current metadata reports `Sekiph82/PackLab` as PUBLIC, contradicting the older PRIVATE-repository assumption below. Do not upload private installers, private scan evidence, Apple signing material, supplier assets or confidential data into public repository/artifact exposure without verifying access and licensing. Hosted Actions are now owner-authorized for legitimate test workflows, but historical legal, factory release and protected-artifact requirements remain.
+
+
 PackLab's repository is private and the product is proprietary internal factory software. Workflow artifacts are temporary, owner-private engineering evidence unless an explicitly approved internal deployment candidate is retained. No artifact is a public release, legal sign-off, or factory rollout authorization.
 
 ## Retention classes
