@@ -1,5 +1,8 @@
 # PackLab M16 | Release Control: Offline Preparation (2026-10-15)
 
+> **2026-11-04 CURRENT MODE:** The owner authorized Codex to select all dependency-safe PL tasks, use GitHub Actions, assign separate peer reviews and update the sole `TASKS.md` tracker after genuine task acceptance. Any older ChatGPT-only, stop-after-child or zero-Actions instructions below are historical, superseded as workflow restrictions by `AGENTS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`; engineering, secrets, licensing, physical and release evidence obligations remain.
+
+
 **Scope:** Source-grounded preliminary design for PL-0363 (version train), PL-0364 (release manifest), PL-0365 (changelog), PL-0366 (release gates), and PL-0367 (rollback). These are **DRAFT CONTRACTS ONLY**, not acceptance of a PL task or authorization to create a release. Created with ZERO GitHub Actions runs.
 
 ## 1. Three-version model, no forced numeric alignment
