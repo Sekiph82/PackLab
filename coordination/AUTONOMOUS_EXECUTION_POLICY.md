@@ -20,3 +20,5 @@ GitHub currently reports this repository as PUBLIC. Never publish tokens, passwo
 
 ## Logging/authority
 For each PL ID record start/end SHA, changed paths, tests with exact command/expected/failure/actual, hosted run links, reviewer/test/security observations, regressions, risks, local and GitHub sync, disk/worktree cleanup, OwnerDev refresh and remaining limitations. Historical `CHATGPT_AUDIT_*.md` files are immutable; Codex may author `CODEX_PEER_REVIEW_*.md` only. `TASKS.md` retains parsable status fields and sole-ledger rule. On process conflicts the 2026-11-04 authorization in root `AGENTS.md` and this policy prevails over historical workflow text, NOT over truthful product/security/physical/legal criteria.
+
+**Canonical sync helper:** after each accepted and pushed PL task, run `tools/dev/post_task_safe_sync.ps1` against the owner Desktop checkout, inspect its SHA parity output, and log `LOCAL_SYNC_PENDING` if it refuses due to owner edits/divergence. Only use its `-RefreshOwnerDev` switch when native Windows runtime deployment is relevant; verify actual result. Never bypass its safe prechecks.
