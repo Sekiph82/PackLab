@@ -134,7 +134,6 @@ jobs:
         id: run-xctests
         run: |
           set -euo pipefail
-          test_selection=()
           names=()
           case "$FOCUSED_GROUP" in
             all) ;;
@@ -155,21 +154,24 @@ jobs:
               ;;
             *) echo "Unknown focused group: $FOCUSED_GROUP" >&2; exit 2 ;;
           esac
-          for name in "${names[@]}"; do
-            test_selection+=("-only-testing:PackLabCaptureTests/PackLabCaptureTests/$name")
-          done
           echo "- XCTest selection: $FOCUSED_GROUP" | tee -a "$GITHUB_STEP_SUMMARY"
-          xcodebuild test \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -destination "$DESTINATION" \
-            -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data" \
-            -resultBundlePath "$RUNNER_TEMP/PackLabCapture.xcresult" \
-            ONLY_ACTIVE_ARCH=YES \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            "${test_selection[@]}" \
+          xcodebuild_args=(
+            -project "$PROJECT"
+            -scheme "$SCHEME"
+            -destination "$DESTINATION"
+            -derivedDataPath "$RUNNER_TEMP/packlab-capture-derived-data"
+            -resultBundlePath "$RUNNER_TEMP/PackLabCapture.xcresult"
+            ONLY_ACTIVE_ARCH=YES
+            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_REQUIRED=NO
+            CODE_SIGN_IDENTITY=""
+          )
+          if [[ "$FOCUSED_GROUP" != all ]]; then
+            for name in "${names[@]}"; do
+              xcodebuild_args+=("-only-testing:PackLabCaptureTests/PackLabCaptureTests/$name")
+            done
+          fi
+          xcodebuild test "${xcodebuild_args[@]}" \
             | tee "$RUNNER_TEMP/packlab-capture-test.log"
 
       - name: Verify and record XCTest summary
