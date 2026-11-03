@@ -233,12 +233,15 @@ private enum Deflater {
     }
 }
 
-private enum CRC32 {
+enum CRC32 {
     static func checksum(_ data: Data) -> UInt32 {
         var crc: UInt32 = 0xffffffff
         for byte in data {
             crc ^= UInt32(byte)
-            for _ in 0..<8 { crc = (crc >> 1) ^ (0xedb88320 & 0 - (crc & 1)) }
+            for _ in 0..<8 {
+                let mask = 0 &- (crc & 1)
+                crc = (crc >> 1) ^ (0xedb88320 & mask)
+            }
         }
         return ~crc
     }

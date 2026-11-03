@@ -131,7 +131,7 @@ private final class FakeProductionTransferClient: @unchecked Sendable, Productio
 }
 
 private final class StubTransferURLProtocol: URLProtocol {
-    nonisolated(unsafe) static var handler: ((URLRequest) -> (Int, Data))?
+    nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (Int, Data))?
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
@@ -143,7 +143,23 @@ private final class StubTransferURLProtocol: URLProtocol {
     }
     override func stopLoading() {}
 }
-private final class RequestCounter { var value = 0 }
+private enum StubTransferResponseHandler {
+    static func make(counter: RequestCounter, statusData: Data, acknowledgementData: Data?) -> @Sendable (URLRequest) -> (Int, Data) {
+        { request in
+            counter.increment()
+            return request.url?.path.hasSuffix("/complete") == true
+                ? (200, acknowledgementData ?? Data())
+                : (200, statusData)
+        }
+    }
+}
+
+private final class RequestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.lock(); defer { lock.unlock() }; return count }
+    func increment() { lock.lock(); defer { lock.unlock() }; count += 1 }
+}
 
 final class PackLabCaptureTests: XCTestCase {
     func testPL0121SwiftWireModelsMatchSharedGoldenFields() throws {
@@ -374,7 +390,7 @@ final class PackLabCaptureTests: XCTestCase {
         let receiver = ReceiverReconnectIdentity(receiverInstanceID: "receiver", host: "127.0.0.1", port: 8443, tlsCertificateFingerprint: String(repeating: "a", count: 64)); let finalization = SessionFinalizationRecord(sessionID: "capture", state: .exported, packagePath: package.path, packageBytes: bytes.count, packageSHA256: digest); let request = TransferRequest(source: package, receiver: receiver, transferID: "transfer", finalization: finalization)
         let statusData = try JSONEncoder().encode(TransferStatusMessage(transferID: "transfer", confirmedBytes: bytes.count, totalBytes: bytes.count, state: "verified", packageSHA256: digest, nextOffset: bytes.count))
         func client(for acknowledgement: TransferCompletionAcknowledgement, counter: RequestCounter) -> URLSessionTransferClient {
-            let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [StubTransferURLProtocol.self]; StubTransferURLProtocol.handler = { request in counter.value += 1; if request.url?.path.hasSuffix("/complete") == true { return (200, (try? JSONEncoder().encode(acknowledgement)) ?? Data()) }; return (200, statusData) }
+            let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [StubTransferURLProtocol.self]; StubTransferURLProtocol.handler = StubTransferResponseHandler.make(counter: counter, statusData: statusData, acknowledgementData: try? JSONEncoder().encode(acknowledgement))
             return URLSessionTransferClient(identity: receiver, session: URLSession(configuration: configuration))
         }
         let good = TransferCompletionAcknowledgement(transferID: "transfer", packageSHA256: digest, verified: true, authenticated: true, state: "complete")
@@ -1403,6 +1419,7 @@ final class PackLabCaptureTests: XCTestCase {
     }
 
     func testFinalizerWritesRealPackageAndKeepsSessionResumableOnDestinationFailure() throws {
+        XCTAssertEqual(CRC32.checksum(Data("123456789".utf8)), 0xcbf43926)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
