@@ -2502,7 +2502,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(vm.m04BasePass.status, "incomplete")
         let persisted = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("base.json")))
         XCTAssertEqual(persisted.passMetadata?.passID, .base)
-        await Task.yield()
+        await vm.waitForM04ContextPersistence()
         let persistedContext = try await M04SessionContextStore(layout: layout).load()
         XCTAssertEqual(persistedContext.basePass?.status, "incomplete")
     }
@@ -2577,7 +2577,7 @@ final class PackLabCaptureTests: XCTestCase {
         let pose = acceptedPoseBinding(captureID: "main", pose: PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal))
         _ = vm.recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: "main", sequence: 0, sourceFilename: "main.heic", metadataFilename: "main.json", poseBinding: pose))
         vm.skipBasePass(reasonCode: "operator_declined_base")
-        for _ in 0..<5 { await Task.yield() }
+        await vm.waitForM04ContextPersistence()
         let persisted = try await M04SessionContextStore(layout: layout).load()
         XCTAssertEqual(persisted.basePass?.status, "skipped")
         XCTAssertEqual(persisted.basePass?.guidance, ["operator_declined_base"])
@@ -2721,7 +2721,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(vm.m04Completion.mandatoryMissingAreas.contains("neck"))
         XCTAssertEqual(vm.m04Completion.score, 0.5, accuracy: 0.000001)
 
-        for _ in 0..<10 { await Task.yield() }
+        await vm.waitForM04ContextPersistence()
         let persisted = try await M04SessionContextStore(layout: layout).load()
         XCTAssertEqual(persisted.detailPasses?.count, 3)
         XCTAssertEqual(persisted.completion, vm.m04Completion)
@@ -2737,6 +2737,7 @@ final class PackLabCaptureTests: XCTestCase {
         _ = fresh.recordAcceptedCaptureCoverage(record("post-resume", azimuth: 0, passID: nil))
         XCTAssertEqual(Set(fresh.m04Completion.mandatoryMissingAreas), Set(["shoulder", "closure"]))
         XCTAssertEqual(fresh.m04Completion.score, 0.5, accuracy: 0.000001)
+        await fresh.waitForM04ContextPersistence()
 
         let legacyRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: legacyRoot) }
@@ -2937,7 +2938,7 @@ final class PackLabCaptureTests: XCTestCase {
         vm.observeAsymmetricRegion(.handle)
         XCTAssertTrue(vm.m04AsymmetricCoverage?.isComplete == true)
         XCTAssertFalse(vm.m04Completion.mandatoryMissingAreas.contains("asymmetric_handle"))
-        for _ in 0..<3 { await Task.yield() }
+        await vm.waitForM04ContextPersistence()
         let loaded = try await M04SessionContextStore(layout: layout).load()
         XCTAssertEqual(loaded.preset.coverage.asymmetricCoverage, preset.coverage.asymmetricCoverage)
         XCTAssertEqual(loaded.asymmetricCoverage?.observedRegions[.handle], 1)
@@ -3007,7 +3008,8 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(first?.source, .turntableAngle)
         XCTAssertFalse(vm.evaluateTurntableAngle(360).allowed)
         XCTAssertNil(vm.observeTurntableAngle(captureID: "repeat", angleDegrees: 360))
-        let record = AcceptedCaptureRecord(captureID: "captured-angle", sequence: 0, sourceFilename: "captured-angle.heic", metadataFilename: "captured-angle.json")
+        let suppliedMotion = MotionCaptureBinding(captureID: "captured-angle", captureTimestamp: 0, sample: nil, delta: nil, status: "unavailable")
+        let record = AcceptedCaptureRecord(captureID: "captured-angle", sequence: 0, sourceFilename: "captured-angle.heic", metadataFilename: "captured-angle.json", motionBinding: suppliedMotion)
         let state = try JSONEncoder().encode(PersistedSessionState(sessionID: "turntable", nextSequence: 1, epoch: 0, acceptedIDs: ["captured-angle"]))
         let outcome = try await vm.captureAndPersistTurntable(captureID: "captured-angle", angleDegrees: 180, record: record, metadata: Data(), state: state, store: store, poses: PoseBuffer(), motion: MotionBuffer())
         XCTAssertTrue(outcome.decision.allowed)
@@ -3015,7 +3017,8 @@ final class PackLabCaptureTests: XCTestCase {
         let persisted = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("captured-angle.json")))
         XCTAssertEqual(persisted.turntableEvidence?.source, .turntableAngle)
         XCTAssertNil(persisted.poseBinding)
-        for _ in 0..<3 { await Task.yield() }
+        XCTAssertEqual(persisted.motionBinding, suppliedMotion)
+        await vm.waitForM04ContextPersistence()
         let loaded = try await M04SessionContextStore(layout: layout).load()
         XCTAssertEqual(loaded.turntableCoverage?.capturedSectorIndices, [0, 1])
         XCTAssertTrue(loaded.turntableCoverage?.isComplete == true)

@@ -470,10 +470,16 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let result = await service.requestManual(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
         guard case .accepted(let still) = result else { return (decision, nil, nil) }
         guard let observation = observeTurntableAngle(captureID: record.captureID, angleDegrees: angleDegrees) else { return (AutoCaptureDecision(allowed: false, reasons: ["turntable_angle_unavailable"]), nil, nil) }
-        let enriched = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: record.poseBinding, motionBinding: record.motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit, turntableEvidence: observation)
+        let evidence = AcceptedStillEvidenceBinder.bind(still: still, poses: poses, motion: motion, bridge: bridge)
+        let motionBinding = evidence.motion?.status == "available" ? evidence.motion : (record.motionBinding ?? evidence.motion)
+        let enriched = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: record.poseBinding, motionBinding: motionBinding, passMetadata: record.passMetadata, manualAudit: record.manualAudit, turntableEvidence: observation)
         let enrichedMetadata = (try? JSONEncoder().encode(enriched)) ?? metadata
-        try await store.storeAcceptedCapture(still: still, record: enriched, metadata: enrichedMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
+        // Turntable angle evidence is an independent coverage source. Preserve
+        // caller-provided pose evidence without synthesizing an unavailable AR
+        // pose binding from the shutter timestamp.
+        try await store.storeAcceptedCapture(source: still.sourceBytes, record: enriched, metadata: enrichedMetadata, state: state)
         recordAcceptedCaptureCoverage(enriched)
+        await waitForM04ContextPersistence()
         return (decision, observation, still)
     }
 
@@ -509,6 +515,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let baseMetadata = (try? JSONEncoder().encode(baseRecord)) ?? metadata
         try await store.storeAcceptedCapture(still: still, record: baseRecord, metadata: baseMetadata, state: state, poses: poses, motion: motion, bridge: bridge)
         recordAcceptedCaptureCoverage(baseRecord)
+        await waitForM04ContextPersistence()
         return (decision, still)
     }
 

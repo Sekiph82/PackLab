@@ -21,6 +21,7 @@ on:
         options:
           - all
           - recovery_all
+          - pl0119_finalization_failures
           - session_integrity
           - camera_pose
           - capture_coverage
@@ -140,6 +141,9 @@ jobs:
             recovery_all)
               names=(testAuthoritativeDeletionRemovesSessionAndRejectsTraversal testDeletionPlanRequiresConfirmationAndStaysInsideRoot testFinalizationGateDistinguishesBindingAndChecksumFailures testPL0088EveryTransactionFailureStageRecoversCleanPreCaptureState testPL0089RetakeCallbackAndDeleteRetakeFailureStagesRollbackCoherently testPL0090DiscoveryUsesRecoveredStateBlocksCorruptionAndDiscardsOnlyResumableSessions testSessionDiscoveryReconstructsHistoryAndBlocksMissingOrVersionMismatch testPL0073FocusCannotLockBeforeObservedStabilization testPL0080AndPL0081AcceptedStillOrchestrationPersistsPoseMotionAndReopens testPL0083AndPL0085RuntimeRefreshUsesInjectedServicesAndStops testPL0085OverlayPropagatesNewestPoseMotionAndEpochThenStops testPoseClockBridgeBindsAcceptedStillAndExactBoundaries testPL0095CandidateRuntimePublishesAlignedMotionWarningsAndHighRisk testPL0097CandidateRuntimePublishesShadowBandsAndRawObjectFraction testPL0102CoverageUsesExactElevationBoundariesAndAdjacentValuesDeterministically testPL0104ProductionAutoCaptureUsesHealthGatedBackendAndAcceptedTransaction testPL0104ProductionGateMatrixNeverInvokesBackendWhenBlocked testPL0105DuplicateDetectorProvesTranslationElevationAndSignatureBoundaries testPL0106RingAndSectorBoundariesAreDeterministicInLiveGuidance testPL0109ActiveCompletionPropagatesAndPersistsWithOptionalBaseState testPL0109CompletionDiagnosticsDistinguishesCompleteAndUnavailableEvidence testPL0118PreflightIsTableDrivenAcrossPresetsAndHealthConditions testPL0120ProductionSharePresentationStateCoversCancelCompletionFailureAndReplacement testPL0120ShareEligibilityRejectsMissingOrNonPackscanFiles testPL0121SwiftWireModelsMatchSharedGoldenFields)
               ;;
+            pl0119_finalization_failures)
+              names=(testPL0119InjectedFinalizationFailuresLeaveNoPartialArtifactsAndPreservePriorExport)
+              ;;
             session_integrity)
               names=(testAuthoritativeDeletionRemovesSessionAndRejectsTraversal testDeletionPlanRequiresConfirmationAndStaysInsideRoot testFinalizationGateDistinguishesBindingAndChecksumFailures testPL0088EveryTransactionFailureStageRecoversCleanPreCaptureState testPL0089RetakeCallbackAndDeleteRetakeFailureStagesRollbackCoherently testPL0090DiscoveryUsesRecoveredStateBlocksCorruptionAndDiscardsOnlyResumableSessions testSessionDiscoveryReconstructsHistoryAndBlocksMissingOrVersionMismatch)
               ;;
@@ -192,6 +196,7 @@ jobs:
           case "$FOCUSED_GROUP" in
             all) expected=205 ;;
             recovery_all) expected=25 ;;
+            pl0119_finalization_failures) expected=1 ;;
             session_integrity) expected=7 ;;
             camera_pose) expected=5 ;;
             capture_coverage) expected=9 ;;
@@ -202,3 +207,12 @@ jobs:
             echo "XCTest selection did not pass with its expected count (group=$FOCUSED_GROUP, result=$result, total=$total, expected=$expected, failed=$failed, skipped=$skipped)." >&2
             exit 1
           fi
+
+      - name: Preserve failed XCTest diagnostics for one day
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-capture-xcresult-${{ github.run_id }}
+          path: ${{ runner.temp }}/PackLabCapture.xcresult
+          if-no-files-found: ignore
+          retention-days: 1
