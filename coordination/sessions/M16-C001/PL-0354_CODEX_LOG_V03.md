@@ -54,15 +54,16 @@ Security/privacy review: public repository contents contain no secret, private s
 
 ## Publication and Desktop synchronization
 
-Source commits were pushed to `origin/main` in sequence: `dc2e087e269f4c2485b0272963c1d1681db4c595`, `5c9ef9d157cabbdf06506fa8175c07beb79e8f25`, `c3aceca8e798768524f785dfd326cd5e8af875e1`, `aad9f4630e3b29bfa892e0edc1cfe2eff37f0919`, `89df9fc622c75e9290aed7aabe82457682488a7f`, and `3cc10fe5241d95f2dce7fb909e15b129342d37a3`. This log and peer review are published separately from those source commits. Tracker/evidence commit and remote SHA will be recorded after publication.
+Source commits were pushed to `origin/main` in sequence: `dc2e087e269f4c2485b0272963c1d1681db4c595`, `5c9ef9d157cabbdf06506fa8175c07beb79e8f25`, `c3aceca8e798768524f785dfd326cd5e8af875e1`, `aad9f4630e3b29bfa892e0edc1cfe2eff37f0919`, `89df9fc622c75e9290aed7aabe82457682488a7f`, and `3cc10fe5241d95f2dce7fb909e15b129342d37a3`. This log and peer review were published with the tracker in commit `fd34603fcd3ff5f8dedcca9655c24e0772d6ebb0`; `git push origin HEAD:main` succeeded, and `git fetch origin main` confirmed `HEAD == origin/main == fd34603fcd3ff5f8dedcca9655c24e0772d6ebb0`.
 
-Desktop state is owner-dirty and has local HEAD `f8745047063aca6c17378ecb33604e6e1e5b5f02`; initial status included existing owner changes. Do not overwrite or claim parity if `tools/dev/post_task_safe_sync.ps1` refuses. Record its exact outcome below.
+Desktop state is owner-dirty at local HEAD `f8745047063aca6c17378ecb33604e6e1e5b5f02`; direct `git status --short --untracked-files=normal` showed many existing tracked modifications and untracked files across owner work. The required `tools/dev/post_task_safe_sync.ps1` invocation did not return usable output before the bounded wait was interrupted. Its source checks cleanliness before fetching/merging; the observed owner changes satisfy its `LOCAL_SYNC_PENDING` stop condition. No parity is claimed and no Desktop file was changed. No OwnerDev refresh applies to this iOS-only task.
 
 ## Post-task PackLab worktree cleanup
 
 - Task worktree: `codex/pl0354-r02-fix`, based on PackLab, intended for removal after all evidence and publication are complete.
 - Other old/prunable worktrees are not part of this task and will be preserved.
-- C: free before cleanup was measured as `214179442688` bytes at the time this log was drafted; remeasure immediately before and after cleanup. Record exact net change only from those measurements.
+- The failed hosted-run xcresult was preserved outside the task worktree in the local Codex artifact store (2,424 files, 54,117,491 logical bytes); it is diagnostic evidence, not published to the public repository. The exact worktree had no reparse points.
+- C: free after moving that artifact was measured as `214177943552` bytes; remeasure immediately before and after worktree removal. Record exact net change only from those measurements.
 - No removal has occurred yet. Verify the exact worktree is inactive, published, clean, has no unique ignored/untracked evidence or protected data, no process/reparse point uses it, then remove without force and verify it is absent. If any check is ambiguous, preserve it and report `WORKTREE_CLEANUP_BLOCKED`.
 
 ## Known limitations
