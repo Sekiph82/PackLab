@@ -23,7 +23,14 @@ review was independent of the implementation summary.
   the header remain blocked. Regression tests cover changed hashes, full
   synthetic blocks, inline payloads, and paths outside the documented areas.
 - The allowlist loader now rejects non-object JSON roots and malformed entries
-  with a redacted, fail-closed scan result.
+  with a redacted, fail-closed scan result; a malformed-root regression test
+  covers the stable schema error.
+- The first hosted scan exposed Windows/Linux line-ending drift in Markdown
+  digests. Hashing now canonicalizes CRLF to LF, and a CRLF regression fixture
+  verifies the same reviewed digest is accepted.
+- Repository-wide Ruff exposed an existing `UP012` lint error in the offline
+  version inventory tests. Its redundant UTF-8 encoding argument was removed
+  without changing test semantics.
 
 ## Review conclusions
 
@@ -37,7 +44,7 @@ review was independent of the implementation summary.
   dependency was added. Test canaries are synthetic.
 - The current tracked public repository passes the signing-material scan.
 
-Tester review: **PASS**, 14 focused tests and both repository guard commands
+Tester review: **PASS**, 15 focused tests and both repository guard commands
 passed.
 
 Source/workflow review: **PASS** after the final source-pinned allowlist and

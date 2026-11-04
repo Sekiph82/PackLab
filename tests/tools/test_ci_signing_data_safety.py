@@ -11,10 +11,23 @@ from pathlib import Path
 from unittest.mock import patch
 
 from tools.ci import ci_data_safety
-from tools.ci.ci_data_safety import _report, scan_signing_material
+from tools.ci.ci_data_safety import (
+    _load_signing_document_allowlist,
+    _report,
+    scan_signing_material,
+)
 
 
 class SigningMaterialSafetyTests(unittest.TestCase):
+    def test_allowlist_rejects_non_object_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = root / "tools" / "ci" / "ci_signing_material_allowlist.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("[]", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "SIGNING_ALLOWLIST_SCHEMA_INVALID"):
+                _load_signing_document_allowlist(root)
+
     def test_safe_example_placeholder_is_ignored(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -99,21 +112,18 @@ class SigningMaterialSafetyTests(unittest.TestCase):
             fixture = root / "docs" / "security" / "fixtures" / "marker.md"
             fixture.parent.mkdir(parents=True)
             header = b"-----BEGIN " + b"PRIVATE KEY-----"
-            contents = b"Example marker: " + header + b" in prose; no key bytes present.\n"
+            contents = b"Example marker: " + header + b" in prose; no key bytes present.\r\n"
             fixture.write_bytes(contents)
+            canonical_digest = hashlib.sha256(contents.replace(b"\r\n", b"\n")).hexdigest()
             approved = {
                 "docs/security/fixtures/marker.md": {
-                    "sha256": hashlib.sha256(contents).hexdigest(),
+                    "sha256": canonical_digest,
                     "reason": "Reviewed documentation marker only; contains no key bytes.",
                 }
             }
             with patch.dict(
                 ci_data_safety.REVIEWED_SIGNING_MARKER_DOCUMENTS,
-                {
-                    "docs/security/fixtures/marker.md": approved[
-                        "docs/security/fixtures/marker.md"
-                    ]["sha256"]
-                },
+                {"docs/security/fixtures/marker.md": canonical_digest},
                 clear=True,
             ):
                 self.assertEqual(scan_signing_material(root, [fixture], approved), [])

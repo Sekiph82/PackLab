@@ -155,7 +155,7 @@ class OfflineVersionInventoryTests(unittest.TestCase):
             with self.subTest(version=version), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 _make_fixture(root)
-                _write(root, STUDIO, f'__version__ = "{version}"\n'.encode("utf-8"))
+                _write(root, STUDIO, f'__version__ = "{version}"\n'.encode())
                 with self.assertRaisesRegex(SourceVersionError, "INVALID_SEMVER"):
                     inventory(root)
 
@@ -164,7 +164,9 @@ class OfflineVersionInventoryTests(unittest.TestCase):
             root = Path(tmp)
             _make_fixture(root)
             _write(root, INFO, plistlib.dumps({"CFBundleVersion": "1"}))
-            with self.assertRaisesRegex(SourceVersionError, "CAPTURE_PLIST_VERSION_BINDING_MISMATCH"):
+            with self.assertRaisesRegex(
+                SourceVersionError, "CAPTURE_PLIST_VERSION_BINDING_MISMATCH"
+            ):
                 inventory(root)
 
 

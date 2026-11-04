@@ -132,7 +132,9 @@ blocked even for documentation. A small documentation-marker exception may
 suppress the private-key-header check only for an exact Markdown path and
 SHA-256 digest listed in `tools/ci/ci_signing_material_allowlist.json`, under
 `docs/security/fixtures/` or `coordination/sessions/`, with a review reason.
-Each exception must also match the scanner’s source-pinned path and digest.
+Each exception must also match the scanner’s source-pinned path and
+line-ending-canonical SHA-256 digest, so Windows and Linux clones evaluate the
+same content identically.
 It cannot suppress extension, signing-material filename, or secret-assignment
 findings. The allowlist currently covers two historical audit documents that
 mention a PEM marker as an example and contain no key bytes. Adding an entry

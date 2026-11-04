@@ -127,8 +127,8 @@ SECRET_ASSIGNMENT = re.compile(
 )
 SIGNING_DOCUMENT_ALLOWLIST_PATH = Path("tools/ci/ci_signing_material_allowlist.json")
 REVIEWED_SIGNING_MARKER_DOCUMENTS = {
-    "coordination/sessions/M16-C001/M16_OFFLINE_OCTOBER_CHATGPT_AUDIT_V01.md": "6ebd10fb763003bda03ba75969c378fb061e3d71c6c49595a6475e8b894e39b0",
-    "coordination/sessions/M16-C001/M16_OFFLINE_OCTOBER_R01_SECURITY_VERSION_TEMP_CLEANUP_PROMPT.md": "ca99715c4603641a40ee3dfeeaa3902d58882473e71bd33bca2c87104a8c7e40",
+    "coordination/sessions/M16-C001/M16_OFFLINE_OCTOBER_CHATGPT_AUDIT_V01.md": "10206292fc83b4ecb8be9f5ef22c86783f0dc7e5d2b6f3b5dfbbd61cacc1815a",
+    "coordination/sessions/M16-C001/M16_OFFLINE_OCTOBER_R01_SECURITY_VERSION_TEMP_CLEANUP_PROMPT.md": "15a5265c56c7f5e671147b9fb9b2ea81a2fa6fa54f60dd15f65bb0d7f0613f62",
 }
 LINE_ENDING_CANONICAL_SUFFIXES = {
     ".svg",
@@ -491,7 +491,9 @@ def _matches_reviewed_public_document(
         contents = path.read_bytes()
     except OSError:
         return False
-    digest = hashlib.sha256(contents).hexdigest()
+    # Markdown hashing must be stable between Windows CRLF and Linux LF clones.
+    canonical_contents = contents.replace(b"\r\n", b"\n")
+    digest = hashlib.sha256(canonical_contents).hexdigest()
     if digest != reviewed_sha256:
         return False
     text = contents.decode("utf-8", errors="strict")
