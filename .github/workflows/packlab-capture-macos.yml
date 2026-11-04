@@ -37,6 +37,228 @@ permissions:
   contents: read
 
 jobs:
+  capture-unsigned-device-archive:
+    name: Unsigned iOS device archive
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      PROJECT: apps/ios-capture/PackLabCapture.xcodeproj
+      SCHEME: PackLabCapture
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Select Xcode and record archive toolchain
+        id: archive-xcode
+        run: |
+          set -euo pipefail
+          test -d /Applications/Xcode_16.app
+          sudo xcode-select --switch /Applications/Xcode_16.app
+          xcode_version="$(xcodebuild -version | awk '/^Xcode / { print $2 }')"
+          xcode_build="$(xcodebuild -version | awk '/^Build version / { print $3 }')"
+          ios_sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          test -n "$xcode_version"
+          test -n "$xcode_build"
+          test -n "$ios_sdk"
+          echo "version=$xcode_version" >> "$GITHUB_OUTPUT"
+          echo "build=$xcode_build" >> "$GITHUB_OUTPUT"
+          echo "ios_sdk=$ios_sdk" >> "$GITHUB_OUTPUT"
+          {
+            echo '## Unsigned device archive toolchain'
+            echo
+            echo "- Runner image: macos-15"
+            echo "- macOS: $(sw_vers -productVersion)"
+            echo "- Xcode: $(xcodebuild -version | tr '\n' ' ')"
+            echo "- iOS SDK: $ios_sdk"
+            echo '- Destination: generic/platform=iOS'
+            echo '- Signing: disabled; no Apple developer credentials are read'
+            echo "- Source revision: $GITHUB_SHA"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore exact Swift Package Manager cache
+        id: archive-spm-cache
+        if: ${{ hashFiles('apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') != '' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/packlab-capture-archive-derived-data/SourcePackages/repositories
+            ~/Library/Caches/org.swift.swiftpm
+          key: packlab-spm-${{ runner.os }}-${{ runner.arch }}-macos-15-xcode-${{ steps.archive-xcode.outputs.version }}-${{ steps.archive-xcode.outputs.build }}-${{ hashFiles('apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      - name: Resolve and validate the exact NextLevel package pin
+        run: |
+          set -euo pipefail
+          derived_data="$RUNNER_TEMP/packlab-capture-archive-derived-data"
+          package_resolved='apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'
+          project_file='apps/ios-capture/PackLabCapture.xcodeproj/project.pbxproj'
+          test -s "$package_resolved"
+          before_digest="$(shasum -a 256 "$package_resolved" | awk '{ print $1 }')"
+          xcodebuild -resolvePackageDependencies \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -derivedDataPath "$derived_data"
+          after_digest="$(shasum -a 256 "$package_resolved" | awk '{ print $1 }')"
+          test "$before_digest" = "$after_digest"
+          python3 - "$package_resolved" "$project_file" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          lock = json.loads(Path(sys.argv[1]).read_text())
+          project = Path(sys.argv[2]).read_text()
+          exact_pin = re.compile(
+              r'repositoryURL = "https://github[.]com/NextLevel/NextLevel";\s*'
+              r'requirement = [{]kind = exactVersion; version = 0[.]19[.]1; [}];'
+          )
+          pins = lock.get('pins')
+          if len(exact_pin.findall(project)) != 1 or not isinstance(pins, list) or len(pins) != 1:
+              raise SystemExit('Expected the reviewed single exact NextLevel 0.19.1 dependency.')
+          pin = pins[0]
+          state = pin.get('state', {})
+          if (
+              pin.get('identity', '').casefold() != 'nextlevel'
+              or state.get('version') != '0.19.1'
+              or not re.fullmatch(r'[0-9a-f]{40}', state.get('revision', ''))
+          ):
+              raise SystemExit('Package.resolved differs from the reviewed NextLevel 0.19.1 revision pin.')
+          print(f"NextLevel pin: 0.19.1 at {state['revision']}")
+          PY
+          package_manifest="$derived_data/SourcePackages/checkouts/NextLevel/Package.swift"
+          test -f "$package_manifest"
+          chmod u+w "$package_manifest"
+          python3 - "$package_manifest" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          manifest = path.read_text()
+          expected = [
+              '// swift-tools-version:6.0',
+              '.enableUpcomingFeature("ExistentialAny")',
+              'swiftLanguageModes: [.version("6")]',
+          ]
+          if any(manifest.count(value) != 1 for value in expected):
+              raise SystemExit('Resolved NextLevel manifest differs from the reviewed 0.19.1 compatibility boundary.')
+          manifest = manifest.replace('              .enableUpcomingFeature("ExistentialAny")\n', '')
+          manifest = manifest.replace('swiftLanguageModes: [.version("6")]', 'swiftLanguageModes: [.version("5")]')
+          path.write_text(manifest)
+          if '.enableUpcomingFeature("ExistentialAny")' in manifest or 'swiftLanguageModes: [.version("5")]' not in manifest:
+              raise SystemExit('Could not apply the runner-local NextLevel Swift 5 compatibility adjustment.')
+          print('Applied runner-local Swift 5 compatibility adjustment to NextLevel 0.19.1 manifest only.')
+          PY
+          echo "- Package.resolved SHA-256: $after_digest" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive PackLabCapture for generic iOS without signing
+        run: |
+          set -euo pipefail
+          archive_path="$RUNNER_TEMP/PackLabCapture-unsigned.xcarchive"
+          test ! -e "$archive_path"
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$archive_path" \
+            -derivedDataPath "$RUNNER_TEMP/packlab-capture-archive-derived-data" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            | tee "$RUNNER_TEMP/packlab-capture-archive.log"
+          echo '- Generic iOS archive build: PASS (unsigned; not an installable IPA)' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate unsigned archive and write provenance
+        env:
+          XCODE_VERSION: ${{ steps.archive-xcode.outputs.version }}
+          XCODE_BUILD: ${{ steps.archive-xcode.outputs.build }}
+          IOS_SDK: ${{ steps.archive-xcode.outputs.ios_sdk }}
+        run: |
+          set -euo pipefail
+          archive_path="$RUNNER_TEMP/PackLabCapture-unsigned.xcarchive"
+          app_path="$archive_path/Products/Applications/PackLabCapture.app"
+          app_info="$app_path/Info.plist"
+          test -d "$archive_path"
+          test -s "$archive_path/Info.plist"
+          test -d "$app_path"
+          test -s "$app_info"
+          if find "$archive_path" \( -name embedded.mobileprovision -o -name _CodeSignature \) -print -quit | grep -q .; then
+            echo 'Unsigned archive unexpectedly contains a provisioning profile or code signature.' >&2
+            exit 1
+          fi
+          app_executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_info")"
+          test -s "$app_path/$app_executable"
+          set +e
+          signature_output="$(/usr/bin/codesign --display --verbose=4 "$app_path/$app_executable" 2>&1)"
+          signature_status=$?
+          set -e
+          if [[ "$signature_status" -eq 0 ]]; then
+            echo 'Unsigned archive unexpectedly contains a signed app executable.' >&2
+            exit 1
+          fi
+          if [[ "$signature_output" != *'code object is not signed at all'* ]]; then
+            echo 'Could not establish that the archived app executable is unsigned.' >&2
+            exit 1
+          fi
+          python3 - "$app_info" <<'PY'
+          import plistlib
+          import sys
+          from pathlib import Path
+
+          info = plistlib.loads(Path(sys.argv[1]).read_bytes())
+          expected = {
+              'CFBundleIdentifier': 'com.packlab.capture',
+              'CFBundleShortVersionString': '0.1.0',
+              'CFBundleVersion': '1',
+              'DTPlatformName': 'iphoneos',
+          }
+          for key, value in expected.items():
+              if info.get(key) != value:
+                  raise SystemExit(f'{key} mismatch: expected {value!r}; got {info.get(key)!r}.')
+          if 'iPhoneOS' not in info.get('CFBundleSupportedPlatforms', []):
+              raise SystemExit('Archived app does not declare iPhoneOS as a supported platform.')
+          print('Archive app bundle, Capture version/build, and iPhoneOS platform validated.')
+          PY
+          lock_sha="$(shasum -a 256 apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved | awk '{ print $1 }')"
+          provenance="$RUNNER_TEMP/packlab-capture-device-archive-provenance.txt"
+          {
+            echo 'format=packlab-ios-unsigned-device-archive-provenance-v1'
+            echo "source_revision=$GITHUB_SHA"
+            echo "workflow_run_id=$GITHUB_RUN_ID"
+            echo 'runner_image=macos-15'
+            echo "macos_version=$(sw_vers -productVersion)"
+            echo "xcode_version=$XCODE_VERSION"
+            echo "xcode_build=$XCODE_BUILD"
+            echo "iphoneos_sdk=$IOS_SDK"
+            echo "destination=generic/platform=iOS"
+            echo 'product=PackLabCapture-unsigned.xcarchive'
+            echo 'bundle_identifier=com.packlab.capture'
+            echo 'capture_version=0.1.0'
+            echo 'capture_build=1'
+            echo 'signing_state=UNSIGNED'
+            echo 'CODE_SIGNING_ALLOWED=NO'
+            echo 'CODE_SIGNING_REQUIRED=NO'
+            echo 'CODE_SIGN_IDENTITY=empty'
+            echo "Package.resolved_sha256=$lock_sha"
+            echo 'installable_ipa=not produced'
+          } > "$provenance"
+          echo '- Archive provenance: validated, UNSIGNED; no IPA or signing material produced' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve unsigned device archive for one day
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-capture-unsigned-device-archive-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/PackLabCapture-unsigned.xcarchive
+            ${{ runner.temp }}/packlab-capture-device-archive-provenance.txt
+          if-no-files-found: error
+          retention-days: 1
+
   capture-tests:
     name: Unsigned iOS Simulator build and XCTest
     runs-on: macos-15
