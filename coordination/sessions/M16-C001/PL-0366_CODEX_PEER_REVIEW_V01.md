@@ -1,6 +1,6 @@
 # PL-0366 Codex Peer Review V01
 
-Task: **Create release checklist requiring Windows and iOS audit passes**  
+Task: **Create release checklist requiring Windows and iOS audit passes**
 Implementation commit reviewed: `35a5dba05db1de907bbde93160ab986f60551507`
 
 ## Review assignments and final results
