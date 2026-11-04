@@ -56,7 +56,14 @@ Expected behavior: complete, mutually consistent evidence produces a stable prep
 
 The source reviewer, tester and security reviewer inspected the implementation/tests/evidence and returned PASS; resolutions and scope boundaries are recorded in `coordination/sessions/M16-C001/PL-0364_CODEX_PEER_REVIEW_V01.md`. This is advisory implementation peer review, not an independent ChatGPT audit. CI receipt authenticity and cryptographic signature verification are not performed by this offline preparation tool.
 
-No secrets, credentials, signing private material, private Kenya scans, confidential supplier data or new dependencies were added. No Apple signing, legal approval, physical-device acceptance, GitHub release, tag, production release, M17 acceptance or PL-0368 release approval is claimed. Desktop sync, task worktree cleanup and actual C: free-space before/after measurements remain to be recorded after safe cleanup checks.
+No secrets, credentials, signing private material, private Kenya scans, confidential supplier data or new dependencies were added. No Apple signing, legal approval, physical-device acceptance, GitHub release, tag, production release, M17 acceptance or PL-0368 release approval is claimed.
+
+## Post-task synchronization and worktree cleanup follow-up
+
+- Invoked `tools/dev/post_task_safe_sync.ps1` from this task worktree. It produced no output and remained running for 30 seconds; the invocation was interrupted. A read-only Desktop inspection confirmed owner changes/untracked files and local SHA `f8745047063aca6c17378ecb33604e6e1e5b5f02`, so the checkout was left untouched. Result: `LOCAL_SYNC_PENDING`; no OwnerDev refresh was attempted because this source/tooling change does not affect its runtime.
+- From the stable Desktop checkout, verified the exact task worktree at `C:\Users\sekip\.codex\worktrees\pl0364-release-manifest\PackLab`, branch `codex/pl0364-release-manifest`, HEAD `c58f17b27a901b1f08e99c817f65efcbfb7c252b`, equal to pushed `origin/main`, with clean tracked/untracked state. Ignored contents were limited to the worktree virtual environment, egg-info, and Python/mypy/pytest/ruff caches. No reparse points or active task processes were found. Other PackLab worktrees were not modified.
+- Removed only this exact worktree via normal `git worktree remove`, without force. The registry no longer lists it and its directory is gone. Actual C: free space was `210939084800` bytes immediately before and `210989613056` bytes after removal, a verified increase of `50528256` bytes.
+- Created the PL-0365 worktree separately from fetched `origin/main` at `c58f17b27a901b1f08e99c817f65efcbfb7c252b`; no Desktop tracked or untracked files were changed.
 
 ## Handoff
 
