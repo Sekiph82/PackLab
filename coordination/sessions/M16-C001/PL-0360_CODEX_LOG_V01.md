@@ -123,4 +123,32 @@ PL-0360 is recorded `AUTO_AUDITED_PASS` in root `TASKS.md`. PL-0358 remains
 The unresolved full-suite findings above remain visible and are not treated as
 PL-0360 passes.
 
+## Post-publication sync and worktree cleanup
+
+- `tools/dev/post_task_safe_sync.ps1` was invoked against the canonical
+  Desktop checkout. The helper did not return after approximately 20 seconds;
+  only the exact PowerShell processes launched for that invocation
+  were stopped. A separate status check found 74 tracked/untracked entries in
+  the Desktop checkout (`main`, HEAD
+  `f8745047063aca6c17378ecb33604e6e1e5b5f02`) while `origin/main` was
+  `8f5bbebd77f02d7b774ac78cceede96d6f50be7a`. Owner changes were preserved;
+  no fast-forward or parity claim was made. State: `LOCAL_SYNC_PENDING`.
+- OwnerDev refresh was not run; PL-0360 does not change the native Windows app
+  runtime or deployment.
+- From the Desktop checkout, `git worktree list --porcelain` identified the
+  exact task worktree
+  `C:\Users\sekip\.codex\worktrees\pl0360-signing-material-guard\PackLab`.
+  Before removal it was clean, at pushed SHA
+  `8f5bbebd77f02d7b774ac78cceede96d6f50be7a`, equal to the verified
+  `origin/main` SHA. No reparse points or active task processes were present.
+  The 18,917 ignored paths were generated `.venv`, Ruff, package metadata and
+  Python test caches from this task; no owner or protected data was present.
+- Removed the worktree with normal `git worktree remove` (no force). The path
+  no longer exists and the worktree registry has no matching entry.
+- Actual C: free bytes immediately before removal: `211339935744`; after:
+  `211382513664`; recovered: `42577920` bytes.
+- This cleanup addendum is being published as a distinct PL-0360 log-only
+  follow-up commit from the PL-0361 worktree. The task worktree was not deleted
+  concurrently with implementation, validation, evidence, or publication.
+
 READY_FOR_INDEPENDENT_AUDIT
