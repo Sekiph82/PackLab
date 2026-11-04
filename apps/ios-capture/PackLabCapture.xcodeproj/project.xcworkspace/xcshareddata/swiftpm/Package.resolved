@@ -1,0 +1,15 @@
+{
+  "originHash" : "ea66d2a15995a701ae8e737c93a5e5f286af9b7e73c4fc4cc2d1548482c79a1a",
+  "pins" : [
+    {
+      "identity" : "nextlevel",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/NextLevel/NextLevel",
+      "state" : {
+        "revision" : "edb3ba52aed8b49e9e197a275ea5e4846fb8c36d",
+        "version" : "0.19.1"
+      }
+    }
+  ],
+  "version" : 3
+}
