@@ -1,84 +1,146 @@
-# PackLab | iPhone 16 Installation and Safe Rollback (DOCUMENTATION DRAFT, NOT DEVICE-VALIDATED)
+# PackLab Capture: iPhone 16 installation and safe rollback
 
-**Prepared 2026-10-15; updated 2026-11-04 after owner authorization for hosted Actions.**
-Relates to **PL-0359, PL-0362 and PL-0367 documentation preparation**. This document is not a release, factory install approval or proof of a physical device installation. The October no-Actions instruction was superseded by the owner's 2026-11-04 autonomous-execution authorization; the no-secret, licensing, legal and physical acceptance boundaries remain.
+**Status: installation procedure; physical-device steps have not been executed. Updated 2026-11-04.** This guide documents the current source and hosted build evidence. It is not device acceptance, a signed release, legal approval, or permission to distribute PackLab or its dependencies.
 
-## Source-grounded current identities
+## Current app identity and behavior
 
-| Contract / component | Source inspected | Observed value |
+| Item | Current source value / evidence |
+| --- | --- |
+| App display name / bundle ID | PackLab Capture / `com.packlab.capture` |
+| Marketing version / build | `0.1.0` / `1` (project defaults, not a released build) |
+| Minimum deployment target | iOS 17.0 |
+| Hosted build toolchain | macOS 15.8.2; Xcode 16.0 (16A242d); iPhoneOS SDK 18.0; iPhone 16 / iOS 18.0 simulator |
+| Camera privacy key | `NSCameraUsageDescription` is present in the current `Info.plist`; physical permission behavior has not been verified |
+| Local-network privacy key | `NSLocalNetworkUsageDescription` is absent from the current `Info.plist`; successful physical local-network transfer and its permission prompt are unverified |
+| PackScan export | The app has an explicit user-initiated share/export flow for finalized `.packscan` packages. The app does not upload them to a cloud service. |
+
+The values above come from `apps/ios-capture/PackLabCapture.xcodeproj/project.pbxproj`, `apps/ios-capture/PackLabCapture/Info.plist`, and the current Swift sources. Confirm the built product’s `Info.plist` and signed identity for every candidate before installing; project defaults alone do not identify an artifact.
+
+## Verified hosted artifacts (unsigned)
+
+PL-0361’s [macOS Capture run 41764141005](https://github.com/Sekiph82/PackLab/actions/runs/41764141005) completed on source commit `f977eb7f3d0a6fee1ff0bd474f5b1557457a590a`. It ran the iPhone 16 / iOS 18.0 simulator XCTest suite: **205 passed, 0 failed, 0 skipped**. It prepared and verified provenance for two unsigned products. The artifacts are temporary CI outputs with one-day retention; check the run’s current Artifacts section before downloading.
+
+| Artifact | Artifact identity and provenance | Valid use |
 | --- | --- | --- |
-| Capture bundle ID | `apps/ios-capture/PackLabCapture.xcodeproj/project.pbxproj` | `com.packlab.capture` |
-| Capture marketing version / build | Same project | `MARKETING_VERSION=0.1.0`, `CURRENT_PROJECT_VERSION=1` (observed source values, not released product) |
-| Deployment target | Same project | iOS 17.0 minimum |
-| NextLevel dependency | Same project + `docs/development/NEXTLEVEL_PIN.md` | Exact 0.19.1 (upstream Swift5 manifest compatibility adjustment used in CI; not part of shipping release identity) |
-| App permission | Current `apps/ios-capture/PackLabCapture/Info.plist` | `NSCameraUsageDescription` present; no locally verified on-device permission behavior |
-| PackScan format | `docs/packscan/container-layout.md`, `docs/packscan/manifest-contract.md`, `schemas/packscan/manifest.schema.json` | Evidence ZIP, schema 1.0.0, SHA-256 index, original `images/` immutable |
-| Device testing | `docs/development/IOS_BASELINE.md`, `docs/development/IOS_SIMULATOR_FALLBACKS.md` | Target is iPhone 16 Standard, no mandatory LiDAR; physical camera/AR/motion require device acceptance |
+| `packlab-capture-unsigned-simulator-<source-sha>` | Artifact ID `13292221930`; ZIP 2,228,803 bytes, ZIP SHA-256 `912746cab418aadd60fdd452cd45069507dbc2cbf22f4bb67fc6e2c31063bb64`; expires `2026-11-05T03:06:38Z`. JSON sidecar `packlab-capture-simulator-provenance.json`: source `f977eb7f3d0a6fee1ff0bd474f5b1557457a590a`, run `41764141005`, bundle `com.packlab.capture`, simulator product tree 8,178,129 bytes, tree SHA-256 `93639751561f7bff2e338247a160821221ffa3270afa4f7e3f2788d17ba48bde`. | Matching iOS Simulator on macOS only. **Cannot be installed on a physical iPhone.** |
+| `packlab-capture-unsigned-device-archive-<source-sha>` | Artifact ID `13291404205`; ZIP 5,380,642 bytes, ZIP SHA-256 `bea54dad45dddd58107a0199e48c065d95f7e3aef090421baf7f4c496dd901d4`; expires `2026-11-05T03:00:07Z`. JSON sidecar `packlab-capture-device-archive-provenance.json`: source `f977eb7f3d0a6fee1ff0bd474f5b1557457a590a`, run `41764141005`, bundle `com.packlab.capture`, unsigned archive product tree 20,800,973 bytes, tree SHA-256 `eb91d6b73ddd8e74163c3168636cb7eafbf9f659994bf385ac383eaec9880fa2`. | Inspect or use as input to a separately authorized signing/export flow. **It is not an installable IPA.** |
 
-**Historical CI blocker:** The 2026-10-15 run was billing-blocked as recorded in the historical audit. It was superseded on 2026-11-04 by successful full-suite hosted macOS runs [PL-0354 run 41743543561](https://github.com/Sekiph82/PackLab/actions/runs/41743543561) and [PL-0357 run 41754385597](https://github.com/Sekiph82/PackLab/actions/runs/41754385597), both reporting 205/205 XCTest, 0 failures and 0 skips.
+The provenance sidecar binds the workflow/source metadata to a deterministic product-tree file count, byte length, and SHA-256. The ZIP digest covers the downloaded Actions artifact archive; the tree digest covers the extracted product. Verify both against the exact run and artifact before use. Artifact IDs and expiration are run-specific, and these files may already be unavailable. If unavailable, use a newly completed, reviewed run and its own sidecar values; never reuse these digests for a different build. Do not upload signing credentials, private scans, or supplier files to public Actions artifacts.
 
-**Current device/signing limit:** The latest hosted build evidence is simulator-only or an unsigned generic iOS archive. GitHub currently reports the repository as PUBLIC, with zero repository signing secrets and zero configured environments. No signed IPA, physical iPhone installation, Apple account/device acceptance, or distribution approval exists in this evidence.
+### Simulator installation on macOS
 
-## PL-0359 free-first build artifacts and simulator route
-
-The public GitHub Actions artifacts are short-lived CI outputs. A signed-in GitHub user with repository read access can download workflow artifacts, so no certificate, provisioning profile, private key, Apple account data, private scan or supplier file may be placed in these artifacts. See [GitHub's artifact download access rules](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts).
-
-| Artifact | Verified evidence | Intended use | Physical iPhone installation |
-| --- | --- | --- | --- |
-| Unsigned simulator `.app` | [Run 41752044382](https://github.com/Sekiph82/PackLab/actions/runs/41752044382), source `384eaef996c92b31d39a28581c0ea6dc7da3d905`; artifact `13286072651`, 2,228,647 bytes, SHA-256 `21a730c4ae4e9a24bc1823ae5f7c6f0ee6e857401417dc614667b14820140e35`, expires `2026-11-05T01:16:12Z`; macOS 15.8.2, Xcode 16.0 / 16A242d, iPhone 16 / iOS 18.0 simulator; 205/205 XCTest | Install into the matching iOS Simulator on macOS for CI/debug inspection | **No.** Simulator architecture/runtime product is not a device-installable app. |
-| Unsigned generic iOS `.xcarchive` | [Run 41754385597](https://github.com/Sekiph82/PackLab/actions/runs/41754385597), source `b94e73744544feae7f5dddcdbfbef22c2cab392d`; artifact `13287651642`, 5,380,516 bytes, SHA-256 `dc7716143c52785bf6b2d0045a37e3d41f36a6a2d9367ab56703a51d288b3196`, expires `2026-11-05T01:31:32Z`; Capture 0.1.0/build 1; iPhoneOS SDK 18.0; manifest states `UNSIGNED`; profile/signature checks passed | Inspect an unsigned device-target archive or use as a source for a separately authorized signing process | **No.** No IPA was exported; an unsigned archive is not an installable iPhone package. |
-
-Both artifact types use one-day retention and expire one day after upload; they may have expired by the time a reader uses this document. Check the workflow run's current Artifacts section before download. Verify the downloaded artifact ZIP's SHA-256 against the digest above, then verify the embedded provenance manifest. If expired, rerun the appropriate workflow against the reviewed source revision; never substitute a different SHA without checking its provenance. The archive and simulator artifacts are build evidence, not retained release candidates.
-
-### Install the simulator app on macOS
-
-1. Download `packlab-capture-unsigned-simulator-<source-sha>` from the linked PL-0356 workflow run while it is available. Verify the artifact ZIP digest from the table, then check `packlab-capture-simulator-provenance.txt` matches the source SHA, run, bundle ID, simulator destination and lockfile digest.
-2. Install a matching iOS 18.0 Simulator runtime and boot an iPhone 16 simulator in Xcode. Find the booted device identifier with `xcrun simctl list devices booted`.
-3. Install and launch the simulator product using that simulator's UDID:
+1. Download the simulator artifact from the linked run. Verify the downloaded ZIP byte length and SHA-256, extract it, and run the repository’s provenance verifier from the same source commit. For example, from the PackLab repository root:
 
    ```sh
-   xcrun simctl install <DEVICE_UDID> /path/to/PackLabCapture.app
-   xcrun simctl launch <DEVICE_UDID> com.packlab.capture
+   python3 tools/ci/ios_artifact_provenance.py verify \
+     --artifact /path/to/PackLabCapture.app \
+     --sidecar /path/to/packlab-capture-simulator-provenance.json
    ```
 
-   Alternatively, open the project in Xcode, select the iPhone 16 simulator and use Product > Run. This route exercises the simulator build only; it does not validate iPhone hardware, camera behavior, physical performance, signing, or distribution.
+   Do not install if the verifier fails or the sidecar is missing.
+2. On a Mac with a compatible Xcode and iOS Simulator runtime, boot an iPhone 16 simulator and obtain its identifier:
 
-### Physical iPhone route
+   ```sh
+   xcrun simctl list devices booted
+   ```
 
-A physical iPhone requires a device-target app signed with a valid development/distribution certificate and provisioning profile suitable for the app and device. The unsigned simulator `.app` and unsigned `.xcarchive` cannot be installed directly.
+3. Confirm the app bundle identity, then install and launch:
 
-On a Mac, the owner can open `apps/ios-capture/PackLabCapture.xcodeproj`, add an Apple Account in Xcode, select the iPhone as the run destination, select an authorized Team, and let Xcode manage signing/provisioning if Apple permits it for that account, app ID and capabilities. Apple documents device registration and automatic development-profile creation in [Running your app on simulated or physical devices](https://developer.apple.com/documentation/Xcode/running-your-app-on-simulated-or-physical-devices). A development profile is tied to the app ID, signing certificate and registered device(s); see [Apple's development provisioning profile requirements](https://developer.apple.com/help/account/provisioning-profiles/create-a-development-provisioning-profile).
+   ```sh
+   /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' /path/to/PackLabCapture.app/Info.plist
+   /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /path/to/PackLabCapture.app/Info.plist
+   /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' /path/to/PackLabCapture.app/Info.plist
+   xcrun simctl install <SIMULATOR_UDID> /path/to/PackLabCapture.app
+   xcrun simctl launch <SIMULATOR_UDID> com.packlab.capture
+   ```
 
-Apple currently documents limited Personal Team provisioning for local testing: up to 10 App IDs and 3 devices, with those registrations and profiles expiring after 7 days; apps must be rebuilt/reinstalled after profile expiry. Limits and account eligibility must be reconfirmed in current Xcode/Apple documentation before use. This is a local test route, not App Store/TestFlight distribution approval; distribution requires an eligible Apple Developer Program team and its applicable signing/distribution process. See [Apple's developer account overview](https://developer.apple.com/help/account/basics/about-your-developer-account) and [registered-device distribution guidance](https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices).
+This verifies a simulator build only. It does not establish physical camera, local-network, performance, signing, or distribution behavior.
 
-No Windows-side signing/sideload tool is included, bundled, selected or endorsed by PackLab. If the owner chooses a community Windows tool, that is an optional user-managed route outside PackLab support and Apple-official tooling. Obtain it only from its verified publisher, review how it handles Apple Account authentication, signing keys and provisioning data, never give it credentials unless the owner has independently accepted that risk, and verify the resulting IPA's signature, profile, bundle ID, version/build and provenance. Tool availability, privacy practices, Apple policy compatibility and profile expiry may change. A Windows tool cannot make the unsigned simulator app or archive installable without valid signing/provisioning.
+## Physical iPhone 16 prerequisites
 
-## Future approved installation, before any operation
+- A Mac with a supported Xcode version and iOS platform support, the PackLab source checkout or a valid signed device artifact, and an iPhone 16 on an iOS version supported by the selected app build. iPhone 16 launched with iOS 18; the app project’s current minimum deployment target is iOS 17.0.
+- The owner’s authorized Apple account/team and a signing certificate/profile that matches the app ID and the selected installation route. No Apple ID, device UDID, certificate, profile, private key, or password belongs in this guide, repository, or CI logs.
+- A data backup/export completed and verified before removing the existing app. Follow **Back up PackScan data before uninstalling** below before any destructive operation.
+- A known source revision and build identity. The hosted artifacts above are unsigned and cannot be installed directly on the phone.
 
-1. **Prerequisite authorization:** Require formally reviewed redistribution rights, owner acceptance of the intended physical test, confirmed PackLab Capture signing/provisioning route, exact release artifact/source identities and SHA-256. Do not use an unsigned simulator .app or .xcarchive as an installable physical iPhone package.
-2. **Backup first:** Identify existing original `.packscan` sessions on the device and use an approved PackLab export/share/transfer mechanism to export every authoritative package before app removal. Verify the exported package file length, manifest schema, checksum index and each payload hash in an independent safe location; record confirmation **without** attaching private images/scans to CI, tickets or the repository. If export, verification or user-data restore semantics are uncertain, STOP before delete/uninstall.
-3. **Trust and signing:** A macOS/Xcode installation requires a suitable Apple signing team/account and any provisioning necessary for this particular device/bundle. A personal/free Apple team may have limitations or expiry, which must be confirmed with current Apple tooling. Never collect the owner's Apple account password, private key, provisioning profile or device identifiers into GitHub logs/prompt.
-4. **Mac + Xcode route:** Open the source `apps/ios-capture/PackLabCapture.xcodeproj`; use a supported Xcode version, physical iPhone 16 as run destination and select the owner's authorized signing team. On iPhone, accept computer trust prompts and enable Developer Mode when required by OS policy, then build/run a **properly signed** app. Read and record installed bundle ID, version/build and provenance after install. This route has not been executed or validated here.
-5. **Signed artifact route:** Only an explicitly accepted and correctly signed/provisioned distribution artifact may be installed via a device-management or Apple-supported distribution route for which the owner has rights. Unsigned Xcode Simulator binaries will not install directly on an iPhone.
-6. **First launch:** Confirm build identity and source revision using declared UI/about/diagnostic features once implemented; check camera permission against `Info.plist`. Local-network permission should only be prompted if current live app transport requires it; historical permission documents may predate later transfer code. Test permissions and transfer end-to-end on the real device before asserting success.
-7. **Reinstall/upgrade:** Prefer an app update path that preserves the same bundle identity and on-device container. Do NOT assume it always preserves data across signing-team changes, app removal, failed upgrade, re-provisioning, or container migration. Reverify original `.packscan` packages after update. A destructive uninstall is forbidden until the export-and-hash backup gate passes.
+### Connect and trust the device
 
-## Schema incompatibility and rollback
+1. Connect the unlocked iPhone to the Mac with a data-capable cable. In Finder or Xcode, accept **Trust This Computer** on the phone and confirm trust on the Mac. Apple’s [Trust This Computer guidance](https://support.apple.com/en-gb/109054) covers resetting trust if the prompt does not appear.
+2. In Xcode, open `apps/ios-capture/PackLabCapture.xcodeproj`, choose the `PackLabCapture` scheme, and select the attached iPhone 16 as the run destination. Sign in through Xcode’s account settings, select the owner-authorized team under Signing & Capabilities, and let Xcode manage development signing only if permitted for that account and app configuration. Apple describes this workflow in [running an app on a simulated or physical device](https://developer.apple.com/documentation/Xcode/running-your-app-on-simulated-or-physical-devices).
+3. If iOS requires Developer Mode for this development-signed app, enable it on the phone at **Settings > Privacy & Security > Developer Mode**, restart, confirm the prompt, and enter the device passcode. Apple explains when it appears in [Enabling Developer Mode on a device](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device?changes=_8). Do not weaken other device security settings.
 
-- Compare **three independent domains**: `StudioVersion`, `CaptureVersion`, and `PackScanSchemaVersion`, per `docs/architecture/VERSIONING_POLICY.md`. Do not equate their numeric versions.
-- On unsupported `.packscan` schema, STOP ingestion and report observed exact version, supported reader range, original SHA-256 and diagnostic category. Do not guess version compatibility or silently rewrite manifest/schema/coordinate semantics.
-- Snapshot/copy original capture evidence and its complete checksum-valid ZIP to read-only, owner-controlled backup. Never modify `images/`, timestamps, calibration or manifest in place.
-- Rollback may restore a separately verified application build or derived representation; it must never restore over, rewrite, or delete the immutable original `.packscan` package or its original image bytes.
-- For a **declared and implemented** migration, produce a **new derived** output with an explicit source/target schema path and retained original package; otherwise do not convert.
-- Select a previously owner-approved Studio/Capture build **only by reviewed release manifest, original source SHA, artifact/executable hash, version/build, dependencies and schema compatibility**. Do not substitute an arbitrary old Installer or privately downloaded IPA.
-- Before downgrading Capture, export and verify every current package and application state the older version may not understand. An older binary is **not assumed able to read newer projects or schema**.
-- Restore from the last independently verified package/library backup if needed. Do not recommend deleting original device sessions, overwriting unbacked libraries or modifying the source package to force compatibility.
-- Finally test reinstall, camera permission, offline transfer, project reopening, original data integrity, app build identity and roundtrip on the **real device**. Without executed evidence report **NOT_VALIDATED**, not PASS.
+### Route A: local Xcode development install
 
-## Safe failure codes for future tooling
+1. Complete the connection/trust steps above. In Xcode, check the selected team, bundle identifier `com.packlab.capture`, signing status, and iPhone destination. Build and run the selected scheme. Xcode creates or refreshes development signing material when automatic signing is available; this is a development install, not a CI-produced release IPA.
+2. Before running, inspect the exact built `.app` selected by Xcode with the three `PlistBuddy` commands in **Simulator installation on macOS** (replace the app path; do not run the `simctl` commands). Record its bundle ID, version/build, source commit, and build/install session in private owner records. Use Xcode Device Hub after installation to confirm the app is present. Do not claim the phone itself verified the installed source SHA or version/build; the current app has no identity readback UI, as described below.
+3. If the selected build product’s identity is missing or mismatched, or Xcode reports a signing/profile error, stop before running it. Do not infer identity from project defaults alone.
 
-`BACKUP_NOT_VERIFIED`, `INVALID_PACKSCAN_CHECKSUM`, `UNSUPPORTED_SCHEMA_VERSION`, `MIGRATION_PATH_NOT_DECLARED`, `APP_SIGNING_NOT_AVAILABLE`, `APPLE_PROVISIONING_EXPIRED`, `BUILD_IDENTITY_UNKNOWN`, `ROLLED_BACK_WITH_UNVERIFIED_DEVICE_STATE`. Do not emit private absolute filesystem paths, owner identifiers, keychain contents, package bytes or scans into logs.
+### Route B: signed IPA (future CI route)
 
-## Remaining real task work after owner lift
+**This route is unavailable in the verified PL-0361 evidence.** That workflow generated an unsigned simulator app and unsigned `.xcarchive`; no signed IPA was produced. PL-0358 remains pending Apple signing credentials. A future CI IPA is usable only after the signing workflow has been explicitly configured and authorized, the produced IPA has a valid signature/profile for this device and intended use, and its own artifact plus provenance have been verified. Never convert or label either unsigned artifact above as a signed IPA.
 
-Confirm application data export and permission semantics against current iOS code, execute controlled physical iPhone testing, resolve formal license/legal review and security gates, and complete PL-0362/0367 device/release acceptance independently. Hosted simulator CI has passed 205/205 on runs 41743543561 and 41754385597; that does not satisfy physical-device or signed-distribution acceptance. This file itself does **not** close PL-0362 or PL-0367.
+For a valid registered-device IPA, use the exact signed artifact and its matching provenance. Verify its download digest, signature, embedded provisioning profile, bundle ID, version/build, device eligibility, and expiry before installation. Install through Xcode’s Devices and Simulators window or Apple Configurator as appropriate to the profile and distribution type. Apple’s [registered-device distribution guide](https://developer.apple.com/documentation/xcode/distributing-your-app-to-registered-devices) describes required signing, registered devices, export, and installation; it states that Developer Mode must be enabled each time an IPA-based app is run on an iOS device. If any identity or signature check fails, do not install.
+
+### Optional Personal Team signing
+
+An owner may use a Personal Team for local development signing if Apple and the current Xcode configuration allow this app and device. Apple’s [account overview](https://developer.apple.com/help/account/basics/about-your-developer-account) documents Personal Team limits, including up to 10 App IDs and 3 registered devices, with provisioning expiring after 7 days. Reconfirm current limits in Apple’s account tools before use. Expiry means rebuild/re-sign and reinstall using valid current provisioning; it is not a reason to disable verification or trust an unknown signer. A Personal Team is not App Store/TestFlight distribution approval.
+
+## Permissions and first launch
+
+- **Camera:** The current app declares `NSCameraUsageDescription`. On first camera use, review the iOS permission prompt and allow camera only if the user intends to scan. If access was denied, change PackLab Capture’s camera access in iOS Settings, then retry. Physical camera behavior remains untested.
+- **Local network:** The current `Info.plist` does not declare `NSLocalNetworkUsageDescription`, while the source contains a user-initiated URLSession receiver transfer flow. Bonjour discovery was not found in the inspected Capture source. Apple’s [TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy?changes=_9%2C_9) explains local-network privacy prompts and the usage-description key. Do not claim that a prompt or transfer works on iPhone 16. A local-network transfer attempt may fail or lack an explanatory prompt until the app configuration is reviewed and physical behavior tested. Use only a trusted receiver on a network the owner controls; stop on an unexpected host, certificate, or verification error. No cloud transfer service is part of this procedure.
+- **Other prompts:** Review any system prompt in context and grant only the permission needed for the intended test. Record sanitized error categories, not private addresses, device identifiers, scans, or secrets.
+
+## Confirm installed build identity
+
+For a local build, inspect the built `.app` before installation. For an IPA, inspect the app under `Payload/PackLabCapture.app` and verify the signature/profile with Apple tooling before install. Confirm:
+
+1. Bundle ID is exactly `com.packlab.capture`.
+2. Marketing version and build number match the reviewed artifact; current source defaults are `0.1.0` and `1` only.
+3. Source commit and provenance metadata match the selected build.
+4. The signature and embedded profile are valid for this device and route (not applicable to the unsigned CI artifacts above, which must not be installed on iPhone).
+
+Use Xcode Device Hub to confirm that `com.packlab.capture` is installed and record the install session, reviewed source SHA, artifact SHA-256, and the version/build read from the exact `.app` or IPA that was installed. **The current Capture app has no About screen or diagnostic flow wired to expose its running bundle version/build or source revision, and Device Hub’s documented Apps panel does not promise to display those fields. Therefore this procedure cannot independently read back the installed version/build/source from the phone.** If exact post-install identity readback is required, record `BUILD_IDENTITY_UNKNOWN` and stop physical acceptance until a verified readback method or in-app build diagnostics exist. Do not infer a physical install from a successful simulator XCTest.
+
+## Upgrade, reinstall, and data preservation
+
+An in-place update normally requires the same bundle ID and an acceptable signing identity/profile. Do not assume data will survive app deletion, team changes, provisioning changes, failed upgrades, or container migration. Confirm the app opens and verify exported packages after each update. If an update fails, stop before deleting the existing app and preserve diagnostic information without private data.
+
+### Back up PackScan data before uninstalling
+
+1. In PackLab Capture, use the app’s share/export action for each finalized `.packscan` session. Choose an owner-controlled destination such as Files or a Mac. The export UI offers a user-selected destination; this is not an automatic cloud backup or a verified device restore mechanism.
+2. Copy each export to a separate owner-controlled backup location. Do not attach package contents or scan images to CI, tickets, or the repository.
+3. From the PackLab repository root with the locked Python environment available, validate each package against the PackScan container contract, manifest schema, payload sizes, and SHA-256 checksums:
+
+   ```sh
+   uv run --locked python -c "from packlab_core.packscan.container import validate_packscan; report = validate_packscan('/path/to/session.packscan'); print('PASS schema=' + str(report.manifest['schema_version']))"
+   ```
+
+   A nonzero error means the backup has not passed verification. Retain the original export unchanged and record only sanitized package name/length/hash and validation outcome in private owner records.
+4. Confirm every required package has a verified backup and that the owner can locate it. If export, validation, or restore expectations are uncertain, stop. **Do not delete or uninstall the app.**
+
+Only after that gate passes may the owner choose to remove/reinstall if external preservation of the packages is sufficient. Preserve original `.packscan` bytes; never rewrite the manifest, images, timestamps, calibration, or checksums to make a package open. **The current Capture app has no `.packscan` import or restore flow. Exported packages can be preserved externally but cannot currently be restored as in-app sessions. If continuing those sessions inside Capture is required, do not uninstall until an import/restore flow is implemented and tested.**
+
+## Troubleshooting
+
+| Symptom | Safe response |
+| --- | --- |
+| iPhone does not appear in Xcode | Unlock it, reconnect with a data-capable cable, accept trust prompts on both devices, and check Xcode/Finder again. If the trust prompt cannot be restored, follow Apple’s trust-reset guidance. Do not publish the device serial or UDID. |
+| Xcode reports profile, certificate, or signing failure | Check the selected team, bundle ID, certificate validity, profile expiration, and device registration in Xcode/account tools. Refresh or create valid signing assets through the authorized Apple team, then rebuild. Do not reuse a mismatched profile or disable signature checks. |
+| Personal Team app stopped launching after expiry | Reconnect to Xcode and rebuild/re-sign with current provisioning, then reinstall. Personal Team provisioning may expire after 7 days; confirm current Apple limits. |
+| IPA is rejected or app is missing after install | Recheck artifact digest/provenance, signature, profile, device eligibility, bundle identity, and Developer Mode requirement. Reject stale, unsigned, mismatched, or unverifiable packages. |
+| Camera prompt does not appear or camera fails | Check the app’s camera permission in iOS Settings and confirm the expected built `Info.plist` key. Record the OS/app version and sanitized error. Physical camera acceptance remains open. |
+| Local-network prompt or transfer fails | Treat this as unverified. The current plist lacks `NSLocalNetworkUsageDescription`; stop rather than assuming a permission or receiver issue. Record a sanitized error and resolve the app configuration before claiming physical transfer support. |
+| Existing package cannot be exported or validated | Do not uninstall, overwrite, or mutate it. Preserve the source and seek a verified recovery path; mark `BACKUP_NOT_VERIFIED` or `INVALID_PACKSCAN_CHECKSUM` as applicable. |
+
+## Rollback and compatibility
+
+- Compare `StudioVersion`, `CaptureVersion`, and `PackScanSchemaVersion` as separate domains under `docs/architecture/VERSIONING_POLICY.md`.
+- For an unsupported schema, stop ingestion and record the observed version, supported reader range, original SHA-256, and diagnostic category. Do not guess compatibility or rewrite the package.
+- Select an older build only by reviewed source SHA, artifact/executable hash, version/build, dependency set, and schema compatibility. An older app is not assumed to read newer projects or packages.
+- Rollback may restore an approved app build or a derived representation. It must not overwrite, modify, or delete the immutable original `.packscan` package or its original image bytes.
+- Test reinstall, camera, local transfer, project reopening, build identity, and data integrity on the real iPhone before claiming device acceptance. Until executed, report `NOT_VALIDATED`.
+
+## Current limitations and external gates
+
+Hosted simulator XCTest passed on runs [41743543561](https://github.com/Sekiph82/PackLab/actions/runs/41743543561) and [41764141005](https://github.com/Sekiph82/PackLab/actions/runs/41764141005); the latter also verified and uploaded the unsigned provenance-bound products listed above. This proves neither a signed iPhone install nor physical camera/local-network behavior. No signed IPA, physical iPhone install, Apple account/device acceptance, legal/license approval, or distribution approval is evidenced here. PL-0358 signing credentials and physical-device validation remain external gates. This guide does not close PL-0367 or authorize M17 work.
