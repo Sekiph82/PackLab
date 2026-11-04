@@ -27,10 +27,12 @@ def _repo_file(root: Path, value: Any) -> Path | None:
     if candidate.is_symlink() or getattr(candidate, "is_junction", lambda: False)():
         return None
     try:
-        candidate.resolve(strict=True).relative_to(root.resolve(strict=True))
+        root_resolved = root.resolve(strict=True)
+        resolved_candidate = candidate.resolve(strict=True)
+        resolved_candidate.relative_to(root_resolved)
     except (OSError, ValueError):
         return None
-    return candidate if candidate.is_file() else None
+    return resolved_candidate if resolved_candidate.is_file() else None
 
 
 def _audit_is_accepted(path: Path, task_id: str) -> bool:
@@ -81,7 +83,9 @@ def validate_entries(root: Path, entries: Any) -> dict[str, Any]:
         audit_path = _repo_file(root, entry["audit_ref"])
         if (
             audit_path is None
-            or not audit_path.as_posix().startswith((root.resolve() / "coordination").as_posix() + "/")
+            or not audit_path.as_posix().startswith(
+                (root.resolve() / "coordination").resolve().as_posix() + "/"
+            )
             or not _audit_is_accepted(audit_path, task_id)
         ):
             errors.add("CHANGELOG_AUDIT_CITATION_UNACCEPTED")
@@ -100,7 +104,11 @@ def validate_entries(root: Path, entries: Any) -> dict[str, Any]:
             except OSError:
                 errors.add("CHANGELOG_SOURCE_FRAGMENT_UNREADABLE")
                 continue
-            if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected) or expected != actual:
+            if (
+                not isinstance(expected, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", expected)
+                or expected != actual
+            ):
                 errors.add("CHANGELOG_SOURCE_DIGEST_MISMATCH")
             if isinstance(summary, str) and summary.strip() and summary not in content:
                 errors.add("CHANGELOG_SUMMARY_NOT_IN_SOURCE_FRAGMENT")

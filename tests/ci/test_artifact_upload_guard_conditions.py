@@ -51,6 +51,14 @@ GUARDED_UPLOADS = (
         "Upload dependency probe evidence",
         "14",
     ),
+    (
+        ".github/workflows/packlab-capture-macos.yml",
+        "capture-tests",
+        "guard_failed_xctest_diagnostics",
+        "Guard failed XCTest diagnostic artifact inputs",
+        "Preserve failed XCTest diagnostics for one day",
+        "1",
+    ),
 )
 
 
@@ -84,7 +92,8 @@ def _step(steps: list[dict[str, Any]], name: str) -> tuple[int, dict[str, Any]]:
 def _condition_succeeds(condition: str, outcomes: dict[str, str]) -> bool:
     """Evaluate the small status-expression subset used by guarded uploads."""
     for expression in (part.strip() for part in condition.split("&&")):
-        if expression == "always()":
+        expression = expression.removeprefix("${{").removesuffix("}}").strip()
+        if expression in {"always()", "failure()"}:
             continue
         match = re.fullmatch(r"steps\.([A-Za-z0-9_-]+)\.outcome\s*(==|!=)\s*'([a-z]+)'", expression)
         if not match:
@@ -117,7 +126,8 @@ def test_upload_is_immediately_gated_by_its_unique_successful_guard(
 
     assert guard_index + 1 == upload_index
     assert guard.get("id") == guard_id
-    assert guard.get("if") is not None and "always()" in guard["if"]
+    assert guard.get("if") is not None
+    assert "always()" in guard["if"] or "failure()" in guard["if"]
     assert sum(step.get("id") == guard_id for step in steps) == 1
     assert upload.get("uses") == UPLOAD_ACTION
     assert upload.get("if") is not None
@@ -215,3 +225,59 @@ def test_optional_missing_file_uploads_still_require_an_immediately_preceding_gu
                 assert f"steps.{previous['id']}.outcome == 'success'" in upload.get("if", "")
                 discovered_optional.add(upload["name"])
     assert discovered_optional == expected_optional
+
+
+def test_capture_products_verify_json_provenance_immediately_before_upload() -> None:
+    workflow = _load_workflow(".github/workflows/packlab-capture-macos.yml")
+    expected = (
+        (
+            "capture-unsigned-device-archive",
+            "Verify unsigned device archive provenance before upload",
+            "Preserve unsigned device archive for one day",
+            "verify_device_archive_provenance",
+            "$RUNNER_TEMP/PackLabCapture-unsigned.xcarchive",
+            "packlab-capture-device-archive-provenance.json",
+            "packlab-capture-unsigned-device-archive-",
+        ),
+        (
+            "capture-tests",
+            "Verify unsigned simulator provenance before upload",
+            "Preserve unsigned simulator build product",
+            "verify_simulator_provenance",
+            "$RUNNER_TEMP/packlab-capture-derived-data/Build/Products/Debug-iphonesimulator/PackLabCapture.app",
+            "packlab-capture-simulator-provenance.json",
+            "packlab-capture-unsigned-simulator-",
+        ),
+    )
+    for (
+        job_id,
+        verify_name,
+        upload_name,
+        verify_id,
+        product_path,
+        sidecar,
+        artifact_prefix,
+    ) in expected:
+        steps = _job_steps(workflow, job_id)
+        verify_index, verify = _step(steps, verify_name)
+        upload_index, upload = _step(steps, upload_name)
+        assert verify_index + 1 == upload_index
+        assert verify["id"] == verify_id
+        assert "ios_artifact_provenance.py verify" in verify["run"]
+        assert product_path in verify["run"]
+        assert product_path.rsplit("/", 1)[-1] in upload["with"]["path"]
+        assert sidecar in upload["with"]["path"]
+        assert artifact_prefix in upload["with"]["name"]
+        assert upload["with"]["if-no-files-found"] == "error"
+
+
+def test_failed_xctest_diagnostic_upload_requires_bounded_guard() -> None:
+    workflow = _load_workflow(".github/workflows/packlab-capture-macos.yml")
+    steps = _job_steps(workflow, "capture-tests")
+    guard_index, guard = _step(steps, "Guard failed XCTest diagnostic artifact inputs")
+    upload_index, upload = _step(steps, "Preserve failed XCTest diagnostics for one day")
+    assert guard_index + 1 == upload_index
+    assert "steps.run-xctests.outcome == 'failure'" in guard["if"]
+    assert "1048576" in guard["run"]
+    assert "steps.guard_failed_xctest_diagnostics.outcome == 'success'" in upload["if"]
+    assert upload["with"]["if-no-files-found"] == "error"

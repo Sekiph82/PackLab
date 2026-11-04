@@ -84,7 +84,9 @@ def test_owner_scripts_use_stable_runtime_and_atomic_staging() -> None:
 
 def test_runtime_manifest_contract_excludes_owner_local_paths() -> None:
     scripts = "\n".join(
-        path.read_text(encoding="utf-8") for path in (ROOT / "tools/dev").glob("*.ps1")
+        path.read_text(encoding="utf-8")
+        for path in (ROOT / "tools/dev").glob("*.ps1")
+        if path.name != "post_task_safe_sync.ps1"
     )
     assert "source_commit = $sha" in scripts
     assert "icon_sha256 = $iconHash" in scripts

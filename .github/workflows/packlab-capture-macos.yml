@@ -9,6 +9,7 @@ on:
       - 'schemas/packscan/**'
       - 'tests/fixtures/packscan/**'
       - 'docs/packscan/**'
+      - 'tools/ci/ios_artifact_provenance.py'
   push:
     branches: [main]
     paths:
@@ -17,6 +18,7 @@ on:
       - 'schemas/packscan/**'
       - 'tests/fixtures/packscan/**'
       - 'docs/packscan/**'
+      - 'tools/ci/ios_artifact_provenance.py'
   workflow_dispatch:
     inputs:
       focused_group:
@@ -173,11 +175,7 @@ jobs:
             | tee "$RUNNER_TEMP/packlab-capture-archive.log"
           echo '- Generic iOS archive build: PASS (unsigned; not an installable IPA)' | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Validate unsigned archive and write provenance
-        env:
-          XCODE_VERSION: ${{ steps.archive-xcode.outputs.version }}
-          XCODE_BUILD: ${{ steps.archive-xcode.outputs.build }}
-          IOS_SDK: ${{ steps.archive-xcode.outputs.ios_sdk }}
+      - name: Validate unsigned archive contents
         run: |
           set -euo pipefail
           archive_path="$RUNNER_TEMP/PackLabCapture-unsigned.xcarchive"
@@ -228,30 +226,37 @@ jobs:
               raise SystemExit('Archived app does not declare iPhoneOS as a supported platform.')
           print('Archive app bundle, Capture version/build, and iPhoneOS platform validated.')
           PY
-          lock_sha="$(shasum -a 256 apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved | awk '{ print $1 }')"
-          provenance="$RUNNER_TEMP/packlab-capture-device-archive-provenance.txt"
-          {
-            echo 'format=packlab-ios-unsigned-device-archive-provenance-v1'
-            echo "source_revision=$GITHUB_SHA"
-            echo "workflow_run_id=$GITHUB_RUN_ID"
-            echo 'runner_image=macos-15'
-            echo "macos_version=$(sw_vers -productVersion)"
-            echo "xcode_version=$XCODE_VERSION"
-            echo "xcode_build=$XCODE_BUILD"
-            echo "iphoneos_sdk=$IOS_SDK"
-            echo "destination=generic/platform=iOS"
-            echo 'product=PackLabCapture-unsigned.xcarchive'
-            echo 'bundle_identifier=com.packlab.capture'
-            echo 'capture_version=0.1.0'
-            echo 'capture_build=1'
-            echo 'signing_state=UNSIGNED'
-            echo 'CODE_SIGNING_ALLOWED=NO'
-            echo 'CODE_SIGNING_REQUIRED=NO'
-            echo 'CODE_SIGN_IDENTITY=empty'
-            echo "Package.resolved_sha256=$lock_sha"
-            echo 'installable_ipa=not produced'
-          } > "$provenance"
-          echo '- Archive provenance: validated, UNSIGNED; no IPA or signing material produced' | tee -a "$GITHUB_STEP_SUMMARY"
+          bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_info")"
+          test "$bundle_identifier" = 'com.packlab.capture'
+          echo '- Archive signing state: validated UNSIGNED; no IPA or signing material produced' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare unsigned device archive provenance sidecar
+        env:
+          PACKLAB_ARTIFACT_TYPE: ios_device_archive
+          PACKLAB_SIGNING_STATE: UNSIGNED
+          PACKLAB_PRODUCT_NAME: PackLabCapture-unsigned.xcarchive
+          PACKLAB_CAPTURE_VERSION: 0.1.0
+          PACKLAB_CAPTURE_BUILD: '1'
+          PACKLAB_PACKSCAN_SCHEMA_VERSION: 1.0.0
+          PACKLAB_XCODE_VERSION: ${{ steps.archive-xcode.outputs.version }}
+          PACKLAB_XCODE_BUILD: ${{ steps.archive-xcode.outputs.build }}
+          PACKLAB_SDK_NAME: iphoneos
+          PACKLAB_SDK_VERSION: ${{ steps.archive-xcode.outputs.ios_sdk }}
+          PACKLAB_BUNDLE_IDENTIFIER: com.packlab.capture
+          PACKLAB_PACKAGE_RESOLVED_SHA256: ${{ hashFiles('apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+        run: |
+          set -euo pipefail
+          python3 tools/ci/ios_artifact_provenance.py prepare \
+            --artifact "$RUNNER_TEMP/PackLabCapture-unsigned.xcarchive" \
+            --sidecar "$RUNNER_TEMP/packlab-capture-device-archive-provenance.json"
+
+      - name: Verify unsigned device archive provenance before upload
+        id: verify_device_archive_provenance
+        run: |
+          set -euo pipefail
+          python3 tools/ci/ios_artifact_provenance.py verify \
+            --artifact "$RUNNER_TEMP/PackLabCapture-unsigned.xcarchive" \
+            --sidecar "$RUNNER_TEMP/packlab-capture-device-archive-provenance.json"
 
       - name: Preserve unsigned device archive for one day
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
@@ -259,7 +264,7 @@ jobs:
           name: packlab-capture-unsigned-device-archive-${{ github.sha }}
           path: |
             ${{ runner.temp }}/PackLabCapture-unsigned.xcarchive
-            ${{ runner.temp }}/packlab-capture-device-archive-provenance.txt
+            ${{ runner.temp }}/packlab-capture-device-archive-provenance.json
           if-no-files-found: error
           retention-days: 1
 
@@ -290,10 +295,12 @@ jobs:
           sudo xcode-select --switch /Applications/Xcode_16.app
           xcode_version="$(xcodebuild -version | awk '/^Xcode / { print $2 }')"
           xcode_build="$(xcodebuild -version | awk '/^Build version / { print $3 }')"
+          simulator_sdk="$(xcrun --sdk iphonesimulator --show-sdk-version)"
           test -n "$xcode_version"
           test -n "$xcode_build"
           echo "version=$xcode_version" >> "$GITHUB_OUTPUT"
           echo "build=$xcode_build" >> "$GITHUB_OUTPUT"
+          echo "ios_simulator_sdk=$simulator_sdk" >> "$GITHUB_OUTPUT"
           {
             echo '## Runner provenance'
             echo
@@ -427,12 +434,11 @@ jobs:
           PY
 
       - name: Preserve generated SPM resolution evidence
-        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-spm-resolution-${{ github.run_id }}
           path: apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 1
 
       - name: Build PackLabCapture for iOS Simulator without signing
@@ -450,7 +456,7 @@ jobs:
             | tee "$RUNNER_TEMP/packlab-capture-build.log"
           echo '- Simulator app build: PASS' | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Label unsigned simulator build provenance
+      - name: Validate unsigned simulator product
         run: |
           set -euo pipefail
           app_path="$RUNNER_TEMP/packlab-capture-derived-data/Build/Products/Debug-iphonesimulator/PackLabCapture.app"
@@ -462,26 +468,36 @@ jobs:
             echo 'Simulator build unexpectedly contains a provisioning profile.' >&2
             exit 1
           fi
-          resolved_sha="$(shasum -a 256 apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved | awk '{ print $1 }')"
-          provenance="$RUNNER_TEMP/packlab-capture-simulator-provenance.txt"
-          {
-            echo 'format=packlab-ios-simulator-build-provenance-v1'
-            echo "source_revision=$GITHUB_SHA"
-            echo "workflow_run_id=$GITHUB_RUN_ID"
-            echo 'runner_image=macos-15'
-            echo "macos_version=$(sw_vers -productVersion)"
-            echo "xcode_version=${{ steps.xcode.outputs.version }}"
-            echo "xcode_build=${{ steps.xcode.outputs.build }}"
-            echo "destination=$DESTINATION"
-            echo 'product=PackLabCapture.app'
-            echo "bundle_identifier=$bundle_identifier"
-            echo 'signing=disabled'
-            echo 'CODE_SIGNING_ALLOWED=NO'
-            echo 'CODE_SIGNING_REQUIRED=NO'
-            echo 'CODE_SIGN_IDENTITY=empty'
-            echo "Package.resolved_sha256=$resolved_sha"
-          } > "$provenance"
-          echo '- Simulator product provenance: unsigned; app and redacted manifest prepared' | tee -a "$GITHUB_STEP_SUMMARY"
+          test "$bundle_identifier" = 'com.packlab.capture'
+          echo '- Simulator product signing state: validated UNSIGNED' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare unsigned simulator provenance sidecar
+        env:
+          PACKLAB_ARTIFACT_TYPE: ios_simulator_app
+          PACKLAB_SIGNING_STATE: UNSIGNED
+          PACKLAB_PRODUCT_NAME: PackLabCapture.app
+          PACKLAB_CAPTURE_VERSION: 0.1.0
+          PACKLAB_CAPTURE_BUILD: '1'
+          PACKLAB_PACKSCAN_SCHEMA_VERSION: 1.0.0
+          PACKLAB_XCODE_VERSION: ${{ steps.xcode.outputs.version }}
+          PACKLAB_XCODE_BUILD: ${{ steps.xcode.outputs.build }}
+          PACKLAB_SDK_NAME: iphonesimulator
+          PACKLAB_SDK_VERSION: ${{ steps.xcode.outputs.ios_simulator_sdk }}
+          PACKLAB_BUNDLE_IDENTIFIER: com.packlab.capture
+          PACKLAB_PACKAGE_RESOLVED_SHA256: ${{ hashFiles('apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+        run: |
+          set -euo pipefail
+          python3 tools/ci/ios_artifact_provenance.py prepare \
+            --artifact "$RUNNER_TEMP/packlab-capture-derived-data/Build/Products/Debug-iphonesimulator/PackLabCapture.app" \
+            --sidecar "$RUNNER_TEMP/packlab-capture-simulator-provenance.json"
+
+      - name: Verify unsigned simulator provenance before upload
+        id: verify_simulator_provenance
+        run: |
+          set -euo pipefail
+          python3 tools/ci/ios_artifact_provenance.py verify \
+            --artifact "$RUNNER_TEMP/packlab-capture-derived-data/Build/Products/Debug-iphonesimulator/PackLabCapture.app" \
+            --sidecar "$RUNNER_TEMP/packlab-capture-simulator-provenance.json"
 
       - name: Preserve unsigned simulator build product
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
@@ -489,7 +505,7 @@ jobs:
           name: packlab-capture-unsigned-simulator-${{ github.sha }}
           path: |
             ${{ runner.temp }}/packlab-capture-derived-data/Build/Products/Debug-iphonesimulator/PackLabCapture.app
-            ${{ runner.temp }}/packlab-capture-simulator-provenance.txt
+            ${{ runner.temp }}/packlab-capture-simulator-provenance.json
           if-no-files-found: error
           retention-days: 1
 
@@ -570,11 +586,34 @@ jobs:
             exit 1
           fi
 
+      - name: Guard failed XCTest diagnostic artifact inputs
+        id: guard_failed_xctest_diagnostics
+        if: ${{ failure() && steps.run-xctests.outcome == 'failure' }}
+        run: |
+          set -euo pipefail
+          result_bundle="$RUNNER_TEMP/PackLabCapture.xcresult"
+          test -d "$result_bundle"
+          test ! -L "$result_bundle"
+          resolved_temp="$(cd "$RUNNER_TEMP" && pwd -P)"
+          resolved_bundle="$(cd "$result_bundle" && pwd -P)"
+          case "$resolved_bundle" in
+            "$resolved_temp"/*) ;;
+            *) echo 'XCTest diagnostics are outside the runner temp directory.' >&2; exit 1 ;;
+          esac
+          size_kib="$(du -sk "$result_bundle" | awk '{ print $1 }')"
+          test "$size_kib" -gt 0
+          test "$size_kib" -le 1048576
+          if find "$result_bundle" -type l -print -quit | grep -q .; then
+            echo 'XCTest diagnostics contain a symbolic link.' >&2
+            exit 1
+          fi
+          echo 'Validated bounded XCTest diagnostics under runner temp.'
+
       - name: Preserve failed XCTest diagnostics for one day
-        if: failure()
+        if: ${{ failure() && steps.guard_failed_xctest_diagnostics.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-capture-xcresult-${{ github.run_id }}
           path: ${{ runner.temp }}/PackLabCapture.xcresult
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 1
