@@ -2687,7 +2687,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(vm.m04Completion.mandatoryMissingAreas.contains("shoulder"))
         XCTAssertTrue(vm.m04Completion.mandatoryMissingAreas.contains("closure"))
         XCTAssertEqual(vm.m04Completion.mandatoryMissingAreas, ["closure", "shoulder"])
-        XCTAssertEqual(vm.m04Completion.guidance, ["Capture missing closure coverage", "Capture missing shoulder coverage"])
+        XCTAssertEqual(vm.m04Completion.guidance, ["Capture missing closure coverage", "Capture missing shoulder coverage", "Optional base pass unavailable; completion is not claimed"])
         XCTAssertEqual(vm.m04DetailGuidance, ["Capture missing closure detail sectors", "Capture missing shoulder detail sectors"])
         XCTAssertFalse(vm.m04Completion.mandatoryMissingAreas.contains("neck"))
         XCTAssertEqual(vm.m04Completion.score, 0.5, accuracy: 0.000001)
@@ -2753,7 +2753,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(fresh.m04Completion, persisted.completion)
         XCTAssertEqual(Set(fresh.m04Completion.mandatoryMissingAreas), Set(["shoulder", "closure"]))
         XCTAssertEqual(fresh.m04Completion.mandatoryMissingAreas, ["closure", "shoulder"])
-        XCTAssertEqual(fresh.m04Completion.guidance, ["Capture missing closure coverage", "Capture missing shoulder coverage"])
+        XCTAssertEqual(fresh.m04Completion.guidance, ["Capture missing closure coverage", "Capture missing shoulder coverage", "Optional base pass unavailable; completion is not claimed"])
         XCTAssertEqual(fresh.m04DetailGuidance, ["Capture missing closure detail sectors", "Capture missing shoulder detail sectors"])
         XCTAssertEqual(fresh.m04Completion.score, 0.5, accuracy: 0.000001)
 
