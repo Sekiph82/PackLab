@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.invalid/schemas/release/changelog-input.schema.json",
+  "title": "PackLab audited changelog draft input",
+  "description": "Curated task notes for offline preparation only; every ID, audit, and note fragment is validated against the repository before generation.",
+  "type": "array",
+  "minItems": 1,
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "task_id",
+      "category",
+      "summary",
+      "known_limitations",
+      "audit_ref",
+      "source_ref",
+      "source_sha256"
+    ],
+    "properties": {
+      "task_id": {
+        "type": "string",
+        "pattern": "^PL-[0-9]{4,}$"
+      },
+      "category": {
+        "enum": ["Added", "Changed", "Fixed", "Security"]
+      },
+      "summary": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "known_limitations": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "uniqueItems": true
+      },
+      "audit_ref": {
+        "type": "string",
+        "pattern": "^coordination/sessions/.+_CHATGPT_AUDIT_[A-Z0-9]+\\.md$"
+      },
+      "source_ref": {
+        "type": "string",
+        "pattern": "^docs/packaging/release-notes/PL-[0-9]{4,}\\.md$"
+      },
+      "source_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  }
+}
