@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,19 @@ from tools.ci.ci_data_safety import (
 
 
 class SigningMaterialSafetyTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows path aliases are case-insensitive")
+    def test_windows_path_alias_uses_resolved_repository_relative_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "signing.py"
+            header = "-----BEGIN " + "PRIVATE KEY-----"
+            source.write_text(header, encoding="utf-8")
+            alias = Path(str(source).swapcase())
+            self.assertEqual(
+                [finding.code for finding in scan_signing_material(root, [alias])],
+                ["PRIVATE_KEY_BLOCK_PRESENT"],
+            )
+
     def test_allowlist_rejects_non_object_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

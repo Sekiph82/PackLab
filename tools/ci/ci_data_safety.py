@@ -531,13 +531,14 @@ def scan_signing_material(
     for supplied in paths:
         path = supplied if supplied.is_absolute() else root / supplied
         try:
-            path.resolve(strict=True).relative_to(root)
+            resolved_path = path.resolve(strict=True)
+            resolved_path.relative_to(root)
             if _is_link_or_junction(path):
                 findings.append(Finding("SIGNING_SCAN_LINK_INPUT"))
                 continue
             if not path.is_file():
                 continue
-            relative = _relative_posix(path, root)
+            relative = _relative_posix(resolved_path, root)
             if relative is None:
                 findings.append(Finding("SIGNING_SCAN_OUTSIDE_REPOSITORY"))
                 continue

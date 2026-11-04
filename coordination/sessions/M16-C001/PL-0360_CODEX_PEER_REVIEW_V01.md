@@ -31,6 +31,9 @@ review was independent of the implementation summary.
 - Repository-wide Ruff exposed an existing `UP012` lint error in the offline
   version inventory tests. Its redundant UTF-8 encoding argument was removed
   without changing test semantics.
+- The first full Windows suite exposed a path-spelling mismatch for temporary
+  paths. The scanner now computes its repository-relative path from the
+  resolved file path, and a Windows case-alias regression covers the behavior.
 
 ## Review conclusions
 
@@ -44,7 +47,7 @@ review was independent of the implementation summary.
   dependency was added. Test canaries are synthetic.
 - The current tracked public repository passes the signing-material scan.
 
-Tester review: **PASS**, 15 focused tests and both repository guard commands
+Tester review: **PASS**, 16 focused tests and both repository guard commands
 passed.
 
 Source/workflow review: **PASS** after the final source-pinned allowlist and
