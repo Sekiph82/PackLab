@@ -145,9 +145,28 @@ PL-0358 remains `EXTERNAL_PENDING_APPLE_SIGNING_CREDENTIALS`.
   entries remain. No Desktop files were changed. State: `LOCAL_SYNC_PENDING`.
 - OwnerDev refresh was not relevant; this task changed no Windows runtime or
   deployment.
-- The PL-0361 worktree cleanup is pending the publication of this log. Record
-  its exact safety checks and actual C: free-byte change in a log-only
-  follow-up commit after cleanup. Do not remove or alter the dirty Desktop
-  checkout or its owner work.
+- From the stable Desktop checkout, the exact PL-0361 worktree was identified
+  at `C:\Users\sekip\.codex\worktrees\pl0361-artifact-provenance\PackLab`.
+  Its branch was `codex/pl0361-artifact-provenance`, HEAD equaled pushed
+  `origin/main` at `7d31f96a9133356123ed4784a1996d91ffa3378f`, and tracked,
+  untracked and reparse-point counts were all zero. No task process was active.
+- The 20,599 ignored paths were inspected: they were the task-created `.venv`,
+  pytest/Ruff caches, package metadata, and eight small synthetic
+  `reports/_local/pytest/run-contract-*` outputs produced by repository tests.
+  No owner data, sole-copy build, SDK/OCP checkpoint, installer or protected
+  evidence was present. The synthetic test results and full-suite totals are
+  recorded above.
+- Removed the exact task worktree with normal `git worktree remove` (no force).
+  The target directory no longer exists and no matching worktree-registry
+  entry remains. Actual C: free bytes immediately before removal were
+  `211274526720`; after removal they were `211357700096`, a verified increase
+  of `83173376` bytes.
+- The Desktop checkout remains dirty and untouched; its local SHA and 74-entry
+  status are recorded above. `git fetch origin main` only refreshed its remote
+  reference. No owner worktree, Desktop file or OwnerDev runtime was removed or
+  refreshed.
+- This cleanup record is published as a distinct log-only follow-up commit
+  from the PL-0362 worktree. The PL-0361 task worktree was kept intact until
+  code, tests, hosted evidence, tracker and log publication were complete.
 
 READY_FOR_INDEPENDENT_AUDIT
