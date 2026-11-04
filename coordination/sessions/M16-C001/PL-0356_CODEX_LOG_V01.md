@@ -48,7 +48,7 @@
 - No unreviewed dependency was added; the existing NextLevel 0.19.1 revision and lockfile digest remained unchanged.
 - No device, signing, installation, release, factory, legal, or physical acceptance is claimed. Simulator results establish only hosted simulator build/XCTest behavior.
 - No source/test failures occurred. Simulator symbol warnings were non-failing. Desktop sync is pending as recorded above.
-- Worktree `codex/pl0356-ios-sim-build` was created for this task. Cleanup is performed after this log is published; the exact safe-removal checks, outcome, and actual C: free-space before/after readings will be added to this log in a follow-up log-only commit.
+- Worktree `codex/pl0356-ios-sim-build` at `C:\Users\sekip\.codex\worktrees\pl0356-ios-sim-build\PackLab` was clean (`git status --porcelain=v1 --untracked-files=all --ignored` empty), had no reparse points, no task processes were active, and its commit `40ab7169a0d335ba427b5f4181a0e8a49f8e2e4e` was an ancestor of fetched `origin/main`. Removed from the stable Desktop checkout using ordinary `git worktree remove` without force. Verified target directory absent and worktree no longer listed. Actual C: free bytes before removal: `212599656448`; after: `212625936384`; net change `+26279936` bytes. Other stale/prunable historical worktree entries were not touched.
 - No local ignored/untracked task output was created in the worktree. Downloaded run artifacts are preserved outside the repository at `C:\Users\sekip\.codex\artifacts\PackLab\PL-0356\run-41752044382`.
 
 READY_FOR_INDEPENDENT_AUDIT
