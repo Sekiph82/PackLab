@@ -64,7 +64,9 @@ Desktop state is owner-dirty at local HEAD `f8745047063aca6c17378ecb33604e6e1e5b
 - Other old/prunable worktrees are not part of this task and will be preserved.
 - The failed hosted-run xcresult was preserved outside the task worktree in the local Codex artifact store (2,424 files, 54,117,491 logical bytes); it is diagnostic evidence, not published to the public repository. The exact worktree had no reparse points.
 - C: free after moving that artifact was measured as `214177943552` bytes; remeasure immediately before and after worktree removal. Record exact net change only from those measurements.
-- No removal has occurred yet. Verify the exact worktree is inactive, published, clean, has no unique ignored/untracked evidence or protected data, no process/reparse point uses it, then remove without force and verify it is absent. If any check is ambiguous, preserve it and report `WORKTREE_CLEANUP_BLOCKED`.
+- `git -C C:\Users\sekip\Desktop\PackLab worktree list --porcelain` identified the exact worktree at SHA `6f730f4dd7e4c7da31d4812d72eb814878e75a5e`; that SHA was equal to `origin/main` and an ancestor of `origin/main`. `git status --porcelain=v1 --untracked-files=all` and `--ignored=matching` were empty; recursive reparse-point scan found none; no matching build/editor/Git process or active subagent was found. The failed-run xcresult had been moved intact to the local Codex artifact store, outside the task worktree.
+- Normal `git -C C:\Users\sekip\Desktop\PackLab worktree remove C:\Users\sekip\.codex\worktrees\pl0354-r02-fix\PackLab` (without `--force`) succeeded. Follow-up `git worktree list --porcelain` and `Test-Path` confirmed the exact entry and directory were absent. Other legacy/prunable entries were left untouched.
+- Immediate measured C: free bytes: before `214177837056`; after `214204661760`; actual net increase `26824704` bytes.
 
 ## Known limitations
 
