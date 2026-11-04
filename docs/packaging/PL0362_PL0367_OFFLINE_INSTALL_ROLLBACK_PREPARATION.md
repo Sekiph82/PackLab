@@ -135,11 +135,7 @@ Only after that gate passes may the owner choose to remove/reinstall if external
 
 ## Rollback and compatibility
 
-- Compare `StudioVersion`, `CaptureVersion`, and `PackScanSchemaVersion` as separate domains under `docs/architecture/VERSIONING_POLICY.md`.
-- For an unsupported schema, stop ingestion and record the observed version, supported reader range, original SHA-256, and diagnostic category. Do not guess compatibility or rewrite the package.
-- Select an older build only by reviewed source SHA, artifact/executable hash, version/build, dependency set, and schema compatibility. An older app is not assumed to read newer projects or packages.
-- Rollback may restore an approved app build or a derived representation. It must not overwrite, modify, or delete the immutable original `.packscan` package or its original image bytes.
-- Test reinstall, camera, local transfer, project reopening, build identity, and data integrity on the real iPhone before claiming device acceptance. Until executed, report `NOT_VALIDATED`.
+PL-0367's detailed deterministic procedure and decision matrix are in [`PL0367_ROLLBACK_PLAYBOOK.md`](PL0367_ROLLBACK_PLAYBOOK.md). The current source supports only PackScan `1.0.0` reads/writes and has no migration implementation; unsupported combinations stop explicitly. The original package/project/library remains untouched during rollback, and physical-device behavior remains unverified until actually tested on iPhone.
 
 ## Current limitations and external gates
 

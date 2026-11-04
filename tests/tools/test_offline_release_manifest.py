@@ -402,6 +402,17 @@ class OfflineReleaseManifestTests(unittest.TestCase):
         self.assertIn("PACKSCAN_COMPATIBILITY_UNSUPPORTED_CLAIM", result["errors"])
         self.assertIn("IOS_SWIFT_LANGUAGE_MODE_MISMATCH", result["errors"])
 
+    def test_rollback_manifest_rejects_unimplemented_schema_migrations(self) -> None:
+        with tempfile.TemporaryDirectory(
+            prefix="release-fixture-", dir=ROOT / "docs" / "packaging"
+        ) as temp:
+            candidate = self._candidate(Path(temp))
+            candidate["packscan_compatibility"]["migrations"] = [
+                {"source_schema": "1.0.0", "target_schema": "0.9.0"}
+            ]
+            result = generate_manifest(candidate, ROOT)
+        self.assertIn("PACKSCAN_MIGRATION_UNSUPPORTED_CLAIM", result["errors"])
+
 
 if __name__ == "__main__":
     unittest.main()
