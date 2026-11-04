@@ -6,11 +6,17 @@ on:
     paths:
       - '.github/workflows/packlab-capture-macos.yml'
       - 'apps/ios-capture/**'
+      - 'schemas/packscan/**'
+      - 'tests/fixtures/packscan/**'
+      - 'docs/packscan/**'
   push:
     branches: [main]
     paths:
       - '.github/workflows/packlab-capture-macos.yml'
       - 'apps/ios-capture/**'
+      - 'schemas/packscan/**'
+      - 'tests/fixtures/packscan/**'
+      - 'docs/packscan/**'
   workflow_dispatch:
     inputs:
       focused_group:
@@ -217,6 +223,49 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             | tee "$RUNNER_TEMP/packlab-capture-build.log"
           echo '- Simulator app build: PASS' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Label unsigned simulator build provenance
+        run: |
+          set -euo pipefail
+          app_path="$RUNNER_TEMP/packlab-capture-derived-data/Build/Products/Debug-iphonesimulator/PackLabCapture.app"
+          test -d "$app_path"
+          test -s "$app_path/Info.plist"
+          bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Info.plist")"
+          test -n "$bundle_identifier"
+          if [[ -e "$app_path/embedded.mobileprovision" ]]; then
+            echo 'Simulator build unexpectedly contains a provisioning profile.' >&2
+            exit 1
+          fi
+          resolved_sha="$(shasum -a 256 apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved | awk '{ print $1 }')"
+          provenance="$RUNNER_TEMP/packlab-capture-simulator-provenance.txt"
+          {
+            echo 'format=packlab-ios-simulator-build-provenance-v1'
+            echo "source_revision=$GITHUB_SHA"
+            echo "workflow_run_id=$GITHUB_RUN_ID"
+            echo 'runner_image=macos-15'
+            echo "macos_version=$(sw_vers -productVersion)"
+            echo "xcode_version=${{ steps.xcode.outputs.version }}"
+            echo "xcode_build=${{ steps.xcode.outputs.build }}"
+            echo "destination=$DESTINATION"
+            echo 'product=PackLabCapture.app'
+            echo "bundle_identifier=$bundle_identifier"
+            echo 'signing=disabled'
+            echo 'CODE_SIGNING_ALLOWED=NO'
+            echo 'CODE_SIGNING_REQUIRED=NO'
+            echo 'CODE_SIGN_IDENTITY=empty'
+            echo "Package.resolved_sha256=$resolved_sha"
+          } > "$provenance"
+          echo '- Simulator product provenance: unsigned; app and redacted manifest prepared' | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve unsigned simulator build product
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-capture-unsigned-simulator-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/packlab-capture-derived-data/Build/Products/Debug-iphonesimulator/PackLabCapture.app
+            ${{ runner.temp }}/packlab-capture-simulator-provenance.txt
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Run PackLabCaptureTests on iOS Simulator without signing
         id: run-xctests
