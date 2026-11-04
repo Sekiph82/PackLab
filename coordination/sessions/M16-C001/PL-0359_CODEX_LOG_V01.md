@@ -44,6 +44,6 @@
 - No Apple Account values, certificate, profile, private key, private scan, or supplier data were read into or added to the repository.
 - PL-0358 remains externally blocked because GitHub has no configured signing secrets/environment. Physical iPhone acceptance, signed IPA, legal clearance, and release/factory approval remain open.
 - Artifact links expire after one day. Recheck current GitHub status/digest or rerun against reviewed source after expiry; do not call the artifacts durable or directly installable on an iPhone.
-- Worktree `codex/pl0359-fallback-docs` remains intact through publication of this log. After publication, verify clean/ignored/untracked state, reparse points and active processes, pushed ancestry, and then remove normally without force. Add actual C: free bytes before/after and cleanup outcome in a follow-up log-only commit.
+- Worktree `codex/pl0359-fallback-docs` at `C:\Users\sekip\.codex\worktrees\pl0359-fallback-docs\PackLab` was clean (`git status --porcelain=v1 --untracked-files=all --ignored` empty), had no reparse points or active task processes, and commit `adeaf965fba550f9e5f2b82520119258a9d961af` was an ancestor of fetched `origin/main`. Removed from the stable Desktop checkout with ordinary `git worktree remove` without force. Verified the target directory was absent and no longer listed. Actual C: free bytes before removal: `211887837184`; after: `211913965568`; net change `+26128384` bytes. Other stale/prunable historical worktree entries were not touched.
 
 READY_FOR_INDEPENDENT_AUDIT
