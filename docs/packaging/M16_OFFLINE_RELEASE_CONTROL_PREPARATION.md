@@ -31,7 +31,9 @@ Without `--commit`, the command preserves its source-only inventory mode and emi
 
 `tools/release/offline_changelog.py`, `schemas/release/changelog-input.schema.json`, and `docs/packaging/PL0365_CHANGELOG_POLICY.md` define the input and deterministic offline draft generator. It derives task milestones from root `TASKS.md`, admits only checked task IDs with a matching task-specific final `AUDITED_PASS` ChatGPT audit, and binds each curated summary/known limitation to an explicit hash-verified note fragment. Duplicate, unknown, unchecked, unaudited, malformed, or path/private-data-bearing entries fail closed. Output is grouped by milestone and `Added`, `Changed`, `Fixed`, `Security`, then `Known limitations`, ordered numerically, and includes exact source commit, release-train ID, and separate version domains. The draft is expressly not release authorization. No retrospective note fragments or production/public changelog were created; no release tag is authorized before PL-0368 and the M17 gate.
 
-## 3. PL-0366 release checklist, explicit current BLOCKED status
+## 3. PL-0366 release checklist implemented; current evidence remains BLOCKED
+
+`tools/release/offline_release_checklist.py`, `schemas/release/release-checklist-input.schema.json`, and `docs/packaging/PL0366_RELEASE_CHECKLIST_POLICY.md` implement an offline fail-closed checklist. It binds every required Windows/iOS, notice, secret-scan, and artifact gate to the latest task-specific independent audit, exact source commit, and explicit gate coverage. Artifact gates bind digest, byte length, and workflow run ID. A signed IPA is conditional on signed-distribution intent. M17, formal legal approval, and physical validation remain visible gates; a checklist never grants release authorization. This implementation does not create a candidate checklist because current exact-source evidence and the future M17/legal/physical gates are not all accepted.
 
 | Required gate | Observed evidence | Current decision |
 | --- | --- | --- |
@@ -42,7 +44,7 @@ Without `--commit`, the command preserves its source-only inventory mode and emi
 | iOS unsigned device archive / physical install | Not accepted; no validated signed IPA | NOT ACCEPTED |
 | Signing credentials / secrets review | Repository is PUBLIC; 2026-11-04 metadata shows zero repository signing secrets and zero configured environments; PL-0358 is `EXTERNAL_PENDING_APPLE_SIGNING_CREDENTIALS` | **EXTERNAL_PENDING**; no signed IPA or device installation verified |
 | Windows redistribution compliance | PL0350 automated engineering inventory mapped all staged files; formal legal review unresolved | **FORMAL LEGAL PENDING** |
-| Version compatibility / release manifest / changelog | PL-0364 preparation-only manifest contract and generator implemented; current-source paired artifact evidence absent. PL-0365 changelog remains outstanding. | MANIFEST IMPLEMENTED; NO CURRENT PRODUCTION MANIFEST |
+| Version compatibility / release manifest / changelog | PL-0364 preparation-only manifest contract and PL-0365 audited changelog draft generator implemented; current-source paired artifact evidence absent. | CONTRACTS IMPLEMENTED; NO CURRENT PRODUCTION MANIFEST OR PUBLIC CHANGELOG |
 | PackScan migration / physical benchmark | M09 owner physical validation deferred; M17 acceptance not completed | **BLOCKED** |
 | Internal release `PL-0368` | Explicitly `DEFERRED_POST_M17` | **FORBIDDEN** |
 

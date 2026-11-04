@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.invalid/schemas/release/release-checklist-input.schema.json",
+  "title": "PackLab offline release checklist evidence input",
+  "description": "Evidence references for a source-bound checklist. Passing validation never authorizes release publication.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_commit", "release_train_id", "versions", "release_intent", "gates", "m17_acceptance", "legal_review", "physical_validation", "known_limitations"],
+  "properties": {
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "release_train_id": {"type": "string", "pattern": "^packlab-rt-v1-[0-9a-f]{64}$"},
+    "versions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["studio", "capture", "capture_build", "packscan_schema"],
+      "properties": {
+        "studio": {"type": "string", "minLength": 1},
+        "capture": {"type": "string", "minLength": 1},
+        "capture_build": {"type": "string", "minLength": 1},
+        "packscan_schema": {"type": "string", "minLength": 1}
+      }
+    },
+    "release_intent": {"enum": ["INTERNAL_UNSIGNED", "SIGNED_DISTRIBUTION"]},
+    "gates": {
+      "type": "object", "additionalProperties": false,
+      "required": ["windows_ci_build_package_smoke", "redistribution_notice_inventory", "ios_swift_simulator_tests", "ios_unsigned_device_archive", "secrets_scan", "windows_artifact_provenance", "ios_artifact_provenance", "signed_ipa"],
+      "properties": {
+        "windows_ci_build_package_smoke": {"$ref": "#/$defs/auditEvidence"},
+        "redistribution_notice_inventory": {"$ref": "#/$defs/auditEvidence"},
+        "ios_swift_simulator_tests": {"$ref": "#/$defs/auditEvidence"},
+        "ios_unsigned_device_archive": {"$ref": "#/$defs/auditEvidence"},
+        "secrets_scan": {"$ref": "#/$defs/auditEvidence"},
+        "windows_artifact_provenance": {"$ref": "#/$defs/artifactEvidence"},
+        "ios_artifact_provenance": {"$ref": "#/$defs/artifactEvidence"},
+        "signed_ipa": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifactEvidence"}]}
+      }
+    },
+    "m17_acceptance": {
+      "type": "object", "additionalProperties": false, "required": ["status", "audit_ref"],
+      "properties": {"status": {"enum": ["ACCEPTED", "NOT_ACCEPTED"]}, "audit_ref": {"type": ["string", "null"]}}
+    },
+    "legal_review": {
+      "type": "object", "additionalProperties": false, "required": ["status", "approval_id", "approval_ref", "evidence_sha256"],
+      "properties": {"status": {"const": "PENDING"}, "approval_id": {"type": "null"}, "approval_ref": {"type": "null"}, "evidence_sha256": {"type": "null"}}
+    },
+    "physical_validation": {
+      "type": "object", "additionalProperties": false, "required": ["status", "evidence"],
+      "properties": {"status": {"enum": ["PENDING", "ACCEPTED"]}, "evidence": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/auditEvidence"}]}}
+    },
+    "known_limitations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$"}}
+  },
+  "$defs": {
+    "auditEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["audit_task_id", "audit_ref", "source_commit", "result"],
+      "properties": {"audit_task_id": {"type": "string", "pattern": "^PL-[0-9]{4,}$"}, "audit_ref": {"type": "string", "pattern": "^coordination/sessions/.+_CHATGPT_AUDIT_V[0-9]+\\.md$"}, "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "result": {"const": "PASS"}}
+    },
+    "artifactEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["audit_task_id", "audit_ref", "source_commit", "result", "artifact_sha256", "artifact_bytes", "workflow_run_id"],
+      "properties": {"audit_task_id": {"type": "string", "pattern": "^PL-[0-9]{4,}$"}, "audit_ref": {"type": "string", "pattern": "^coordination/sessions/.+_CHATGPT_AUDIT_V[0-9]+\\.md$"}, "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "result": {"const": "PASS"}, "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "artifact_bytes": {"type": "integer", "minimum": 1}, "workflow_run_id": {"type": "string", "pattern": "^[0-9]{1,20}$"}}
+    }
+  }
+}
