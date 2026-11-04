@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://packlab.invalid/schemas/release/release-manifest-v1.schema.json",
+  "title": "PackLab preparation-only release manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_schema", "manifest_id", "identity_sha256", "status",
+    "release_authorization", "m17_status", "identity_schema", "source_commit",
+    "release_train_id", "versions", "artifacts", "build_identities",
+    "packscan_compatibility", "third_party_notice_inventory_sha256",
+    "known_limitations", "third_party_notice_inventory"
+  ],
+  "properties": {
+    "manifest_schema": {"const": "packlab-release-manifest-v1"},
+    "manifest_id": {"type": "string", "pattern": "^packlab-rm-v1-[0-9a-f]{64}$"},
+    "identity_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"const": "PREPARATION_ONLY_NOT_RELEASE_AUTHORIZATION"},
+    "release_authorization": {"const": "NOT_GRANTED"},
+    "m17_status": {"const": "NOT_ACCEPTED"},
+    "identity_schema": {"const": "packlab-release-manifest-v1"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "release_train_id": {"type": "string", "pattern": "^packlab-rt-v1-[0-9a-f]{64}$"},
+    "versions": {
+      "type": "object", "additionalProperties": false,
+      "required": ["studio", "capture", "capture_build", "packscan_schema"],
+      "properties": {
+        "studio": {"$ref": "#/$defs/semver"},
+        "capture": {"$ref": "#/$defs/semver"},
+        "capture_build": {"type": "integer", "minimum": 1},
+        "packscan_schema": {"$ref": "#/$defs/semver"}
+      }
+    },
+    "artifacts": {
+      "type": "array", "minItems": 2, "items": {"$ref": "#/$defs/artifact"}
+    },
+    "build_identities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["windows", "ios"],
+      "properties": {
+        "windows": {
+          "type": "object", "additionalProperties": false,
+          "required": ["source_commit", "workflow_run_id", "artifact_sha256s", "python", "qt", "ocp", "occt", "open3d", "evidence_ref", "evidence_sha256"],
+          "properties": {
+            "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "workflow_run_id": {"type": "string", "pattern": "^[0-9]{5,20}$"},
+            "artifact_sha256s": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/sha256"}},
+            "python": {"type": "string"}, "qt": {"type": "string"},
+            "ocp": {"type": "string"}, "occt": {"type": "string"},
+            "open3d": {"type": "string"}, "evidence_ref": {"$ref": "#/$defs/path"},
+            "evidence_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        "ios": {
+          "type": "object", "additionalProperties": false,
+          "required": ["source_commit", "workflow_run_id", "artifact_sha256s", "package_resolved_sha256", "xcode_version", "xcode_build", "sdk", "swift_language_mode", "swift_compiler", "nextlevel_version", "nextlevel_revision", "evidence_ref", "evidence_sha256"],
+          "properties": {
+            "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "workflow_run_id": {"type": "string", "pattern": "^[0-9]{5,20}$"},
+            "artifact_sha256s": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/sha256"}},
+            "package_resolved_sha256": {"$ref": "#/$defs/sha256"},
+            "xcode_version": {"type": "string"}, "xcode_build": {"type": "string"},
+            "sdk": {"type": "string"}, "swift_language_mode": {"type": "string"},
+            "swift_compiler": {"type": "string"}, "nextlevel_version": {"type": "string"},
+            "nextlevel_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "evidence_ref": {"$ref": "#/$defs/path"}, "evidence_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    },
+    "packscan_compatibility": {
+      "type": "object", "additionalProperties": false,
+      "required": ["read_min", "read_max", "write", "migrations", "evidence_ref", "evidence_sha256"],
+      "properties": {
+        "read_min": {"$ref": "#/$defs/semver"}, "read_max": {"$ref": "#/$defs/semver"},
+        "write": {"$ref": "#/$defs/semver"}, "migrations": {"type": "array", "items": {"type": "object"}},
+        "evidence_ref": {"$ref": "#/$defs/path"}, "evidence_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "third_party_notice_inventory_sha256": {"$ref": "#/$defs/sha256"},
+    "known_limitations": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,63}$"}},
+    "third_party_notice_inventory": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {"path": {"$ref": "#/$defs/path"}, "sha256": {"$ref": "#/$defs/sha256"}}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "path": {"type": "string", "minLength": 1, "pattern": "^(?:coordination|docs|schemas|tools/(?:ci|packaging))/(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*//)[A-Za-z0-9._/-]+$"},
+    "semver": {"type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"},
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["platform", "name", "kind", "sha256", "bytes", "source_commit", "workflow_run_id", "signing_state", "signature_sha256", "signature_verification_ref", "signature_verification_sha256", "provenance_ref", "provenance_sha256"],
+      "properties": {
+        "platform": {"enum": ["windows", "ios"]}, "name": {"type": "string"},
+        "kind": {"enum": ["windows_installer", "ios_simulator_app", "ios_unsigned_device_archive", "ios_signed_ipa"]},
+        "sha256": {"$ref": "#/$defs/sha256"}, "bytes": {"type": "integer", "minimum": 1},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "workflow_run_id": {"type": "string", "pattern": "^[0-9]{5,20}$"},
+        "signing_state": {"enum": ["UNSIGNED", "SIGNED_VERIFIED"]},
+        "signature_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "signature_verification_ref": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/path"}]},
+        "signature_verification_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+        "provenance_ref": {"$ref": "#/$defs/path"}, "provenance_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"signing_state": {"const": "UNSIGNED"}}},
+          "then": {
+            "properties": {
+              "signature_sha256": {"type": "null"},
+              "signature_verification_ref": {"type": "null"},
+              "signature_verification_sha256": {"type": "null"}
+            }
+          },
+          "else": {
+            "properties": {
+              "signature_sha256": {"$ref": "#/$defs/sha256"},
+              "signature_verification_ref": {"$ref": "#/$defs/path"},
+              "signature_verification_sha256": {"$ref": "#/$defs/sha256"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"kind": {"const": "ios_signed_ipa"}}},
+          "then": {"properties": {"signing_state": {"const": "SIGNED_VERIFIED"}}},
+          "else": {
+            "if": {"properties": {"kind": {"enum": ["ios_simulator_app", "ios_unsigned_device_archive"]}}},
+            "then": {"properties": {"signing_state": {"const": "UNSIGNED"}}}
+          }
+        }
+      ]
+    }
+  }
+}

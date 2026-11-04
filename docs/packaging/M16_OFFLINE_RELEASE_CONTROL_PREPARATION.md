@@ -23,21 +23,9 @@ python tools/release/offline_version_inventory.py --commit <FULL_40_CHARACTER_SO
 
 Without `--commit`, the command preserves its source-only inventory mode and emits `OFFLINE_UNVERIFIED_BUILD` with no train identifier. With a commit, the same status remains: the output is not a release manifest, built-artifact record, audit, signing claim, or release authorization. For PL-0363 no public application/schema behavior changed, so Studio `0.1.0`, Capture `0.1.0`/build `1`, and PackScan schema `1.0.0` remain unchanged under the policy's no-unnecessary-bump principle.
 
-**Future manifest contract, not a generated release artifact:**
+**PL-0364 contract implemented; no production release manifest generated:**
 
-```yaml
-manifest_status: DRAFT_UNVALIDATED
-release_train_id: null  # mandatory only for a real release candidate
-studio: { version: null, source_sha: null, artifact_sha256: null, signing: UNKNOWN }
-capture: { version: null, build: null, source_sha: null, artifact_sha256: null, signing: UNKNOWN }
-packscan: { schema_written: "1.0.0", schema_read_min: null, schema_read_max: null }
-windows: { python: null, qt: null, occt: null, ocp: null, open3d: null, notices_ref: null }
-ios: { xcode: null, swift: null, nextlevel_pin: "0.19.1", provisioning: UNKNOWN }
-rights: { formal_legal_review: PENDING, factory_distribution: NOT_AUTHORIZED }
-acceptance: { pl0354_full_xctest: ENGINEERING_PASS_SIMULATOR_ONLY, m17: NOT_ACCEPTED, pl0368_release: DEFERRED }
-```
-
-**Null is deliberately a failure/incompleteness marker.** The offline candidate-description validator accepts explicit version/source/artifact/provenance/notice/audit inputs only; it does not inspect or create a binary. A future validated generator must populate exact source/build-provenance facts and fail closed on missing required artifact hashes, source and notices, supported schema range, signing state or independent audit. Even synthetically complete validator input is preparation evidence, not a real release manifest or authorization.
+`schemas/release/release-manifest.schema.json`, `tools/release/offline_release_manifest.py`, and `docs/packaging/PL0364_RELEASE_MANIFEST_CONTRACT.md` define the output contract, evidence bindings, source cross-checks, deterministic identity, and fail-closed behavior. Generated status is fixed to `PREPARATION_ONLY_NOT_RELEASE_AUTHORIZATION`, M17 `NOT_ACCEPTED`, and release authorization `NOT_GRANTED`. Inputs require per-platform artifact receipts, same-run build identity evidence, compatibility/migration claims, third-party notice inventory, and limitations. Paths are repository-relative and content-digest checked. No production manifest was generated because no complete Windows+iOS artifact/provenance set bound to one current source commit and complete notice inventory is available. Historical PL-0361 iOS artifacts and PL-0352 installer do not form such a set.
 
 ## 2. Changelog policy prepared for PL-0365
 
@@ -54,7 +42,7 @@ Use explicit, reviewed task IDs (e.g., `PL-0350`) and summaries present in a has
 | iOS unsigned device archive / physical install | Not accepted; no validated signed IPA | NOT ACCEPTED |
 | Signing credentials / secrets review | Repository is PUBLIC; 2026-11-04 metadata shows zero repository signing secrets and zero configured environments; PL-0358 is `EXTERNAL_PENDING_APPLE_SIGNING_CREDENTIALS` | **EXTERNAL_PENDING**; no signed IPA or device installation verified |
 | Windows redistribution compliance | PL0350 automated engineering inventory mapped all staged files; formal legal review unresolved | **FORMAL LEGAL PENDING** |
-| Version compatibility / release manifest / changelog | This draft only; authoritative generator not yet audited | NOT IMPLEMENTED |
+| Version compatibility / release manifest / changelog | PL-0364 preparation-only manifest contract and generator implemented; current-source paired artifact evidence absent. PL-0365 changelog remains outstanding. | MANIFEST IMPLEMENTED; NO CURRENT PRODUCTION MANIFEST |
 | PackScan migration / physical benchmark | M09 owner physical validation deferred; M17 acceptance not completed | **BLOCKED** |
 | Internal release `PL-0368` | Explicitly `DEFERRED_POST_M17` | **FORBIDDEN** |
 
