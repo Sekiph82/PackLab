@@ -13,7 +13,7 @@ Criteria: `coordination/sessions/M16-C001/PL-0365_CHATGPT_AUDIT_CRITERIA_V01.md`
 - This log-only commit is published separately after the preceding evidence commit.
 - Branch: `codex/pl0365-task-changelog`; publication target: `origin/main`.
 - The implementation commit was pushed to `main` and hosted checks were verified. Tracker, peer-review evidence and this distinct log are pushed after the implementation run; remote final SHA is recorded at publication.
-- Desktop synchronization remains `LOCAL_SYNC_PENDING` until the required safe-sync check is completed. The canonical Desktop checkout has owner changes at local SHA `f8745047063aca6c17378ecb33604e6e1e5b5f02`; no owner files were changed.
+- Desktop synchronization remains `LOCAL_SYNC_PENDING`. The canonical Desktop checkout has owner changes at local SHA `f8745047063aca6c17378ecb33604e6e1e5b5f02`; no owner files were changed. The required safe-sync helper was invoked and timed out silently; details are recorded in the cleanup follow-up below.
 
 ## Contract and implementation
 
@@ -61,6 +61,14 @@ No full local repository suite was started separately; the hosted workflow ran t
 Source reviewer, tester and security reviewer each inspected the actual source/tests and final changes and returned PASS. The source reviewer and security reviewer identified and then rechecked task-fragment identity/category binding, latest-audit selection, private/path filtering, and output collision protections. Details are in `coordination/sessions/M16-C001/PL-0365_CODEX_PEER_REVIEW_V01.md`. This advisory evidence is not an independent ChatGPT audit verdict.
 
 No secrets, credentials, signing private material, private scans, supplier files, or new dependencies were added. There is no current curated set of release-note fragments; therefore no changelog draft or public `CHANGELOG.md` was produced. No release tag, GitHub Release, signing/legal/physical acceptance, M17 acceptance, or PL-0368 authorization is claimed.
+
+## Post-task synchronization and worktree cleanup follow-up
+
+- Invoked `tools/dev/post_task_safe_sync.ps1` from the PL-0365 worktree using `pwsh -NoProfile -NonInteractive -File`. It produced no output and remained running for 30 seconds; the invocation was interrupted. Read-only Desktop status showed owner changes and local SHA `f8745047063aca6c17378ecb33604e6e1e5b5f02`; no Desktop changes were made. Result: `LOCAL_SYNC_PENDING`. No OwnerDev refresh applies to this source/tooling task.
+- From the stable Desktop checkout, verified exact PL-0365 worktree `C:\Users\sekip\.codex\worktrees\pl0365-task-changelog\PackLab`, branch `codex/pl0365-task-changelog`, HEAD `d0d846fbb38d237f65972255e9b45b9da22494e3`, equal to `origin/main`, and no tracked/untracked changes. Ignored items were only the worktree virtual environment, egg-info and Python/mypy/pytest/ruff caches. No reparse points or matching task processes were present; no owner data, evidence, installer, signing material, SDK/OCP checkpoint or sole-copy build was found.
+- Removed only the exact PL-0365 worktree with normal `git worktree remove`, without force. Its directory and registry entry are gone. Actual C: free bytes were `209803104256` immediately before and `209852755968` after removal, an increase of `49651712` bytes.
+- Created the PL-0366 worktree from fetched `origin/main` at `d0d846fbb38d237f65972255e9b45b9da22494e3`. Desktop tracked and untracked owner work remains untouched.
+- The verified PL-0365 log commit is `d0d846fbb38d237f65972255e9b45b9da22494e3`, and remote `refs/heads/main` matched it before this follow-up publication.
 
 ## Handoff
 
