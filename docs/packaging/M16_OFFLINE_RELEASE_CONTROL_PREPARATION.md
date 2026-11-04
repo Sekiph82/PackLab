@@ -11,9 +11,17 @@
 | --- | --- | --- | --- |
 | `StudioVersion` | `pyproject.toml` and `apps/windows-studio/src/packlab_studio/__init__.py` | `0.1.0` in both checked-in source declarations | Windows Studio source identity only; not a built or released application |
 | `CaptureVersion` | `apps/ios-capture/PackLabCapture.xcodeproj/project.pbxproj` and `Info.plist` | `0.1.0`; numeric app build `1` | iOS app version/build; **not** a signed/shipped binary |
-| `PackScanSchemaVersion` | `schemas/packscan/manifest.schema.json` | `1.0.0` | Canonical `.packscan` capture-container contract |
+| `PackScanSchemaVersion` | `core/src/packlab_core/packscan/container.py` and `schemas/packscan/manifest.schema.json` | `1.0.0` in both; inventory fails closed on disagreement | Canonical `.packscan` capture-container contract |
 
-Per `docs/architecture/VERSIONING_POLICY.md`, these domain versions advance independently. A release-train identifier may group artifacts and exact build/source SHA without pretending versions are equal or that a draft train has shipped.
+Per `docs/architecture/VERSIONING_POLICY.md`, these domain versions advance independently. PL-0363 implements a deterministic, source-only release-train identity in `tools/release/offline_version_inventory.py`. It retains each semantic version and numeric Capture build as separate fields, verifies Studio’s project/package version declarations agree, checks Capture’s Xcode and `Info.plist` bindings, checks the PackScan core constant against its JSON schema, and binds the group to the supplied full 40-character commit only when that commit equals the checkout's HEAD and every version source is clean. It rejects linked/reparse version sources. It does not require numerical equality, claim a build exists, or treat the commit SHA as a semantic version. The identifier is a SHA-256 over canonical JSON containing the identity schema, all three version domains (plus Capture build), and exact source commit.
+
+Create the current source identity with the exact commit being identified:
+
+```sh
+python tools/release/offline_version_inventory.py --commit <FULL_40_CHARACTER_SOURCE_COMMIT>
+```
+
+Without `--commit`, the command preserves its source-only inventory mode and emits `OFFLINE_UNVERIFIED_BUILD` with no train identifier. With a commit, the same status remains: the output is not a release manifest, built-artifact record, audit, signing claim, or release authorization. For PL-0363 no public application/schema behavior changed, so Studio `0.1.0`, Capture `0.1.0`/build `1`, and PackScan schema `1.0.0` remain unchanged under the policy's no-unnecessary-bump principle.
 
 **Future manifest contract, not a generated release artifact:**
 
@@ -26,7 +34,7 @@ packscan: { schema_written: "1.0.0", schema_read_min: null, schema_read_max: nul
 windows: { python: null, qt: null, occt: null, ocp: null, open3d: null, notices_ref: null }
 ios: { xcode: null, swift: null, nextlevel_pin: "0.19.1", provisioning: UNKNOWN }
 rights: { formal_legal_review: PENDING, factory_distribution: NOT_AUTHORIZED }
-acceptance: { pl0354_full_xctest: BLOCKED, m17: NOT_ACCEPTED, pl0368_release: DEFERRED }
+acceptance: { pl0354_full_xctest: ENGINEERING_PASS_SIMULATOR_ONLY, m17: NOT_ACCEPTED, pl0368_release: DEFERRED }
 ```
 
 **Null is deliberately a failure/incompleteness marker.** The offline candidate-description validator accepts explicit version/source/artifact/provenance/notice/audit inputs only; it does not inspect or create a binary. A future validated generator must populate exact source/build-provenance facts and fail closed on missing required artifact hashes, source and notices, supported schema range, signing state or independent audit. Even synthetically complete validator input is preparation evidence, not a real release manifest or authorization.
