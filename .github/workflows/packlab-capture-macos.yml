@@ -51,10 +51,17 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Select Xcode and record runner provenance
+        id: xcode
         run: |
           set -euo pipefail
           test -d /Applications/Xcode_16.app
           sudo xcode-select --switch /Applications/Xcode_16.app
+          xcode_version="$(xcodebuild -version | awk '/^Xcode / { print $2 }')"
+          xcode_build="$(xcodebuild -version | awk '/^Build version / { print $3 }')"
+          test -n "$xcode_version"
+          test -n "$xcode_build"
+          echo "version=$xcode_version" >> "$GITHUB_OUTPUT"
+          echo "build=$xcode_build" >> "$GITHUB_OUTPUT"
           {
             echo '## Runner provenance'
             echo
@@ -83,14 +90,85 @@ jobs:
           xcrun simctl list runtimes --json | jq -e '.runtimes[] | select(.identifier == "com.apple.CoreSimulator.SimRuntime.iOS-18-0" and .isAvailable)' >/dev/null
           xcodebuild -showdestinations -project "$PROJECT" -scheme "$SCHEME" | grep -F 'iPhone 16' | grep -F '18.0'
 
+      - name: Restore exact Swift Package Manager cache
+        id: spm-cache
+        if: ${{ hashFiles('apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') != '' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ runner.temp }}/packlab-capture-derived-data/SourcePackages/repositories
+            ~/Library/Caches/org.swift.swiftpm
+          key: packlab-spm-${{ runner.os }}-${{ runner.arch }}-macos-15-xcode-${{ steps.xcode.outputs.version }}-${{ steps.xcode.outputs.build }}-${{ hashFiles('apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      - name: Record Swift Package Manager cache result
+        if: always()
+        env:
+          CACHE_HIT: ${{ steps.spm-cache.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [[ "$CACHE_HIT" == true ]]; then
+            echo '- SPM dependency cache: exact-key hit (resolution validation still runs below)' | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- SPM dependency cache: miss (resolution runs from declared upstream sources)' | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Resolve pinned NextLevel and preserve its Swift 5 source compatibility
         run: |
           set -euo pipefail
           derived_data="$RUNNER_TEMP/packlab-capture-derived-data"
+          package_resolved='apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'
+          project_file='apps/ios-capture/PackLabCapture.xcodeproj/project.pbxproj'
+          before_digest=''
+          if [[ -f "$package_resolved" ]]; then
+            before_digest="$(shasum -a 256 "$package_resolved" | awk '{ print $1 }')"
+          fi
           xcodebuild -resolvePackageDependencies \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -derivedDataPath "$derived_data"
+          test -s "$package_resolved"
+          python3 - "$package_resolved" "$project_file" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          package_resolved = json.loads(Path(sys.argv[1]).read_text())
+          project = Path(sys.argv[2]).read_text()
+          requirement = re.compile(
+              r'repositoryURL = "https://github[.]com/NextLevel/NextLevel";\s*'
+              r'requirement = [{]kind = exactVersion; version = 0[.]19[.]1; [}];'
+          )
+          if len(requirement.findall(project)) != 1:
+              raise SystemExit('Xcode project must contain exactly one NextLevel 0.19.1 exact-version requirement.')
+          pins = package_resolved.get('pins')
+          if not isinstance(pins, list):
+              raise SystemExit('Package.resolved must contain a pins array.')
+          if len(pins) != 1:
+              raise SystemExit(f'Expected only the reviewed NextLevel dependency, found {len(pins)} package pins.')
+          nextlevel = [pin for pin in pins if pin.get('identity', '').casefold() == 'nextlevel']
+          if len(nextlevel) != 1:
+              raise SystemExit(f'Expected exactly one NextLevel pin, found {len(nextlevel)}.')
+          pin = nextlevel[0]
+          state = pin.get('state', {})
+          if pin.get('kind') != 'remoteSourceControl':
+              raise SystemExit('NextLevel pin must be a remote source-control package.')
+          if pin.get('location', '').rstrip('/').casefold() != 'https://github.com/nextlevel/nextlevel':
+              raise SystemExit('NextLevel pin location differs from the declared upstream repository.')
+          if state.get('version') != '0.19.1' or not re.fullmatch(r'[0-9a-f]{40}', state.get('revision', '')):
+              raise SystemExit('Package.resolved does not pin NextLevel 0.19.1 to a full Git revision.')
+          print(f"NextLevel pin: 0.19.1 at {state['revision']}")
+          print(f"Resolved package pins: {len(pins)}")
+          PY
+          after_digest="$(shasum -a 256 "$package_resolved" | awk '{ print $1 }')"
+          if [[ -n "$before_digest" && "$before_digest" != "$after_digest" ]]; then
+            echo 'Package.resolved changed during resolution; the checked lock must be reviewed and committed.' >&2
+            exit 1
+          fi
+          if git ls-files --error-unmatch "$package_resolved" >/dev/null 2>&1; then
+            git diff --exit-code -- "$package_resolved"
+          fi
+          echo "- Package.resolved SHA-256: $after_digest" | tee -a "$GITHUB_STEP_SUMMARY"
           package_manifest="$derived_data/SourcePackages/checkouts/NextLevel/Package.swift"
           test -f "$package_manifest"
           chmod u+w "$package_manifest"
@@ -115,6 +193,15 @@ jobs:
           print('NextLevel source version: 0.19.1 (resolved from the exact Xcode project pin)')
           print('Runner-local package language mode: Swift 5; dependency source files remain unchanged')
           PY
+
+      - name: Preserve generated SPM resolution evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-spm-resolution-${{ github.run_id }}
+          path: apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          if-no-files-found: ignore
+          retention-days: 1
 
       - name: Build PackLabCapture for iOS Simulator without signing
         run: |
