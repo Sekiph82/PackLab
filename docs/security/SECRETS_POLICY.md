@@ -3,9 +3,11 @@
 ## Purpose and boundary
 
 This policy defines what must never enter PackLab’s public Git history and
-how builders respond when exposure is suspected. It is a governance contract,
-not a signing system, credential store, CI implementation, keychain
-integration, or concrete ignore-file configuration.
+how builders respond when exposure is suspected. PackLab does not implement
+signing or credential storage. The repository guard checks tracked source for
+signing-material paths, private-key headers, and direct assignments to common
+signing-secret names; `.gitignore` supplies local convenience only, while CI
+enforces the tracked-file check.
 
 ## Secret classes
 
@@ -48,8 +50,7 @@ authorization and a separately audited public-data decision.
 
 ## Safe handling principles
 
-Concrete storage and CI integrations are future work. Their governing
-principles are:
+The governing handling principles are:
 
 1. Environment variables may supply short-lived values to a process without
    committing the value, but commands, crash dumps, child-process output, and
@@ -60,11 +61,13 @@ principles are:
    metadata, and redacted status may be documented; the secret value must not.
 3. CI secrets belong in the CI provider’s protected secret facility with
    minimum repository/environment scope, masked output, rotation, and an
-   explicit workflow permission boundary. This policy does not implement CI
-   secret plumbing.
+   explicit workflow permission boundary. The signing-material guard has
+   read-only repository access and receives no signing credentials.
 4. Local `.env` files and credential-bearing config are local-only inputs. Use
-   a public template containing safe placeholders, keep real values outside
-   tracked paths, and defer concrete `.gitignore` changes to PL-0021.
+   a public template containing safe placeholders and keep real values
+   outside tracked paths. `.gitignore` covers common Apple certificate,
+   profile, private-key, and keychain extensions but is not a security
+   boundary.
 5. Never copy a credential into a prompt, test fixture, diagnostic command,
    screenshot, generated report, or Codex log for convenience.
 
@@ -112,12 +115,33 @@ locations, or screenshots containing secrets. Replace sensitive values with a
 placeholder such as `<PACKLAB_TEST_TOKEN_REDACTED>` and omit command output
 when redaction cannot be guaranteed.
 
-## Explicit non-implementation boundary
+## Signing-material repository guard
 
-This task does not implement Apple signing, provisioning, CI secret wiring,
-OS-keychain integration, credential storage, secret scanning automation, or
-the concrete `.gitignore` policy deferred to PL-0021. Those systems require
-their own authorized scope and evidence.
+`tools/ci/ci_data_safety.py --check-signing-secrets` scans tracked repository
+files for Apple signing containers and keychains by extension, private-key
+PEM headers, and direct assignments to common signing credential names. Its
+diagnostics report finding codes only; they do not include filenames, matched
+values, or file contents. The dedicated GitHub Actions workflow runs on pull
+requests and pushes to `main`; the Windows quality workflow also runs this
+check. Both workflows use read-only repository permissions and no signing
+secrets.
+
+The extension guard covers `.cer`, `.p8`, `.p12`, `.pfx`, `.mobileprovision`,
+`.provisionprofile`, `.keychain`, and `.keychain-db`. These extensions are
+blocked even for documentation. A small documentation-marker exception may
+suppress the private-key-header check only for an exact Markdown path and
+SHA-256 digest listed in `tools/ci/ci_signing_material_allowlist.json`, under
+`docs/security/fixtures/` or `coordination/sessions/`, with a review reason.
+Each exception must also match the scanner’s source-pinned path and digest.
+It cannot suppress extension, signing-material filename, or secret-assignment
+findings. The allowlist currently covers two historical audit documents that
+mention a PEM marker as an example and contain no key bytes. Adding an entry
+requires a security review and updates to both pins; it must not place
+credentials or private signing material in the repository.
+
+The scanner is a focused repository guard, not a complete entropy-based secret
+scanner. It does not implement Apple signing, provisioning, keychain access,
+credential storage, or CI secret plumbing.
 
 ## Cross-references
 

@@ -70,7 +70,7 @@ jobs:
       - name: Guard tracked data and developer-runtime boundaries
         shell: pwsh
         run: |
-          python -m tools.ci.ci_data_safety --repository $env:GITHUB_WORKSPACE --tracked --check-workflows --check-environment
+          python -m tools.ci.ci_data_safety --repository $env:GITHUB_WORKSPACE --tracked --check-workflows --check-environment --check-signing-secrets
           if ($LASTEXITCODE -ne 0) { throw "CI data-safety guard rejected a tracked or ambient input." }
 
       - name: Install pinned uv

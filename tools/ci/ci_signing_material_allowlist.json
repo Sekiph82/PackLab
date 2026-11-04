@@ -1,0 +1,13 @@
+{
+  "approved_public_documents": {
+    "coordination/sessions/M16-C001/M16_OFFLINE_OCTOBER_CHATGPT_AUDIT_V01.md": {
+      "reason": "Reviewed public audit text uses the PEM marker only to document a scanner coverage gap; it contains no key bytes.",
+      "sha256": "6ebd10fb763003bda03ba75969c378fb061e3d71c6c49595a6475e8b894e39b0"
+    },
+    "coordination/sessions/M16-C001/M16_OFFLINE_OCTOBER_R01_SECURITY_VERSION_TEMP_CLEANUP_PROMPT.md": {
+      "reason": "Reviewed public audit prompt uses the PEM marker only to describe the scanner gap; it contains no key bytes.",
+      "sha256": "ca99715c4603641a40ee3dfeeaa3902d58882473e71bd33bca2c87104a8c7e40"
+    }
+  },
+  "schema": "packlab-signing-documents-v1"
+}

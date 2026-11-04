@@ -87,23 +87,49 @@ UNKNOWN_RAW_SUFFIXES = {".bin", ".dat", ".data", ".capture", ".rawscan"}
 STRUCTURED_DATA_SUFFIXES = {".json", ".csv", ".xml", ".txt", ".log", ".yaml", ".yml"}
 TEXT_SUFFIXES = {".txt", ".log", ".json", ".yaml", ".yml", ".csv", ".xml", ".md"}
 SIGNING_TEXT_SUFFIXES = TEXT_SUFFIXES | {
-    ".py", ".toml", ".plist", ".pbxproj", ".sh", ".ps1", ".swift",
-    ".ini", ".cfg", ".properties", ".entitlements", ".env",
-    ".pem", ".key",
+    ".py",
+    ".toml",
+    ".plist",
+    ".pbxproj",
+    ".sh",
+    ".ps1",
+    ".swift",
+    ".ini",
+    ".cfg",
+    ".properties",
+    ".entitlements",
+    ".env",
+    ".pem",
+    ".key",
 }
 SIGNING_MATERIAL_SUFFIXES = {
-    ".p8", ".p12", ".pfx", ".mobileprovision", ".provisionprofile"
+    ".p8",
+    ".p12",
+    ".pfx",
+    ".cer",
+    ".mobileprovision",
+    ".provisionprofile",
+    ".keychain",
+    ".keychain-db",
 }
 PRIVATE_KEY_HEADER = re.compile(
     r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----",
     re.IGNORECASE,
 )
 SECRET_ASSIGNMENT = re.compile(
-    r"(?im)^\s*(?:APPLE|APP_STORE|APPSTORE|ASC|GITHUB|GH|SIGNING|PROVISIONING|"
-    r"DISTRIBUTION|PRIVATE|CLIENT|ACCESS|API|DEPLOY|CERTIFICATE)"
-    r"[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PRIVATE_KEY|API_KEY|SIGNING_KEY|ID|EMAIL|ACCOUNT)"
+    r"(?im)^\s*(?:export\s+)?(?:APPLE|APP_STORE|APPSTORE|ASC|GITHUB|GH|SIGNING|PROVISIONING|"
+    r"DISTRIBUTION|PRIVATE|CLIENT|ACCESS|API|DEPLOY|CERTIFICATE|MATCH|KEYCHAIN)"
+    r"[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PRIVATE_KEY|API_KEY|SIGNING_KEY|"
+    r"SIGNING_CERTIFICATE_BASE64|SIGNING_CERTIFICATE|PROVISIONING_PROFILE|"
+    r"CERTIFICATE_P12_BASE64|CERTIFICATE_P12|CERTIFICATE_BASE64|CERTIFICATE|"
+    r"PROFILE_BASE64|KEYCHAIN|TEAM_ID|KEY_ID|ISSUER_ID|ID|EMAIL|ACCOUNT)"
     r"\s*[:=]\s*(?:([\"'])([^\"'\r\n]+)\1|([^\s#]+))"
 )
+SIGNING_DOCUMENT_ALLOWLIST_PATH = Path("tools/ci/ci_signing_material_allowlist.json")
+REVIEWED_SIGNING_MARKER_DOCUMENTS = {
+    "coordination/sessions/M16-C001/M16_OFFLINE_OCTOBER_CHATGPT_AUDIT_V01.md": "6ebd10fb763003bda03ba75969c378fb061e3d71c6c49595a6475e8b894e39b0",
+    "coordination/sessions/M16-C001/M16_OFFLINE_OCTOBER_R01_SECURITY_VERSION_TEMP_CLEANUP_PROMPT.md": "ca99715c4603641a40ee3dfeeaa3902d58882473e71bd33bca2c87104a8c7e40",
+}
 LINE_ENDING_CANONICAL_SUFFIXES = {
     ".svg",
     ".step",
@@ -413,9 +439,92 @@ def check_environment(environment: dict[str, str] | None = None) -> list[Finding
     return []
 
 
-def scan_signing_material(repository_root: Path, paths: Iterable[Path]) -> list[Finding]:
+def _load_signing_document_allowlist(root: Path) -> dict[str, dict[str, str]]:
+    try:
+        manifest = json.loads((root / SIGNING_DOCUMENT_ALLOWLIST_PATH).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError("SIGNING_ALLOWLIST_MISSING_OR_INVALID") from None
+    if not isinstance(manifest, dict):
+        raise ValueError("SIGNING_ALLOWLIST_SCHEMA_INVALID")
+    if manifest.get("schema") != "packlab-signing-documents-v1":
+        raise ValueError("SIGNING_ALLOWLIST_SCHEMA_INVALID")
+    entries = manifest.get("approved_public_documents")
+    if not isinstance(entries, dict):
+        raise ValueError("SIGNING_ALLOWLIST_ENTRIES_INVALID")
+    for relative, entry in entries.items():
+        if (
+            not isinstance(relative, str)
+            or not (
+                relative.startswith("docs/security/fixtures/")
+                or relative.startswith("coordination/sessions/")
+            )
+            or not relative.endswith(".md")
+            or not isinstance(entry, dict)
+            or not isinstance(entry.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])
+            or not isinstance(entry.get("reason"), str)
+            or not entry["reason"].strip()
+        ):
+            raise ValueError("SIGNING_ALLOWLIST_ENTRY_INVALID")
+    return entries
+
+
+def _matches_reviewed_public_document(
+    path: Path, relative: str, allowlist: dict[str, dict[str, str]]
+) -> bool:
+    entry = allowlist.get(relative)
+    reviewed_sha256 = REVIEWED_SIGNING_MARKER_DOCUMENTS.get(relative)
+    if (
+        not (
+            relative.startswith("docs/security/fixtures/")
+            or relative.startswith("coordination/sessions/")
+        )
+        or not relative.endswith(".md")
+        or not isinstance(entry, dict)
+        or not isinstance(entry.get("reason"), str)
+        or not entry["reason"].strip()
+        or entry.get("sha256") != reviewed_sha256
+        or reviewed_sha256 is None
+    ):
+        return False
+    try:
+        contents = path.read_bytes()
+    except OSError:
+        return False
+    digest = hashlib.sha256(contents).hexdigest()
+    if digest != reviewed_sha256:
+        return False
+    text = contents.decode("utf-8", errors="strict")
+    matches = list(PRIVATE_KEY_HEADER.finditer(text))
+    if not matches or re.search(
+        r"-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----", text, re.I
+    ):
+        return False
+    # Allow only inline prose markers. A PEM header at a line boundary or
+    # with no prose following it is treated as possible key material.
+    for match in matches:
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        line_end = text.find("\n", match.end())
+        if line_end < 0:
+            line_end = len(text)
+        line_tail = text[match.end() : line_end]
+        if (
+            not text[line_start : match.start()].strip()
+            or not line_tail.strip()
+            or re.search(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{24,}={0,2}(?![A-Za-z0-9+/=])", line_tail)
+        ):
+            return False
+    return True
+
+
+def scan_signing_material(
+    repository_root: Path,
+    paths: Iterable[Path],
+    document_allowlist: dict[str, dict[str, str]] | None = None,
+) -> list[Finding]:
     """Inspect explicit source paths; return codes only, never matched values."""
     root = repository_root.resolve(strict=True)
+    allowlist = document_allowlist or {}
     findings: list[Finding] = []
     for supplied in paths:
         path = supplied if supplied.is_absolute() else root / supplied
@@ -444,16 +553,26 @@ def scan_signing_material(repository_root: Path, paths: Iterable[Path]) -> list[
 
         # Filename checks use only explicit private-key phrases, so ordinary
         # names such as private_key_policy.md do not trigger this guard.
-        if re.search(r"(?:^|[._-])(?:apple[-_.]?signing|distribution[-_.]?key|private[-_.]?key)(?:[._-]|$)", name):
+        if re.search(
+            r"(?:^|[._-])(?:apple[-_.]?signing|distribution[-_.]?key|private[-_.]?key)(?:[._-]|$)",
+            name,
+        ):
             findings.append(Finding("APPLE_SIGNING_MATERIAL_FILENAME"))
             continue
-        if PRIVATE_KEY_HEADER.search(contents):
+        if PRIVATE_KEY_HEADER.search(contents) and not _matches_reviewed_public_document(
+            path, relative, allowlist
+        ):
             findings.append(Finding("PRIVATE_KEY_BLOCK_PRESENT"))
             continue
         for match in SECRET_ASSIGNMENT.finditer(contents):
             value = match.group(2) or match.group(3) or ""
             marker = value.upper()
-            if "EXAMPLE" in marker or "TEST" in marker or "REDACTED" in marker or "PLACEHOLDER" in marker:
+            if (
+                "EXAMPLE" in marker
+                or "TEST" in marker
+                or "REDACTED" in marker
+                or "PLACEHOLDER" in marker
+            ):
                 continue
             if value.startswith("<") and value.endswith(">"):
                 continue
@@ -511,10 +630,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     root = args.repository.resolve()
-    if not any((
-        args.tracked, args.path, args.check_workflows, args.check_environment,
-        args.check_signing_secrets,
-    )):
+    if not any(
+        (
+            args.tracked,
+            args.path,
+            args.check_workflows,
+            args.check_environment,
+            args.check_signing_secrets,
+        )
+    ):
         parser.error("select at least one scan or check")
     findings: list[Finding] = []
     try:
@@ -530,7 +654,8 @@ def main(argv: list[str] | None = None) -> int:
         findings.extend(check_environment())
     if args.check_signing_secrets:
         try:
-            findings.extend(scan_signing_material(root, tracked_source_paths(root)))
+            allowlist = _load_signing_document_allowlist(root)
+            findings.extend(scan_signing_material(root, tracked_source_paths(root), allowlist))
         except (OSError, ValueError):
             findings.append(Finding("SIGNING_SCAN_INCOMPLETE"))
     return _report(findings)
