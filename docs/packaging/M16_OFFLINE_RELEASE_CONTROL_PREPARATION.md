@@ -1,4 +1,4 @@
-# PackLab M16 | Release Control: Offline Preparation (2026-10-15)
+# PackLab M16 | Release Control: Offline Preparation (2026-10-15; status refreshed 2026-11-04)
 
 > **2026-11-04 CURRENT MODE:** The owner authorized Codex to select all dependency-safe PL tasks, use GitHub Actions, assign separate peer reviews and update the sole `TASKS.md` tracker after genuine task acceptance. Any older ChatGPT-only, stop-after-child or zero-Actions instructions below are historical, superseded as workflow restrictions by `AGENTS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`; engineering, secrets, licensing, physical and release evidence obligations remain.
 
@@ -42,9 +42,9 @@ Use explicit, reviewed task IDs (e.g., `PL-0350`) and summaries present in a has
 | Windows Installer build + installed offline smoke | PL0350/PL0351 audits PASS; exact accepted warm Installer published privately | ENGINEERING PASS only |
 | Private Installer retention | PL0352 artifact `11959245441` until 2026-12-14, readback PASS | TIME-LIMITED, NOT permanent |
 | CI protected from private sample datasets | PL0353 V02 audit PASS, five fail-closed upload guards | ENGINEERING PASS |
-| iOS Capture simulator all XCTest | Targeted run `38767357450` 25/25 PASS; **full final 205 not run**, `38770566255` billing-blocked; older run 173/205 | **BLOCKED** |
+| iOS Capture simulator all XCTest | Historical October runs remain below; 2026-11-04 hosted runs [41743543561](https://github.com/Sekiph82/PackLab/actions/runs/41743543561) and [41754385597](https://github.com/Sekiph82/PackLab/actions/runs/41754385597) passed 205/205, 0 failed, 0 skipped | **ENGINEERING PASS**; simulator only |
 | iOS unsigned device archive / physical install | Not accepted; no validated signed IPA | NOT ACCEPTED |
-| Signing credentials / secrets review | No signed workflow authorized; no Apple credentials may be stored in repo | SEPARATE REVIEW REQUIRED |
+| Signing credentials / secrets review | Repository is PUBLIC; 2026-11-04 metadata shows zero repository signing secrets and zero configured environments; PL-0358 is `EXTERNAL_PENDING_APPLE_SIGNING_CREDENTIALS` | **EXTERNAL_PENDING**; no signed IPA or device installation verified |
 | Windows redistribution compliance | PL0350 automated engineering inventory mapped all staged files; formal legal review unresolved | **FORMAL LEGAL PENDING** |
 | Version compatibility / release manifest / changelog | This draft only; authoritative generator not yet audited | NOT IMPLEMENTED |
 | PackScan migration / physical benchmark | M09 owner physical validation deferred; M17 acceptance not completed | **BLOCKED** |
@@ -59,8 +59,8 @@ Use explicit, reviewed task IDs (e.g., `PL-0350`) and summaries present in a has
 - Risk/compliance analysis, documented iPhone install/reinstall steps, safe rollback and non-destructive data backup can be finalized as policy drafts pending executed device acceptance.
 - Existing workflow YAML and CI selectors may be **read-only audited** without runner dispatch. Do not push changes to `.github/workflows/**`, `apps/ios-capture/**`, `tools/**`, `tests/**` or other path-triggered areas onto `main` during the zero-Actions work mode.
 
-## 5. No-action budget and authorization
+## 5. Historical October budget and current authorization
 
-Owner reported **USD 56.92** Actions spending in approximately one week. No GitHub Actions, retry, paid alternative CI, invoice/payment change, new build artifact or signing request is authorized through October. Docs/coordination-only commits do not match the *currently inspected* automatic workflow push path filters; inspect any new filters before further pushes. GitHub existing storage may still incur fees and must not be misrepresented as guaranteed free. Resume **only** on a new explicit owner instruction; November is not automatic permission.
+As of **2026-10-15**, the owner reported **USD 56.92** in Actions spending over approximately one week and prohibited new GitHub Actions, retries, paid alternative CI, invoice/payment changes, build artifacts or signing requests through October unless explicitly reauthorized. That historical restriction was superseded by the owner's **2026-11-04** authorization for task-required GitHub Actions and autonomous execution. The current authorization does not permit changing billing settings or spending caps, and it does not make artifact storage guaranteed free. The account billing allowance and actual cost remain unverified; avoid unnecessary runs and do not claim a billing quote or free quota. Any future scope or account/billing change still requires owner authorization.
 
 **References:** `docs/development/NO_ACTIONS_OFFLINE_WORK_POLICY_2026-10-15.md`, `docs/architecture/VERSIONING_POLICY.md`, `docs/packscan/container-layout.md`, `docs/packaging/PL0362_PL0367_OFFLINE_INSTALL_ROLLBACK_PREPARATION.md`, `docs/packaging/GITHUB_ACTIONS_ARTIFACT_RETENTION_POLICY.md`, and `coordination/sessions/M16-C001/PL-0354_CHATGPT_AUDIT_V02.md`.
