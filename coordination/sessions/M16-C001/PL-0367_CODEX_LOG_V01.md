@@ -1,7 +1,7 @@
 # PL-0367 Codex Execution Log V01
 
-Task: **Rollback for incompatible Capture/Studio versions**  
-Milestone: **M16 - CI/CD, Signing & Distribution**  
+Task: **Rollback for incompatible Capture/Studio versions**
+Milestone: **M16 - CI/CD, Signing & Distribution**
 Cycle: **M16-C001**
 
 ## Synchronization and authority
