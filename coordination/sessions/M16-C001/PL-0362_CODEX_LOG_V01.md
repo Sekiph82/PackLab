@@ -60,6 +60,11 @@ PL-0362 is recorded in `TASKS.md` as `CODEX_IMPLEMENTATION_PASS / READY_FOR_INDE
 
 ## Post-publication sync and worktree cleanup
 
-Pending until the log-only commit is published: run `tools/dev/post_task_safe_sync.ps1` against Desktop without overwriting owner changes, verify the remote SHA, inspect exact PL-0362 worktree safety from a stable checkout, and remove only the verified clean/pushed task worktree with normal `git worktree remove` if all owner-data/reparse/process checks pass. Record actual C: free bytes before/after and the exact result. If safe sync or cleanup is blocked, preserve the checkout/worktree and state the precise reason.
+- Invoked `tools/dev/post_task_safe_sync.ps1` after publication. It did not return within 10 seconds and was interrupted. A direct read-only inspection found Desktop `main` at `f8745047063aca6c17378ecb33604e6e1e5b5f02`, 74 dirty entries, and fetched `origin/main` at `76fe422e267aac24d2a17d9269de10decd5df924`. No Desktop files were changed. State: `LOCAL_SYNC_PENDING`; the owner-dirty checkout remains untouched.
+- From stable `C:\Users\sekip\Desktop\PackLab`, verified the exact PL-0362 worktree path `C:\Users\sekip\.codex\worktrees\pl0362-install-procedure\PackLab`, branch `codex/pl0362-install-procedure`, HEAD equal to pushed `origin/main` at `76fe422e267aac24d2a17d9269de10decd5df924`, clean tracked/untracked state, zero reparse points, and zero active task processes.
+- Inspected all 18,943 ignored paths. They consisted only of the task-created `.venv`, its generated Python package metadata and bytecode caches. No owner data, unique evidence/build, SDK/OCP checkpoint, Installer, protected file, or sole-copy output was present.
+- Removed the exact PL-0362 worktree through normal `git worktree remove` with no force. Its directory and registry entry are gone. Actual C: free space was `211304448000` bytes before and `211340574720` bytes after, a verified increase of `36126720` bytes. No other PackLab worktree was removed.
+- OwnerDev refresh was not relevant to this documentation-only task. No Desktop or other owner workspace was modified.
+- The cleanup follow-up was committed as a separate log-only commit from the PL-0363 checkout after the PL-0362 worktree had been removed.
 
 READY_FOR_INDEPENDENT_AUDIT
