@@ -192,6 +192,10 @@ jobs:
             exit 1
           fi
           app_executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_info")"
+          if [[ "$app_executable" != 'PackLabCapture' ]]; then
+            echo 'Archived app executable name differs from the expected PackLabCapture product.' >&2
+            exit 1
+          fi
           test -s "$app_path/$app_executable"
           set +e
           signature_output="$(/usr/bin/codesign --display --verbose=4 "$app_path/$app_executable" 2>&1)"
