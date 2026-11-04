@@ -67,6 +67,14 @@ No credentials, signing material, private samples, supplier files, or new runtim
 
 ## Handoff
 
-Implementation and peer-reviewed evidence are published to GitHub `main`. The root tracker accurately advances to PL-0367; PL-0368 remains deferred until the M17 gate. Desktop synchronization and exact worktree cleanup evidence will be added in a subsequent log-only follow-up.
+Implementation, peer-reviewed evidence, and this log are published to GitHub `main`. The root tracker accurately advances to PL-0367; PL-0368 remains deferred until the M17 gate.
+
+## Post-task Desktop synchronization and worktree cleanup
+
+- Invoked `pwsh -NoProfile -NonInteractive -File tools/dev/post_task_safe_sync.ps1` after publication. It produced no output for over 35 seconds and was interrupted. Read-only checks confirmed the canonical Desktop checkout remains on branch `main` at owner-local SHA `f8745047063aca6c17378ecb33604e6e1e5b5f02`, with numerous tracked edits and untracked owner files. The helper correctly cannot fast-forward a dirty owner checkout. No Desktop file was changed; result: `LOCAL_SYNC_PENDING`. OwnerDev refresh is not relevant to a documentation/tooling task.
+- From the stable Desktop checkout, verified exact task worktree `C:\Users\sekip\.codex\worktrees\pl0366-release-checklist\PackLab`, branch `codex/pl0366-release-checklist`, HEAD `77812d3528af4fb08401fb3247d5a934d87d69b0`, equal to `origin/main`. It was clean with no untracked files. Ignored contents were limited to `.venv`, `packlab.egg-info`, mypy/pytest/ruff caches, and Python bytecode caches; no build artifact, installer, SDK/OCP checkpoint, signing material, private evidence, or sole-copy deliverable was present. No task process or reparse point remained.
+- Removed only the exact PL-0366 worktree using normal `git worktree remove` without force. The directory and worktree registry entry are gone. C: free space measured immediately before removal was `199883886592` bytes and after removal `199916179456` bytes, an observed increase of `32292864` bytes. Other worktrees, including older/prunable historical entries, were left untouched.
+- Created PL-0367 worktree `C:\Users\sekip\.codex\worktrees\pl0367-release-rollback\PackLab` on `codex/pl0367-release-rollback` from fetched `origin/main` at `77812d3528af4fb08401fb3247d5a934d87d69b0`. The owner's Desktop changes remain untouched.
+- This cleanup follow-up changes only this PL-0366 execution log and is published separately as a log-only commit.
 
 READY_FOR_INDEPENDENT_AUDIT
