@@ -4,9 +4,14 @@ A turntable driver (none is integrated; PL-0425 is hardware-gated) reports one e
 capture: the photo sequence it triggered, the commanded angle and, when the device can
 measure it, the measured angle. This module binds those events to PackScan photo records
 by sequence, emits the per-photo ``capture_mode.parameters`` used by the turntable
-PackScan mode (``frame_count``/``frame_index``/``angle_deg``), and provides the
-equivalent virtual-camera transform the turntable adapter needs (object rotates about the
-station axis; see OPENREALITY_INTEGRATION_ARCHITECTURE section 10).
+PackScan mode (``angle_unit``/``angle_convention``/``frame_count``/``frame_index``/
+``angle_deg``, schemas/packscan/manifest.schema.json), and provides the equivalent
+virtual-camera transform the turntable adapter needs (OPENREALITY_INTEGRATION_ARCHITECTURE
+section 10). PackScan's frozen ``clockwise_from_reference`` convention is read as: the
+platter turns clockwise **as seen from above** (looking down the station +z axis).
+
+This is a sync report; the caller writes each bound photo's parameters into that frame's
+PackScan manifest (one turntable ``capture_mode`` per manifest).
 
 It never invents an angle: a photo without exactly one matching event stays unbound.
 Angles are device-reported, not observed geometry; physical calibration of the turntable
@@ -36,7 +41,7 @@ def _angle(value: object, name: str) -> float:
         raise TurntableSyncError(f"{name}_invalid")
     if not 0.0 <= float(value) < 360.0:
         raise TurntableSyncError(f"{name}_out_of_range")
-    return float(value)
+    return float(value) + 0.0  # normalise -0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +95,7 @@ def synchronize_turntable_angles(
     if not isinstance(photos, Sequence) or not 1 <= len(photos) <= _MAX_EVENTS:
         raise TurntableSyncError("photos_invalid")
     sequences: dict[int, str] = {}
+    photo_ids: set[str] = set()
     for record in photos:
         if (
             not isinstance(record, tuple)
@@ -101,9 +107,10 @@ def synchronize_turntable_angles(
             or record[1] < 0
         ):
             raise TurntableSyncError("photo_record_invalid")
-        if record[1] in sequences or record[0] in sequences.values():
+        if record[1] in sequences or record[0] in photo_ids:
             raise TurntableSyncError("photo_sequence_or_id_duplicate")
         sequences[record[1]] = record[0]
+        photo_ids.add(record[0])
 
     by_sequence: dict[int, list[TurntableAngleEvent]] = {}
     for event in events:
@@ -139,6 +146,8 @@ def synchronize_turntable_angles(
                 "photo_id": photo_id,
                 "sequence": sequence,
                 "capture_mode_parameters": {
+                    "angle_unit": "deg",
+                    "angle_convention": "clockwise_from_reference",
                     "frame_count": frame_count,
                     "frame_index": frame_index,
                     "angle_deg": angle,
@@ -149,12 +158,17 @@ def synchronize_turntable_angles(
         )
     orphan_sequences = sorted(set(by_sequence) - set(sequences))
     angles = sorted(
-        float(item["capture_mode_parameters"]["angle_deg"])  # type: ignore[index]
-        for item in bound
+        {
+            float(item["capture_mode_parameters"]["angle_deg"])  # type: ignore[index]
+            for item in bound
+        }
     )
-    gaps = [
-        (angles[(i + 1) % len(angles)] - angles[i]) % 360.0 or 360.0 for i in range(len(angles))
-    ]
+    # Distinct angles only: a repeated angle is not a 360-degree gap (review P2-1).
+    gaps = (
+        [360.0]
+        if len(angles) == 1
+        else [(angles[(i + 1) % len(angles)] - angles[i]) % 360.0 for i in range(len(angles))]
+    )
     return {
         "contract": TURNTABLE_SYNC_CONTRACT,
         "authority": "DEVICE_REPORTED_ANGLES_NOT_OBSERVED_GEOMETRY",
@@ -174,9 +188,11 @@ def virtual_camera_to_world(
 ) -> tuple[float, ...]:
     """Equivalent pose of a fixed camera in the object's frame after a turntable rotation.
 
-    The object rotates by +angle about the station z axis (PL-0397 frame: origin on the
-    turntable axis). Seen from the object, the camera moves by the inverse rotation:
-    ``R_z(-angle) @ camera_to_world`` (row-major 4x4 in, row-major 4x4 out).
+    PackScan angles are ``clockwise_from_reference`` seen from above: the object rotates by
+    -angle about the station +z axis (PL-0397 frame: origin on the turntable axis, z up).
+    Seen from the object, the camera moves by the inverse rotation:
+    ``R_z(+angle) @ camera_to_world`` (row-major 4x4 in and out). The pose must be a rigid
+    transform in the z-up station frame (ARKit y-up poses must be converted first).
     """
     angle = math.radians(_angle(turntable_angle_deg, "turntable_angle"))
     if len(camera_to_world) != 16 or any(
@@ -184,7 +200,17 @@ def virtual_camera_to_world(
         for v in camera_to_world
     ):
         raise TurntableSyncError("camera_to_world_invalid")
-    c, s = math.cos(-angle), math.sin(-angle)
+    m0 = [float(v) for v in camera_to_world]
+    rows = (m0[0:3], m0[4:7], m0[8:11])
+    orthonormal = all(
+        abs(sum(a * b for a, b in zip(rows[i], rows[j], strict=True)) - (1.0 if i == j else 0.0))
+        < 1e-6
+        for i in range(3)
+        for j in range(3)
+    )
+    if not orthonormal or m0[12:16] != [0.0, 0.0, 0.0, 1.0]:
+        raise TurntableSyncError("camera_to_world_not_rigid")
+    c, s = math.cos(angle), math.sin(angle)
     rotation = (c, -s, 0.0, 0.0, s, c, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
     m = [float(v) for v in camera_to_world]
     return tuple(

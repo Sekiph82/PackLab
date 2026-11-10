@@ -37,7 +37,9 @@ Each variant rejects fields belonging to another mode.
 - `turntable` requires an integer zero-based `frame_index`, positive
   `frame_count`, and `angle_deg` in `[0, 360)`. Angles use degrees and the
   frozen convention `clockwise_from_reference`; the index identifies the
-  frame's position in the declared sequence. The metadata does not implement
+  frame's position in the declared sequence. `clockwise_from_reference` means
+  the platter turns clockwise as seen from above (looking down the subject's
+  vertical axis) from the reference position. The metadata does not implement
   motor control or infer an angle from pixels.
 
 Adding a future mode requires a new versioned schema variant with explicit
