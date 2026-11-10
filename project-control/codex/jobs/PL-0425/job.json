@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "project": "Sekiph82/PackLab",
+  "taskId": "PL-0425",
+  "title": "Prototype Bluetooth-controlled turntable integration",
+  "stage": "BLOCKED",
+  "updatedAt": "2026-10-22T18:36:38.946Z",
+  "prompt": "coordination/sessions/M19-C007/PL-0425_CODEX_PROMPT_V01.md",
+  "validationCriteria": "coordination/sessions/M19-C007/PL-0425_VALIDATION_CRITERIA_V01.md",
+  "log": "coordination/sessions/M19-C007/PL-0425_CODEX_LOG_V01.md",
+  "validationEvidence": {
+    "path": "coordination/sessions/M19-C007/PL-0425_CODEX_LOG_V01.md",
+    "sha256": "60780039519413ca129cb4089c3bd103102a124677e8c57e358169566b81f157",
+    "result": "blocked"
+  },
+  "openGates": [
+    "No exact compatible turntable target/protocol/physical stop behavior is evidenced in the local environment."
+  ],
+  "publication": "LOCAL_ONLY_NO_CI_NO_PR_NO_MAIN_SOURCE_PUSH",
+  "logEvidence": {
+    "path": "coordination/sessions/M19-C007/PL-0425_CODEX_LOG_V01.md",
+    "sha256": "60780039519413ca129cb4089c3bd103102a124677e8c57e358169566b81f157"
+  }
+}

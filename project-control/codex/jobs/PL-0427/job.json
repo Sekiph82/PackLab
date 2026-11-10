@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "project": "Sekiph82/PackLab",
+  "taskId": "PL-0427",
+  "title": "Add automatic multi-ring scan-station capture recipe",
+  "stage": "LOCAL_COMPLETE",
+  "updatedAt": "2026-10-22T18:38:31.516Z",
+  "prompt": "coordination/sessions/M19-C008/PL-0427_CODEX_PROMPT_V01.md",
+  "validationCriteria": "coordination/sessions/M19-C008/PL-0427_VALIDATION_CRITERIA_V01.md",
+  "log": "coordination/sessions/M19-C008/PL-0427_CODEX_LOG_V01.md",
+  "validationEvidence": {
+    "path": "coordination/sessions/M19-C008/PL-0427_CODEX_LOG_V01.md",
+    "sha256": "e0130ebb71b7e53c3be86461bcc37e8823c68e73ca17218fe21e7115ef711d42",
+    "result": "passed"
+  },
+  "openGates": [
+    "This is a declarative plan only. Exact turntable target, angle feedback and emergency-stop controls remain unavailable."
+  ],
+  "publication": "LOCAL_ONLY_NO_CI_NO_PR_NO_MAIN_SOURCE_PUSH",
+  "logEvidence": {
+    "path": "coordination/sessions/M19-C008/PL-0427_CODEX_LOG_V01.md",
+    "sha256": "e0130ebb71b7e53c3be86461bcc37e8823c68e73ca17218fe21e7115ef711d42"
+  }
+}

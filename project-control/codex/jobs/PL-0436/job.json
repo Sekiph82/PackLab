@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "project": "Sekiph82/PackLab",
+  "taskId": "PL-0436",
+  "title": "VGGT neural reconstruction backend adapter contract",
+  "stage": "V08_SCOPED_IMPLEMENTATION_TESTS_AND_SOURCE_SECURITY_REVIEW_PASS_REAL_INFERENCE_PENDING_RAM_NO_RELEASE",
+  "updatedAt": "2026-11-04T00:00:00Z",
+  "prompt": "coordination/sessions/M19-C016/PL-0436_CODEX_PROMPT_V08.md",
+  "validationCriteria": "coordination/sessions/M19-C016/PL-0436_VALIDATION_CRITERIA_V08.md",
+  "log": "coordination/sessions/M19-C016/PL-0436_CODEX_LOG_V08.md",
+  "validationEvidence": {
+    "path": "coordination/sessions/M19-C016/PL-0436_CODEX_LOG_V08.md",
+    "sha256": "64c08b2e769fcbe89e40890766c1e372925dd582241b8eafcc1192f135c500f9",
+    "result": "v08_m19_scoped_suite_149_passed_8_skipped_after_focused_reruns_ruff_and_source_security_reviews_pass_full_core_studio_not_green_1732_passed_199_failed_15_skipped_real_inference_not_run_ram_below_checkpoint"
+  },
+  "ownerAuthorization": {
+    "vggtHuggingFaceAccess": "approved_and_authenticated",
+    "localPinnedCheckpointUse": "approved_and_downloaded_sha256_verified",
+    "packlabDistributionPreference": "non-commercial; users may use PackLab; source code should not be exposed or downloadable",
+    "repeatOwnerLicenseApprovalRequired": false
+  },
+  "openGates": [
+    "Run the concrete pinned offline CPU worker only after a live available-physical-RAM measurement meets the configured checkpoint-plus-inference-reserve budget; current system memory is below the checkpoint size.",
+    "Before distributing a VGGT-enabled PackLab build: finish exact resolved-wheel notice review and implement the end-user VGGT AUP/license notice path consistent with the owner-approved non-commercial closed-source distribution preference. This is packaging work, not a pending owner access/local-use approval."
+  ],
+  "publication": "LOCAL_ONLY_NO_CI_NO_PR_NO_MAIN_SOURCE_PUSH"
+}

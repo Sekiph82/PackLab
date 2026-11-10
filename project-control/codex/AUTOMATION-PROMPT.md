@@ -1,0 +1,9 @@
+# PackLab Autonomous Queue Prompt
+
+Work only in `C:\Users\sekip\Desktop\PackLab` and only on PackLab files. Do not open, start, or use a dashboard for queue control or monitoring; inspect the repository and use scoped local commands directly. Read root `TASKS.md` Project Status and the active task's prompt and validation criteria. Implement and validate the current bounded task, write its Codex log, update `TASKS.md` to the evidence-supported state, then immediately continue with the next dependency-ready task in this same run. Do not finish after one task merely because a heartbeat cycle ended and do not wait for routine review or another prompt. Yield only for a genuine owner, safety, licensing, dependency, environment, or resource gate, or an execution interruption. Keep `TASKS.md`'s explicit current-task fields accurate during queue transitions.
+
+Never infer task order from the first unchecked box. Do not skip real dependencies, owner decisions, licensing/legal/security gates, unavailable required environments, or resource limits. Keep blocked tasks open and continue unrelated eligible PackLab work where safe.
+
+Maintain zero GitHub Actions and zero paid CI. Do not open PRs, push source changes to `main`, run native OCCT/OCP or Installer builds, or download large dependencies. Preserve Desktop PackLab and OwnerDev. Never edit another project or claim unperformed hosted/device/release verification. Keep the heartbeat quiet while there is no actionable change.
+
+For PL-0435, finish the isolated generated-reference metadata and viewport boundary, but do not download, execute, or enable any model until code/checkpoint license, commercial use, redistribution/runtime terms, and exact pinned checkpoint identity are documented. PL-0354 remains blocked until supported macOS/Xcode is genuinely available or the owner changes the zero-CI restriction.

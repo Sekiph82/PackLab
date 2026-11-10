@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "project": "Sekiph82/PackLab",
+  "taskId": "PL-0424",
+  "title": "Add anomaly detector that identifies likely reconstruction defects before fitting",
+  "stage": "LOCAL_COMPLETE",
+  "updatedAt": "2026-10-22T18:36:38.912Z",
+  "prompt": "coordination/sessions/M19-C006/PL-0424_CODEX_PROMPT_V01.md",
+  "validationCriteria": "coordination/sessions/M19-C006/PL-0424_VALIDATION_CRITERIA_V01.md",
+  "log": "coordination/sessions/M19-C006/PL-0424_CODEX_LOG_V01.md",
+  "validationEvidence": {
+    "path": "coordination/sessions/M19-C006/PL-0424_CODEX_LOG_V01.md",
+    "sha256": "8d0877ad51745a8c5c35a33d36418d7b4a4d15ed577a7903d85dc2c809e3b9ff",
+    "result": "passed"
+  },
+  "openGates": [
+    "Findings are review-only; no geometry repair or authority promotion."
+  ],
+  "publication": "LOCAL_ONLY_NO_CI_NO_PR_NO_MAIN_SOURCE_PUSH",
+  "logEvidence": {
+    "path": "coordination/sessions/M19-C006/PL-0424_CODEX_LOG_V01.md",
+    "sha256": "8d0877ad51745a8c5c35a33d36418d7b4a4d15ed577a7903d85dc2c809e3b9ff"
+  }
+}

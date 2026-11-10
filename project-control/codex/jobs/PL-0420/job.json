@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "project": "Sekiph82/PackLab",
+  "taskId": "PL-0420",
+  "title": "Research learned feature recognition for shoulder/base/handle segmentation",
+  "stage": "LOCAL_COMPLETE",
+  "updatedAt": "2026-10-22T18:29:49.304Z",
+  "prompt": "coordination/sessions/M19-C002/PL-0420_CODEX_PROMPT_V01.md",
+  "validationCriteria": "coordination/sessions/M19-C002/PL-0420_VALIDATION_CRITERIA_V01.md",
+  "log": "coordination/sessions/M19-C002/PL-0420_CODEX_LOG_V01.md",
+  "validationEvidence": {
+    "path": "coordination/sessions/M19-C002/PL-0420_CODEX_LOG_V01.md",
+    "sha256": "8a99890340c5bc3e36b35bd41717e928abab8732acb21b9ba4f553f9a0a1d357",
+    "result": "passed"
+  },
+  "openGates": [
+    "No model selected, approved, downloaded, or enabled; future model/data rights gates remain open."
+  ],
+  "publication": "LOCAL_ONLY_NO_CI_NO_PR_NO_MAIN_SOURCE_PUSH",
+  "logEvidence": {
+    "path": "coordination/sessions/M19-C002/PL-0420_CODEX_LOG_V01.md",
+    "sha256": "8a99890340c5bc3e36b35bd41717e928abab8732acb21b9ba4f553f9a0a1d357"
+  }
+}

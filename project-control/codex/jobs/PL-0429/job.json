@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "project": "Sekiph82/PackLab",
+  "taskId": "PL-0429",
+  "title": "Add remote iPhone capture control from Windows Studio on trusted LAN",
+  "stage": "BLOCKED",
+  "updatedAt": "2026-10-22T18:40:05.477Z",
+  "prompt": "coordination/sessions/M19-C010/PL-0429_CODEX_PROMPT_V01.md",
+  "validationCriteria": "coordination/sessions/M19-C010/PL-0429_VALIDATION_CRITERIA_V01.md",
+  "log": "coordination/sessions/M19-C010/PL-0429_CODEX_LOG_V01.md",
+  "validationEvidence": {
+    "path": "coordination/sessions/M19-C010/PL-0429_CODEX_LOG_V01.md",
+    "sha256": "22955668df06b4c593f238dfaffb0fffccad8778c67c626ff9d8b8b675b84e45",
+    "result": "blocked"
+  },
+  "openGates": [
+    "No exact usable iPhone capture target or trusted-LAN endpoint is evidenced; no network discovery or device connection was performed."
+  ],
+  "publication": "LOCAL_ONLY_NO_CI_NO_PR_NO_MAIN_SOURCE_PUSH",
+  "logEvidence": {
+    "path": "coordination/sessions/M19-C010/PL-0429_CODEX_LOG_V01.md",
+    "sha256": "22955668df06b4c593f238dfaffb0fffccad8778c67c626ff9d8b8b675b84e45"
+  }
+}

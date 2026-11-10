@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "project": "Sekiph82/PackLab",
+  "task_id": "PL-0438",
+  "status": "COMPLETED_LOCAL",
+  "authority": "PackLab/TASKS.md",
+  "prompt": "coordination/sessions/M16-C002/PL-0438_CODEX_PROMPT_V01.md",
+  "validation_criteria": "coordination/sessions/M16-C002/PL-0438_VALIDATION_CRITERIA_V01.md",
+  "log": "coordination/sessions/M16-C002/PL-0438_CODEX_LOG_V01.md",
+  "validation_command": "python -m pytest -q tests/ci/test_codex_task_queue.py",
+  "handoff": "AUTONOMOUS_QUEUE_ARMED_PL0354_BLOCKED"
+}

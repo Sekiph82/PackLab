@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "project": "Sekiph82/PackLab",
+  "taskId": "PL-0434",
+  "title": "Add automated packaging technical-dossier export",
+  "stage": "LOCAL_COMPLETE",
+  "updatedAt": "2026-10-22T19:01:10Z",
+  "prompt": "coordination/sessions/M19-C014/PL-0434_CODEX_PROMPT_V01.md",
+  "validationCriteria": "coordination/sessions/M19-C014/PL-0434_VALIDATION_CRITERIA_V01.md",
+  "log": "coordination/sessions/M19-C014/PL-0434_CODEX_LOG_V01.md",
+  "validationEvidence": {
+    "path": "coordination/sessions/M19-C014/PL-0434_CODEX_LOG_V01.md",
+    "sha256": "16afa3b02f2144b48aa81ab934e1af85ed7a9274a53e9118eb487b4559911a6a",
+    "result": "passed"
+  },
+  "openGates": [
+    "Recorded field provenance and any source links are not independently verified by the dossier exporter.",
+    "The caller must authorize and choose any destination for returned PDF bytes."
+  ],
+  "publication": "LOCAL_ONLY_NO_CI_NO_PR_NO_MAIN_SOURCE_PUSH",
+  "logEvidence": {
+    "path": "coordination/sessions/M19-C014/PL-0434_CODEX_LOG_V01.md",
+    "sha256": "16afa3b02f2144b48aa81ab934e1af85ed7a9274a53e9118eb487b4559911a6a"
+  }
+}
