@@ -1,42 +1,11 @@
-# PackLab Handoff Notes
+# PackLab Handoff Notes | Claude Code (2026-11-10)
 
-> **Non-authoritative workflow aid.** Current project state is defined only by root `TASKS.md` on GitHub `main`.
+> Historical/non-authoritative workflow guide. **Current project state is only root `TASKS.md` on GitHub `main`.** Do not duplicate active task/progress/milestone counters here.
 
-This file must not contain the canonical current milestone, sprint, task, status, next action, required actor, project progress, or audit verdict.
+The owner handed all incomplete PL tasks to **Claude Code as sole new-work orchestrator**. Current implementation/acceptance instructions: `CLAUDE.md`, `AGENTS.md`, `coordination/AUTONOMOUS_CLAUDE_GOAL.md`, `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Codex and ChatGPT handoff/artifact names from earlier sessions remain historical evidence only.
 
-## Canonical live state
+For each new task, Claude owns implementation, tests, true peer/security reviews, tracked status updates, safe GitHub `main` publication and owner Desktop fast-forward verification. Store versioned evidence under `coordination/sessions/<cycle>/` as `CLAUDE_IMPLEMENTATION_LOG_*.md` and `CLAUDE_PEER_REVIEW_*.md`. Do not edit old `CHATGPT_AUDIT_*` or `CODEX_PEER_REVIEW_*` history.
 
-Always read:
+Local workspace: `C:\Users\sekip\Desktop\PackLab`. Use `tools/dev/post_task_safe_sync.ps1` after verified publication. Never reset/discard owner edits; report `LOCAL_SYNC_PENDING` when conflicts persist.
 
-`TASKS.md`
-
-The explicit `## Project Status` section is authoritative for H!veAI and all agents.
-
-## Canonical implementation/audit evidence
-
-Versioned work orders and evidence live under:
-
-`coordination/sessions/<CYCLE_ID>/`
-
-Normal bundle:
-
-```text
-CODEX_PROMPT_VNN.md
-CHATGPT_AUDIT_CRITERIA_VNN.md
-CODEX_LOG_VNN.md
-CHATGPT_AUDIT_VNN.md
-```
-
-- Codex writes implementation/test evidence in the matching `CODEX_LOG_VNN.md`.
-- ChatGPT performs the independent audit, writes `CHATGPT_AUDIT_VNN.md`, and updates root `TASKS.md` after every audit cycle.
-- Failed audits receive a new versioned remediation prompt/criteria pair; prior versions remain history.
-
-## Local workspace
-
-`C:\Users\sekip\Desktop\PackLab`
-
-GitHub `main` is repository truth. The owner has authorized one initial GitHub-authoritative local bootstrap; afterwards normal sessions use safe fetch/compare/fast-forward and stop on unexpected divergence unless the owner explicitly authorizes replacement.
-
-## Notes policy
-
-Temporary human notes may be added here only when they do not duplicate live state. Do not turn this file into a second tracker, queue or audit ledger.
+Kenya factory and its real scan dataset do not exist. Claude must build reproducible realistic software-test datasets autonomously, distinguish synthetic from real and preserve actual physical/factory acceptance as external pending. Never publish protected scans, credentials or supplier materials to the PUBLIC repo.
