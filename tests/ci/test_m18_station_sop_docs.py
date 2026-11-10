@@ -23,6 +23,11 @@ M18_DOCS = {
     "PL-0400": "PL-0400_OPERATOR_CAPTURE_CHECKLIST.md",
     "PL-0402": "PL-0402_PACKAGING_ASSET_NAMING_AND_IDS.md",
     "PL-0413": "PL-0413_SAMPLE_TO_LIBRARY_SOP_DRAFT.md",
+    "PL-0414": "PL-0414_RESCAN_RECAPTURE_DECISION_TREE.md",
+    "PL-0415": "PL-0415_SUPPLIER_CHANGE_REVISION_PROCESS.md",
+    "PL-0416": "PL-0416_ARTWORK_ONLY_CHANGE_PROCESS.md",
+    "PL-0417": "PL-0417_GEOMETRY_CHANGE_PROCESS.md",
+    "PL-0418": "PL-0418_SCAN_BACKUP_POLICY.md",
 }
 CLAIM = re.compile(r"\b(validated|accepted|production[- ]ready|certified|guaranteed)\b", re.I)
 NEGATION = re.compile(
@@ -241,3 +246,37 @@ def test_pl0399_treatment_defaults_to_none_and_every_gate_is_named() -> None:
         "measurement validity",
     ]
     assert "every gate must pass" in text.lower()
+
+
+def test_pl0414_doc_table_lists_the_implemented_actions_in_severity_order() -> None:
+    from packlab_core.rescan_decision import ACTIONS, LOW_TEXTURE_VIEW_FRACTION
+
+    rows = re.findall(r"^\| (\d) \| `([a-z_]+)` \|", _text("PL-0414"), re.M)
+    assert [int(number) for number, _ in rows] == list(range(1, len(ACTIONS) + 1))
+    assert tuple(action for _, action in rows) == ACTIONS
+    assert f"{LOW_TEXTURE_VIEW_FRACTION:.0%}".replace("%", " %") in _text("PL-0414")
+
+
+@pytest.mark.parametrize(
+    ("task", "symbols"),
+    [
+        ("PL-0415", ("with_field_update", "SUPPLIER_FACT", "packaging_sku_asset_target_stale")),
+        ("PL-0416", ("from_accepted_assignment", "geometry_copied: false")),
+        ("PL-0417", ("with_source_links", "packaging_sku_geometry_identity_change_forbidden")),
+    ],
+)
+def test_change_process_docs_cite_real_contract_behaviour(task: str, symbols: tuple) -> None:
+    text = _text(task)
+    for symbol in symbols:
+        assert symbol in text, (task, symbol)
+    assert f"test_{task.lower().replace('-', '')}_" in text
+
+
+def test_pl0418_backup_scope_matches_the_library_backup_service() -> None:
+    from packlab_studio import packaging_library_backup as backup
+
+    text = _text("PL-0418")
+    assert backup._MAX_ARCHIVE_BYTES == 512 * 1024 * 1024 and "512 MiB" in text
+    assert backup._CONTRACT in text
+    assert "does not include raw captures" in text
+    assert "SCAN_COPY_VERIFY_PASS" in text and "3 copies on 2 different media" in text
