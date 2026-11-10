@@ -463,3 +463,62 @@ def test_builtin_segmentation_engine_scores_ground_truth_masks(dataset_manifest:
     sample = json.loads(dataset_manifest.read_text(encoding="utf-8"))["samples"][0]
     metrics = builtin_segmentation(sample, dataset_manifest.parent)
     assert metrics == {"segmentation_iou": 1.0, "segmentation_dice": 1.0}
+
+
+GOLDEN_SUBSET = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "m17_golden_subset" / "manifest.json"
+)
+FULL_M17_MANIFEST_SHA256 = "3a37b55d8b93affdba73d23a39ba299c12053f433000a5911ac7f6e71ea3601b"
+
+
+def test_committed_golden_subset_is_real_generated_data_pinned_to_full_dataset() -> None:
+    result = validate_manifest(GOLDEN_SUBSET)
+    assert result["golden_subset"] is True and result["sample_count"] == 8
+    assert result["families"] == sorted(FAMILIES) and result["materials"] == sorted(MATERIALS)
+    manifest = json.loads(GOLDEN_SUBSET.read_text(encoding="utf-8"))
+    assert manifest["golden_subset_of"]["manifest_sha256"] == FULL_M17_MANIFEST_SHA256
+    decision = (
+        Path(__file__).resolve().parents[2]
+        / manifest["golden_subset_of"]["public_redistribution_decision"]
+    )
+    assert decision.is_file()
+    assert all(sample["source"]["kind"] == "procedural_blender" for sample in manifest["samples"])
+
+
+def test_regression_harness_runs_segmentation_engine_on_committed_golden_subset() -> None:
+    from tools.datasets.run_benchmark_regression import builtin_segmentation, run_regression
+
+    report = run_regression(GOLDEN_SUBSET, observers=(builtin_segmentation,))
+    assert report["counts"] == {"PASS": 16, "FAIL": 0, "NOT_EVALUATED": 8 * 6}
+    assert report["outcome"] == "PARTIAL_PASS"
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["drop_family", "wrong_decision", "bad_parent_sha", "unbalanced_materials", "extra_parent_key"],
+)
+def test_golden_subset_parent_record_and_coverage_fail_closed(
+    tmp_path: Path, mutation: str
+) -> None:
+    import shutil
+
+    root = tmp_path / "subset"
+    shutil.copytree(GOLDEN_SUBSET.parent, root)
+    path = root / "manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    parent = manifest["golden_subset_of"]
+    if mutation == "drop_family":
+        manifest["samples"] = manifest["samples"][1:]
+    elif mutation == "wrong_decision":
+        parent["public_redistribution_decision"] = "README.md"
+    elif mutation == "bad_parent_sha":
+        parent["manifest_sha256"] = "not-a-digest"
+    elif mutation == "extra_parent_key":
+        parent["note"] = "x"
+    else:
+        manifest["samples"][0]["material_appearance"]["finish"] = manifest["samples"][1][
+            "material_appearance"
+        ]["finish"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError):
+        validate_manifest(path)

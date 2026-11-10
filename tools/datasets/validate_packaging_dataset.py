@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 import struct
 import zlib
 from pathlib import Path, PurePosixPath
@@ -257,6 +258,28 @@ def _validate_software_metric_bands(sample: dict, mesh_extent: list[float]) -> N
             raise ValueError(f"expected metric authority/provenance is invalid: {key}")
 
 
+GOLDEN_SUBSET_DECISION = (
+    "coordination/sessions/M17-C001/PL-0369_OWNER_DECISION_PUBLIC_GOLDEN_SUBSET_V01.md"
+)
+
+
+def _golden_subset_record(manifest: dict) -> dict | None:
+    """Return the pinned parent record of a public CI golden subset, if declared."""
+    if "golden_subset_of" not in manifest:
+        return None
+    record = manifest["golden_subset_of"]
+    if (
+        type(record) is not dict
+        or set(record) != {"dataset_id", "manifest_sha256", "public_redistribution_decision"}
+        or record["dataset_id"] != "packlab-m17-synthetic-packaging-v2"
+        or type(record["manifest_sha256"]) is not str
+        or re.fullmatch(r"[0-9a-f]{64}", record["manifest_sha256"]) is None
+        or record["public_redistribution_decision"] != GOLDEN_SUBSET_DECISION
+    ):
+        raise ValueError("golden subset parent record is invalid")
+    return record
+
+
 def validate_manifest(manifest_path: Path) -> dict:
     manifest_path = manifest_path.resolve(strict=True)
     if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
@@ -281,10 +304,13 @@ def validate_manifest(manifest_path: Path) -> dict:
     ):
         raise ValueError("dataset-specific internal-use terms are missing or changed")
     samples = manifest.get("samples")
-    if (
-        type(samples) is not list
-        or len(samples) != len(REQUIRED_FAMILIES) * len(EXPECTED_MATERIALS) * 3
-    ):
+    subset = _golden_subset_record(manifest)
+    expected_count = (
+        len(REQUIRED_FAMILIES)
+        if subset is not None
+        else len(REQUIRED_FAMILIES) * len(EXPECTED_MATERIALS) * 3
+    )
+    if type(samples) is not list or len(samples) != expected_count:
         raise ValueError("unexpected sample count")
     identities: set[str] = set()
     folded_paths: set[str] = set()
@@ -511,8 +537,13 @@ def validate_manifest(manifest_path: Path) -> dict:
             )
     if families != REQUIRED_FAMILIES or materials != EXPECTED_MATERIALS:
         raise ValueError("required family or appearance coverage is incomplete")
+    if subset is not None:
+        finishes = [sample["material_appearance"]["finish"] for sample in samples]
+        if any(finishes.count(finish) != 2 for finish in EXPECTED_MATERIALS):
+            raise ValueError("golden subset must use each appearance exactly twice")
     return {
         "dataset_id": manifest["dataset_id"],
+        "golden_subset": subset is not None,
         "sample_count": len(samples),
         "families": sorted(families),
         "materials": sorted(materials),

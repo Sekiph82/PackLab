@@ -1,0 +1,1672 @@
+{
+  "dataset_id": "packlab-m17-synthetic-packaging-v2",
+  "fully_synthetic": true,
+  "generator_version": "2.0.0",
+  "golden_subset_of": {
+    "dataset_id": "packlab-m17-synthetic-packaging-v2",
+    "manifest_sha256": "3a37b55d8b93affdba73d23a39ba299c12053f433000a5911ac7f6e71ea3601b",
+    "public_redistribution_decision": "coordination/sessions/M17-C001/PL-0369_OWNER_DECISION_PUBLIC_GOLDEN_SUBSET_V01.md"
+  },
+  "owner_internal_use_scope": "PackLab development/CI and owner-controlled design-office and future Kenya-factory use; no external reuse, sublicense, sale or marketing permission",
+  "physical_measurements_present": false,
+  "samples": [
+    {
+      "camera": {
+        "blender_lens_distortion_factor_simulated": -0.008,
+        "camera_to_world_row_major": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.087155685,
+          -0.99619472,
+          -0.6813972,
+          0.0,
+          0.99619472,
+          0.087155685,
+          0.178174525,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "cx_px": 320.0,
+        "cy_px": 240.0,
+        "focal_length_mm": 50.0,
+        "fx_px": 888.888889,
+        "fy_px": 888.888889,
+        "model": "pinhole plus Blender compositor lens distortion",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "sensor_fit": "HORIZONTAL",
+        "sensor_mm": [
+          36.0,
+          27.0
+        ],
+        "view_index": 0
+      },
+      "dimensions_mm_nominal_simulated": [
+        72,
+        72,
+        228
+      ],
+      "expected_geometry_extent_mm": [
+        72.0,
+        72.0,
+        228.0
+      ],
+      "expected_software_metric_bands": {
+        "parametric_fit_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 71.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 72.55
+        },
+        "parametric_fit_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 71.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 72.55
+        },
+        "parametric_fit_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 227.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 228.55
+        },
+        "reconstruction_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 71.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 72.55
+        },
+        "reconstruction_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 71.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 72.55
+        },
+        "reconstruction_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 227.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 228.55
+        },
+        "segmentation_dice": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.88,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        },
+        "segmentation_iou": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.8,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        }
+      },
+      "expected_software_use": [
+        "reconstruction",
+        "segmentation",
+        "camera_calibration",
+        "measurement",
+        "scan_master_preview",
+        "design_model_family_regression"
+      ],
+      "family": "bottle",
+      "files": {
+        "geometry": {
+          "bounds_mm_from_generated_vertices": [
+            72.0,
+            72.0,
+            228.0
+          ],
+          "bytes": 35086,
+          "faces": 578,
+          "format": "PLY",
+          "path": "ground_truth/syn_bottle_pet_gloss_v01.ply",
+          "sha256": "b59a639cc02f9bf11838c158422d6cdee208167d45e4856ee6bff101323b3d40",
+          "units": "meters",
+          "vertices": 640
+        },
+        "mask": {
+          "bytes": 100858,
+          "format": "PNG",
+          "path": "masks/syn_bottle_pet_gloss_v01.png",
+          "sha256": "07b310d48eb12f19524d0ee154145c6b2f38f833690a5b7c2922d5d10d60df73"
+        },
+        "rgb": {
+          "bytes": 246117,
+          "format": "PNG",
+          "path": "rgb/syn_bottle_pet_gloss_v01.png",
+          "sha256": "3f75f0a107dee9c22461cc20e74781af531093cfa7a12871e718d330ca117ead"
+        }
+      },
+      "id": "syn_bottle_pet_gloss_v01",
+      "lighting": [
+        {
+          "area_size_m": 0.65,
+          "energy_w": 237.4862060546875,
+          "position_m": [
+            1.0,
+            -1.2,
+            1.8
+          ]
+        },
+        {
+          "area_size_m": 0.45,
+          "energy_w": 121.89637756347656,
+          "position_m": [
+            -1.1,
+            -0.1,
+            1.4
+          ]
+        },
+        {
+          "area_size_m": 0.55,
+          "energy_w": 182.45623779296875,
+          "position_m": [
+            0.2,
+            1.2,
+            1.0
+          ]
+        }
+      ],
+      "manufacturing_tolerance_mm_simulated": {
+        "each_axis_plus_minus": [
+          0.35,
+          0.55
+        ],
+        "source": "generator scenario input; not supplier or physical tolerance evidence"
+      },
+      "material_appearance": {
+        "finish": "pet_gloss",
+        "polymer_assumption": "PET",
+        "roughness": 0.12,
+        "transmission_weight": 0.0,
+        "warning": "idealized shader; not measured resin optical behavior"
+      },
+      "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
+      "render": {
+        "blender_version": "5.2.2 LTS",
+        "color_management": "AgX",
+        "controlled_sensor_noise": "not applied",
+        "engine": "Blender Eevee",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "shadow_and_reflection": "Blender area-light approximations"
+      },
+      "source": {
+        "generator": "tools/datasets/generate_packaging_benchmark.py",
+        "kind": "procedural_blender",
+        "seed": 3692026,
+        "version": "2.0.0"
+      },
+      "synthetic": true
+    },
+    {
+      "camera": {
+        "blender_lens_distortion_factor_simulated": -0.008,
+        "camera_to_world_row_major": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.087155916,
+          -0.996194661,
+          -0.854735076,
+          0.0,
+          0.996194661,
+          0.087155916,
+          0.223499626,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "cx_px": 320.0,
+        "cy_px": 240.0,
+        "focal_length_mm": 50.0,
+        "fx_px": 888.888889,
+        "fy_px": 888.888889,
+        "model": "pinhole plus Blender compositor lens distortion",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "sensor_fit": "HORIZONTAL",
+        "sensor_mm": [
+          36.0,
+          27.0
+        ],
+        "view_index": 0
+      },
+      "dimensions_mm_nominal_simulated": [
+        168,
+        92,
+        286
+      ],
+      "expected_geometry_extent_mm": [
+        168.0,
+        92.0,
+        286.0
+      ],
+      "expected_software_metric_bands": {
+        "parametric_fit_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 167.0,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 169.0
+        },
+        "parametric_fit_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 91.0,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 93.0
+        },
+        "parametric_fit_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 285.0,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 287.0
+        },
+        "reconstruction_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 167.0,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 169.0
+        },
+        "reconstruction_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 91.0,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 93.0
+        },
+        "reconstruction_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 285.0,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 287.0
+        },
+        "segmentation_dice": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.88,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        },
+        "segmentation_iou": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.8,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        }
+      },
+      "expected_software_use": [
+        "reconstruction",
+        "segmentation",
+        "camera_calibration",
+        "measurement",
+        "scan_master_preview",
+        "design_model_family_regression"
+      ],
+      "family": "jerrycan",
+      "files": {
+        "geometry": {
+          "bounds_mm_from_generated_vertices": [
+            168.0,
+            92.0,
+            286.0
+          ],
+          "bytes": 57207,
+          "faces": 840,
+          "format": "PLY",
+          "path": "ground_truth/syn_jerrycan_hdpe_matte_v01.ply",
+          "sha256": "d6fb65e19a9d2b05dda04a70f7b8ec82f03aec4ce2e4a29a31b8ac84d6279e69",
+          "units": "meters",
+          "vertices": 1032
+        },
+        "mask": {
+          "bytes": 107313,
+          "format": "PNG",
+          "path": "masks/syn_jerrycan_hdpe_matte_v01.png",
+          "sha256": "582aa65b784929e6910038011237f9e4a002cb6f47b3514eb96b8f831399ee1c"
+        },
+        "rgb": {
+          "bytes": 260942,
+          "format": "PNG",
+          "path": "rgb/syn_jerrycan_hdpe_matte_v01.png",
+          "sha256": "0b969710912e3c5ff3b2ca77a993b8a5d76a1440381d8021e2446f30d59477d5"
+        }
+      },
+      "id": "syn_jerrycan_hdpe_matte_v01",
+      "lighting": [
+        {
+          "area_size_m": 0.65,
+          "energy_w": 172.00059509277344,
+          "position_m": [
+            1.0,
+            -1.2,
+            1.8
+          ]
+        },
+        {
+          "area_size_m": 0.45,
+          "energy_w": 84.09471893310547,
+          "position_m": [
+            -1.1,
+            -0.1,
+            1.4
+          ]
+        },
+        {
+          "area_size_m": 0.55,
+          "energy_w": 127.72260284423828,
+          "position_m": [
+            0.2,
+            1.2,
+            1.0
+          ]
+        }
+      ],
+      "manufacturing_tolerance_mm_simulated": {
+        "each_axis_plus_minus": [
+          0.7,
+          1.0
+        ],
+        "source": "generator scenario input; not supplier or physical tolerance evidence"
+      },
+      "material_appearance": {
+        "finish": "hdpe_matte",
+        "polymer_assumption": "HDPE",
+        "roughness": 0.76,
+        "transmission_weight": 0.0,
+        "warning": "idealized shader; not measured resin optical behavior"
+      },
+      "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
+      "render": {
+        "blender_version": "5.2.2 LTS",
+        "color_management": "AgX",
+        "controlled_sensor_noise": "not applied",
+        "engine": "Blender Eevee",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "shadow_and_reflection": "Blender area-light approximations"
+      },
+      "source": {
+        "generator": "tools/datasets/generate_packaging_benchmark.py",
+        "kind": "procedural_blender",
+        "seed": 3692026,
+        "version": "2.0.0"
+      },
+      "synthetic": true
+    },
+    {
+      "camera": {
+        "blender_lens_distortion_factor_simulated": 0.0,
+        "camera_to_world_row_major": [
+          0.829037547,
+          -0.116262637,
+          0.546973288,
+          0.233010575,
+          0.559192955,
+          0.172366485,
+          -0.810921073,
+          -0.345452398,
+          -4.6e-08,
+          0.978147626,
+          0.207911536,
+          0.162410378,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "cx_px": 320.0,
+        "cy_px": 240.0,
+        "focal_length_mm": 50.0,
+        "fx_px": 888.888889,
+        "fy_px": 888.888889,
+        "model": "pinhole plus Blender compositor lens distortion",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "sensor_fit": "HORIZONTAL",
+        "sensor_mm": [
+          36.0,
+          27.0
+        ],
+        "view_index": 1
+      },
+      "dimensions_mm_nominal_simulated": [
+        104,
+        104,
+        142
+      ],
+      "expected_geometry_extent_mm": [
+        104.0,
+        104.0,
+        142.0
+      ],
+      "expected_software_metric_bands": {
+        "parametric_fit_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 103.4,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 104.6
+        },
+        "parametric_fit_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 103.4,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 104.6
+        },
+        "parametric_fit_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 141.4,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 142.6
+        },
+        "reconstruction_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 103.4,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 104.6
+        },
+        "reconstruction_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 103.4,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 104.6
+        },
+        "reconstruction_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 141.4,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 142.6
+        },
+        "segmentation_dice": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.88,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        },
+        "segmentation_iou": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.8,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        }
+      },
+      "expected_software_use": [
+        "reconstruction",
+        "segmentation",
+        "camera_calibration",
+        "measurement",
+        "scan_master_preview",
+        "design_model_family_regression"
+      ],
+      "family": "jar",
+      "files": {
+        "geometry": {
+          "bounds_mm_from_generated_vertices": [
+            104.0,
+            104.0,
+            142.0
+          ],
+          "bytes": 27585,
+          "faces": 450,
+          "format": "PLY",
+          "path": "ground_truth/syn_jar_pet_clear_v02.ply",
+          "sha256": "fe6142dff53520d4361a75d139c97af626eee341b23a80702950f026f8268bfa",
+          "units": "meters",
+          "vertices": 512
+        },
+        "mask": {
+          "bytes": 113704,
+          "format": "PNG",
+          "path": "masks/syn_jar_pet_clear_v02.png",
+          "sha256": "cddce5685280dcce6374c21ee784c4c22acd02b918faf516c6a683e0b80ce90f"
+        },
+        "rgb": {
+          "bytes": 305782,
+          "format": "PNG",
+          "path": "rgb/syn_jar_pet_clear_v02.png",
+          "sha256": "b173aaddcb8f64ecfcc9d007625197aef6dd3832ef9c71561dd9063cd76868cc"
+        }
+      },
+      "id": "syn_jar_pet_clear_v02",
+      "lighting": [
+        {
+          "area_size_m": 0.65,
+          "energy_w": 173.1085968017578,
+          "position_m": [
+            1.0,
+            -1.2,
+            1.8
+          ]
+        },
+        {
+          "area_size_m": 0.45,
+          "energy_w": 84.47494506835938,
+          "position_m": [
+            -1.1,
+            -0.1,
+            1.4
+          ]
+        },
+        {
+          "area_size_m": 0.55,
+          "energy_w": 133.153564453125,
+          "position_m": [
+            0.2,
+            1.2,
+            1.0
+          ]
+        }
+      ],
+      "manufacturing_tolerance_mm_simulated": {
+        "each_axis_plus_minus": [
+          0.4,
+          0.6
+        ],
+        "source": "generator scenario input; not supplier or physical tolerance evidence"
+      },
+      "material_appearance": {
+        "finish": "pet_clear",
+        "polymer_assumption": "PET",
+        "roughness": 0.025,
+        "transmission_weight": 0.08,
+        "warning": "idealized shader; not measured resin optical behavior"
+      },
+      "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
+      "render": {
+        "blender_version": "5.2.2 LTS",
+        "color_management": "AgX",
+        "controlled_sensor_noise": "not applied",
+        "engine": "Blender Eevee",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "shadow_and_reflection": "Blender area-light approximations"
+      },
+      "source": {
+        "generator": "tools/datasets/generate_packaging_benchmark.py",
+        "kind": "procedural_blender",
+        "seed": 3692026,
+        "version": "2.0.0"
+      },
+      "synthetic": true
+    },
+    {
+      "camera": {
+        "blender_lens_distortion_factor_simulated": -0.008,
+        "camera_to_world_row_major": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.087155685,
+          -0.99619472,
+          -0.125520542,
+          0.0,
+          0.99619472,
+          0.087155685,
+          0.025541624,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "cx_px": 320.0,
+        "cy_px": 240.0,
+        "focal_length_mm": 50.0,
+        "fx_px": 888.888889,
+        "fy_px": 888.888889,
+        "model": "pinhole plus Blender compositor lens distortion",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "sensor_fit": "HORIZONTAL",
+        "sensor_mm": [
+          36.0,
+          27.0
+        ],
+        "view_index": 0
+      },
+      "dimensions_mm_nominal_simulated": [
+        42,
+        42,
+        28
+      ],
+      "expected_geometry_extent_mm": [
+        42.0,
+        42.0,
+        28.0
+      ],
+      "expected_software_metric_bands": {
+        "parametric_fit_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 41.75,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 42.25
+        },
+        "parametric_fit_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 41.75,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 42.25
+        },
+        "parametric_fit_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 27.75,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 28.25
+        },
+        "reconstruction_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 41.75,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 42.25
+        },
+        "reconstruction_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 41.75,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 42.25
+        },
+        "reconstruction_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 27.75,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 28.25
+        },
+        "segmentation_dice": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.88,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        },
+        "segmentation_iou": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.8,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        }
+      },
+      "expected_software_use": [
+        "reconstruction",
+        "segmentation",
+        "camera_calibration",
+        "measurement",
+        "scan_master_preview",
+        "design_model_family_regression"
+      ],
+      "family": "closure",
+      "files": {
+        "geometry": {
+          "bounds_mm_from_generated_vertices": [
+            42.0,
+            42.0,
+            28.0
+          ],
+          "bytes": 227037,
+          "faces": 3186,
+          "format": "PLY",
+          "path": "ground_truth/syn_closure_pp_translucent_v01.ply",
+          "sha256": "4b0971d0adc2961c37a2ac60a3f2f713937f5561c696235810346fdf11269043",
+          "units": "meters",
+          "vertices": 3776
+        },
+        "mask": {
+          "bytes": 103814,
+          "format": "PNG",
+          "path": "masks/syn_closure_pp_translucent_v01.png",
+          "sha256": "1876418c2a1b30436d8e65d26a453d84783cbac646d4e03f599f41890bb197f5"
+        },
+        "rgb": {
+          "bytes": 268214,
+          "format": "PNG",
+          "path": "rgb/syn_closure_pp_translucent_v01.png",
+          "sha256": "67b0af04e8c14cf3af5e494261bdb7e3e492f1a118860503054a5b26b093d08d"
+        }
+      },
+      "id": "syn_closure_pp_translucent_v01",
+      "lighting": [
+        {
+          "area_size_m": 0.65,
+          "energy_w": 171.93453979492188,
+          "position_m": [
+            1.0,
+            -1.2,
+            1.8
+          ]
+        },
+        {
+          "area_size_m": 0.45,
+          "energy_w": 87.69769287109375,
+          "position_m": [
+            -1.1,
+            -0.1,
+            1.4
+          ]
+        },
+        {
+          "area_size_m": 0.55,
+          "energy_w": 126.91524505615234,
+          "position_m": [
+            0.2,
+            1.2,
+            1.0
+          ]
+        }
+      ],
+      "manufacturing_tolerance_mm_simulated": {
+        "each_axis_plus_minus": [
+          0.15,
+          0.25
+        ],
+        "source": "generator scenario input; not supplier or physical tolerance evidence"
+      },
+      "material_appearance": {
+        "finish": "pp_translucent",
+        "polymer_assumption": "PP",
+        "roughness": 0.27,
+        "transmission_weight": 0.2,
+        "warning": "idealized shader; not measured resin optical behavior"
+      },
+      "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
+      "render": {
+        "blender_version": "5.2.2 LTS",
+        "color_management": "AgX",
+        "controlled_sensor_noise": "not applied",
+        "engine": "Blender Eevee",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "shadow_and_reflection": "Blender area-light approximations"
+      },
+      "source": {
+        "generator": "tools/datasets/generate_packaging_benchmark.py",
+        "kind": "procedural_blender",
+        "seed": 3692026,
+        "version": "2.0.0"
+      },
+      "synthetic": true
+    },
+    {
+      "camera": {
+        "blender_lens_distortion_factor_simulated": 0.006,
+        "camera_to_world_row_major": [
+          0.74314481,
+          0.421097636,
+          -0.520012081,
+          -0.380648881,
+          -0.669130623,
+          0.467676252,
+          -0.577531934,
+          -0.422753423,
+          -2.5e-08,
+          0.777145863,
+          0.629320502,
+          0.587542534,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "cx_px": 320.0,
+        "cy_px": 240.0,
+        "focal_length_mm": 50.0,
+        "fx_px": 888.888889,
+        "fy_px": 888.888889,
+        "model": "pinhole plus Blender compositor lens distortion",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "sensor_fit": "HORIZONTAL",
+        "sensor_mm": [
+          36.0,
+          27.0
+        ],
+        "view_index": 2
+      },
+      "dimensions_mm_nominal_simulated": [
+        92,
+        78,
+        244
+      ],
+      "expected_geometry_extent_mm": [
+        92.0,
+        78.0,
+        244.0
+      ],
+      "expected_software_metric_bands": {
+        "parametric_fit_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 91.3,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 92.7
+        },
+        "parametric_fit_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 77.3,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 78.7
+        },
+        "parametric_fit_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 243.3,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 244.7
+        },
+        "reconstruction_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 91.3,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 92.7
+        },
+        "reconstruction_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 77.3,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 78.7
+        },
+        "reconstruction_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 243.3,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 244.7
+        },
+        "segmentation_dice": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.88,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        },
+        "segmentation_iou": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.8,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        }
+      },
+      "expected_software_use": [
+        "reconstruction",
+        "segmentation",
+        "camera_calibration",
+        "measurement",
+        "scan_master_preview",
+        "design_model_family_regression"
+      ],
+      "family": "trigger_spray",
+      "files": {
+        "geometry": {
+          "bounds_mm_from_generated_vertices": [
+            92.0,
+            78.0,
+            244.0
+          ],
+          "bytes": 56224,
+          "faces": 908,
+          "format": "PLY",
+          "path": "ground_truth/syn_trigger_spray_hdpe_matte_v03.ply",
+          "sha256": "8b4a9ca19d8374bf189cfe806be06364a7c04f3e8bfcbc0d2c44df25d41ba519",
+          "units": "meters",
+          "vertices": 1016
+        },
+        "mask": {
+          "bytes": 102568,
+          "format": "PNG",
+          "path": "masks/syn_trigger_spray_hdpe_matte_v03.png",
+          "sha256": "f72fd790496b8f34e02b55245a148e65e888e37a5193986b6341b31e40cbd203"
+        },
+        "rgb": {
+          "bytes": 273552,
+          "format": "PNG",
+          "path": "rgb/syn_trigger_spray_hdpe_matte_v03.png",
+          "sha256": "dce4885f2619ab5de74c3848bb083ccf45f68c5196b54b4f7f3a5aca2b76f20a"
+        }
+      },
+      "id": "syn_trigger_spray_hdpe_matte_v03",
+      "lighting": [
+        {
+          "area_size_m": 0.65,
+          "energy_w": 310.6840515136719,
+          "position_m": [
+            1.0,
+            -1.2,
+            1.8
+          ]
+        },
+        {
+          "area_size_m": 0.45,
+          "energy_w": 153.61012268066406,
+          "position_m": [
+            -1.1,
+            -0.1,
+            1.4
+          ]
+        },
+        {
+          "area_size_m": 0.55,
+          "energy_w": 235.72166442871094,
+          "position_m": [
+            0.2,
+            1.2,
+            1.0
+          ]
+        }
+      ],
+      "manufacturing_tolerance_mm_simulated": {
+        "each_axis_plus_minus": [
+          0.45,
+          0.7
+        ],
+        "source": "generator scenario input; not supplier or physical tolerance evidence"
+      },
+      "material_appearance": {
+        "finish": "hdpe_matte",
+        "polymer_assumption": "HDPE",
+        "roughness": 0.76,
+        "transmission_weight": 0.0,
+        "warning": "idealized shader; not measured resin optical behavior"
+      },
+      "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
+      "render": {
+        "blender_version": "5.2.2 LTS",
+        "color_management": "AgX",
+        "controlled_sensor_noise": "not applied",
+        "engine": "Blender Eevee",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "shadow_and_reflection": "Blender area-light approximations"
+      },
+      "source": {
+        "generator": "tools/datasets/generate_packaging_benchmark.py",
+        "kind": "procedural_blender",
+        "seed": 3692026,
+        "version": "2.0.0"
+      },
+      "synthetic": true
+    },
+    {
+      "camera": {
+        "blender_lens_distortion_factor_simulated": 0.0,
+        "camera_to_world_row_major": [
+          0.829037547,
+          -0.116262659,
+          0.546973228,
+          0.357720435,
+          0.559192955,
+          0.17236647,
+          -0.810921133,
+          -0.5303424,
+          -1e-09,
+          0.978147626,
+          0.207911536,
+          0.249334246,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "cx_px": 320.0,
+        "cy_px": 240.0,
+        "focal_length_mm": 50.0,
+        "fx_px": 888.888889,
+        "fy_px": 888.888889,
+        "model": "pinhole plus Blender compositor lens distortion",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "sensor_fit": "HORIZONTAL",
+        "sensor_mm": [
+          36.0,
+          27.0
+        ],
+        "view_index": 1
+      },
+      "dimensions_mm_nominal_simulated": [
+        82,
+        82,
+        218
+      ],
+      "expected_geometry_extent_mm": [
+        82.0,
+        82.0,
+        218.0
+      ],
+      "expected_software_metric_bands": {
+        "parametric_fit_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 81.35,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 82.65
+        },
+        "parametric_fit_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 81.35,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 82.65
+        },
+        "parametric_fit_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 217.35,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 218.65
+        },
+        "reconstruction_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 81.35,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 82.65
+        },
+        "reconstruction_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 81.35,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 82.65
+        },
+        "reconstruction_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 217.35,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 218.65
+        },
+        "segmentation_dice": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.88,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        },
+        "segmentation_iou": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.8,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        }
+      },
+      "expected_software_use": [
+        "reconstruction",
+        "segmentation",
+        "camera_calibration",
+        "measurement",
+        "scan_master_preview",
+        "design_model_family_regression"
+      ],
+      "family": "pump",
+      "files": {
+        "geometry": {
+          "bounds_mm_from_generated_vertices": [
+            82.0,
+            82.0,
+            218.0
+          ],
+          "bytes": 58889,
+          "faces": 916,
+          "format": "PLY",
+          "path": "ground_truth/syn_pump_pp_translucent_v02.ply",
+          "sha256": "47d6ebf73ced3d5ce2b0feea6f6f1dde5fb792d84082e55efeb3e53232c5e902",
+          "units": "meters",
+          "vertices": 1064
+        },
+        "mask": {
+          "bytes": 102425,
+          "format": "PNG",
+          "path": "masks/syn_pump_pp_translucent_v02.png",
+          "sha256": "6acf3c24f1fdd2220e7ab01f1aaef13166f7b8047bc7414bd77bf7c244157579"
+        },
+        "rgb": {
+          "bytes": 288115,
+          "format": "PNG",
+          "path": "rgb/syn_pump_pp_translucent_v02.png",
+          "sha256": "876d6ad32f83d07c5c6c379879dbf95c82026182837fba93095b6df0f99242f1"
+        }
+      },
+      "id": "syn_pump_pp_translucent_v02",
+      "lighting": [
+        {
+          "area_size_m": 0.65,
+          "energy_w": 235.60342407226562,
+          "position_m": [
+            1.0,
+            -1.2,
+            1.8
+          ]
+        },
+        {
+          "area_size_m": 0.45,
+          "energy_w": 121.59415435791016,
+          "position_m": [
+            -1.1,
+            -0.1,
+            1.4
+          ]
+        },
+        {
+          "area_size_m": 0.55,
+          "energy_w": 178.83001708984375,
+          "position_m": [
+            0.2,
+            1.2,
+            1.0
+          ]
+        }
+      ],
+      "manufacturing_tolerance_mm_simulated": {
+        "each_axis_plus_minus": [
+          0.4,
+          0.65
+        ],
+        "source": "generator scenario input; not supplier or physical tolerance evidence"
+      },
+      "material_appearance": {
+        "finish": "pp_translucent",
+        "polymer_assumption": "PP",
+        "roughness": 0.27,
+        "transmission_weight": 0.2,
+        "warning": "idealized shader; not measured resin optical behavior"
+      },
+      "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
+      "render": {
+        "blender_version": "5.2.2 LTS",
+        "color_management": "AgX",
+        "controlled_sensor_noise": "not applied",
+        "engine": "Blender Eevee",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "shadow_and_reflection": "Blender area-light approximations"
+      },
+      "source": {
+        "generator": "tools/datasets/generate_packaging_benchmark.py",
+        "kind": "procedural_blender",
+        "seed": 3692026,
+        "version": "2.0.0"
+      },
+      "synthetic": true
+    },
+    {
+      "camera": {
+        "blender_lens_distortion_factor_simulated": 0.006,
+        "camera_to_world_row_major": [
+          0.74314487,
+          0.421097547,
+          -0.520012081,
+          -0.287046701,
+          -0.669130564,
+          0.467676282,
+          -0.577531934,
+          -0.318797648,
+          3.6e-08,
+          0.777145922,
+          0.629320443,
+          0.443064839,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "cx_px": 320.0,
+        "cy_px": 240.0,
+        "focal_length_mm": 50.0,
+        "fx_px": 888.888889,
+        "fy_px": 888.888889,
+        "model": "pinhole plus Blender compositor lens distortion",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "sensor_fit": "HORIZONTAL",
+        "sensor_mm": [
+          36.0,
+          27.0
+        ],
+        "view_index": 2
+      },
+      "dimensions_mm_nominal_simulated": [
+        58,
+        42,
+        184
+      ],
+      "expected_geometry_extent_mm": [
+        58.0,
+        42.0,
+        184.0
+      ],
+      "expected_software_metric_bands": {
+        "parametric_fit_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 57.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 58.55
+        },
+        "parametric_fit_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 41.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 42.55
+        },
+        "parametric_fit_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 183.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 184.55
+        },
+        "reconstruction_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 57.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 58.55
+        },
+        "reconstruction_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 41.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 42.55
+        },
+        "reconstruction_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 183.45,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 184.55
+        },
+        "segmentation_dice": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.88,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        },
+        "segmentation_iou": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.8,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        }
+      },
+      "expected_software_use": [
+        "reconstruction",
+        "segmentation",
+        "camera_calibration",
+        "measurement",
+        "scan_master_preview",
+        "design_model_family_regression"
+      ],
+      "family": "tube",
+      "files": {
+        "geometry": {
+          "bounds_mm_from_generated_vertices": [
+            58.0,
+            42.0,
+            184.0
+          ],
+          "bytes": 27949,
+          "faces": 450,
+          "format": "PLY",
+          "path": "ground_truth/syn_tube_pet_gloss_v03.ply",
+          "sha256": "bdc4a95bd4dc20895fd75ed6ff7602622ec91bc218c1b7d00ff98b0333439308",
+          "units": "meters",
+          "vertices": 512
+        },
+        "mask": {
+          "bytes": 96457,
+          "format": "PNG",
+          "path": "masks/syn_tube_pet_gloss_v03.png",
+          "sha256": "5c9c97492552f80d37ad523b5c8792162ea54ffdaa9abfdf9688447c76fc6e1c"
+        },
+        "rgb": {
+          "bytes": 304380,
+          "format": "PNG",
+          "path": "rgb/syn_tube_pet_gloss_v03.png",
+          "sha256": "3a0f3ccaef7bb2a0db4af0e94601c586d3f0c3b5956c2c150415924667595155"
+        }
+      },
+      "id": "syn_tube_pet_gloss_v03",
+      "lighting": [
+        {
+          "area_size_m": 0.65,
+          "energy_w": 171.8745880126953,
+          "position_m": [
+            1.0,
+            -1.2,
+            1.8
+          ]
+        },
+        {
+          "area_size_m": 0.45,
+          "energy_w": 88.45223236083984,
+          "position_m": [
+            -1.1,
+            -0.1,
+            1.4
+          ]
+        },
+        {
+          "area_size_m": 0.55,
+          "energy_w": 130.73724365234375,
+          "position_m": [
+            0.2,
+            1.2,
+            1.0
+          ]
+        }
+      ],
+      "manufacturing_tolerance_mm_simulated": {
+        "each_axis_plus_minus": [
+          0.35,
+          0.55
+        ],
+        "source": "generator scenario input; not supplier or physical tolerance evidence"
+      },
+      "material_appearance": {
+        "finish": "pet_gloss",
+        "polymer_assumption": "PET",
+        "roughness": 0.12,
+        "transmission_weight": 0.0,
+        "warning": "idealized shader; not measured resin optical behavior"
+      },
+      "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
+      "render": {
+        "blender_version": "5.2.2 LTS",
+        "color_management": "AgX",
+        "controlled_sensor_noise": "not applied",
+        "engine": "Blender Eevee",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "shadow_and_reflection": "Blender area-light approximations"
+      },
+      "source": {
+        "generator": "tools/datasets/generate_packaging_benchmark.py",
+        "kind": "procedural_blender",
+        "seed": 3692026,
+        "version": "2.0.0"
+      },
+      "synthetic": true
+    },
+    {
+      "camera": {
+        "blender_lens_distortion_factor_simulated": -0.008,
+        "camera_to_world_row_major": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.087155685,
+          -0.99619472,
+          -0.56783098,
+          0.0,
+          0.99619472,
+          0.087155685,
+          0.148478776,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "cx_px": 320.0,
+        "cy_px": 240.0,
+        "focal_length_mm": 50.0,
+        "fx_px": 888.888889,
+        "fy_px": 888.888889,
+        "model": "pinhole plus Blender compositor lens distortion",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "sensor_fit": "HORIZONTAL",
+        "sensor_mm": [
+          36.0,
+          27.0
+        ],
+        "view_index": 0
+      },
+      "dimensions_mm_nominal_simulated": [
+        125,
+        18.36,
+        190
+      ],
+      "expected_geometry_extent_mm": [
+        125.0,
+        18.36,
+        190.0
+      ],
+      "expected_software_metric_bands": {
+        "parametric_fit_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 124.25,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 125.75
+        },
+        "parametric_fit_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 17.61,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 19.11
+        },
+        "parametric_fit_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 189.25,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 190.75
+        },
+        "reconstruction_extent_x_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 124.25,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 125.75
+        },
+        "reconstruction_extent_y_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 17.61,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 19.11
+        },
+        "reconstruction_extent_z_mm": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 189.25,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "mm_simulated",
+          "upper": 190.75
+        },
+        "segmentation_dice": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.88,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        },
+        "segmentation_iou": {
+          "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
+          "lower": 0.8,
+          "provenance": "SYNTHETIC_GENERATOR_SCENARIO",
+          "unit": "ratio",
+          "upper": 1.0
+        }
+      },
+      "expected_software_use": [
+        "reconstruction",
+        "segmentation",
+        "camera_calibration",
+        "measurement",
+        "scan_master_preview",
+        "design_model_family_regression"
+      ],
+      "family": "sachet",
+      "files": {
+        "geometry": {
+          "bounds_mm_from_generated_vertices": [
+            125.0,
+            18.36,
+            190.0
+          ],
+          "bytes": 41889,
+          "faces": 666,
+          "format": "PLY",
+          "path": "ground_truth/syn_sachet_pet_clear_v01.ply",
+          "sha256": "0f8176c75642b9b0385d74bd6ce1cc327749caa7fdbc626dcf02667dc2214109",
+          "units": "meters",
+          "vertices": 736
+        },
+        "mask": {
+          "bytes": 107463,
+          "format": "PNG",
+          "path": "masks/syn_sachet_pet_clear_v01.png",
+          "sha256": "dcd44d5f6a10ea45e9598f748be58430bc3349d34ea9c67f7c6c848302690d0b"
+        },
+        "rgb": {
+          "bytes": 252982,
+          "format": "PNG",
+          "path": "rgb/syn_sachet_pet_clear_v01.png",
+          "sha256": "ef2cb1e88cf660d5a8133735b937818d92cab5a7ce309ebe3524c82c33508d4f"
+        }
+      },
+      "id": "syn_sachet_pet_clear_v01",
+      "lighting": [
+        {
+          "area_size_m": 0.65,
+          "energy_w": 310.1127014160156,
+          "position_m": [
+            1.0,
+            -1.2,
+            1.8
+          ]
+        },
+        {
+          "area_size_m": 0.45,
+          "energy_w": 153.1092529296875,
+          "position_m": [
+            -1.1,
+            -0.1,
+            1.4
+          ]
+        },
+        {
+          "area_size_m": 0.55,
+          "energy_w": 235.4358367919922,
+          "position_m": [
+            0.2,
+            1.2,
+            1.0
+          ]
+        }
+      ],
+      "manufacturing_tolerance_mm_simulated": {
+        "each_axis_plus_minus": [
+          0.45,
+          0.75
+        ],
+        "source": "generator scenario input; not supplier or physical tolerance evidence"
+      },
+      "material_appearance": {
+        "finish": "pet_clear",
+        "polymer_assumption": "PET",
+        "roughness": 0.025,
+        "transmission_weight": 0.08,
+        "warning": "idealized shader; not measured resin optical behavior"
+      },
+      "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
+      "render": {
+        "blender_version": "5.2.2 LTS",
+        "color_management": "AgX",
+        "controlled_sensor_noise": "not applied",
+        "engine": "Blender Eevee",
+        "resolution_px": [
+          640,
+          480
+        ],
+        "shadow_and_reflection": "Blender area-light approximations"
+      },
+      "source": {
+        "generator": "tools/datasets/generate_packaging_benchmark.py",
+        "kind": "procedural_blender",
+        "seed": 3692026,
+        "version": "2.0.0"
+      },
+      "synthetic": true
+    }
+  ],
+  "schema_version": "1.0",
+  "seed": 3692026
+}
