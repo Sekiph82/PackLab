@@ -124,15 +124,46 @@ StageExecutor = Callable[[ReconstructionStageContext], ReconstructionStageExecut
 
 @dataclass(frozen=True, slots=True)
 class StageCheckpoint:
-    """A completed stage bound to the exact request configuration and source input."""
+    """A completed stage bound to one exact request and to its output content digests."""
 
     execution: ReconstructionStageExecution
-    configuration_digest: str
-    source_digest: str
+    request_binding: str
+    output_sha256: Mapping[str, str]
 
 
-CheckpointVerifier = Callable[[StageCheckpoint], bool]
+ArtifactDigest = Callable[[str], str]
 CheckpointSink = Callable[[StageCheckpoint], None]
+
+
+def checkpoint_binding(request: ReconstructionOrchestrationRequest) -> str:
+    """Digest of everything a reused stage output must belong to."""
+    return _canonical_digest(
+        {
+            "contract": ORCHESTRATION_CONTRACT,
+            "workspace": request.workspace,
+            "job_id": request.job.job_id,
+            "project_id": request.job.project_id,
+            "project_revision": request.job.project_revision,
+            "configuration_digest": request.configuration_digest,
+            "source_digest": request.job.inputs.source_digest,
+        }
+    )
+
+
+def _output_digests(
+    execution: ReconstructionStageExecution, artifact_digest: ArtifactDigest
+) -> dict[str, str]:
+    digests: dict[str, str] = {}
+    for name, asset in sorted(execution.output_asset_ids.items()):
+        label = f"{execution.stage_id}:{name}"
+        try:
+            value = artifact_digest(asset)
+        except Exception as error:  # missing/unreadable artifact must fail closed
+            raise ReconstructionOrchestrationError(
+                f"{label} content cannot be hashed: {type(error).__name__}"
+            ) from error
+        digests[name] = _digest(value, f"{label} content digest")
+    return digests
 
 
 @dataclass(frozen=True, slots=True)
@@ -287,22 +318,29 @@ class ReconstructionOrchestrator:
         cancel: CancelToken | None = None,
         *,
         resume_from: Sequence[StageCheckpoint] = (),
-        verify_checkpoint: CheckpointVerifier | None = None,
+        artifact_digest: ArtifactDigest | None = None,
         on_checkpoint: CheckpointSink | None = None,
     ) -> ReconstructionOrchestrationResult:
         """Run the plan, optionally reusing a verified prefix of completed stages.
 
-        Every resumed checkpoint must match the stage order, this request's
-        configuration and source digests, carry verified outputs, and pass
-        ``verify_checkpoint`` (which should confirm the artifacts still exist
-        unchanged). Any mismatch raises instead of silently restarting.
+        ``artifact_digest`` maps an output asset ID to the SHA-256 of its current
+        content. It is required to emit or resume checkpoints. A resumed
+        checkpoint must follow stage order, match :func:`checkpoint_binding` for
+        this request (workspace, job, project, revision, configuration, source),
+        keep its outputs inside the workspace, and every output must still hash
+        to the digest recorded when the stage finished. Any mismatch raises
+        instead of silently restarting.
         """
         if not isinstance(request, ReconstructionOrchestrationRequest):
             raise ReconstructionOrchestrationError(
                 "request must be ReconstructionOrchestrationRequest"
             )
+        if (resume_from or on_checkpoint is not None) and artifact_digest is None:
+            raise ReconstructionOrchestrationError(
+                "checkpoints require an artifact_digest function"
+            )
         token = CancelToken() if cancel is None else cancel
-        executions = _validated_resume_prefix(request, tuple(resume_from), verify_checkpoint)
+        executions = _validated_resume_prefix(request, tuple(resume_from), artifact_digest)
         results: list[ReconstructionStageResult] = [item.stage_result for item in executions]
 
         for definition in request.stages[len(executions) :]:
@@ -393,12 +431,21 @@ class ReconstructionOrchestrator:
                 )
             executions.append(execution)
             results.append(stage_result)
-            if on_checkpoint is not None:
-                on_checkpoint(
-                    StageCheckpoint(
-                        execution, request.configuration_digest, request.job.inputs.source_digest
+            if on_checkpoint is not None and artifact_digest is not None:
+                try:
+                    digests = _output_digests(execution, artifact_digest)
+                except ReconstructionOrchestrationError as error:
+                    failed = _terminal_stage(
+                        definition.stage_id, StageStatus.FAILED, str(error), previous=stage_result
                     )
-                )
+                    results[-1] = failed
+                    return ReconstructionOrchestrationResult(
+                        request,
+                        RunStatus.FAILED,
+                        tuple(results),
+                        failure_reason=failed.failure_reason,
+                    )
+                on_checkpoint(StageCheckpoint(execution, checkpoint_binding(request), digests))
 
         if token.cancelled:
             cancelled = _terminal_stage(
@@ -447,14 +494,16 @@ class ReconstructionOrchestrator:
 def _validated_resume_prefix(
     request: ReconstructionOrchestrationRequest,
     checkpoints: tuple[StageCheckpoint, ...],
-    verify: CheckpointVerifier | None,
+    artifact_digest: ArtifactDigest | None,
 ) -> list[ReconstructionStageExecution]:
     if not checkpoints:
         return []
-    if verify is None:
-        raise ReconstructionOrchestrationError("resuming requires a checkpoint verifier")
+    if artifact_digest is None:
+        raise ReconstructionOrchestrationError("resuming requires an artifact_digest function")
     if len(checkpoints) > len(STAGE_ORDER):
         raise ReconstructionOrchestrationError("more checkpoints than stages")
+    binding = checkpoint_binding(request)
+    workspace_prefix = request.workspace + "/"
     executions: list[ReconstructionStageExecution] = []
     for expected, checkpoint in zip(STAGE_ORDER, checkpoints):
         if not isinstance(checkpoint, StageCheckpoint):
@@ -466,13 +515,9 @@ def _validated_resume_prefix(
             raise ReconstructionOrchestrationError(
                 f"checkpoint order mismatch: expected {expected}, got {execution.stage_id}"
             )
-        if checkpoint.configuration_digest != request.configuration_digest:
+        if checkpoint.request_binding != binding:
             raise ReconstructionOrchestrationError(
-                f"checkpoint {expected} belongs to a different configuration"
-            )
-        if checkpoint.source_digest != request.job.inputs.source_digest:
-            raise ReconstructionOrchestrationError(
-                f"checkpoint {expected} belongs to a different source"
+                f"checkpoint {expected} belongs to a different job, workspace or input"
             )
         if (
             execution.stage_result.status is not StageStatus.SUCCEEDED
@@ -482,9 +527,15 @@ def _validated_resume_prefix(
             raise ReconstructionOrchestrationError(
                 f"checkpoint {expected} is not a verified success"
             )
-        if verify(checkpoint) is not True:
+        if any(
+            not asset.startswith(workspace_prefix) for asset in execution.output_asset_ids.values()
+        ):
             raise ReconstructionOrchestrationError(
-                f"checkpoint {expected} failed artifact verification"
+                f"checkpoint {expected} references outputs outside the workspace"
+            )
+        if dict(checkpoint.output_sha256) != _output_digests(execution, artifact_digest):
+            raise ReconstructionOrchestrationError(
+                f"checkpoint {expected} outputs are missing or changed since the stage finished"
             )
         executions.append(execution)
     return executions
@@ -508,6 +559,7 @@ __all__ = [
     "ReconstructionStageDefinition",
     "ReconstructionStageExecution",
     "StageCheckpoint",
+    "checkpoint_binding",
     "STAGE_ORDER",
     "orchestrate_reconstruction",
 ]

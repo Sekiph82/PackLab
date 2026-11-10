@@ -147,7 +147,8 @@ def _metadata_component(
         return "unavailable", {"reason_code": "photo_metadata_missing"}, []
     try:
         document = json.loads(metadata_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        # ValueError covers JSONDecodeError and Python's integer-digit limit.
         return "failed", {"reason_code": "photo_metadata_malformed_json"}, []
     if not isinstance(document, dict) or document.get("schema_version") != "1.0.0":
         return "failed", {"reason_code": "photo_metadata_schema_version_invalid"}, []

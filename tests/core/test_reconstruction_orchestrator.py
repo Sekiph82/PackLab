@@ -236,102 +236,156 @@ def test_configuration_digest_is_stable_and_changes_with_stage_configuration() -
     assert third.configuration_digest != first.configuration_digest
 
 
-def _interrupted_then_checkpoints(fail_stage: str):
-    calls: list[str] = []
-    saved = []
+def _file_stages(root, fail_stage=None, calls=None):
+    """Stage adapters that write real output files under ``root`` and record calls."""
 
-    def counting(stage_id):
+    def make(stage_id):
         def run(_context):
-            calls.append(stage_id)
+            if calls is not None:
+                calls.append(stage_id)
             if stage_id == fail_stage:
                 raise RuntimeError("simulated crash mid-stage")
+            asset = f"working/reconstruction/r1/{stage_id}/output"
+            path = root / asset
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(f"{stage_id} output".encode())
             return ReconstructionStageExecution(
                 stage_id,
                 ReconstructionStageResult(stage_id, StageStatus.SUCCEEDED, 0, 0.01),
-                {"primary": f"working/reconstruction/r1/{stage_id}/output"},
+                {"primary": asset},
                 outputs_verified=True,
             )
 
         return run
 
-    request = _request({stage: counting(stage) for stage in STAGE_ORDER})
-    first = ReconstructionOrchestrator().run(request, on_checkpoint=saved.append)
-    return request, first, calls, saved
+    return {stage: make(stage) for stage in STAGE_ORDER}
 
 
-def test_interrupted_job_resumes_from_verified_checkpoints_without_rerunning() -> None:
-    from packlab_core.reconstruction_orchestrator import StageCheckpoint
+def _hasher(root):
+    return lambda asset: hashlib.sha256((root / asset).read_bytes()).hexdigest()
 
-    failing = STAGE_ORDER[2]
-    request, first, calls, saved = _interrupted_then_checkpoints(failing)
+
+def _interrupted(tmp_path, fail_index=2):
+    saved, calls = [], []
+    request = _request(_file_stages(tmp_path, STAGE_ORDER[fail_index], calls))
+    first = ReconstructionOrchestrator().run(
+        request, artifact_digest=_hasher(tmp_path), on_checkpoint=saved.append
+    )
+    return request, first, saved, calls
+
+
+def test_interrupted_job_resumes_from_verified_checkpoints_without_rerunning(tmp_path) -> None:
+    request, first, saved, calls = _interrupted(tmp_path)
     assert first.status is RunStatus.FAILED and first.output is None
+    assert calls == list(STAGE_ORDER[:3])
     assert [item.execution.stage_id for item in saved] == list(STAGE_ORDER[:2])
-    assert all(isinstance(item, StageCheckpoint) for item in saved)
+    kept = {
+        stage: (tmp_path / f"working/reconstruction/r1/{stage}/output").read_bytes()
+        for stage in STAGE_ORDER[:2]
+    }
 
     reruns: list[str] = []
-
-    def recording(stage_id):
-        def run(_context):
-            reruns.append(stage_id)
-            return ReconstructionStageExecution(
-                stage_id,
-                ReconstructionStageResult(stage_id, StageStatus.SUCCEEDED, 0, 0.01),
-                {"primary": f"working/reconstruction/r1/{stage_id}/output"},
-                outputs_verified=True,
-            )
-
-        return run
-
-    retry_request = _request({stage: recording(stage) for stage in STAGE_ORDER})
-    verified: list[str] = []
     retry = ReconstructionOrchestrator().run(
-        retry_request,
+        _request(_file_stages(tmp_path, calls=reruns)),
         resume_from=saved,
-        verify_checkpoint=lambda cp: verified.append(cp.execution.stage_id) is None,
+        artifact_digest=_hasher(tmp_path),
     )
     assert retry.status is RunStatus.SUCCEEDED and retry.output is not None
     assert reruns == list(STAGE_ORDER[2:])
-    assert verified == list(STAGE_ORDER[:2])
-    for stage in STAGE_ORDER[:2]:
-        assert (
-            retry.output.asset_paths[f"{stage}:primary"]
-            == f"working/reconstruction/r1/{stage}/output"
-        )
+    for stage, content in kept.items():
+        asset = f"working/reconstruction/r1/{stage}/output"
+        assert retry.output.asset_paths[f"{stage}:primary"] == asset
+        assert (tmp_path / asset).read_bytes() == content
     assert len(retry.stage_results) == len(STAGE_ORDER)
 
 
-def test_resume_rejects_unverified_mismatched_or_out_of_order_checkpoints() -> None:
+@pytest.mark.parametrize(
+    "variant",
+    ["workspace", "job_id", "project_id", "project_revision", "configuration", "source"],
+)
+def test_checkpoints_cannot_resume_a_different_job_or_workspace(tmp_path, variant) -> None:
     from dataclasses import replace
 
-    request, _first, _calls, saved = _interrupted_then_checkpoints(STAGE_ORDER[2])
-    orchestrator = ReconstructionOrchestrator()
-    ok = lambda _cp: True  # noqa: E731
+    request, _first, saved, _calls = _interrupted(tmp_path)
+    other = _request(_file_stages(tmp_path))
+    if variant == "workspace":
+        other = replace(other, workspace="working/reconstruction/r2")
+    elif variant == "configuration":
+        other = replace(other, configuration={"changed": True})
+    elif variant == "project_id":
+        inputs = replace(other.job.inputs, project_id="project-2")
+        other = replace(other, job=replace(other.job, project_id="project-2", inputs=inputs))
+    elif variant == "source":
+        inputs = replace(other.job.inputs, source_digest=hashlib.sha256(b"other").hexdigest())
+        other = replace(other, job=replace(other.job, inputs=inputs))
+    else:
+        value = {"job_id": "job-2", "project_revision": 4}[variant]
+        other = replace(other, job=replace(other.job, **{variant: value}))
+    with pytest.raises(ReconstructionOrchestrationError, match="different job, workspace or input"):
+        ReconstructionOrchestrator().run(
+            other, resume_from=saved, artifact_digest=_hasher(tmp_path)
+        )
 
-    with pytest.raises(ReconstructionOrchestrationError, match="verifier"):
+
+def test_resume_rejects_changed_missing_unverified_or_out_of_order_outputs(tmp_path) -> None:
+    from dataclasses import replace
+
+    request, _first, saved, _calls = _interrupted(tmp_path)
+    orchestrator = ReconstructionOrchestrator()
+    digest = _hasher(tmp_path)
+    first_output = tmp_path / f"working/reconstruction/r1/{STAGE_ORDER[0]}/output"
+
+    with pytest.raises(ReconstructionOrchestrationError, match="artifact_digest"):
         orchestrator.run(request, resume_from=saved)
-    with pytest.raises(ReconstructionOrchestrationError, match="artifact verification"):
-        orchestrator.run(request, resume_from=saved, verify_checkpoint=lambda _cp: False)
     with pytest.raises(ReconstructionOrchestrationError, match="order mismatch"):
-        orchestrator.run(request, resume_from=saved[1:], verify_checkpoint=ok)
-    with pytest.raises(ReconstructionOrchestrationError, match="different configuration"):
-        orchestrator.run(
-            request,
-            resume_from=[replace(saved[0], configuration_digest="0" * 64)],
-            verify_checkpoint=ok,
-        )
-    with pytest.raises(ReconstructionOrchestrationError, match="different source"):
-        orchestrator.run(
-            request, resume_from=[replace(saved[0], source_digest="0" * 64)], verify_checkpoint=ok
-        )
+        orchestrator.run(request, resume_from=saved[1:], artifact_digest=digest)
     unverified = replace(saved[0], execution=replace(saved[0].execution, outputs_verified=False))
     with pytest.raises(ReconstructionOrchestrationError, match="not a verified success"):
-        orchestrator.run(request, resume_from=[unverified], verify_checkpoint=ok)
+        orchestrator.run(request, resume_from=[unverified], artifact_digest=digest)
+    outside = replace(
+        saved[0],
+        execution=replace(
+            saved[0].execution, output_asset_ids={"primary": "working/reconstruction/r2/x"}
+        ),
+    )
+    with pytest.raises(ReconstructionOrchestrationError, match="outside the workspace"):
+        orchestrator.run(request, resume_from=[outside], artifact_digest=digest)
+
+    original = first_output.read_bytes()
+    first_output.write_bytes(b"tampered")
+    with pytest.raises(ReconstructionOrchestrationError, match="changed since the stage finished"):
+        orchestrator.run(request, resume_from=saved, artifact_digest=digest)
+    first_output.unlink()
+    with pytest.raises(ReconstructionOrchestrationError, match="cannot be hashed"):
+        orchestrator.run(request, resume_from=saved, artifact_digest=digest)
+    first_output.write_bytes(original)
+    assert (
+        orchestrator.run(request, resume_from=saved[:1], artifact_digest=digest).status
+        is RunStatus.FAILED
+    )
 
 
-def test_failed_resume_attempt_never_exposes_partial_output() -> None:
-    request, _first, _calls, saved = _interrupted_then_checkpoints(STAGE_ORDER[2])
+def test_checkpoint_emission_requires_digests_and_fails_closed_on_unhashable_output(
+    tmp_path,
+) -> None:
+    request = _request(_file_stages(tmp_path))
+    with pytest.raises(ReconstructionOrchestrationError, match="artifact_digest"):
+        ReconstructionOrchestrator().run(request, on_checkpoint=lambda _cp: None)
+
+    def broken(_asset):
+        raise FileNotFoundError("gone")
+
+    result = ReconstructionOrchestrator().run(
+        request, artifact_digest=broken, on_checkpoint=lambda _cp: None
+    )
+    assert result.status is RunStatus.FAILED and result.output is None
+    assert "cannot be hashed" in (result.failure_reason or "")
+
+
+def test_failed_resume_attempt_never_exposes_partial_output(tmp_path) -> None:
+    request, _first, saved, _calls = _interrupted(tmp_path)
     again = ReconstructionOrchestrator().run(
-        request, resume_from=saved, verify_checkpoint=lambda _cp: True
+        request, resume_from=saved, artifact_digest=_hasher(tmp_path)
     )
     assert again.status is RunStatus.FAILED and again.output is None
     assert [r.stage_id for r in again.stage_results] == list(STAGE_ORDER[:3])

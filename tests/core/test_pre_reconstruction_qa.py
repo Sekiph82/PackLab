@@ -285,6 +285,29 @@ def test_malformed_and_misaligned_photo_metadata_fail_component() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "metadata_bytes",
+    [
+        b'{"value":' + b"9" * 5_000 + b"}",
+        b"[" * 200_000 + b"]" * 200_000,
+    ],
+    ids=["oversized-integer", "deep-nesting"],
+)
+def test_hostile_photo_metadata_fails_component_without_crashing(metadata_bytes: bytes) -> None:
+    report = _report(metadata_bytes=metadata_bytes)
+    digest = hashlib.sha256(metadata_bytes).hexdigest()
+    for item in report.manifest["payloads"]:
+        if item["path"] == "metadata/photos.json":
+            item["sha256"] = digest
+            item["size_bytes"] = len(metadata_bytes)
+    report.checksums["metadata/photos.json"] = digest
+    component = build_pre_reconstruction_qa(report, {}).as_dict()["components"][
+        "metadata_consistency"
+    ]
+    assert component["status"] == "failed"
+    assert component["evidence"]["reason_code"] == "photo_metadata_malformed_json"
+
+
 def test_authoritative_payload_digest_mismatch_is_rejected_without_mutation() -> None:
     report = _report()
     original = dict(report.payloads)
