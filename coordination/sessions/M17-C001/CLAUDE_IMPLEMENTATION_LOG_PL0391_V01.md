@@ -20,9 +20,9 @@ The local run on 2026-11-10 printed `PL0391_MOCKUP_EVIDENCE`:
 | Field | Value |
 | --- | --- |
 | Blender | 5.2.2 LTS |
-| Scene package | `blender-scene-package:4d341511…dfd98` |
+| Scene package | `blender-scene-package:4d341511…dfd98` (pre-commit run; at HEAD 68f9e93b the deterministic value is `blender-scene-package:8f9b4b57…`, reviewer re-run) |
 | Render preset | `blender-render-preset:6c35ca6f…85df` |
-| PNG | 512×512, sha256 `f9f3545b…d73336`, 59,513 visible pixels |
+| PNG | 512×512, 59,513 visible pixels; sha256 `f9f3545b…` (pre-commit) / `95833b8a…8d43` (reviewer re-run at HEAD) |
 | Overlays | 3, rendered and visibly registered on the body (front panel and boss wrap) |
 | SVG dielines | 3, sha256 `36976e83…`, `a2205081…`, `d7b197df…` |
 
@@ -48,3 +48,7 @@ Every Blender suite passes against the real executable: 59 tests (real smokes, r
 - No print, colour, physical-fit or manufacturing validation is claimed.
 - The real-render test runs only on a machine with the approved Blender; hosted CI runs the lineage test only.
 - The render evidence `light_facts` records the preset watts; the effective scaled power is not yet recorded (P3).
+
+## Review outcome
+
+`CLAUDE_PEER_REVIEW_PL0390_0392_V01.md`: PASS. P2-1 found that artwork renders rotated 180° on the flat faces, because nothing in the pipeline defines which way is "up" for artwork. This is a known limitation at acceptance, and a follow-up is in progress.
