@@ -268,7 +268,9 @@ def test_real_blender_scene_imports_material_and_planar_cylindrical_png_overlays
     assert all(item["image_loaded"] and item["uv_layer_count"] == 1 for item in result["overlays"])
     assert all(item["uv_minimum"] == pytest.approx([0.0, 0.0]) for item in result["overlays"])
     assert all(item["uv_maximum"] == pytest.approx([1.0, 1.0]) for item in result["overlays"])
-    assert all(item["uv_first_loop"] == pytest.approx([0.0, 1.0]) for item in result["overlays"])
+    # The first loop is the zone's (u0, v0) corner: bottom edge, viewer's right on these
+    # outward faces. With upright, left-to-right artwork it maps to image (1, 0).
+    assert all(item["uv_first_loop"] == pytest.approx([1.0, 0.0]) for item in result["overlays"])
     assert result["renderer_only_offsets_are_non_physical"] is True
     assert result["physical_accuracy_inferred"] is False
     assert result["network_access"] == "NONE"

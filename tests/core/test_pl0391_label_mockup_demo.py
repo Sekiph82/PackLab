@@ -136,3 +136,67 @@ def test_rendered_mockup_runs_through_the_blender_scene_pipeline(tmp_path: Path)
         "svg_dieline_sha256": sorted(svg.svg_sha256 for _b, _i, svg in exports),
     }
     print("PL0391_MOCKUP_EVIDENCE " + json.dumps(summary, sort_keys=True))
+
+
+@pytest.mark.skipif(
+    os.environ.get("PACKLAB_REAL_BLENDER_SMOKE") != "1",
+    reason="set PACKLAB_REAL_BLENDER_SMOKE=1 to render through approved Blender 5.2.2",
+)
+def test_front_label_artwork_reads_upright_and_left_to_right(tmp_path: Path) -> None:
+    # Review P2-1: artwork rendered rotated 180 degrees. The synthetic 2x2 artwork is
+    # red (top-left), green (top-right), blue (bottom-left), white (bottom-right); seen
+    # from the front, the label's corners must show the same layout.
+    from PySide6.QtGui import QImage
+
+    if not BLENDER.is_file():
+        pytest.fail("approved_blender_5_2_2_executable_missing")
+    package, *_rest = _chain(tmp_path)
+    source = package.manifest()["body"]["source"]
+    revisions = tuple(
+        sorted(
+            (key.removesuffix("_revision_id"), value)
+            for key, value in source.items()
+            if key.endswith("_revision_id")
+        )
+    )
+    preset = create_blender_render_preset((0.0, 0.0, 0.0), (0.1, 0.06, 0.06), "FRONT", revisions)
+    request = BlenderRenderRequest(width=512, height=512, samples=16)
+    script = tmp_path / "front_runner.py"
+    script.write_bytes(build_blender_render_runner(package, preset, request))
+    completed = run_blender_render(BLENDER, script, tmp_path)
+    assert "PACKLAB_BLENDER_RENDER_VALID" in completed.stdout, completed.stderr[-2000:]
+    image = QImage.fromData((tmp_path / request.output_relative_path).read_bytes())
+
+    label = [
+        (x, y)
+        for y in range(image.height())
+        for x in range(image.width())
+        if image.pixelColor(x, y).alpha() > 0
+        and max(image.pixelColor(x, y).getRgb()[:3]) - min(image.pixelColor(x, y).getRgb()[:3])
+        >= 80
+    ]
+    assert len(label) > 500
+    # Keep only rows with a wide band of label pixels: the front panel, not the narrow boss.
+    from collections import Counter
+
+    wide_rows = {row for row, count in Counter(y for _, y in label).items() if count >= 60}
+    label = [(x, y) for x, y in label if y in wide_rows]
+    xs, ys = [x for x, _ in label], [y for _, y in label]
+    left, right, top, bottom = min(xs), max(xs), min(ys), max(ys)
+
+    def corner(fx: float, fy: float) -> tuple[float, float, float]:
+        cx = left + (right - left) * fx
+        cy = top + (bottom - top) * fy
+        samples = [
+            image.pixelColor(int(cx + dx), int(cy + dy)).getRgb()[:3]
+            for dx in range(-3, 4)
+            for dy in range(-3, 4)
+        ]
+        return tuple(sum(channel) / len(samples) for channel in zip(*samples))  # type: ignore[return-value]
+
+    top_left, top_right = corner(0.08, 0.1), corner(0.92, 0.1)
+    bottom_left, bottom_right = corner(0.08, 0.9), corner(0.92, 0.9)
+    assert top_left[0] > top_left[1] and top_left[0] > top_left[2], top_left  # red
+    assert top_right[1] > top_right[0] and top_right[1] > top_right[2], top_right  # green
+    assert bottom_left[2] > bottom_left[0] and bottom_left[2] > bottom_left[1], bottom_left
+    assert min(bottom_right) > max(top_left[1:]), bottom_right  # white-ish

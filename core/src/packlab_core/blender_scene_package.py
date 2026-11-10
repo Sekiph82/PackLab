@@ -762,7 +762,34 @@ def _image_material(overlay, image_path):
     return material, image
 
 
-def _artwork_uv(overlay, u, v, width, height):
+def _viewer_orientation(overlay):
+    """Mirror flags so artwork reads upright and left-to-right from outside the package.
+
+    Zone u/v follow the CAD face parameterisation, which says nothing about "up" for
+    artwork; with world +Z as up, image columns must run to the viewer's right
+    (Z x outward normal) and image rows (top-left origin) must run downward.
+    """
+    geometry = overlay["geometry"]
+    if overlay["mapping_mode"] == "PLANAR_RECTANGULAR":
+        u_axis = [float(c) for c in geometry["u_axis"]]
+        v_axis = [float(c) for c in geometry["v_axis"]]
+        normal = [float(c) for c in geometry["surface_normal"]]
+    else:
+        import math as _math
+        theta = (float(geometry["angular_start_radians"]) + float(geometry["angular_end_radians"])) / 2.0
+        if geometry.get("azimuth_direction") != "+Y_TO_PLUS_X":
+            raise ValueError("scene_wrap_azimuth_direction_unsupported")
+        normal = [_math.sin(theta), _math.cos(theta), 0.0]
+        u_axis = [_math.cos(theta), -_math.sin(theta), 0.0]
+        sign = 1.0 if float(geometry["axial_end_mm_unverified"]) >= float(geometry["axial_start_mm_unverified"]) else -1.0
+        v_axis = [sign * float(c) for c in geometry["axis"]]
+    viewer_right = [-normal[1], normal[0], 0.0]  # world Z x outward normal
+    mirror_u = sum(a * b for a, b in zip(u_axis, viewer_right)) < 0.0
+    mirror_v = v_axis[2] > 0.0
+    return mirror_u, mirror_v
+
+
+def _artwork_uv(overlay, u, v, width, height, mirror_u=False, mirror_v=False):
     mapping = overlay["geometry"]["artwork_mapping"]
     if overlay["geometry"]["uv_orientation"] == "REVERSED_U":
         boundary = overlay["geometry"]["placement_boundary_normalized_uv"]
@@ -771,7 +798,13 @@ def _artwork_uv(overlay, u, v, width, height):
     source_v = (v - float(mapping["translate_v"])) / float(mapping["scale_v"])
     if overlay["geometry"].get("artwork_pixel_origin") != "TOP_LEFT":
         raise ValueError("scene_artwork_pixel_origin_unsupported")
-    return (source_u / float(width), 1.0 - source_v / float(height))
+    column = source_u / float(width)
+    row = source_v / float(height)
+    if mirror_u:
+        column = 1.0 - column
+    if mirror_v:
+        row = 1.0 - row
+    return (column, 1.0 - row)
 
 
 def _create_overlay(overlay, root, base_matrix):
@@ -825,12 +858,13 @@ def _create_overlay(overlay, root, base_matrix):
     mesh.from_pydata(verts, [], faces)
     mesh.update()
     uv_layer = mesh.uv_layers.new(name="PackLabRendererUV")
+    mirror_u, mirror_v = _viewer_orientation(overlay)
     for polygon in mesh.polygons:
         for loop_index in polygon.loop_indices:
             vertex_index = mesh.loops[loop_index].vertex_index
             uv_layer.data[loop_index].uv = _artwork_uv(
                 overlay, uv_coords[vertex_index][0], uv_coords[vertex_index][1],
-                geometry["artwork_width"], geometry["artwork_height"]
+                geometry["artwork_width"], geometry["artwork_height"], mirror_u, mirror_v
             )
     obj = bpy.data.objects.new("PackLabLabelOverlay_" + str(overlay["zone_id"]), mesh)
     bpy.context.scene.collection.objects.link(obj)
