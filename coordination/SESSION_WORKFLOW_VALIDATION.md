@@ -1,5 +1,8 @@
 # PackLab Canonical Session Workflow Validation
 
+> **CURRENT OWNER DECISION: 2026-11-10 CLAUDE CODE EXCLUSIVE.** Claude, not Codex or ChatGPT, owns all new PackLab implementation, testing, independent peer-review coordination, GitHub Actions runs, `TASKS.md` updates and next-task selection. Earlier workflow texts below are dated history, not active stop/approval rules; genuine security, architecture, license, physical/owner/factory release gates remain binding. See root `CLAUDE.md`, `AGENTS.md`, `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. 
+
+
 > **ACTIVE OPERATING UPDATE 2026-11-04:** Owner has authorized Codex to complete and peer-review all remaining PL tasks, edit root `TASKS.md` after genuine verified review, re-enable GitHub Actions, select dependency-safe work across milestones and continue without a ChatGPT handoff. Older statements below forbidding these operations are HISTORICAL and superseded by root `AGENTS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Preserve protected product architecture, license/security/privacy, real tests, real external/owner/physical/legal release gates, accepted evidence and safe non-destructive Git sync. Historical ChatGPT audit files are immutable. 
 
 
