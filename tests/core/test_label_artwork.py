@@ -331,22 +331,109 @@ def test_metric_host_size_keeps_artwork_aspect_in_millimetres() -> None:
     assert abs((cu1 - cu0) / (cv1 - cv0) - zone_aspect) < 1e-9
 
 
-def test_default_normalized_mapping_ids_are_unchanged() -> None:
+GOLDEN_DEFAULT_MAPPING_IDS = {
+    # Computed with the module as of e97d4027^ (before the metric-aspect option).
+    (
+        "svg",
+        "CONTAIN",
+    ): "label-artwork-mapping:0f6cb3cdd7da39e852443a114ad64e197fd664702f1d09ba9cfd927f5aa5399d",
+    (
+        "svg",
+        "COVER",
+    ): "label-artwork-mapping:5ff55760eb2ec9db4abb0652b0d3df45988570821ea89c5d3c1ac43a55acb229",
+    (
+        "svg",
+        "STRETCH",
+    ): "label-artwork-mapping:0ee2c9c7810fae404f94d2d07333f08111a5dfda6adcce20e604a1a8453f6135",
+    (
+        "png",
+        "CONTAIN",
+    ): "label-artwork-mapping:0a4d025cd5caeedab21da4788115cab451083a646515a0b69a00df49e1d4cab8",
+    (
+        "png",
+        "COVER",
+    ): "label-artwork-mapping:6ff3c41a0515c7920d6e978a38e75aa688ecce6dc3a3b1c442ef801058381956",
+    (
+        "png",
+        "STRETCH",
+    ): "label-artwork-mapping:34348220a0ded6d3fd522ae7346fac248be8f049033baeace96661de98e3b1ff",
+}
+
+
+@pytest.mark.parametrize(("kind", "fit"), sorted(GOLDEN_DEFAULT_MAPPING_IDS))
+def test_default_mapping_ids_match_the_pre_change_golden_values(kind: str, fit: str) -> None:
+    # Review P2-2: pins historical ids; the default path must not drift.
+    from packlab_core.label_artwork import ingest_label_artwork, map_label_artwork_to_zone
+
+    artwork = ingest_label_artwork(_svg() if kind == "svg" else _png())
+    mapping = map_label_artwork_to_zone(artwork, _placement(), fit_mode=fit)
+    assert mapping.revision_id == GOLDEN_DEFAULT_MAPPING_IDS[(kind, fit)]
+    assert "aspect_basis" not in mapping.as_dict()  # keeps overlay/scene digests unchanged
+
+
+def test_metric_and_default_mappings_have_distinct_ids_and_reject_bad_host_sizes() -> None:
+    from packlab_core.label_artwork import LabelArtworkError, map_label_artwork_to_zone
+
+    artwork, placement = _square_artwork_and_wide_placement()
+    default = map_label_artwork_to_zone(artwork, placement, fit_mode="CONTAIN")
+    # A host whose aspect makes the metric result coincide geometrically with the default.
+    boundary = placement.boundary
+    ratio = (boundary.u_max - boundary.u_min) / (boundary.v_max - boundary.v_min)
+    same_shape = map_label_artwork_to_zone(
+        artwork, placement, fit_mode="CONTAIN", host_size_mm_unverified=(1.0, 1.0)
+    )
+    assert same_shape.revision_id != default.revision_id
+    assert ratio > 0
+    for bad in ((0.0, 1.0), (1.0,), (float("nan"), 1.0), (True, 1.0), (5e-324, 1.0)):
+        # Extreme ratios may instead trip the mapping's own validity check; either way it is
+        # the module's error, never an uncaught ZeroDivisionError (review P3-2).
+        with pytest.raises(LabelArtworkError, match="host_size_invalid|mapping_invalid"):
+            for fit in ("CONTAIN", "COVER"):
+                map_label_artwork_to_zone(
+                    artwork,
+                    placement,
+                    fit_mode=fit,
+                    host_size_mm_unverified=bad,  # type: ignore[arg-type]
+                )
+
+
+@pytest.mark.parametrize(
+    ("host", "fit"),
+    [
+        ((100.0, 40.0), "CONTAIN"),  # wide zone: height-limited branch
+        ((20.0, 400.0), "CONTAIN"),  # tall zone: width-limited branch
+        ((100.0, 40.0), "COVER"),
+        ((20.0, 400.0), "COVER"),
+    ],
+)
+def test_metric_mapping_draws_with_equal_millimetre_scale_and_exact_transform(host, fit) -> None:
+    # Review P2-1: guard the scale/translate values the renderer actually draws with.
     from packlab_core.label_artwork import map_label_artwork_to_zone
 
     artwork, placement = _square_artwork_and_wide_placement()
-    mapping = map_label_artwork_to_zone(artwork, placement, fit_mode="CONTAIN")
-    assert mapping.aspect_basis == "NORMALIZED_ZONE_UNITS"
-    assert mapping.scale_u == mapping.scale_v
-    assert "aspect_basis" not in mapping.revision_id
-    for bad in ((0.0, 1.0), (1.0,), (float("nan"), 1.0), (True, 1.0)):
-        with pytest.raises(Exception, match="host_size_invalid"):
-            map_label_artwork_to_zone(
-                artwork,
-                placement,
-                fit_mode="CONTAIN",
-                host_size_mm_unverified=bad,  # type: ignore[arg-type]
-            )
+    mapping = map_label_artwork_to_zone(
+        artwork, placement, fit_mode=fit, host_size_mm_unverified=host
+    )
+    c0, c1, c2, c3 = mapping.source_crop_rect
+    t0, t1, t2, t3 = mapping.target_rect_normalized_uv
+    # crop * scale + translate == target, on both axes.
+    assert c0 * mapping.scale_u + mapping.translate_u == pytest.approx(t0)
+    assert c2 * mapping.scale_u + mapping.translate_u == pytest.approx(t2)
+    assert c1 * mapping.scale_v + mapping.translate_v == pytest.approx(t1)
+    assert c3 * mapping.scale_v + mapping.translate_v == pytest.approx(t3)
+    # One source unit spans the same millimetres horizontally and vertically.
+    assert mapping.scale_u * host[0] == pytest.approx(mapping.scale_v * host[1])
+    boundary = placement.boundary
+    if fit == "CONTAIN":
+        assert boundary.u_min - 1e-12 <= t0 and t2 <= boundary.u_max + 1e-12
+        assert boundary.v_min - 1e-12 <= t1 and t3 <= boundary.v_max + 1e-12
+        # Centred inside the boundary.
+        assert (t0 + t2) / 2 == pytest.approx((boundary.u_min + boundary.u_max) / 2)
+        assert (t1 + t3) / 2 == pytest.approx((boundary.v_min + boundary.v_max) / 2)
+    else:
+        assert 0.0 <= c0 and c2 <= artwork.width and 0.0 <= c1 and c3 <= artwork.height
+        assert (c0 + c2) / 2 == pytest.approx(artwork.width / 2)
+        assert (c1 + c3) / 2 == pytest.approx(artwork.height / 2)
 
 
 def _square_artwork_and_wide_placement():

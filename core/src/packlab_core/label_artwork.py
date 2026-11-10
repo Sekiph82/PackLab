@@ -142,7 +142,11 @@ class LabelArtworkMappingRevision:
             "scale_v": self.scale_v,
             "translate_u": self.translate_u,
             "translate_v": self.translate_v,
-            "aspect_basis": self.aspect_basis,
+            **(
+                {"aspect_basis": self.aspect_basis}
+                if self.aspect_basis != "NORMALIZED_ZONE_UNITS"
+                else {}
+            ),
             "geometry_authority_created": False,
             "physical_fit_verified": False,
         }
@@ -412,6 +416,8 @@ def map_label_artwork_to_zone(
     source_aspect = artwork.width / artwork.height
     # Physical aspect of the zone; equals the normalized aspect when no host size is given.
     target_aspect = (target_width * host_width) / (target_height * host_height)
+    if not math.isfinite(target_aspect) or target_aspect <= 0.0:
+        raise LabelArtworkError("label_artwork_host_size_invalid")
     if fit == "STRETCH":
         target = (boundary.u_min, boundary.v_min, boundary.u_max, boundary.v_max)
         crop = (0.0, 0.0, artwork.width, artwork.height)
@@ -448,6 +454,8 @@ def map_label_artwork_to_zone(
                 (artwork.height + crop_height) / 2.0,
             )
         target = (boundary.u_min, boundary.v_min, boundary.u_max, boundary.v_max)
+        if crop[2] - crop[0] <= 0.0 or crop[3] - crop[1] <= 0.0:
+            raise LabelArtworkError("label_artwork_host_size_invalid")
         scale_u = target_width / (crop[2] - crop[0])
         scale_v = target_height / (crop[3] - crop[1])
     if not all(math.isfinite(value) for value in (*target, *crop, scale_u, scale_v)):
