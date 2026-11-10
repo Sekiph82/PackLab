@@ -1,84 +1,9 @@
-# PackLab Independent Auditor-AI Policy
+# PackLab Claude Independent Peer Reviewer Policy (2026-11-10)
 
-> **OPERATING AUTHORITY UPDATED 2026-11-04:** This file's historical ChatGPT-only TASKS editor, one-task handoff, mandatory frozen prompt, stop-on-any-blocker and cross-milestone prohibitions are superseded by the owner's `AGENTS.md`, `TASKS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Codex may independently schedule ready PL tasks, use distinct peer-review/testing/security subagents, record real `AUTO_AUDITED_PASS` and update the sole tracker, then continue. GitHub Actions are allowed. Prior historical audits, genuine test failures, secrets/privacy, technical contracts, physical/owner/legal gates and safe Git operations are NOT waived. New Codex peer review is NOT a forged ChatGPT audit. 
+The owner delegates all new PackLab review coordination to Claude Code's **non-implementing** reviewer, tester and security subagents. Previous ChatGPT-authored audit artifacts are history and must not be impersonated or edited.
 
+For each assigned PL task, independently inspect exact original requirements and mandatory pre-reads, the actual Git base/head diff and affected source, observed local tests/CI links, regression behavior, architecture and data/provenance/licensing/security boundaries. Verify test sensitivity: would a broken implementation make tests fail? Distinguish actual execution from builder assertions; report precise missing coverage, file/line findings and real-world limitations.
 
-## Independence and authority
+Output task-linked `CLAUDE_PEER_REVIEW_*.md` evidence with reviewer identity, E3-auto classification (not historical ChatGPT E3), criterion-by-criterion PASS/CHANGES_REQUIRED/NOT_VERIFIED and actual source/CI evidence. Reviewers do not implement the same scope or silently edit `TASKS.md`.
 
-ChatGPT is the independent auditor, separate from Codex builder claims and
-builder-run test output. Before every audit decision, ChatGPT reads the
-current root `TASKS.md`; it does not rely on a historical prompt, log,
-dashboard, or local state as current authorization.
-
-ChatGPT audits the actual GitHub `main` commit range, changed-file set,
-source/artifact content, protected-file boundary, and matching prompts,
-criteria, logs, and prior audits. A summary that says “tests passed” is not
-itself an audit.
-
-## Minimum audit checks
-
-For each frozen task, ChatGPT disposes every numbered mandatory criterion and
-checks, as applicable:
-
-- prompt/criteria compliance, scope and permanent task identity;
-- actual commit ancestry, diff, changed files, and remote visibility;
-- architecture and ownership boundaries;
-- negative, invalid, missing, interrupted, corrupt, and boundary paths;
-- regression behavior and whether tests are sensitive to the intended defect
-  rather than mirroring the implementation;
-- determinism, provenance, units, and compatibility when relevant;
-- security, privacy, secrets, protected data, and generated-file boundaries;
-- physical/device/account/owner limitations without fabricating reproduction;
-  and
-- leakage into future tasks or unauthorized tracker/governance state.
-
-The auditor labels builder runtime evidence that was not independently rerun
-and records why. E1/E2 builder evidence is not upgraded to E3 by repetition.
-
-## Evidence levels
-
-- **E1/E2:** Codex builder checks and reproducible builder evidence.
-- **E3:** ChatGPT’s independent GitHub inspection, independent rerun, or
-  independent reasoning against the frozen criteria.
-- **E4:** owner-controlled or physical/device/account evidence; it remains
-  explicitly owner-controlled and is not manufactured by the auditor.
-
-## PASS and non-pass dispositions
-
-`AUDITED_PASS` is permitted only when every frozen mandatory criterion is
-true, the actual diff/source matches the claims, and no unresolved material
-defect remains. A green aggregate test count cannot compensate for a missing
-required command, unsafe scope, weak negative test, or architecture issue.
-
-`CHANGES_REQUIRED` / `AUDITED_FAIL` records exact findings, keeps the same
-permanent PL task ID and unchecked tracker state, updates `TASKS.md` to the
-next actor/action, and requires a new bounded remediation prompt and matching
-criteria version. Prior prompts, criteria, logs, audits, commits, and
-accepted behavior remain evidence; they are not overwritten.
-
-`BLOCKED` records the exact missing dependency, input, environment, or
-decision and the required actor/unblock action. `OWNER_REQUIRED` records a
-human-controlled product, design, physical, account, or authorization
-decision. Neither disposition manufactures closure or silently changes
-requirements.
-
-## Milestone batches
-
-An authorized milestone batch still receives one independent audit per child,
-followed only after those child audits close by a milestone-level audit.
-Execution batching does not turn builder validation green into acceptance.
-The auditor checks that the batch followed its frozen order, stopped at any
-failed child frontier, preserved earlier evidence, did not skip blocked work,
-and did not start a future milestone.
-
-## Requirement integrity and tracker ownership
-
-The auditor applies the frozen prompt and criteria as written. It must not
-silently loosen, reinterpret, or remove a requirement merely to pass an
-implementation. If the requirement itself is contradictory, the auditor
-records the contradiction and routes it through the governed prompt/ADR/owner
-process.
-
-Only ChatGPT may write `CHATGPT_AUDIT_VNN.md` and update root `TASKS.md`
-lifecycle/closure state. This policy is evidence/reference only and never a
-second current-task tracker.
+The Claude coordinator updates `TASKS.md` to `[x] CLAUDE_PEER_AUDITED_PASS` only when all mandatory criteria, required tests and independent peer review succeed. Missing owner hardware/data/legal/Apple signing evidence remains `[ ] EXTERNAL_PENDING`; reviewer must not simulate E4 acceptance. Historic findings remain binding until real remediation. An unrelated executable task may continue while an external gate remains open.
