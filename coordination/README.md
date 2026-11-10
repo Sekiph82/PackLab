@@ -1,112 +1,24 @@
-# PackLab Coordination Protocol
+# PackLab Coordination Protocol | Claude Code Handoff (2026-11-10)
 
-> **CURRENT OWNER AUTHORIZATION (2026-11-04):** The single-task ChatGPT-only, frozen-prompt, stop-after-handoff model described below is HISTORICAL and superseded for future execution by root `AGENTS.md`, `TASKS.md`, and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Codex may now update the tracker after real autonomous peer review, select subsequent dependency-safe tasks across milestones, and use GitHub Actions. Older audits and technical/security/physical/legal acceptance requirements remain factual and binding. 
-
-
-## Authority model
-
-- Canonical repository: `Sekiph82/PackLab`.
-- Canonical branch: `main`.
-- GitHub `main` is repository truth.
-- Root `TASKS.md` is the **only live project-status tracker** and the only H!veAI current-state surface.
-- `AGENTS.md` and `CLAUDE.md` are operating manuals, not trackers.
-- `coordination/AUDIT_POLICY.md` is the audit constitution.
-- `coordination/AUDIT_INDEX.md` is ChatGPT-owned reusable audit memory, not live state.
-- `coordination/sessions/<CYCLE_ID>/` contains immutable/versioned work orders and evidence.
-- `handoff.md`, root `AUDIT.md`, session indexes, dashboards, and historical artifacts must never become competing live trackers.
+## Active authority
+Claude Code is sole new-work orchestrator and `TASKS.md` lifecycle author for all unfinished permanent PL tasks. GitHub `Sekiph82/PackLab` `main` is source truth; root `TASKS.md` is the only live tracker. Read `../CLAUDE.md`, `AUTONOMOUS_CLAUDE_GOAL.md` and `AUTONOMOUS_EXECUTION_POLICY.md`. The former ChatGPT-only, Codex-only, frozen-prompt-per-task and milestone-stop operating requirements are **superseded for new work**. Historical prompts, logs and audits under `coordination/sessions/` are immutable evidence, not a competing task tracker.
 
 ## Roles
+- **Claude orchestrator:** owns dependency-aware scheduling, technical/CI work, milestone planning, independent subagent review requests, accepted status edits, Git publication, Desktop and OwnerDev synchronization.
+- **Claude builder/dataset-curator:** implement assigned scopes with real tests; do not self-certify independent review.
+- **Claude tester/reviewer/security:** examine real source and check/CI evidence independently, document findings; no claim of external/physical truth without observed data.
+- **Owner:** supplies only genuinely owner-exclusive facts/decisions, such as physical printer/sample, Apple signing credentials, account/billing changes or formal legal/factory approval; lack of these does not stop independent software work.
+- **Codex/ChatGPT:** all prior outputs are preserved as historical evidence. They are no longer the mandatory next executor or sole tracker writer.
 
-### Codex
+## Execution loop
+1. Read current `TASKS.md`; inventory every unchecked PL ID and actual contract/dependencies. Start from the live frontier (PL-0369 at handoff), not outdated PL-0354 references.
+2. Build 3–5 related executable tasks when safe, trace IDs individually; use focused verification during development.
+3. Run all mandatory regression/hosted Windows/macOS suites before corresponding milestone/criterion acceptance; inspect actual pass/fail results.
+4. Independent Claude peer/source/security review; remediate defects. Save new `CLAUDE_IMPLEMENTATION_LOG_*.md` and `CLAUDE_PEER_REVIEW_*.md` under versioned session folders, NEVER forged `CHATGPT_AUDIT_*` or `CODEX_PEER_REVIEW_*`.
+5. Only genuinely verified work becomes `[x] CLAUDE_PEER_AUDITED_PASS`. External gates remain `[ ] EXTERNAL_PENDING_*` and are re-entered after evidence arrives while independent tasks proceed.
+6. Per truly accepted task: commit and push GitHub `main`, verify SHA; safely fast-forward Desktop through `tools/dev/post_task_safe_sync.ps1`, record actual local parity or `LOCAL_SYNC_PENDING`; refresh OwnerDev when relevant; continue task selection.
 
-Codex is the implementation and test actor.
+## Real-data and safety boundary
+Kenya factory and authentic production scans do not yet exist. Claude creates rights-cleared genuine public and reproducible physically credible SYNTHETIC proxy datasets for software testing, not fabricated Kenya or physical acceptance. Private inputs stay outside Git. GitHub repository currently PUBLIC. Preserve real architecture, product/security/licensing, owner-owned files, device/physical/legal acceptance and privacy. GitHub Actions are allowed but should not be run wastefully or with false PASS claims.
 
-Codex may:
-- read root `TASKS.md`;
-- read the active `CODEX_PROMPT_VNN.md` and matching `CHATGPT_AUDIT_CRITERIA_VNN.md`;
-- modify only files authorized by the active prompt;
-- run tests/checks;
-- write the matching `CODEX_LOG_VNN.md`;
-- commit and push authorized implementation/evidence changes.
-
-Codex must **not**:
-- edit root `TASKS.md`;
-- create or edit `CHATGPT_AUDIT_*` files;
-- create an audit verdict;
-- self-close tasks;
-- invent the next task;
-- continue after returning `AWAITING_AUDIT`.
-
-### ChatGPT
-
-ChatGPT is the independent auditor, prompt/criteria author, and sole live-tracker writer.
-
-ChatGPT owns:
-- `CODEX_PROMPT_VNN.md`;
-- `CHATGPT_AUDIT_CRITERIA_VNN.md`;
-- `CHATGPT_AUDIT_VNN.md`;
-- root `TASKS.md` lifecycle/progress/task closure;
-- `coordination/AUDIT_INDEX.md` reusable audit learnings;
-- correction/remediation prompt versions.
-
-## Versioned cycle bundle
-
-Each implementation cycle uses:
-
-```text
-coordination/sessions/<CYCLE_ID>/
-  CODEX_PROMPT_V01.md
-  CHATGPT_AUDIT_CRITERIA_V01.md
-  CODEX_LOG_V01.md               # written by Codex
-  CHATGPT_AUDIT_V01.md            # written by ChatGPT after log arrives
-```
-
-If audit fails or changes are required:
-
-```text
-  CODEX_PROMPT_V02.md
-  CHATGPT_AUDIT_CRITERIA_V02.md
-  CODEX_LOG_V02.md
-  CHATGPT_AUDIT_V02.md
-```
-
-Continue V03, V04, etc. until closure. Never overwrite prior versions.
-
-Cycle IDs normally use `<TASK_ID>-C001`, for example `PL-0001-C001`. A later independent cycle for the same task uses `PL-0001-C002`.
-
-## Normal cycle flow
-
-1. ChatGPT reads GitHub `main`, root `TASKS.md`, current source, prior session evidence, and relevant audit learnings.
-2. ChatGPT freezes the implementation scope in `CODEX_PROMPT_VNN.md` and publishes matching strict criteria in `CHATGPT_AUDIT_CRITERIA_VNN.md`.
-3. Codex synchronizes the local workspace according to the prompt and repository policy.
-4. Codex confirms root `TASKS.md` still authorizes the task. If not, it stops without implementing.
-5. Codex implements only the frozen prompt scope and runs every required validation command.
-6. Codex writes a detailed matching `CODEX_LOG_VNN.md`, commits/pushes authorized changes, returns `AWAITING_AUDIT`, and stops.
-7. ChatGPT reads the log and independently audits GitHub source/diff/evidence against the frozen criteria.
-8. ChatGPT writes `CHATGPT_AUDIT_VNN.md`.
-9. ChatGPT updates root `TASKS.md` to audited truth after **every** log/audit cycle.
-10. PASS: ChatGPT closes only proven task rows and advances H!veAI state.
-11. FAIL/CHANGES_REQUIRED: ChatGPT leaves the task open, records the exact state in `TASKS.md`, creates VNN+1 remediation prompt/criteria, and returns a short prompt link/instruction for Codex.
-12. BLOCKED/OWNER_REQUIRED: ChatGPT records that state in `TASKS.md`; no AI silently bypasses it.
-
-## One-time local bootstrap rule
-
-Canonical local workspace:
-
-`C:\Users\sekip\Desktop\PackLab`
-
-The owner explicitly states that for the **first synchronization only**, GitHub `origin/main` is correct and local content is not authoritative. The active bootstrap-capable Codex prompt may therefore instruct a destructive tracked-file alignment to `origin/main` after verifying the repository/remote identity.
-
-This is a one-time owner-authorized exception. After the local checkout is proven to match GitHub `main`, normal sessions must use safe fetch/compare/fast-forward behavior and must stop on unexpected local divergence unless a later owner instruction explicitly authorizes replacement.
-
-Never use `git clean -fdx`; ignored local environments/caches must not be destroyed by the bootstrap alignment.
-
-## Single-tracker rule
-
-There is no second live tracker. Session files are work orders and evidence only. They never override `TASKS.md` current state.
-
-## Canonical URLs
-
-- Repository: https://github.com/Sekiph82/PackLab
-- Tracker: https://github.com/Sekiph82/PackLab/blob/main/TASKS.md
-- Coordination: https://github.com/Sekiph82/PackLab/tree/main/coordination
+No second project-status ledger; older `AUDIT.md`, `handoff.md`, archived sessions, audit index and historical Codex goal remain non-authoritative references.
