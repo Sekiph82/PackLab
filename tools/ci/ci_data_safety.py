@@ -116,7 +116,18 @@ PRIVATE_KEY_HEADER = re.compile(
     r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----",
     re.IGNORECASE,
 )
-TOKEN_PREFIXES = ("ghp_", "gho_", "ghs_", "ghu_", "ghr_", "github_pat_", "glpat", "sk-", "xox")
+TOKEN_PREFIXES = (
+    "ghp_",
+    "gho_",
+    "ghs_",
+    "ghu_",
+    "ghr_",
+    "github_pat_",
+    "glpat",
+    "sk-",
+    "sk_",
+    "xox",
+)
 SECRET_ASSIGNMENT = re.compile(
     r"(?im)^\s*(?:export\s+)?(?:APPLE|APP_STORE|APPSTORE|ASC|GITHUB|GH|SIGNING|PROVISIONING|"
     r"DISTRIBUTION|PRIVATE|CLIENT|ACCESS|API|DEPLOY|CERTIFICATE|MATCH|KEYCHAIN)"
@@ -590,6 +601,7 @@ def scan_signing_material(
                 continue
             if (
                 match.group(2) is None
+                and suffix in {".py", ".swift"}
                 and not value.casefold().startswith(TOKEN_PREFIXES)
                 and re.fullmatch(
                     r"[a-z_][a-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+",

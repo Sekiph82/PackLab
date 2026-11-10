@@ -125,6 +125,25 @@ class SigningMaterialSafetyTests(unittest.TestCase):
                     source.write_text(line + "\n", encoding="utf-8")
                     self.assertEqual(scan_signing_material(root, [source]), [])
 
+    def test_unquoted_lowercase_tokens_in_shell_or_yaml_are_not_exempt(self) -> None:
+        # PL-0394 V03 P3-1: the lower-case identifier exemption applies only to source code.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index, (name, line) in enumerate(
+                (
+                    ("deploy.sh", "API_TOKEN=deadbeefcafe0123456789abcdef0123"),
+                    ("ci.yml", "ACCESS_TOKEN: abcdef0123456789synthetic"),
+                    ("settings.py", "API_TOKEN = sk_live_synthetic_canary_0123"),
+                )
+            ):
+                with self.subTest(name=name):
+                    source = root / f"{index}-{name}"
+                    source.write_text(line + "\n", encoding="utf-8")
+                    self.assertEqual(
+                        [finding.code for finding in scan_signing_material(root, [source])],
+                        ["DIRECT_SECRET_ASSIGNMENT"],
+                    )
+
     def test_common_signing_exports_are_detected_without_echoing_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -221,3 +221,15 @@ def test_calibration_keeps_a_margin_on_both_sides_of_the_threshold() -> None:
 def _texture_fraction(samples: GrayImageSamples, mask: ObjectMaskSamples) -> float:
     texture = _qa(b"synthetic-image", samples, mask)["photos"][0]["object_surface_texture"]
     return float(texture["textured_cell_fraction"])
+
+
+def test_pl0376_documented_limit_unclipped_dark_reflection_reads_as_texture() -> None:
+    # Re-review P2-A, pinned on purpose: an unclipped reflection band (here a SIMULATED
+    # 40 DN, 4 px band on plain glossy PET) is indistinguishable from print in one view and
+    # passes the texture check. The calibration doc discloses this; if behaviour changes,
+    # update the doc together with this test.
+    png, samples, mask = _render("syn_bottle_pet_gloss_v01")
+    banded = simulated_specular_streaks(samples, mask, 1, 4, level=40)
+    texture = _qa(png, banded, mask)["photos"][0]["object_surface_texture"]
+    assert texture["status"] == "pass"
+    assert texture["textured_cell_fraction"] >= OBJECT_TEXTURE_MIN_FRACTION

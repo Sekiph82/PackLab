@@ -45,7 +45,7 @@ Reproduce: `python -m tools.datasets.calibrate_object_texture` (requires PySide6
 | --- | --- | --- | --- |
 | Plain renders (HDPE matte, PET gloss, PET clear, PP translucent), σ 0–10 | 32 | max 0.0643 (PP closure ribs, σ 10) | all `warning` |
 | Same renders + simulated label, σ 0–10 | 32 | min 0.1730 (HDPE trigger spray, σ 10) | all `pass` |
-| PET gloss renders + simulated specular streaks (1–2 streaks, 1–12 px wide, soft edges 0–8 px), σ 0–3 | 24 | ≤ 0.007 | all `warning` |
+| PET gloss renders + simulated specular streaks (1–2 streaks, 1–12 px wide, soft edges 0–8 px), σ 0–3 | 24 | ≤ 0.010 (seed-dependent; from the test suite, not the CLI) | all `warning` |
 
 The threshold of 0.12 sits between the plain and labelled groups, about 0.05 from each. CI pins a ±0.04
 margin on a 5-render subset (`test_calibration_keeps_a_margin_on_both_sides_of_the_threshold`).
@@ -66,6 +66,17 @@ A labelled PET bottle beside a highlight still passes on its label texture.
   noisier than about 12 DN at QA resolution are outside the calibrated range.
 - **Mask tightness:** the check assumes a tight object mask. The reviewer found that dilation up to 8 px
   is fine and 16 px flips the jerrycan to pass, because backdrop edges enter the assessed region.
+- **Unclipped reflections (known false pass):** the guard only recognises highlights at or above 240 DN. An
+  unclipped reflection, either a bright band just under 240 DN or a **dark** mirrored band, is
+  indistinguishable from print in a single view. On a plain glossy PET bottle it can produce a texture
+  `pass`, and the PL-0414 tree can then reach `proceed_to_reconstruction_review`. The re-review reproduced
+  this, and `test_pl0376_documented_limit_unclipped_dark_reflection_reads_as_texture` pins it. For glossy
+  or transparent packages the operator must not treat a texture `pass` as evidence of a printed surface;
+  the PL-0400 checklist and human review remain required.
+- **More warnings on labelled glossy packages:** a label beside clipped highlights now warns more often.
+  For example, a labelled bottle with 2 streaks went from a 0.40 pass to a 0.07 warning, and a labelled
+  tube with 1 streak from 0.34 to 0.09. Such views route to surface-treatment review under PL-0414. This
+  errs toward review.
 - The specular guard prevents false texture but does not flag glossy surfaces by itself. A high
   `specular_cell_fraction` is reviewer evidence; no separate specular warning is calibrated.
 - The frame-level `sharpness` metric is unchanged and is still inflated by noise. It is a blur indicator, not

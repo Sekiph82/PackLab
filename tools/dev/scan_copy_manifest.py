@@ -31,8 +31,18 @@ def _files(root: Path) -> dict[str, tuple[int, str]]:
         raise ValueError("root is a symlink or junction")
     if not root.is_dir():
         raise ValueError(f"not a directory: {root}")
+    # A link anywhere in the root's own path (e.g. a junctioned parent) makes the real
+    # location differ from the spelled one; refuse so a "copy" cannot be the source itself.
+    # Checked per ancestor rather than realpath != abspath, which false-fails on Windows
+    # 8.3 short names (e.g. C:\Users\RUNNER~1) that are not links.
+    if any(_is_link(ancestor) for ancestor in Path(os.path.abspath(root)).parents):
+        raise ValueError("root path passes through a symlink or junction")
     entries: dict[str, tuple[int, str]] = {}
-    for directory, subdirectories, filenames in os.walk(root, followlinks=False):
+
+    def _raise(error: OSError) -> None:
+        raise ValueError(f"unreadable entry: {error.filename}") from error
+
+    for directory, subdirectories, filenames in os.walk(root, onerror=_raise, followlinks=False):
         here = Path(directory)
         for name in sorted(subdirectories + filenames):
             path = here / name

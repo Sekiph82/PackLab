@@ -101,3 +101,29 @@ def test_empty_source_cannot_produce_a_manifest(tmp_path: Path) -> None:
     (tmp_path / "empty").mkdir()
     with pytest.raises(ValueError, match="no files"):
         create_manifest(tmp_path / "empty")
+
+
+def test_copy_reached_through_a_linked_parent_folder_fails(tmp_path: Path) -> None:
+    # Re-review P2-B: <junction-to-parent>/<source-name> resolves to the source itself.
+    source = _scan_folder(tmp_path)
+    manifest = create_manifest(source)
+    parent_link = tmp_path / "parent-link"
+    if not _junction(parent_link, source.parent):
+        parent_link.symlink_to(source.parent, target_is_directory=True)
+    result = verify_copy(manifest, parent_link / source.name)
+    assert result[0].startswith("copy_unreadable: root path passes through")
+
+
+def test_unreadable_subfolder_fails_instead_of_being_skipped(tmp_path: Path, monkeypatch) -> None:
+    # Re-review P2-B: os.walk used to swallow errors, silently dropping files.
+    source = _scan_folder(tmp_path)
+    real_scandir = os.scandir
+
+    def failing_scandir(path):
+        if str(path).endswith("captures"):
+            raise PermissionError(13, "synthetic access denied", str(path))
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", failing_scandir)
+    with pytest.raises(ValueError, match="unreadable entry"):
+        create_manifest(source)
