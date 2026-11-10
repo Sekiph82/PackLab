@@ -10,7 +10,7 @@ Only the label/sleeve artwork changes (design, text, colour, regulatory copy, va
 
 1. **Intake.** Record the artwork change request, owner/brand approver, artwork source and licence/permission for every element (fonts, images, logos). Unlicensed elements stop the change.
 2. **Ingest.** Ingest the new artwork as a new immutable `LabelArtworkAssetRevision`; never overwrite the previous artwork file or revision.
-3. **Map and assign.** Map it to the **existing** Label Zone placement already used by the SKU and create an assignment (`SkuArtworkPresentationReference.from_accepted_assignment`). A stale or mismatched zone/mapping/assignment set is rejected by the contract.
+3. **Map and assign.** Map it to the **existing** Label Zone placement already used by the SKU and create an assignment (`SkuArtworkPresentationReference.from_accepted_assignment`). A stale or mismatched zone/mapping/assignment set is rejected by the contract. The contract does **not** check that the label zone belongs to the SKU's asset Design Model, so the reviewer confirms that binding.
 4. **New SKU revision.** Create a new SKU revision on the **same Packaging Asset revision** with the new artwork reference. The asset record and its Scan Master / Design Model links are not touched, and no geometry is copied (`geometry_copied: false`).
 5. **Review.** A reviewer compares the rendered mockup against the approved artwork proof and confirms that the label zone still fits. Rendering is a visual reference only.
 6. **Retention.** Keep the old artwork revision and old SKU revision; current lookup moves to the new revision, history keeps both.

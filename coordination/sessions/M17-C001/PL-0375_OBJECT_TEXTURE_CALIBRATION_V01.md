@@ -8,16 +8,21 @@ Review `CLAUDE_PEER_REVIEW_PL0375_0384_V01.md` (P2-2) showed that a white surfac
 passes the frame-level Laplacian-variance sharpness metric (value 325), so realistic noise hid the
 low-texture signal. Pixel-scale noise and coarse surface texture must be separated.
 
-## Algorithm (`masked_block4_mean_laplacian_textured_fraction_v1`)
+## Algorithm (`masked_block4_mean_laplacian_textured_fraction_v2`)
 
 1. Average decoded 8-bit luma over 4×4 sample blocks. This cuts i.i.d. noise σ by a factor of 4.
 2. Assess only blocks whose 4-neighbourhood lies fully inside the object mask. Silhouette edges and the
    backdrop are excluded.
 3. A block counts as textured when |4·c − Σ neighbours| ≥ 32 DN. This is a block-scale Laplacian, so smooth
    shading gradients give ≈0.
-4. The view is `warning` / `low_object_surface_texture` when the textured fraction is < 0.12. It is
+4. Specular guard (added after review P2-7): a cell with at least 4 of its 16 samples at or above
+   240 DN is specular or clipped. That cell, and every cell within 2 cells of it, never counts as
+   textured, so highlight streaks and their soft edges cannot pose as texture.
+   `specular_cell_fraction` is reported as evidence. Isolated noise pixels at or above 240 do not
+   trigger the guard; whole cells do.
+5. The view is `warning` / `low_object_surface_texture` when the textured fraction is < 0.12. It is
    `unavailable` when fewer than 64 cells are assessed, or when the mask is missing or misaligned.
-5. Without masks the component is `not_requested`, and the overall QA disposition does not change. The
+6. Without masks the component is `not_requested`, and the overall QA disposition does not change. The
    Studio adapter only passes masks through; wiring capture-time segmentation masks is not done here.
 
 The test fixtures pass the masks explicitly. In production the QA lane is non-authoritative
@@ -38,11 +43,13 @@ Reproduce: `python -m tools.datasets.calibrate_object_texture` (requires PySide6
 
 | Group | Views | Textured fraction range | Disposition |
 | --- | --- | --- | --- |
-| Plain renders (HDPE matte, PET gloss, PET clear, PP translucent), σ 0–10 | 32 | 0.0000 – 0.0680 (max: PP closure ribs, σ 10) | all `warning` |
-| Same renders + simulated label, σ 0–10 | 32 | 0.1906 – 0.3202 (min: PET tube, σ 3) | all `pass` |
+| Plain renders (HDPE matte, PET gloss, PET clear, PP translucent), σ 0–10 | 32 | max 0.0643 (PP closure ribs, σ 10) | all `warning` |
+| Same renders + simulated label, σ 0–10 | 32 | min 0.1730 (HDPE trigger spray, σ 10) | all `pass` |
+| PET gloss renders + simulated specular streaks (1–2 streaks, 1–12 px wide, soft edges 0–8 px), σ 0–3 | 24 | ≤ 0.007 | all `warning` |
 
-The threshold of 0.12 sits between the two groups: about 0.05 above the plain maximum and 0.07 below the
-labelled minimum.
+The threshold of 0.12 sits between the plain and labelled groups, about 0.05 from each. CI pins a ±0.04
+margin on a 5-render subset (`test_calibration_keeps_a_margin_on_both_sides_of_the_threshold`).
+A labelled PET bottle beside a highlight still passes on its label texture.
 
 ## Limits (must not be over-read)
 
@@ -51,10 +58,16 @@ labelled minimum.
   real-data gates stay pending).
 - Texture finer than 4 sample pixels is treated as noise. Very fine print at low resolution may be flagged
   low-texture. This errs toward review, not toward a false pass.
-- Glossy PET: the AgX-tone-mapped renders barely clip (bottle 0.36 % of mask pixels > 239). These fixtures
-  therefore cannot calibrate a specular-clipping detector. PL-0376 relies on the low-texture warning and on
-  the existing global clipped-pixel exposure rule. Specular detection on real PET captures remains
-  uncalibrated.
+- Glossy PET: the AgX-tone-mapped renders barely clip (bottle 0.36 % of mask pixels > 239), so highlights
+  are simulated as seeded streaks. PL-0376 relies on the low-texture warning plus the specular guard.
+  Real PET highlight shapes may differ, and calibration on real captures remains pending.
+- **Noise ceiling:** no plain render passes up to σ 12 DN. At σ 15 the PP closure passes on one seed. By
+  σ 20 the PET bottle, PET tube and PP closure pass. Heavy noise errs toward a **false pass**, so captures
+  noisier than about 12 DN at QA resolution are outside the calibrated range.
+- **Mask tightness:** the check assumes a tight object mask. The reviewer found that dilation up to 8 px
+  is fine and 16 px flips the jerrycan to pass, because backdrop edges enter the assessed region.
+- The specular guard prevents false texture but does not flag glossy surfaces by itself. A high
+  `specular_cell_fraction` is reviewer evidence; no separate specular warning is calibrated.
 - The frame-level `sharpness` metric is unchanged and is still inflated by noise. It is a blur indicator, not
   a texture indicator.
 - Nothing here measures reconstruction quality or physical dimensional accuracy.

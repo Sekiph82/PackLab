@@ -92,6 +92,37 @@ def simulated_printed_label(
     return _replace_pixels(samples, bytes(pixels))
 
 
+def simulated_specular_streaks(
+    samples: GrayImageSamples,
+    mask: ObjectMaskSamples,
+    count: int,
+    width_px: int,
+    soft_px: int = 0,
+    level: int = 255,
+) -> GrayImageSamples:
+    """SIMULATED vertical glossy-PET highlight streaks (clipped core, linear soft edges)."""
+    width = samples.width
+    pixels = bytearray(samples.pixels)
+    inside = [index for index, flag in enumerate(mask.inside) if flag]
+    cols = [index % width for index in inside]
+    rows = [index // width for index in inside]
+    left, right, top, bottom = min(cols), max(cols), min(rows), max(rows)
+    for streak in range(count):
+        x0 = left + (right - left) * (streak + 1) // (count + 1) - width_px // 2
+        for row in range(top + (bottom - top) // 4, bottom - (bottom - top) // 10):
+            for col in range(x0 - soft_px, x0 + width_px + soft_px):
+                index = row * width + col
+                if not mask.inside[index]:
+                    continue
+                if x0 <= col < x0 + width_px:
+                    pixels[index] = level
+                    continue
+                distance = x0 - col if col < x0 else col - x0 - width_px + 1
+                weight = 1 - distance / (soft_px + 1)
+                pixels[index] = round(pixels[index] * (1 - weight) + level * weight)
+    return _replace_pixels(samples, bytes(pixels))
+
+
 def calibration_rows(subset: Path) -> list[dict[str, object]]:
     manifest = json.loads((subset / "manifest.json").read_text(encoding="utf-8"))
     rows: list[dict[str, object]] = []

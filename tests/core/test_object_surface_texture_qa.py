@@ -19,6 +19,7 @@ from tools.datasets.calibrate_object_texture import (
     load_render,
     simulated_printed_label,
     simulated_sensor_noise,
+    simulated_specular_streaks,
 )
 
 from packlab_core.pre_reconstruction_qa import (
@@ -172,3 +173,51 @@ def test_object_texture_fails_closed_for_missing_misaligned_or_tiny_masks() -> N
         ObjectMaskSamples(4, 4, b"\x01" * 15, "mask", "1")
     with pytest.raises(PreReconstructionQAError):
         build_pre_reconstruction_qa(report, {PATH: samples}, [mask for mask in ()])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("sample_id", PET_GLOSS)
+@pytest.mark.parametrize(
+    ("count", "width_px", "soft_px"),
+    [(1, 1, 0), (2, 2, 0), (1, 6, 0), (2, 6, 0), (2, 4, 4), (2, 12, 8)],
+)
+def test_pl0376_simulated_specular_streaks_never_count_as_texture(
+    sample_id: str, count: int, width_px: int, soft_px: int
+) -> None:
+    # Review P2-7: clipped glossy-PET highlight streaks used to turn the warning into a pass.
+    png, samples, mask = _render(sample_id)
+    glossy = simulated_specular_streaks(samples, mask, count, width_px, soft_px)
+    for sigma in (0.0, 3.0):
+        result = _qa(png, _with_sensor_noise(glossy, sigma, seed=3), mask)
+        texture = result["photos"][0]["object_surface_texture"]
+        assert texture["status"] == "warning", (count, width_px, soft_px, sigma, texture)
+        assert texture["specular_cell_fraction"] > 0
+        assert result["overall"]["status"] == "review_required"
+
+
+def test_pl0376_printed_label_still_passes_beside_a_specular_highlight() -> None:
+    png, samples, mask = _render("syn_bottle_pet_gloss_v01")
+    labelled = simulated_specular_streaks(_with_printed_label(samples, mask), mask, 1, 6)
+    texture = _qa(png, _with_sensor_noise(labelled, 3.0, seed=3), mask)["photos"][0][
+        "object_surface_texture"
+    ]
+    assert texture["status"] == "pass"
+    assert texture["specular_cell_fraction"] > 0
+
+
+def test_calibration_keeps_a_margin_on_both_sides_of_the_threshold() -> None:
+    # Pins the PL-0375 calibration in CI: a shifted threshold or a removed exclusion fails.
+    plain: list[float] = []
+    labelled: list[float] = []
+    for sample_id in (*HDPE_MATTE, *PET_GLOSS, "syn_closure_pp_translucent_v01"):
+        _png, samples, mask = _render(sample_id)
+        label = _with_printed_label(samples, mask)
+        for sigma in (0.0, 10.0):
+            plain.append(_texture_fraction(_with_sensor_noise(samples, sigma, seed=1), mask))
+            labelled.append(_texture_fraction(_with_sensor_noise(label, sigma, seed=1), mask))
+    assert max(plain) <= OBJECT_TEXTURE_MIN_FRACTION - 0.04, max(plain)
+    assert min(labelled) >= OBJECT_TEXTURE_MIN_FRACTION + 0.04, min(labelled)
+
+
+def _texture_fraction(samples: GrayImageSamples, mask: ObjectMaskSamples) -> float:
+    texture = _qa(b"synthetic-image", samples, mask)["photos"][0]["object_surface_texture"]
+    return float(texture["textured_cell_fraction"])

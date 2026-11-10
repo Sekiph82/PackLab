@@ -23,12 +23,17 @@ EXPOSURE_CLIPPED_LIMIT: Final = 0.05
 # noise; a block counts as textured when its block-scale Laplacian magnitude reaches the
 # DN threshold. Only blocks whose 4-neighbourhood lies fully inside the object mask are
 # assessed, so silhouette edges and the backdrop do not count as surface texture.
+# A cell with >= 4 samples at >= 240 DN is treated as specular/clipped; it and every cell
+# within 2 cells of it never count as texture, so highlight streaks cannot fake texture.
 # Calibrated on synthetic M17 renders only (PL-0375_OBJECT_TEXTURE_CALIBRATION_V01.md).
-OBJECT_TEXTURE_ALGORITHM: Final = "masked_block4_mean_laplacian_textured_fraction_v1"
+OBJECT_TEXTURE_ALGORITHM: Final = "masked_block4_mean_laplacian_textured_fraction_v2"
 OBJECT_TEXTURE_BLOCK: Final = 4
 OBJECT_TEXTURE_LAPLACIAN_MIN_DN: Final = 32.0
 OBJECT_TEXTURE_MIN_FRACTION: Final = 0.12
 OBJECT_TEXTURE_MIN_CELLS: Final = 64
+OBJECT_SPECULAR_MIN_DN: Final = 240
+OBJECT_SPECULAR_HALO_CELLS: Final = 2
+OBJECT_SPECULAR_MIN_SAMPLES: Final = 4
 OBJECT_TEXTURE_CALIBRATION: Final = "synthetic-m17-golden-subset-renders-v1-not-physical"
 MAX_SAMPLES_PER_IMAGE: Final = 1_000_000
 MAX_QA_IMAGES: Final = 512
@@ -180,6 +185,9 @@ def _object_texture(
         "laplacian_minimum_dn": OBJECT_TEXTURE_LAPLACIAN_MIN_DN,
         "minimum_textured_fraction": OBJECT_TEXTURE_MIN_FRACTION,
         "minimum_assessed_cells": OBJECT_TEXTURE_MIN_CELLS,
+        "specular_minimum_dn": OBJECT_SPECULAR_MIN_DN,
+        "specular_halo_cells": OBJECT_SPECULAR_HALO_CELLS,
+        "specular_minimum_samples_per_cell": OBJECT_SPECULAR_MIN_SAMPLES,
         "calibration": OBJECT_TEXTURE_CALIBRATION,
     }
     if mask is None:
@@ -193,18 +201,34 @@ def _object_texture(
     cells_x, cells_y = width // block, samples.height // block
     means: list[float] = []
     inside: list[bool] = []
+    clipped: list[bool] = []
     pixels, flags = samples.pixels, mask.inside
     for cell_y in range(cells_y):
         for cell_x in range(cells_x):
             total = 0
             full = True
+            bright_count = 0
             for row in range(cell_y * block, cell_y * block + block):
                 start = row * width + cell_x * block
                 total += sum(pixels[start : start + block])
                 full = full and all(flags[start : start + block])
+                bright_count += sum(
+                    value >= OBJECT_SPECULAR_MIN_DN for value in pixels[start : start + block]
+                )
             means.append(total / (block * block))
             inside.append(full)
-    assessed = textured = 0
+            clipped.append(bright_count >= OBJECT_SPECULAR_MIN_SAMPLES)
+    # Specular highlights and their soft falloff are reflections, not surface texture:
+    # cells within OBJECT_SPECULAR_HALO_CELLS of a near-clipped cell never count as textured.
+    halo = OBJECT_SPECULAR_HALO_CELLS
+    near_specular = [False] * len(means)
+    for index, bright in enumerate(clipped):
+        if bright:
+            cell_x, cell_y = index % cells_x, index // cells_x
+            for y in range(max(0, cell_y - halo), min(cells_y, cell_y + halo + 1)):
+                for x in range(max(0, cell_x - halo), min(cells_x, cell_x + halo + 1)):
+                    near_specular[y * cells_x + x] = True
+    assessed = textured = specular = 0
     for cell_y in range(1, cells_y - 1):
         for cell_x in range(1, cells_x - 1):
             index = cell_y * cells_x + cell_x
@@ -213,11 +237,15 @@ def _object_texture(
                 continue
             response = 4 * means[index] - sum(means[item] for item in neighbours)
             assessed += 1
-            textured += abs(response) >= OBJECT_TEXTURE_LAPLACIAN_MIN_DN
+            specular += clipped[index]
+            textured += (
+                not near_specular[index] and abs(response) >= OBJECT_TEXTURE_LAPLACIAN_MIN_DN
+            )
     evidence = {
         **base,
         "mask_source": {"id": mask.mask_source_id, "version": mask.mask_source_version},
         "assessed_cell_count": assessed,
+        "specular_cell_fraction": specular / assessed if assessed else None,
     }
     if assessed < OBJECT_TEXTURE_MIN_CELLS:
         return {**evidence, "status": "unavailable", "reason_code": "object_area_too_small"}

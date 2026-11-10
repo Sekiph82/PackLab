@@ -34,7 +34,7 @@ Keep at least **3 copies on 2 different media, with 1 off-site/offline** (3-2-1)
 2. Copy the folder and the manifest off the machine.
 3. On the destination, run:
    `python -m tools.dev.scan_copy_manifest verify <manifest.json> <copy folder>`
-   Only `SCAN_COPY_VERIFY_PASS` (exit 0) counts. Missing, unexpected or altered files fail (exit 1), and symlinks are refused.
+   Only `SCAN_COPY_VERIFY_PASS` (exit 0) counts. Missing, unexpected or altered files fail (exit 1). Symlinks and NTFS junctions are refused, including a copy root that links back to the source. Empty or internally inconsistent manifests are invalid.
 4. Library archives must pass `validate_backup` after they are copied.
 5. Record the date, operator, manifest SHA-256, destination and result in the work record.
 
@@ -53,9 +53,11 @@ Retention and deletion of supplier or customer data follow owner and legal instr
 
 ## Synthetic dry-run
 
-`tests/ci/test_scan_copy_manifest.py` checks two things on a synthetic scan folder:
+`tests/ci/test_scan_copy_manifest.py` checks these cases on a synthetic scan folder:
 
 - an identical copy passes, and the tool does not overwrite an existing manifest;
+- a copy root, or a nested folder, that is a junction or symlink back to the source fails;
+- empty, inconsistent or malformed manifests are invalid, and an empty source cannot be manifested;
 - a missing file, an extra file and a single flipped bit are each reported, and a malformed manifest or unreadable copy fails.
 
 The library archive round-trip is covered by the existing `tests/studio/test_packaging_library_backup.py`. No physical storage, Kenya library or restore at a real site is claimed.

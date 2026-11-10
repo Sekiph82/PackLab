@@ -16,7 +16,7 @@ A supplier change never edits an existing record. `PackagingAsset` revisions are
    - **Not equivalent, unknown or not measurable** → use the PL-0417 geometry-change process instead. Do not reuse geometry on assumption, and do not infer equivalence from a matching neck finish or volume.
 4. **New asset revision.** Apply `with_field_update` for `supplier_id` and `supplier_name` (both, with `SUPPLIER_FACT` provenance). Keep `scan_master_link`, `design_model_links` and raw-scan links unchanged. Attach the equivalence evidence ID to the work record.
 5. **SKU migration.** For each affected SKU create a new SKU revision on the new asset revision (`PackagingSkuCatalog.with_revision`). SKUs still sourced from the old supplier stay on the old revision. History (`skus_for_geometry(..., include_history=True)`) shows both.
-6. **Retention.** Never delete the old asset revision while any SKU revision or document references it: `validate_targets` fails (`packaging_sku_asset_target_stale_or_missing`) when it is missing, which is the intended guard. Archive with status `ARCHIVED`, never by deletion.
+6. **Retention.** Never delete the old asset revision while any SKU revision or document references it: `validate_targets` fails (`packaging_sku_asset_target_stale_or_missing`) when it is missing, which is the intended guard. Nothing refuses the deletion itself, so the reviewer runs that validation before removing any revision. Archive with status `ARCHIVED`, never by deletion.
 
 ## No-go cases
 
