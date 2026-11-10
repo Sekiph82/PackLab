@@ -1,3 +1,9 @@
+# HISTORICAL CODEX GOAL — SUPERSEDED 2026-11-10
+
+> **DO NOT EXECUTE THIS CODEX GOAL FOR NEW PACKLAB WORK.** The owner transferred exclusive execution, review and TASKS.md status ownership to **Claude Code** on 2026-11-10. Use [AUTONOMOUS_CLAUDE_GOAL.md](AUTONOMOUS_CLAUDE_GOAL.md) and root [CLAUDE.md](../CLAUDE.md). Prior Codex implementation/CI and peer review claims remain historical evidence, not new authorizations. The historical material below is preserved for traceability.
+
+---
+
 # PackLab CODEX: Execute all remaining tasks continuously
 
 Owner authorization: 2026-11-04
