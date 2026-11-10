@@ -117,3 +117,25 @@ def test_score_to_count_rounding_is_pinned(score: float, expected: int) -> None:
     # Default policy: count = 1 + floor(score * 3 + 0.5).
     sectors = (AngularComplexityEvidence("all", 0.0, 360.0, score, "1" * 64),)
     assert len(plan_adaptive_angles("geometry-r1", "a" * 64, sectors).angles) == expected
+
+
+def test_rounding_duplicate_strictly_inside_a_sector_is_rejected() -> None:
+    # Re-review P3-a: isolates the distinctness check (all angles stay strictly inside).
+    start, end = 10.0000000004, 10.0000000036
+    sectors = (
+        AngularComplexityEvidence("before", 0.0, start, 0.0, "1" * 64),
+        AngularComplexityEvidence("narrow", start, end, 1.0, "2" * 64),
+        AngularComplexityEvidence("after", end, 360.0, 0.0, "3" * 64),
+    )
+    with pytest.raises(AdaptiveAnglePlanError, match="sector_too_narrow_for_planned_angles"):
+        plan_adaptive_angles("geometry-r1", "a" * 64, sectors)
+
+
+def test_angle_rounding_onto_the_sector_end_is_rejected() -> None:
+    # Re-review P3-a: isolates the strict-bounds check (a single angle, no duplicates).
+    sectors = (
+        AngularComplexityEvidence("most", 0.0, 359.9999999995, 0.0, "1" * 64),
+        AngularComplexityEvidence("sliver", 359.9999999995, 360.0, 0.0, "2" * 64),
+    )
+    with pytest.raises(AdaptiveAnglePlanError, match="sector_too_narrow_for_planned_angles"):
+        plan_adaptive_angles("geometry-r1", "a" * 64, sectors)

@@ -164,3 +164,37 @@ def test_rendered_page_draws_disclaimer_every_field_and_its_provenance_tag(monke
         assert label in drawn, label
         assert f"{value}  [{provenance}]" in drawn, field_name
     assert any(asset.revision_id in text for text in drawn)
+
+
+def test_painted_text_matches_literal_expected_strings(monkeypatch) -> None:
+    # Re-review P2-6: expectations must not come from the module's own helpers, or a
+    # provenance upgrade / weakened disclaimer would pass. Literal strings only.
+    from PySide6.QtGui import QPainter
+
+    drawn: list[str] = []
+    original = QPainter.drawText
+
+    def recording_draw_text(self, *args):
+        drawn.extend(arg for arg in args if isinstance(arg, str))
+        return original(self, *args)
+
+    monkeypatch.setattr(QPainter, "drawText", recording_draw_text)
+    export_packaging_dossier_pdf(_asset())
+    for expected in (
+        "Synthetic bottle  [USER_DECLARED]",
+        "BOTTLE  [USER_DECLARED]",
+        "500.0 mL  [SUPPLIER_FACT]",
+        "180.0 mm  [SUPPLIER_FACT]",
+        "65.0 mm  [SUPPLIER_FACT]",
+        "SCREW_CAP  [SUPPLIER_FACT]",
+    ):
+        assert expected in drawn, expected
+    assert drawn.count("UNKNOWN  [UNKNOWN]") == 7  # unknowns are never upgraded
+    disclaimer = next(text for text in drawn if text.startswith("PACKAGING METADATA ONLY."))
+    for phrase in (
+        "does not establish physical accuracy",
+        "supplier certification",
+        "regulatory compliance",
+        "manufacturing authorization",
+    ):
+        assert phrase in disclaimer, phrase
