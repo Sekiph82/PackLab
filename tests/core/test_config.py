@@ -63,3 +63,22 @@ def test_environment_override_and_platform_paths(tmp_path):
         )
         == tmp_path / "appdata" / "PackLab" / "config.toml"
     )
+
+
+def test_ai_assist_flag_defaults_off_and_is_strictly_boolean(tmp_path) -> None:
+    # PL-0421..0424 feature flag: AI-assist proposals stay off unless explicitly enabled.
+    from packlab_core.config import ConfigError, load_config
+
+    empty_home = tmp_path / "home"
+    assert load_config(env={}, home=empty_home, system="Linux").ai_assist_enabled is False
+    enabled = load_config(
+        env={"PACKLAB_AI_ASSIST_ENABLED": "true"}, home=empty_home, system="Linux"
+    )
+    assert enabled.ai_assist_enabled is True
+    for bad in ("yes", "1", ""):
+        with pytest.raises(ConfigError, match="PACKLAB_AI_ASSIST_ENABLED"):
+            load_config(env={"PACKLAB_AI_ASSIST_ENABLED": bad}, home=empty_home, system="Linux")
+    project = tmp_path / "packlab.toml"
+    project.write_text('ai_assist_enabled = "true"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="ai_assist_enabled must be a boolean"):
+        load_config(project_path=project, env={}, home=empty_home, system="Linux")

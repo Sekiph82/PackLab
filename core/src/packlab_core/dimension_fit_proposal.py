@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -21,6 +23,9 @@ from .design_model import (
 DIMENSION_FIT_PROPOSAL_CONTRACT = "packlab.dimension-fit-proposal.v1"
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$", re.ASCII)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
+
+
+_PROVENANCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+:@-]{0,159}", re.ASCII)
 
 
 class DimensionFitProposalError(ValueError):
@@ -177,7 +182,8 @@ class DimensionFitProposalProvenance:
     def __post_init__(self) -> None:
         for field in ("backend_id", "model_id", "checkpoint_id", "version"):
             value = getattr(self, field)
-            if not isinstance(value, str) or not value.strip() or len(value) > 160:
+            # Opaque identifiers only: no paths, whitespace or control characters (F-3).
+            if not isinstance(value, str) or not _PROVENANCE_ID.fullmatch(value):
                 raise DimensionFitProposalError(f"{field}_invalid")
         if self.checkpoint_sha256 is not None:
             _digest(self.checkpoint_sha256, "checkpoint_sha256")
@@ -245,6 +251,66 @@ class DimensionFitProposal:
 @runtime_checkable
 class DimensionFitOptimizerBackend(Protocol):
     def optimize(self, request: DimensionFitOptimizationRequest) -> DimensionFitProposal: ...
+
+
+DeviationEvaluator = Callable[[tuple[NumericParameterValue, ...]], tuple[float, str]]
+_GRID_STEPS = 5
+_MAX_EVALUATIONS = 625
+
+
+@dataclass(frozen=True, slots=True)
+class BoundedGridFitOptimizer:
+    """Deterministic reference optimizer: a bounded grid inside each measured tolerance.
+
+    ``evaluate`` maps candidate parameter values to ``(maximum_scan_deviation,
+    evaluation_sha256)``, for example by regenerating the Design Model and comparing it with
+    the bound Scan Master. Only candidates within the request's deviation budget are kept,
+    best first. Stdlib only, no randomness, no model weights.
+    """
+
+    evaluate: DeviationEvaluator
+    maximum_candidates: int = 8
+
+    def optimize(self, request: DimensionFitOptimizationRequest) -> DimensionFitProposal:
+        if not isinstance(request, DimensionFitOptimizationRequest):
+            raise DimensionFitProposalError("request_required")
+        if not 1 <= self.maximum_candidates <= 64:
+            raise DimensionFitProposalError("maximum_candidates_invalid")
+        axes = [
+            [
+                item.target_value + item.tolerance * (2 * step / (_GRID_STEPS - 1) - 1)
+                for step in range(_GRID_STEPS)
+            ]
+            for item in request.constraints
+        ]
+        if _GRID_STEPS ** len(axes) > _MAX_EVALUATIONS:
+            raise DimensionFitProposalError("grid_search_exceeds_evaluation_bound")
+        ids = [item.parameter_id for item in request.constraints]
+        scored: list[DimensionFitCandidate] = []
+        for index, values in enumerate(itertools.product(*axes)):
+            parameters = tuple(
+                NumericParameterValue(parameter_id, value)
+                for parameter_id, value in zip(ids, values, strict=True)
+            )
+            deviation, evaluation_sha256 = self.evaluate(parameters)
+            candidate = DimensionFitCandidate(
+                f"grid-{index:04d}", parameters, deviation, evaluation_sha256
+            )
+            if candidate.estimated_maximum_deviation <= request.maximum_deviation:
+                scored.append(candidate)
+        if not scored:
+            raise DimensionFitProposalError("no_candidate_within_deviation_budget")
+        scored.sort(key=lambda item: (item.estimated_maximum_deviation, item.candidate_id))
+        kept = tuple(scored[: self.maximum_candidates])
+        body = {"request": request.as_dict(), "candidates": [item.as_dict() for item in kept]}
+        return DimensionFitProposal(
+            "dimension-fit-proposal:" + _canonical_digest(body)[:32],
+            request,
+            kept,
+            DimensionFitProposalProvenance(
+                "packlab-bounded-grid", "none", "none", f"grid{_GRID_STEPS}-v1"
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -320,14 +386,21 @@ def accept_dimension_fit_proposal(
     model: DesignModelRevision,
     proposal: DimensionFitProposal,
     *,
+    request: DimensionFitOptimizationRequest,
     candidate_id: str,
     actor_id: str,
     reason: str,
     created_at_utc: str,
 ) -> AcceptedDimensionFitProposal:
+    """Accept one candidate against the request the user created, never the backend's echo."""
     if not isinstance(model, DesignModelRevision) or not isinstance(proposal, DimensionFitProposal):
         raise DimensionFitProposalError("model_and_proposal_required")
-    request = proposal.request
+    if not isinstance(request, DimensionFitOptimizationRequest):
+        raise DimensionFitProposalError("user_request_required")
+    # Targets, tolerances, deviation budget and deviation evidence must be exactly what the
+    # user requested; a backend cannot widen bounds by echoing a different request.
+    if proposal.request != request:
+        raise DimensionFitProposalError("proposal_request_mismatch")
     if (
         request.model_revision_id != model.revision_id
         or request.scan_master_revision_id != model.fitted_to_scan_master_revision_id
@@ -457,6 +530,8 @@ def _utc_timestamp(value: object) -> str:
 
 __all__ = [
     "AcceptedDimensionFitProposal",
+    "BoundedGridFitOptimizer",
+    "DeviationEvaluator",
     "DIMENSION_FIT_PROPOSAL_CONTRACT",
     "DimensionFitCandidate",
     "DimensionFitOptimizationRequest",

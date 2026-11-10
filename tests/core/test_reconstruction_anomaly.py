@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from test_geometry_statistics import _grid_with_floater, _tetrahedron
 
 from packlab_core.geometry_adapter import TriangleMeshData
@@ -89,3 +90,53 @@ def test_path_like_revision_id_is_rejected_before_serialization() -> None:
         assert str(error) == "geometry_revision_id_invalid"
     else:
         raise AssertionError("path-like revision identifier was serialized")
+
+
+def _replace_stats(**changes):
+    from dataclasses import replace
+
+    return replace(_statistics(_tetrahedron()), **changes)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"topology_indicators": ()},  # point-cloud style statistics: no mesh topology
+        {"connected_component_count": None},
+        {"connected_component_count": True},
+        {"topology_indicators": (("boundary_edge_count", 0.0), ("nonmanifold_edge_count", 0))},
+        {"topology_indicators": (("boundary_edge_count", False), ("nonmanifold_edge_count", 0))},
+        {"topology_indicators": (("boundary_edge_count", -1), ("nonmanifold_edge_count", 0))},
+    ],
+)
+def test_missing_or_malformed_topology_is_incomplete_not_clean(changes) -> None:
+    # Review F-2: these used to return NO_RULE_TRIGGERED_DIAGNOSTIC_ONLY.
+    report = detect_reconstruction_anomalies(_replace_stats(**changes), _confidence())
+    assert report.status == "REVIEW_REQUIRED"
+    assert "mesh_topology_evidence_incomplete" in {item.code for item in report.findings}
+
+
+def test_nonmanifold_and_unresolved_hole_rules_each_fire() -> None:
+    nonmanifold = _replace_stats(
+        topology_indicators=(
+            ("unique_edge_count", 6),
+            ("boundary_edge_count", 0),
+            ("nonmanifold_edge_count", 2),
+        )
+    )
+    report = detect_reconstruction_anomalies(nonmanifold, _confidence())
+    assert {item.code for item in report.findings} == {"mesh_nonmanifold_edges_present"}
+    holes = _replace_stats(hole_report_linkage=("hole-report-1", "a" * 64, 3, 1))
+    report = detect_reconstruction_anomalies(holes, _confidence())
+    assert {item.code for item in report.findings} == {"mesh_hole_report_unresolved_components"}
+
+
+def test_not_evaluated_confidence_threshold_is_incomplete() -> None:
+    report = detect_reconstruction_anomalies(
+        _statistics(_tetrahedron()), _confidence(threshold="not_evaluated")
+    )
+    assert report.status == "REVIEW_REQUIRED"
+    finding = next(
+        item for item in report.findings if item.code == "confidence_evidence_incomplete"
+    )
+    assert finding.as_dict()["evidence"] == {"threshold_status": "not_evaluated"}

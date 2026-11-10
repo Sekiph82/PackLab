@@ -24,6 +24,7 @@ _ANOMALY_CODES = frozenset(
         "mesh_boundary_edges_present",
         "mesh_nonmanifold_edges_present",
         "mesh_hole_report_unresolved_components",
+        "mesh_topology_evidence_incomplete",
     }
 )
 _SAFE_REVISION_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,191}$", re.ASCII)
@@ -114,23 +115,37 @@ def detect_reconstruction_anomalies(
         if geometry_statistics.interpretation != "DIAGNOSTIC_ONLY_NO_PHYSICAL_ACCURACY_CLAIM":
             raise ReconstructionAnomalyError("geometry_statistics_authority_invalid")
         topology = dict(geometry_statistics.topology_indicators)
-        if (
-            geometry_statistics.connected_component_count is not None
-            and geometry_statistics.connected_component_count > 1
-        ):
+        component_count = _count(geometry_statistics.connected_component_count)
+        boundary_edges = _count(topology.get("boundary_edge_count"))
+        nonmanifold_edges = _count(topology.get("nonmanifold_edge_count"))
+        # Review F-2: absent or malformed mesh topology (e.g. point-cloud statistics, bool or
+        # float counts) is incomplete evidence, never a clean "no rule triggered" result.
+        missing = [
+            name
+            for name, value in (
+                ("connected_component_count", component_count),
+                ("boundary_edge_count", boundary_edges),
+                ("nonmanifold_edge_count", nonmanifold_edges),
+            )
+            if value is None
+        ]
+        if missing:
+            findings.append(
+                _finding(
+                    "mesh_topology_evidence_incomplete",
+                    "geometry_statistics",
+                    (("missing_or_invalid", ",".join(missing)),),
+                )
+            )
+        if component_count is not None and component_count > 1:
             findings.append(
                 _finding(
                     "mesh_disconnected_components",
                     "geometry_statistics",
-                    (("component_count", geometry_statistics.connected_component_count),),
+                    (("component_count", component_count),),
                 )
             )
-        boundary_edges = topology.get("boundary_edge_count")
-        if (
-            isinstance(boundary_edges, int)
-            and not isinstance(boundary_edges, bool)
-            and boundary_edges > 0
-        ):
+        if boundary_edges:
             findings.append(
                 _finding(
                     "mesh_boundary_edges_present",
@@ -138,12 +153,7 @@ def detect_reconstruction_anomalies(
                     (("edge_count", boundary_edges),),
                 )
             )
-        nonmanifold_edges = topology.get("nonmanifold_edge_count")
-        if (
-            isinstance(nonmanifold_edges, int)
-            and not isinstance(nonmanifold_edges, bool)
-            and nonmanifold_edges > 0
-        ):
+        if nonmanifold_edges:
             findings.append(
                 _finding(
                     "mesh_nonmanifold_edges_present",
@@ -233,6 +243,13 @@ def detect_reconstruction_anomalies(
         str(body["status"]),
         canonical_findings,
     )
+
+
+def _count(value: object) -> int | None:
+    """A non-negative integer count, or None when absent or malformed (bools rejected)."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def _finding(

@@ -196,3 +196,44 @@ def test_other_family_acceptance_requires_a_user_label_and_records_it() -> None:
     provenance = {item.field_name: item for item in accepted.asset.field_provenance}
     assert provenance["family"].classification is ProvenanceClass.USER_DECLARED
     assert provenance["other_family_label"].classification is ProvenanceClass.USER_DECLARED
+
+
+def test_moving_from_other_to_a_suggested_family_clears_the_other_label() -> None:
+    # Review F-4: this path used to fail because the stale OTHER label was kept.
+    base = _asset()
+    other = PackagingAsset(
+        base.asset_id,
+        base.display_name,
+        PackagingFamily.OTHER,
+        other_family_label="Custom dispenser",
+        field_provenance=(
+            FieldProvenance("display_name", ProvenanceClass.USER_DECLARED),
+            FieldProvenance("family", ProvenanceClass.USER_DECLARED),
+            FieldProvenance("other_family_label", ProvenanceClass.USER_DECLARED),
+        ),
+    )
+    accepted = accept_package_family_suggestion(
+        other,
+        _suggestion(other),
+        chosen_family=PackagingFamily.BOTTLE,
+        actor_id="owner-1",
+        reason="Owner confirmed it is a bottle.",
+        created_at_utc="2026-10-22T18:00:00Z",
+    )
+    assert accepted.asset.family is PackagingFamily.BOTTLE
+    assert accepted.asset.other_family_label is None
+    assert other.other_family_label == "Custom dispenser"  # source revision untouched
+
+
+def test_other_label_is_rejected_for_a_non_other_choice() -> None:
+    asset = _asset()
+    with pytest.raises(PackageFamilySuggestionError, match="other_family_label_not_allowed"):
+        accept_package_family_suggestion(
+            asset,
+            _suggestion(asset),
+            chosen_family=PackagingFamily.BOTTLE,
+            actor_id="owner-1",
+            reason="Reviewed.",
+            created_at_utc="2026-10-22T18:00:00Z",
+            other_family_label="Should not be stored",
+        )

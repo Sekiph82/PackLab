@@ -22,6 +22,9 @@ _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$", re.ASCII)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 
 
+_PROVENANCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+:@-]{0,159}", re.ASCII)
+
+
 class ProfileZoneProposalError(ValueError):
     """Raised when a placement proposal or confirmation violates its contract."""
 
@@ -93,7 +96,8 @@ class ProfileZoneProposalProvenance:
     def __post_init__(self) -> None:
         for name in ("backend_id", "model_id", "checkpoint_id", "version"):
             value = getattr(self, name)
-            if not isinstance(value, str) or not value.strip() or len(value) > 160:
+            # Opaque identifiers only: no paths, whitespace or control characters (F-3).
+            if not isinstance(value, str) or not _PROVENANCE_ID.fullmatch(value):
                 raise ProfileZoneProposalError(f"{name}_invalid")
         if self.checkpoint_sha256 is not None:
             _digest(self.checkpoint_sha256, "checkpoint_sha256")

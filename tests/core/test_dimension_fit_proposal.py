@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 
@@ -8,6 +9,7 @@ from test_design_history import _model
 
 from packlab_core.design_model import revise_design_model_revision
 from packlab_core.dimension_fit_proposal import (
+    BoundedGridFitOptimizer,
     DimensionFitCandidate,
     DimensionFitOptimizerBackend,
     DimensionFitProposal,
@@ -127,6 +129,7 @@ def test_acceptance_creates_immutable_deferred_successor_and_bound_record() -> N
     accepted = accept_dimension_fit_proposal(
         model,
         proposal,
+        request=proposal.request,
         candidate_id="candidate-1",
         actor_id="owner-1",
         reason="I reviewed the bounded dimension proposal.",
@@ -165,6 +168,7 @@ def test_acceptance_rejects_stale_model_unknown_candidate_bounds_and_deviation_b
         accept_dimension_fit_proposal(
             changed,
             proposal,
+            request=proposal.request,
             candidate_id="candidate-1",
             actor_id="owner-1",
             reason="Reviewed.",
@@ -174,6 +178,7 @@ def test_acceptance_rejects_stale_model_unknown_candidate_bounds_and_deviation_b
         accept_dimension_fit_proposal(
             model,
             proposal,
+            request=proposal.request,
             candidate_id="missing",
             actor_id="owner-1",
             reason="Reviewed.",
@@ -199,6 +204,7 @@ def test_acceptance_rejects_stale_model_unknown_candidate_bounds_and_deviation_b
         accept_dimension_fit_proposal(
             model,
             outside,
+            request=proposal.request,
             candidate_id="candidate-1",
             actor_id="owner-1",
             reason="Reviewed.",
@@ -213,8 +219,140 @@ def test_acceptance_rejects_stale_model_unknown_candidate_bounds_and_deviation_b
         accept_dimension_fit_proposal(
             model,
             over_budget,
+            request=proposal.request,
             candidate_id="candidate-1",
             actor_id="owner-1",
             reason="Reviewed.",
             created_at_utc="2026-10-22T19:05:00Z",
         )
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda c: replace(c, tolerance=95.0),  # backend widens the measured tolerance
+        lambda c: replace(c, target_value=3.0, tolerance=2.9),  # backend moves the target
+    ],
+)
+def test_backend_echoing_a_widened_request_cannot_be_accepted(tamper) -> None:
+    # Review F-1 (P1): acceptance must use the user's request, not the backend's echo.
+    model, proposal = _scenario()
+    user_request = proposal.request
+    widened = replace(
+        user_request,
+        constraints=(tamper(user_request.constraints[0]), *user_request.constraints[1:]),
+    )
+    rogue = replace(
+        proposal,
+        request=widened,
+        candidates=(
+            replace(
+                proposal.candidates[0],
+                parameter_values=(
+                    NumericParameterValue("height", 3.0),
+                    NumericParameterValue("width", 32.0),
+                ),
+            ),
+        ),
+    )
+    with pytest.raises(DimensionFitProposalError, match="proposal_request_mismatch"):
+        accept_dimension_fit_proposal(
+            model,
+            rogue,
+            request=user_request,
+            candidate_id="candidate-1",
+            actor_id="owner-1",
+            reason="Reviewed.",
+            created_at_utc="2026-10-22T19:05:00Z",
+        )
+
+
+@pytest.mark.parametrize(
+    "field_value",
+    [("maximum_deviation", 50.0), ("deviation_evidence_sha256", "9" * 64)],
+)
+def test_backend_cannot_swap_deviation_budget_or_evidence(field_value) -> None:
+    model, proposal = _scenario()
+    field, value = field_value
+    rogue = replace(proposal, request=replace(proposal.request, **{field: value}))
+    with pytest.raises(DimensionFitProposalError, match="proposal_request_mismatch"):
+        accept_dimension_fit_proposal(
+            model,
+            rogue,
+            request=proposal.request,
+            candidate_id="candidate-1",
+            actor_id="owner-1",
+            reason="Reviewed.",
+            created_at_utc="2026-10-22T19:05:00Z",
+        )
+
+
+def test_candidate_must_cover_exactly_the_constrained_parameters() -> None:
+    model, proposal = _scenario()
+    partial = replace(
+        proposal,
+        candidates=(
+            replace(
+                proposal.candidates[0],
+                parameter_values=(NumericParameterValue("height", 103.0),),
+            ),
+        ),
+    )
+    with pytest.raises(DimensionFitProposalError, match="candidate_constraint_set_mismatch"):
+        accept_dimension_fit_proposal(
+            model,
+            partial,
+            request=proposal.request,
+            candidate_id="candidate-1",
+            actor_id="owner-1",
+            reason="Reviewed.",
+            created_at_utc="2026-10-22T19:05:00Z",
+        )
+
+
+def _synthetic_evaluator(best: dict[str, float]):
+    """SYNTHETIC deviation: distance from a known optimum (no geometry, test only)."""
+    calls: list[tuple] = []
+
+    def evaluate(parameters):
+        calls.append(parameters)
+        deviation = max(abs(item.value - best[item.parameter_id]) for item in parameters) / 10
+        digest = hashlib.sha256(repr(parameters).encode()).hexdigest()
+        return deviation, digest
+
+    return evaluate, calls
+
+
+def test_bounded_grid_optimizer_finds_the_known_optimum_inside_tolerances() -> None:
+    model, proposal = _scenario()
+    evaluate, calls = _synthetic_evaluator({"height": 104.5, "width": 29.5})
+    optimizer = BoundedGridFitOptimizer(evaluate)
+    assert isinstance(optimizer, DimensionFitOptimizerBackend)
+    first = optimizer.optimize(proposal.request)
+    assert first == BoundedGridFitOptimizer(evaluate).optimize(proposal.request)
+    assert len(calls) == 2 * 25
+    best = {item.parameter_id: item.value for item in first.candidates[0].parameter_values}
+    assert best == {"height": 104.5, "width": 29.5}
+    for candidate in first.candidates:
+        assert candidate.estimated_maximum_deviation <= proposal.request.maximum_deviation
+        for value in candidate.parameter_values:
+            constraint = next(
+                c for c in proposal.request.constraints if c.parameter_id == value.parameter_id
+            )
+            assert abs(value.value - constraint.target_value) <= constraint.tolerance
+    accepted = accept_dimension_fit_proposal(
+        model,
+        first,
+        request=proposal.request,
+        candidate_id=first.candidates[0].candidate_id,
+        actor_id="owner-1",
+        reason="Reviewed the optimizer proposal.",
+        created_at_utc="2026-10-22T19:05:00Z",
+    )
+    assert accepted.model.mold_use_authorized is False
+
+
+def test_bounded_grid_optimizer_reports_when_nothing_meets_the_budget() -> None:
+    _model_unused, proposal = _scenario()
+    with pytest.raises(DimensionFitProposalError, match="no_candidate_within_deviation_budget"):
+        BoundedGridFitOptimizer(lambda parameters: (9.0, "a" * 64)).optimize(proposal.request)

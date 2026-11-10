@@ -25,6 +25,9 @@ _IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$", re.ASCII)
 _ASSET_REVISION = re.compile(r"^packaging-asset:[0-9a-f]{64}$", re.ASCII)
 
 
+_PROVENANCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+:@-]{0,159}", re.ASCII)
+
+
 class PackageFamilySuggestionError(ValueError):
     """Raised when a suggestion or explicit acceptance violates its contract."""
 
@@ -72,7 +75,8 @@ class PackageFamilySuggestionProvenance:
     def __post_init__(self) -> None:
         for name in ("backend_id", "model_id", "checkpoint_id", "version"):
             value = getattr(self, name)
-            if not isinstance(value, str) or not value.strip() or len(value) > 160:
+            # Opaque identifiers only: no paths, whitespace or control characters (F-3).
+            if not isinstance(value, str) or not _PROVENANCE_ID.fullmatch(value):
                 raise PackageFamilySuggestionError(f"{name}_invalid")
         if self.checkpoint_sha256 is not None:
             _digest(self.checkpoint_sha256, "checkpoint_sha256")
@@ -254,6 +258,8 @@ def accept_package_family_suggestion(
         raise PackageFamilySuggestionError("other_family_label_not_allowed")
     try:
         if asset.family is PackagingFamily.OTHER and chosen_family is not PackagingFamily.OTHER:
+            # Review F-4: the OTHER label must be cleared, or the asset contract rejects it.
+            updated_other_label = None
             updated_provenance["other_family_label"] = FieldProvenance(
                 "other_family_label", ProvenanceClass.UNKNOWN
             )

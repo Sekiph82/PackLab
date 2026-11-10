@@ -21,9 +21,18 @@ class AppConfig:
     telemetry_enabled: bool = False
     diagnostics_retention_days: int = 7
     cache_root: str | None = None
+    # M19 AI-assist proposals (PL-0421..0424) are opt-in. When False, callers must not invoke
+    # suggestion backends; the fallback is the existing manual workflow.
+    ai_assist_enabled: bool = False
 
 
-_FIELDS = {"log_level", "telemetry_enabled", "diagnostics_retention_days", "cache_root"}
+_FIELDS = {
+    "log_level",
+    "telemetry_enabled",
+    "diagnostics_retention_days",
+    "cache_root",
+    "ai_assist_enabled",
+}
 _LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
 
 
@@ -50,8 +59,9 @@ def _validate(values: dict[str, Any], source: str) -> AppConfig:
         not isinstance(values["log_level"], str) or values["log_level"].upper() not in _LEVELS
     ):
         raise ConfigError(f"{source}: log_level must be one of {sorted(_LEVELS)}")
-    if "telemetry_enabled" in values and type(values["telemetry_enabled"]) is not bool:
-        raise ConfigError(f"{source}: telemetry_enabled must be a boolean")
+    for flag in ("telemetry_enabled", "ai_assist_enabled"):
+        if flag in values and type(values[flag]) is not bool:
+            raise ConfigError(f"{source}: {flag} must be a boolean")
     if "diagnostics_retention_days" in values and (
         type(values["diagnostics_retention_days"]) is not int
         or not 1 <= values["diagnostics_retention_days"] <= 365
@@ -86,11 +96,15 @@ def _environment(values: Mapping[str, str]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     if "PACKLAB_LOG_LEVEL" in values:
         result["log_level"] = values["PACKLAB_LOG_LEVEL"]
-    if "PACKLAB_TELEMETRY_ENABLED" in values:
-        raw = values["PACKLAB_TELEMETRY_ENABLED"].lower()
-        if raw not in {"true", "false"}:
-            raise ConfigError("environment: PACKLAB_TELEMETRY_ENABLED must be true or false")
-        result["telemetry_enabled"] = raw == "true"
+    for variable, key in (
+        ("PACKLAB_TELEMETRY_ENABLED", "telemetry_enabled"),
+        ("PACKLAB_AI_ASSIST_ENABLED", "ai_assist_enabled"),
+    ):
+        if variable in values:
+            raw = values[variable].lower()
+            if raw not in {"true", "false"}:
+                raise ConfigError(f"environment: {variable} must be true or false")
+            result[key] = raw == "true"
     if "PACKLAB_DIAGNOSTICS_RETENTION_DAYS" in values:
         raw = values["PACKLAB_DIAGNOSTICS_RETENTION_DAYS"]
         try:

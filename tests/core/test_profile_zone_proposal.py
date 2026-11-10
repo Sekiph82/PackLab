@@ -163,3 +163,30 @@ def test_acceptance_rejects_transitions_outside_the_fitted_profile() -> None:
             reason="Reviewed.",
             created_at_utc="2026-10-22T18:30:00Z",
         )
+
+
+@pytest.mark.parametrize("order", [(1, 0, 2), (0, 2, 1), (0, 0, 2)])
+def test_acceptance_rejects_in_range_but_unordered_or_repeated_transitions(order) -> None:
+    # Review F-7: the ordering half of the guard had no test of its own.
+    fit, zones, proposal = _scenario()
+    valid = proposal.candidates[0].transition_axial
+    shuffled = tuple(valid[index] for index in order)
+    unordered = ProfileZonePlacementProposal(
+        "proposal-unordered",
+        proposal.request,
+        (ProfileZonePlacementCandidate("candidate-unordered", shuffled, 0.9),),
+        proposal.provenance,
+    )
+    with pytest.raises(
+        ProfileZoneProposalError,
+        match="candidate_transitions_outside_profile_or_unordered",
+    ):
+        accept_profile_zone_proposal(
+            fit,
+            zones,
+            unordered,
+            candidate_id="candidate-unordered",
+            actor_id="owner-1",
+            reason="Reviewed.",
+            created_at_utc="2026-10-22T18:30:00Z",
+        )
