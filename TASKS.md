@@ -6,9 +6,9 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 - Current Milestone: M17 (CLAUDE exclusive autonomous ownership, dependency-safe work across M02–M19)
 - Current Sprint: CLAUDE_FULL_BACKLOG_HANDOFF / M17-S01 golden datasets plus all independent open sprints
-- Current Task: PL-0375 (OPEN): test low-texture white HDPE failure behavior
-- Current Task Status: CLAUDE_SOLE_EXECUTOR / PL-0369 through PL-0374 CLAUDE_PEER_AUDITED_PASS 2026-11-10 / 71 tasks remain open
-- Next Task/Action: CLAUDE implements PL-0375 through PL-0384 (failure/recovery testing sprint). Stage untracked Codex M17-M19 test files, run tests, independent review, accept or remediate.
+- Current Task: PL-0370..0374 independent review; next PL-0375 (OPEN)
+- Current Task Status: CLAUDE_SOLE_EXECUTOR / PL-0369..0374 and M18 PL-0396..0400, 0402, 0413 IMPLEMENTED_REVIEW_PENDING (independent review running) / 77 permanent tasks remain open / TASKS.md stash conflict markers removed 2026-11-10
+- Next Task/Action: CLAUDE completes independent review of PL-0369..0374 and the M18 planning batch, then PL-0375..0384 failure-behavior sprint (PL-0379 tests must fail closed in production code; c7ffa5db test weakening reverted) and the M19 Codex code published in 260beb49 (tests pass, tasks still open, needs independent review).
 - Required Actor: CLAUDE_CODE_SOLE_ORCHESTRATOR_AND_IMPLEMENTER_WITH_CLAUDE_TEST_REVIEW_SECURITY_DATASET_SUBAGENTS / OWNER only for genuinely unavailable real-world decisions and credentials
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL0354_MAIN_LOCAL_CAPABILITY_AND_TEMP52_CHATGPT_AUDIT_V01.md — AUDITED_PASS narrowly scoped TEMP52 cleanup and Windows local XCTest feasibility on Codex evidence: 52 screened, 5 removed/47 protected, +71,462,912 reported C: free T0-T1. ChatGPT independently verified 205 named Swift test methods in source, NOT 205 executed XCTest. PL0354 full suite blocked, M17/legal/factory rollout held.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
@@ -722,7 +722,6 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M16-S02 - GitHub Actions macOS/iOS
 
-<<<<<<< Updated upstream
 - [x] **PL-0354** — `AUTO_AUDITED_PASS` on exact final SHA `3cc10fe5241d95f2dce7fb909e15b129342d37a3`; full hosted unsigned iPhone 16 / iOS 18.0 XCTest run [41743543561](https://github.com/Sekiph82/PackLab/actions/runs/41743543561) passed 205/205, 0 failed, 0 skipped. Historical R02 billing block and prior audits remain preserved in the linked audit artifacts; the 2026-11-04 owner autonomy re-entry was fulfilled. Codex peer/source/security PASS: `coordination/sessions/M16-C001/PL-0354_CODEX_PEER_REVIEW_V01.md`; detailed repairs and validation: `PL-0354_CODEX_LOG_V03.md`. Distinct from historic ChatGPT audit; no physical-device, signing, release or factory claim.
 - [x] **PL-0355** — `AUTO_AUDITED_PASS` on exact final SHA `8e58a86bc7aa72353d9b396191f6bcd21a48c8ed`. Xcode-generated/committed `Package.resolved` pins only NextLevel 0.19.1 at `edb3ba52aed8b49e9e197a275ea5e4846fb8c36d`; exact-key SPM cache restore precedes package-capable Xcode calls and did not bypass resolution/lock validation. Final hosted unsigned macOS run [41749672668](https://github.com/Sekiph82/PackLab/actions/runs/41749672668) passed 205/205, 0 failed, 0 skipped. Independent Codex source, tester and security reviews PASS; details in `PL-0355_CODEX_PEER_REVIEW_V01.md`. No physical-device/signing/release/factory claim.
 - [x] **PL-0356** Build simulator target on every relevant change with no signing secrets. **AUTO_AUDITED_PASS** on `384eaef996c92b31d39a28581c0ea6dc7da3d905`; hosted run [41752044382](https://github.com/Sekiph82/PackLab/actions/runs/41752044382) built and tested unsigned iPhone 16 / iOS 18.0 on macOS 15.8.2 / Xcode 16.0 (16A242d), 205/205 XCTest, 0 failures/skips. Provenance-labeled app artifact had no embedded provisioning profile; independent Codex workflow, tester, and security reviews PASS. Simulator-only; no device/signing/release claim. See `PL-0356_CODEX_PEER_REVIEW_V01.md` and `PL-0356_CODEX_LOG_V01.md`.
@@ -732,19 +731,6 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [x] **PL-0360** Ensure no Apple certificate/profile/private key is ever committed to the public repository. **AUTO_AUDITED_PASS** on `a34704a2e0a9098b2748a0d4734e5fea2815c9ee`; redacted tracked-source scanner covers Apple signing containers/keychains, private-key blocks and common direct signing-secret exports; `.gitignore` and secrets policy updated; exact path/digest/source-pinned Markdown marker exceptions cover two historical prose references only. Dedicated read-only GitHub workflow passed [run 41760545827](https://github.com/Sekiph82/PackLab/actions/runs/41760545827). Focused tests 16/16 passed; source, tester and security peer reviews PASS. Full Windows Python quality run [41760545803](https://github.com/Sekiph82/PackLab/actions/runs/41760545803) passed guard, lock, Ruff, formatting and mypy but its full suite retained four unrelated failures (two artifact-upload gate assertions, OwnerDev path assertion, offline changelog assertion); no signed build or Xcode action was performed. See `PL-0360_CODEX_PEER_REVIEW_V01.md` and `PL-0360_CODEX_LOG_V01.md`.
 - [x] **PL-0361** Publish build artifacts with clear signed/unsigned provenance. **CODEX_IMPLEMENTATION_PASS / READY_FOR_INDEPENDENT_AUDIT** on `f977eb7f3d0a6fee1ff0bd474f5b1557457a590a`; implementation, peer review and hosted validation passed. No signed IPA was produced because PL-0358 still lacks Apple signing credentials. See `PL-0361_CODEX_PEER_REVIEW_V01.md` and `PL-0361_CODEX_LOG_V01.md`. This is not an independent ChatGPT audit or release acceptance.
 - [x] **PL-0362** Document exact iPhone 16 installation/reinstallation procedure. **CODEX_IMPLEMENTATION_PASS / READY_FOR_INDEPENDENT_AUDIT** on `cdea9839f694711f6e6f25ef3224cf40ab933c7b`; exact hosted unsigned artifact ZIP/product-tree provenance and simulator/device-archive distinctions recorded; Xcode development, future signed IPA, and Personal Team routes documented; backup validation command verified against the real PackScan API. Source/criteria review PASS, tester PASS, security PASS. Signed IPA, physical installation, installed-build readback, in-app package restore, legal/license and release acceptance remain unverified. No audit or release acceptance claimed. See `coordination/sessions/M16-C001/PL-0362_CODEX_LOG_V01.md`.
-=======
-- [!] **PL-0354** Execute the complete 205-case iOS XCTest suite on supported macOS with Xcode
-  Historical evidence: audited partial blocker https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0354_CHATGPT_AUDIT_V02.md. Targeted macOS recovery was 25/25 PASS; the full suite was not run on final source, an earlier full 205 had 173 pass/32 fail, and a GitHub run was blocked before runner allocation by billing controls. The owner-authorized one-retry prompt is https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL-0354_R02_BILLING_UNBLOCK_FULL_XCTEST_CODEX_PROMPT.md. Current task worktree cleanup was reported previously; no PL0355 or M17 advancement was accepted.
-  The targeted run was https://github.com/Sekiph82/PackLab/actions/runs/38767357450; the full-suite attempt at source revision `4b1cf516` was https://github.com/Sekiph82/PackLab/actions/runs/38770566255 and failed before runner allocation. The earlier full result remains historical only. R01 task worktree removal was reported with net C: free +26,042,368 bytes; a stale Codex UI attachment was left untouched because it belonged to another task.
-- [ ] **PL-0355** Resolve/cache Swift Package Manager dependencies including NextLevel.
-- [ ] **PL-0356** Build simulator target on every relevant change with no signing secrets.
-- [ ] **PL-0357** Create device archive job for PackLab Capture.
-- [ ] **PL-0358** Implement secret-safe optional code-signing path for a signed IPA when credentials/provisioning are available.
-- [ ] **PL-0359** Implement free-first fallback artifact path when CI signing is unavailable, documenting Windows-side sideload/sign route.
-- [ ] **PL-0360** Ensure no Apple certificate/profile/private key is ever committed to the public repository.
-- [ ] **PL-0361** Publish build artifacts with clear signed/unsigned provenance.
-- [ ] **PL-0362** Document exact iPhone 16 installation/reinstallation procedure.
->>>>>>> Stashed changes
 
 ## Sprint M16-S03 - Releases
 
@@ -761,16 +747,15 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M17-S01 - Golden datasets
 
-- [x] **PL-0369** Create small redistributable synthetic/public golden dataset for CI. **Executor: CLAUDE (autonomous).** **Status: CLAUDE_PEER_AUDITED_PASS 2026-11-10.** Commits b6bf5d67+8d410b1a. 14/17 tests pass (3 skip Windows symlink privilege). benchmark_metrics.py fail-closed synthetic authority; dataset validator with SHA-256/path-traversal/authority guards; YCB CC BY 4.0 source identity pinning. Peer review: coordination/sessions/M17-C001/CLAUDE_PEER_REVIEW_PL0369_V01.md.
-- [x] **PL-0370** Create private local Kenya benchmark dataset outside Git for real packaging validation. **Status: CLAUDE_PEER_AUDITED_PASS (software criteria 1-4,6-7) | EXTERNAL_PENDING_REAL_KENYA_DATA (criterion 5: local YCB corpus not on this machine; Kenya factory not yet real).** Commits b6bf5d67+8d410b1a. ycb_source_identity.py pinned archives; extract_ycb_subset.py symlink/atomic hardening; validate_ycb_manifest.py member-binding; 5 security tests PASS. Peer review: coordination/sessions/M17-C001/CLAUDE_PEER_REVIEW_PL0370-0374_BATCH_V01.md.
-- [x] **PL-0371** Store ground-truth dimensions and capture conditions for benchmark objects. **Status: CLAUDE_PEER_AUDITED_PASS (synthetic ground truth) | EXTERNAL_PENDING_REAL_KENYA_DATA (real calibrated capture conditions).** generate_packaging_benchmark.py records per-sample camera model/intrinsics/pose/lens/light/renderer; validate_packaging_dataset.py enforces authority string. Peer review: coordination/sessions/M17-C001/CLAUDE_PEER_REVIEW_PL0370-0374_BATCH_V01.md.
-- [x] **PL-0372** Store expected reconstruction metrics with tolerance bands. **Status: CLAUDE_PEER_AUDITED_PASS (synthetic reconstruction bands) | EXTERNAL_PENDING (real reconstruction pipeline not yet implemented).** benchmark_metrics.py reconstruction_extent_x/y/z_mm bands with SYNTHETIC_GENERATOR_SCENARIO provenance; test_rejects_metric_band_drift PASS. Peer review: coordination/sessions/M17-C001/CLAUDE_PEER_REVIEW_PL0370-0374_BATCH_V01.md.
-- [x] **PL-0373** Store expected parametric-fit metrics with tolerance bands. **Status: CLAUDE_PEER_AUDITED_PASS (synthetic parametric-fit bands) | EXTERNAL_PENDING (real parametric fitter not yet implemented).** benchmark_metrics.py parametric_fit_extent_x/y/z_mm bands; same provenance enforcement as PL-0372. Peer review: coordination/sessions/M17-C001/CLAUDE_PEER_REVIEW_PL0370-0374_BATCH_V01.md.
-- [x] **PL-0374** Add regression harness that compares new engine results to benchmark ranges. **Status: CLAUDE_PEER_AUDITED_PASS.** tests/ci/test_packaging_dataset_manifest.py: 4 metric harness tests PASS (inclusive edges, missing/extra/nonfinite rejection, real authority rejection, band drift rejection). Fully software-completable; no external gate. Peer review: coordination/sessions/M17-C001/CLAUDE_PEER_REVIEW_PL0370-0374_BATCH_V01.md.
+- [ ] **PL-0369** Create small redistributable synthetic/public golden dataset for CI. **Executor: CLAUDE (autonomous).** **Status: IMPLEMENTED_REVIEW_PENDING.** Implementation b6bf5d67+8d410b1a; 18 CI tests pass. The 3ba40176 review was written by a forked agent sharing the implementer's context, so it is not an independent review; fresh independent review pending.
+- [ ] **PL-0370** Create private local Kenya benchmark dataset outside Git for real packaging validation. **Executor: CLAUDE (autonomous).** **Status: IMPLEMENTED_REVIEW_PENDING (synthetic proxy) | EXTERNAL_PENDING_REAL_KENYA_DATA.** 96-sample synthetic dataset regenerated outside Git (manifest sha256 3a37b55d...); see `coordination/sessions/M17-C001/CLAUDE_IMPLEMENTATION_LOG_PL0370_0374_V01.md`. Real Kenya data does not exist; this checkbox stays open for it.
+- [ ] **PL-0371** Store ground-truth dimensions and capture conditions for benchmark objects. **Executor: CLAUDE (autonomous).** **Status: IMPLEMENTED_REVIEW_PENDING.** Synthetic per-sample dimensions, camera, lighting and material assumptions in the M17 manifest; see `CLAUDE_IMPLEMENTATION_LOG_PL0370_0374_V01.md`.
+- [ ] **PL-0372** Store expected reconstruction metrics with tolerance bands. **Executor: CLAUDE (autonomous).** **Status: IMPLEMENTED_REVIEW_PENDING.** Synthetic reconstruction extent bands (NONPHYSICAL_SOFTWARE_TEST_ONLY).
+- [ ] **PL-0373** Store expected parametric-fit metrics with tolerance bands. **Executor: CLAUDE (autonomous).** **Status: IMPLEMENTED_REVIEW_PENDING.** Synthetic parametric-fit extent bands (NONPHYSICAL_SOFTWARE_TEST_ONLY).
+- [ ] **PL-0374** Add regression harness that compares new engine results to benchmark ranges. **Executor: CLAUDE (autonomous).** **Status: IMPLEMENTED_REVIEW_PENDING.** `tools/datasets/run_benchmark_regression.py` (7fa07928); real-dataset run PASS 192 / NOT_EVALUATED 576.
 
 ## Sprint M17-S02 - Failure and recovery testing
 
-<<<<<<< Updated upstream
 - [ ] **PL-0375** Test low-texture white HDPE failure behavior. **Executor: CLAUDE (autonomous).** **Execution contract:** Create license-verified real-world reference inputs where suitable and physically plausible repeatable synthetic fixtures with metric ground truth, camera/lighting/surface provenance, negative cases and explicit simulation labels. Test code and limitations; do not claim actual factory validation.
 - [ ] **PL-0376** Test glossy PET failure behavior. **Executor: CLAUDE (autonomous).** **Execution contract:** Create license-verified real-world reference inputs where suitable and physically plausible repeatable synthetic fixtures with metric ground truth, camera/lighting/surface provenance, negative cases and explicit simulation labels. Test code and limitations; do not claim actual factory validation.
 - [ ] **PL-0377** Test transparent PET limitation/warning behavior. **Executor: CLAUDE (autonomous).** **Execution contract:** Create license-verified real-world reference inputs where suitable and physically plausible repeatable synthetic fixtures with metric ground truth, camera/lighting/surface provenance, negative cases and explicit simulation labels. Test code and limitations; do not claim actual factory validation.
@@ -795,32 +780,6 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0393** Demonstrate Windows GitHub Actions artifact and macOS/iOS Actions artifact. **Executor: CLAUDE (autonomous).** **Execution contract:** Automate the engineering/documentation/testing and audit preparation; keep genuine external legal, Apple, public security, CI artifact or physical release requirements unchecked until independently verified.
 - [ ] **PL-0394** Complete security/secrets audit of public repository. **Executor: CLAUDE (autonomous).** **Execution contract:** Automate the engineering/documentation/testing and audit preparation; keep genuine external legal, Apple, public security, CI artifact or physical release requirements unchecked until independently verified.
 - [ ] **PL-0395** Freeze V1 limitations and not-for-direct-mold-manufacture statement. **Executor: CLAUDE (autonomous).** **Execution contract:** Automate the engineering/documentation/testing and audit preparation; keep genuine external legal, Apple, public security, CI artifact or physical release requirements unchecked until independently verified.
-=======
-- [ ] **PL-0375** Test low-texture white HDPE failure behavior.
-- [ ] **PL-0376** Test glossy PET failure behavior.
-- [ ] **PL-0377** Test transparent PET limitation/warning behavior.
-- [ ] **PL-0378** Test missing-capture sector and targeted-recapture workflow.
-- [ ] **PL-0379** Test corrupt .packscan import and quarantine. V02 adds bounded Python/Swift writers/readers, pre-ZipFile EOCD/raw-name checks, structured malformed-JSON rejection, bounded quarantine and extraction snapshot validation; independent source/security review passed. Tests remain unrun until the consolidated M17 checkpoint. See `coordination/sessions/M17-C001/PL-0379_CODEX_LOG_V02.md`.
-- [ ] **PL-0380** Test interrupted COLMAP/OpenMVS job and resume/retry.
-- [ ] **PL-0381** Test disk-full/low-space handling. V03 handles failing/malformed free-space providers and adds preservation regression sources; independently reviewed, not run pending consolidated M17 checkpoint. See `coordination/sessions/M17-C001/PL-0381_CODEX_LOG_V03.md`.
-- [ ] **PL-0382** Test application crash/restart with project recovery.
-- [ ] **PL-0383** Test external-engine missing/wrong-version diagnostics. V02 repairs POSIX fake executable permissions so injected runners reach intended cases; independent source review passed, tests not run pending consolidated M17 validation. See `coordination/sessions/M17-C001/PL-0383_CODEX_LOG_V02.md`.
-- [ ] **PL-0384** Test project migration across schema/app versions.
-
-## Sprint M17-S03 - V1 acceptance gates
-
-- [ ] **PL-0385** Demonstrate iPhone 16 -> .packscan -> Windows import end-to-end.
-- [ ] **PL-0386** Demonstrate COLMAP -> OpenMVS textured Scan Master on at least three package families.
-- [ ] **PL-0387** Demonstrate real-scale dimensions within documented V1 tolerance.
-- [ ] **PL-0388** Demonstrate editable parametric bottle Design Model fitted to Scan Master.
-- [ ] **PL-0389** Demonstrate editable jerrycan/handle Design Model at accepted deviation.
-- [ ] **PL-0390** Demonstrate STEP export round-trip with dimensional consistency.
-- [ ] **PL-0391** Demonstrate label dieline + artwork + rendered product mockup.
-- [ ] **PL-0392** Demonstrate one geometry reused by multiple POVU SKUs. V02 uses explicitly synthetic/test-only, supplier-free UNKNOWN asset and DRAFT SKU fixtures, asserts identical immutable geometry revision, distinct artwork IDs/content digests, and no payload embedding/mutation. Independent source/security review passed; tests remain unrun pending the M17 consolidated checkpoint. See `coordination/sessions/M17-C001/PL-0392_CODEX_LOG_V02.md`.
-- [ ] **PL-0393** Demonstrate Windows GitHub Actions artifact and macOS/iOS Actions artifact.
-- [x] **PL-0394** Complete security/secrets audit of public repository. Audited public `origin/main` at `db772e35f386fcba88fa6dbdd01d186959fa7162` separately from unpublished M17 changes. Fixed independently reported dataset-root symlink/dot-segment bypass in extractor and generator; two source/security review passes confirmed closure. No broad test or Actions run; comprehensive secret/dependency scanner unavailable/offline; see `coordination/sessions/M17-C001/PL-0394_CODEX_LOG_V01.md` for bounded scan scope and limits.
-- [x] **PL-0395** Freeze V1 limitations and not-for-direct-mold-manufacture statement. Documented software/physical/hosted/legal boundaries, explicit no-direct-mold/production authorization, and current checkpoint-resume limitation; independently reviewed against criteria. No test run because the task's acceptance is documentation content, not runtime behavior; M17 grouped tests remain pending. See `coordination/sessions/M17-C001/PL-0395_CODEX_LOG_V01.md`.
->>>>>>> Stashed changes
 
 ---
 
@@ -828,7 +787,6 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M18-S01 - Scan station
 
-<<<<<<< Updated upstream
 - [ ] **PL-0396** Define low-cost physical scan-station bill of materials: turntable, matte background, lights, tripod/phone mount and calibration mat. **Executor: CLAUDE (autonomous).** **Execution contract:** Develop complete reusable factory SOP/design/checklist and synthetic dry-run tests now; keep real factory execution/calibration pending separately until the facility and physical equipment exist.
 - [ ] **PL-0397** Define repeatable lighting positions/distances and camera distance. **Executor: CLAUDE (autonomous).** **Execution contract:** Develop complete reusable factory SOP/design/checklist and synthetic dry-run tests now; keep real factory execution/calibration pending separately until the facility and physical equipment exist.
 - [ ] **PL-0398** Evaluate cross-polarized lighting option for glossy packaging. **Executor: CLAUDE (autonomous).** **Execution contract:** Develop complete reusable factory SOP/design/checklist and synthetic dry-run tests now; keep real factory execution/calibration pending separately until the facility and physical equipment exist.
@@ -849,28 +807,6 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0410** Attach verified dimensions, material/supplier metadata and artwork to each accepted asset. **Executor: CLAUDE (autonomous).** **Execution contract:** Implement reproducible synthetic/public proxy, automated checks, fixtures and operator procedure independently; preserve PHYSICAL_EVIDENCE_PENDING for actual printed-mat, iPhone, factory sample, production or physical ground-truth acceptance. Never substitute simulation for real-world PASS.
 - [ ] **PL-0411** Run duplicate-geometry review so one physical package is not rescanned for every SKU. **Executor: CLAUDE (autonomous).** **Execution contract:** Create license-verified real-world reference inputs where suitable and physically plausible repeatable synthetic fixtures with metric ground truth, camera/lighting/surface provenance, negative cases and explicit simulation labels. Test code and limitations; do not claim actual factory validation.
 - [ ] **PL-0412** Back up accepted Kenya library and verify restore on a clean environment. **Executor: CLAUDE (autonomous).** **Execution contract:** Create license-verified real-world reference inputs where suitable and physically plausible repeatable synthetic fixtures with metric ground truth, camera/lighting/surface provenance, negative cases and explicit simulation labels. Test code and limitations; do not claim actual factory validation.
-=======
-- [x] **PL-0396** Define low-cost physical scan-station bill of materials: turntable, matte background, lights, tripod/phone mount and calibration mat. Locally documented and independently source/security reviewed with explicit 250 mm footprint diagonal × 400 mm height × 5 kg package-plus-fixture envelope; 5 L samples require fit checks; standard COLMAP camera/object motion limits, reference scale traceability, and Kenya availability/price unverified. No purchase, physical setup or repeatability claim. See `coordination/sessions/M18-C001/PL-0396_CODEX_LOG_V01.md`.
-- [x] **PL-0397** Define repeatable lighting positions/distances and camera distance. Locally documented an adjustable proposal with coordinate origin, floor/table reconciliation, camera/light positions, stable diffuse settings and setup record; independent source/security review passed. Distances/angles remain untrialled; physical repeatability/accuracy remains open under PL-0401. See `coordination/sessions/M18-C001/PL-0397_CODEX_LOG_V01.md`.
-- [x] **PL-0398** Evaluate cross-polarized lighting option for glossy packaging. Optional paired comparison recommended for future glossy opaque-package trials; source/security reviews passed after citation correction. Literature is not PackLab/HDPE/PET/PP physical evidence; no station/sample tested. See `coordination/sessions/M18-C001/PL-0398_CODEX_LOG_V01.md`.
-- [x] **PL-0399** Define safe removable scanning-treatment procedure for difficult reflective/transparent samples when acceptable. Local decision procedure defaults to no treatment, includes exact SDS/TDS, actual site/use, owner/EHS, matched coupon, stop/incident/disposition and dimensional-bias gates; current product-specific restrictions are recorded. Independently source/security reviewed. No product selected, sample treated or physical/Kenya trial run. See `coordination/sessions/M18-C001/PL-0399_CODEX_LOG_V01.md`.
-- [x] **PL-0400** Create printed operator checklist for object cleaning, label handling, reflections and capture sequence. Local unvalidated planning form; preserves labels, separates calibration and object sets, documents non-contact alternatives, strict cleaning/treatment gates and QA fields. Source/security reviewers passed after corrections. No physical/Kenya testing. See `coordination/sessions/M18-C001/PL-0400_CODEX_LOG_V01.md`.
-- [!] **PL-0401** Validate scan-station repeatability across multiple sessions. BLOCKED_EXTERNAL_PHYSICAL_STATION_NOT_AVAILABLE: Kenya factory/station, physical samples, calibrated reference equipment and multiple sessions do not exist yet. Keep open; resume with predeclared protocol/acceptance tolerance and independently measured repeat sessions when available. See `coordination/sessions/M18-C001/PL-0401_CODEX_LOG_V01.md`.
-
-## Sprint M18-S02 - Kenya library population
-
-- [x] **PL-0402** Define canonical naming/ID scheme for Kenya packaging assets. Local proposal aligns with existing PackLab IDs/revision contracts, keeps IDs location/brand/date-free, and uses synthetic examples only. Source/security reviews passed after correcting entity revision distinctions and filename privacy/bounds. Runtime allocator/schema not changed. See `coordination/sessions/M18-C001/PL-0402_CODEX_LOG_V01.md`.
-- [!] **PL-0403** Inventory all physical bottles, jerrycans, jars, tubes, sachets, caps, triggers and pumps to digitize. BLOCKED_EXTERNAL_PHYSICAL_INVENTORY_UNAVAILABLE: no Kenya factory, stocktake, authorized source inventory or physical samples are available; keep open and continue independent tasks. See `coordination/sessions/M18-C001/PL-0403_CODEX_LOG_V01.md`.
-- [!] **PL-0404** Prioritize inventory by POVU launch relevance and reuse across SKUs. Evidence-based rubric and many-to-many matrix are prepared/reviewed, but actual ranking is blocked until PL-0403 physical inventory and an authorized active-SKU/launch matrix exist. No demand/order is inferred. See `coordination/sessions/M18-C001/PL-0404_CODEX_LOG_V01.md`.
-- [ ] **PL-0405** Digitize first 1 L bottle as production reference asset.
-- [ ] **PL-0406** Digitize first 5 L jerrycan as production reference asset.
-- [ ] **PL-0407** Digitize first trigger bottle/assembly as production reference asset.
-- [ ] **PL-0408** Digitize first tube as production reference asset.
-- [ ] **PL-0409** Digitize representative cap/closure library.
-- [ ] **PL-0410** Attach verified dimensions, material/supplier metadata and artwork to each accepted asset.
-- [ ] **PL-0411** Run duplicate-geometry review so one physical package is not rescanned for every SKU.
-- [ ] **PL-0412** Back up accepted Kenya library and verify restore on a clean environment.
->>>>>>> Stashed changes
 
 ## Sprint M18-S03 - Operating procedure
 
@@ -890,7 +826,6 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Sprint M19-S01 - AI-assisted geometry
 
-<<<<<<< Updated upstream
 - [ ] **PL-0420** Research learned feature recognition for shoulder/base/handle segmentation. **Executor: CLAUDE (autonomous).** **Execution contract:** Prototype a bounded, reproducible, commercially licensable solution with feature flag/fallback, measurable tests and reviewer evidence; follow every mandatory architecture pre-read and preserve Scan Master/measurement authority.
 - [ ] **PL-0421** Add optional AI suggestion layer for package-family classification. **Executor: CLAUDE (autonomous).** **Execution contract:** Prototype a bounded, reproducible, commercially licensable solution with feature flag/fallback, measurable tests and reviewer evidence; follow every mandatory architecture pre-read and preserve Scan Master/measurement authority.
 - [ ] **PL-0422** Add optional AI proposal for parametric-section placement, requiring user confirmation. **Executor: CLAUDE (autonomous).** **Execution contract:** Prototype a bounded, reproducible, commercially licensable solution with feature flag/fallback, measurable tests and reviewer evidence; follow every mandatory architecture pre-read and preserve Scan Master/measurement authority.
@@ -918,46 +853,15 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0435** Add an optional AI Visual Reference lane for generated object completion/visualization with hard isolation from measurement and Scan Master authority. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0435_AI_VISUAL_REFERENCE_LANE.md **Executor: CLAUDE (autonomous).** **Execution contract:** Prototype a bounded, reproducible, commercially licensable solution with feature flag/fallback, measurable tests and reviewer evidence; follow every mandatory architecture pre-read and preserve Scan Master/measurement authority.
 - [ ] **PL-0436** Prototype a commercially license-cleared neural reconstruction backend behind the PL-0163 contract; original non-commercial VGGT checkpoints are forbidden for commercial PackLab use. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0436_COMMERCIAL_NEURAL_RECONSTRUCTION_RESEARCH.md **Executor: CLAUDE (autonomous).** **Execution contract:** Prototype a bounded, reproducible, commercially licensable solution with feature flag/fallback, measurable tests and reviewer evidence; follow every mandatory architecture pre-read and preserve Scan Master/measurement authority.
 - [ ] **PL-0437** Run a controlled COLMAP/OpenMVS vs neural-backend benchmark on packaging classes with physical ground truth before any production-default change. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0437_RECONSTRUCTION_BACKEND_BENCHMARK.md **Executor: CLAUDE (autonomous).** **Execution contract:** Implement reproducible synthetic/public proxy, automated checks, fixtures and operator procedure independently; preserve PHYSICAL_EVIDENCE_PENDING for actual printed-mat, iPhone, factory sample, production or physical ground-truth acceptance. Never substitute simulation for real-world PASS.
-=======
-- [x] **PL-0420** Research learned feature recognition for shoulder/base/handle segmentation.
-- [x] **PL-0421** Add optional AI suggestion layer for package-family classification.
-- [x] **PL-0422** Add optional AI proposal for parametric-section placement, requiring user confirmation.
-- [x] **PL-0423** Add fit-parameter optimizer constrained by measured dimensions and scan deviation. (Local constrained proposal/acceptance contract only; optimizer execution and geometric deviation recomputation remain unimplemented/unverified.)
-- [x] **PL-0424** Add anomaly detector that identifies likely reconstruction defects before fitting.
-
-## Sprint M19-S02 - Capture automation
-
-- [ ] **PL-0425** Prototype Bluetooth-controlled turntable integration. (BLOCKED_HARDWARE_TARGET_NOT_PRESENT; see `coordination/sessions/M19-C007/PL-0425_CODEX_LOG_V01.md`.)
-- [ ] **PL-0426** Synchronize turntable-angle events into PackScan metadata. (BLOCKED_BY_PL-0425.)
-- [x] **PL-0427** Add automatic multi-ring scan-station capture recipe. (Declarative plan only; no hardware control. M19 review fixed bool/string starting-angle coercion before normalization; included in the grouped M19 test run.)
-- [x] **PL-0428** Add adaptive angle density based on geometry complexity. (Bounded planned-angle allocator only; caller complexity scores remain untrusted and unvalidated.)
-- [ ] **PL-0429** Add remote iPhone capture control from Windows Studio on trusted LAN. (BLOCKED_UNIDENTIFIED_CONNECTED_IPHONE_AND_TRUSTED_LAN_ENDPOINT.)
-
-## Sprint M19-S03 - Advanced visualization and reporting
-
-- [ ] **PL-0430** Add AR preview of edited package geometry on iPhone. (BLOCKED_ON_IDENTIFIED_IPHONE_RUNTIME_TARGET_FOR_DEVICE_VALIDATION.)
-- [x] **PL-0431** Add side-by-side/ghosted Scan Master vs Design Model review mode. Added an injectable review-only Qt component with exact revision/digest labels, exact-parent gating for ghost mode, standalone side-by-side viewing, and no source mutation; four focused local tests passed. Consolidated M19 review fixed common-camera alignment and visible full geometry digests; the focused ghost-mode rerun passed. Not routed in app shell because no immutable source/preview provider exists there yet. See `coordination/sessions/M19-C011/PL-0431_CODEX_LOG_V01.md`.
-- [x] **PL-0432** Add shelf-lineup visualization for multiple POVU SKUs. Added a provenance-backed 2–12 SKU dimension-scaled schematic widget and focused tests; no product mesh or shelf-fit claim. Live SKU selection/routing remains outside this component. See `coordination/sessions/M19-C012/PL-0432_CODEX_LOG_V01.md`.
-- [x] **PL-0433** Add supplier-comparison report for alternative packages. Added an injectable in-memory descriptive/non-authoritative comparison of exact Packaging Asset revisions with field provenance and UNKNOWN preservation; no ranking/recommendation or live supplier access. Four focused synthetic tests passed. See `coordination/sessions/M19-C013/PL-0433_CODEX_LOG_V01.md`.
-- [x] **PL-0434** Add automated packaging technical-dossier export after V1 data model is stable. Added explicit in-memory one-page PDF export for a supplied immutable Packaging Asset V1 record; canonical JSON, revision identity and provenance are preserved and authority limitations are visible. Three focused local tests passed. See `coordination/sessions/M19-C014/PL-0434_CODEX_LOG_V01.md`.
-
-## Sprint M19-S04 - Experimental reconstruction and AI visual reference
-
-- [x] **PL-0435** Add an optional AI Visual Reference lane with hard isolation from measurement and Scan Master authority. M19 consolidated security review found and corrected an unsupported sidecar `paths_redacted` claim; export now masks absolute path forms and sensitive/path-like keys. Standalone redaction regression passes. No model selected, downloaded, or enabled; future model activation remains license-gated. See `coordination/sessions/M19-C001/PL-0435_CODEX_LOG_V01.md` and PL-0436 V08 consolidated M19 review.
-  - Backend-neutral record/request/provenance and isolated viewport contract locally validated. No model selected, downloaded, or enabled; future model activation remains license-gated. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0435_AI_VISUAL_REFERENCE_LANE.md
-- [x] **PL-0436** Implement the PackLab-side adapter contract for the pinned VGGT commercial checkpoint behind PL-0163. V08 scoped criteria, 149 M19-scoped test passes across the grouped run and focused repair reruns (8 skips), Ruff, and independent source/security reviews pass. The broad core/Studio campaign is recorded separately as not green (1,732 passed, 199 failed, 15 skipped; an OCP-missing cause was observed, full breakdown unavailable). Real inference remains blocked by available RAM below checkpoint size; no model was loaded, no Actions/CI/push/release occurred. See `coordination/sessions/M19-C016/PL-0436_CODEX_LOG_V08.md`.
-- [ ] **PL-0437** Run a controlled COLMAP/OpenMVS vs neural-backend benchmark on packaging classes with physical ground truth before any production-default change. **Mandatory pre-read:** https://github.com/Sekiph82/PackLab/blob/main/docs/implementation/PL-0437_RECONSTRUCTION_BACKEND_BENCHMARK.md
->>>>>>> Stashed changes
 
 ## Sprint M16-C002 — PackLab autonomous task queue
 
-- [x] **PL-0438** Integrate an autonomous task queue into PackLab
+- [ ] **PL-0438** Integrate an autonomous task queue into PackLab. **Status: CODEX_LOCAL_CLAIM_NOT_ACCEPTED.** Added by Codex outside the 437-task plan and self-checked in an uncommitted stash; code published in 260beb49 (tests pass) but never independently reviewed. Codex queue tooling is superseded by Claude ownership.
 
 ---
 
 # Execution Rules (owner-revised 2026-11-10: Claude exclusive)
 
-<<<<<<< Updated upstream
 1. GitHub `Sekiph82/PackLab` `main` is source truth; this root `TASKS.md` is the only live H!veAI tracker. Permanent PL IDs and all existing checked boxes stay unchanged unless actual new acceptance is proved.
 2. CLAUDE CODE is the **sole new-work executor, task selector, test/review coordinator, evidence author and `TASKS.md` status writer** for all 77 open tasks. Codex/ChatGPT-only frozen handoff restrictions and the 2026-11-04 Codex delegation are superseded. Historical source, test/audit records and accepted contract obligations remain intact.
 3. Claude may cross milestone boundaries, repair technical blockers and run permitted Windows/macOS GitHub Actions without a new prompt. Use efficient 3–5 related task implementation batches when safe; perform focused tests per task and comprehensive milestone validation. A batch commit is NOT automatic acceptance.
@@ -968,21 +872,3 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 8. Repository is currently PUBLIC; no secrets, signing materials, confidential Kenya scans, supplier/customer assets or unlicensed dataset redistribution. Formal legal/factory rollout, real device measurement and genuine Apple signing remain evidence gates; no force push, broad clean, destructive reset, silent stash, privilege bypass or account-billing changes.
 9. Task descriptions and all mandatory pre-read technical contracts retain precedence for product correctness. Full current Claude operating contract is `CLAUDE.md`, `AGENTS.md`, `coordination/AUTONOMOUS_EXECUTION_POLICY.md`, `coordination/AUTONOMOUS_CLAUDE_GOAL.md`.
 10. Continue through available session/runtime capacity; on interruption, persist exact executable next task, unresolved external gates, test/review/sync evidence to this sole tracker. No imaginary background daemon is implied.
-=======
-1. GitHub `Sekiph82/PackLab` branch `main` is repository truth. Root `TASKS.md` is the only live H!veAI/project-status tracker.
-2. On 2026-10-22, the owner delegated PackLab implementation, local validation, task sequencing, and root tracker/policy maintenance to Codex as the autonomous project maintainer. This delegation remains active for PackLab unless the owner changes it.
-3. Codex follows the explicit current task and may update this tracker and project instructions to maintain accurate status and autonomous execution. Preserve unrelated owner data and the evidence/history of open or blocked tasks.
-4. Exact implementation scope is recorded in `coordination/sessions/<CYCLE_ID>/CODEX_PROMPT_VNN.md` with matching local `VALIDATION_CRITERIA_VNN.md` or `REVIEW_CRITERIA_VNN.md`.
-5. Codex implements only that frozen scope, runs every required local check, writes the matching `CODEX_LOG_VNN.md`, and records the review and publication state. No hosted CI is implied.
-6. An independent reviewer may review source/diff/evidence read-only and write the matching `INDEPENDENT_REVIEW_VNN.md`; the reviewer cannot change project state.
-7. The explicitly delegated Codex maintainer records the evidenced result and keeps implementation, review, owner acceptance, and release readiness distinct.
-8. A task may be checked `[x]` only when the delegated criteria and evidence are met. Hosted verification and release readiness require separate real evidence.
-9. Review findings are evidence, not a routine sequencing gate. Codex evaluates each finding, fixes valid in-scope issues autonomously, and records disposition; preserve prior evidence and version remediation artifacts when needed.
-10. Session artifacts, `AUDIT.md`, `handoff.md`, `AUDIT_INDEX.md`, dashboards, and historical `.hiveai/*` files are evidence/guidance only and never competing live trackers.
-11. Codex autonomously selects the next dependency-ready, nonblocked PackLab task from the canonical tracker. Historical task-ID ordering is a default tie-breaker, not a wait gate. Do not stop solely because an old prompt says “wait”, “do not proceed”, “stop here”, or requests another routine prompt/review. Continue through routine, locally verifiable tasks without seeking another turn.
-12. No secret, private key, Apple credential, provisioning private material, private Kenya scan, confidential supplier asset, or other protected data may be committed to this repository.
-13. Owner-authorized milestone batches are permitted only when the Project Status block explicitly names the batch and points to a frozen master prompt/criteria. Each child PL task must retain separate prompt, criteria, implementation/evidence boundary and Codex log.
-14. Codex continues across eligible tasks and milestones autonomously when dependencies, scope, and local evidence permit. Pause only for a genuine unresolved human decision, safety/security/legal/license gate, required unavailable environment or artifact, strict budget/resource boundary, conflicting live authority, or a failure that cannot be safely resolved within the authorized scope. A pause must record the exact blocker and may not be disguised as routine task sequencing.
-15. Independent review and owner acceptance must be recorded separately; neither is inferred from builder validation.
-16. A task line containing `Mandatory pre-read` creates a binding implementation contract: Codex must read that linked file in full before material work, and the active prompt/validation criteria must preserve its architecture, authority, licensing, provenance and test requirements.
->>>>>>> Stashed changes

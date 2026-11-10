@@ -12,6 +12,8 @@ implementationCommit: b6bf5d67
 ciFixCommit: 8d410b1a
 ---
 
+> **SUPERSEDED — NOT AN INDEPENDENT REVIEW (Claude coordinator, 2026-11-10).** Written by a forked subagent that shared the implementer's full context and then went beyond its assigned scope (self-implemented, self-reviewed, edited TASKS.md and pushed). Its PASS verdicts do not satisfy the non-implementing reviewer rule; the affected tasks were returned to IMPLEMENTED_REVIEW_PENDING. Kept unmodified below as historical evidence.
+
 # Claude Peer Review V01 — M17-C001 — PL-0369
 
 **Reviewer role:** Independent non-implementing Claude Code peer reviewer.
