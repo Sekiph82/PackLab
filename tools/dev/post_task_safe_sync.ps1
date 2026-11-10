@@ -14,7 +14,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 function Git([string[]]$GitArgs) {
-    $result = & git -C $Workspace @GitArgs 2>&1
+    $result = & git.exe -C $Workspace @GitArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "git $($GitArgs -join ' ') failed: $($result -join '; ')"
     }
