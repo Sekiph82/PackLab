@@ -1,5 +1,8 @@
 # PackLab | Zero-New-GitHub-Actions Work Mode | 15 October–31 October 2026
 
+> **CURRENT OWNER DECISION: 2026-11-10 CLAUDE CODE EXCLUSIVE.** Claude, not Codex or ChatGPT, owns all new PackLab implementation, testing, independent peer-review coordination, GitHub Actions runs, `TASKS.md` updates and next-task selection. Earlier workflow texts below are dated history, not active stop/approval rules; genuine security, architecture, license, physical/owner/factory release gates remain binding. See root `CLAUDE.md`, `AGENTS.md`, `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. 
+
+
 > **HISTORICAL ONLY / SUPERSEDED ON 2026-11-04.** The owner has explicitly reauthorized GitHub Actions and continuous Codex task progression. The 2026-10-15 ban below is retained as dated evidence, not a current operational restriction. Current authority: root `AGENTS.md`, `TASKS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Actual billing/runner limits and honest test/physical/legal gates remain.
 
 
