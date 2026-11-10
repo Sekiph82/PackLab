@@ -427,3 +427,115 @@ def test_worker_wait_rejects_nonzero_exit() -> None:
 
     with pytest.raises(VGGTWorkerError, match="worker failed"):
         _wait_for_vggt_worker(process, CancelToken(), 10)
+
+
+# --- Review mutants N3, N4, N8, N9 (PL-0436): isolate each worker/engine pin. ---
+
+
+def _pinned_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, **overrides):
+    """A request that passes every earlier check, using a tiny synthetic checkpoint.
+
+    The real pins (5 GB checkpoint, upstream git checkout) are patched to synthetic values
+    so the later checks can be exercised in isolation.
+    """
+    import hashlib
+    import subprocess as subprocess_module
+
+    from packlab_core import vggt_worker
+
+    checkpoint = tmp_path / "synthetic.safetensors"
+    checkpoint.write_bytes(b"synthetic-checkpoint-not-a-model")
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    monkeypatch.setattr(vggt_worker, "_PINNED_CHECKPOINT_SIZE", checkpoint.stat().st_size)
+    monkeypatch.setattr(vggt_worker, "_PINNED_CHECKPOINT_SHA256", digest)
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+
+    def fake_git(command, **_kwargs):
+        return vggt_worker._PINNED_UPSTREAM_COMMIT + "\n" if "rev-parse" in command else ""
+
+    monkeypatch.setattr(subprocess_module, "check_output", fake_git)
+    image = tmp_path / "img.png"
+    image.write_bytes(b"synthetic-image")
+    work = tmp_path / "work"
+    work.mkdir()
+    request = {
+        "schema": "packlab.vggt-worker-request.v1",
+        "upstream_root": str(upstream),
+        "upstream_commit": vggt_worker._PINNED_UPSTREAM_COMMIT,
+        "checkpoint_path": str(checkpoint),
+        "checkpoint_size_bytes": checkpoint.stat().st_size,
+        "checkpoint_sha256": digest,
+        "required_available_memory_bytes": checkpoint.stat().st_size + 1,
+        "images": [
+            {
+                "asset_id": "images/000.png",
+                "path": str(image),
+                "sha256": hashlib.sha256(b"synthetic-image").hexdigest(),
+                "size_bytes": len(b"synthetic-image"),
+            }
+        ],
+        "result_path": str(work / "result.json"),
+        "point_cloud_path": str(work / "points.ply"),
+    }
+    request.update(overrides)
+    path = work / "request.json"
+    path.write_text(json.dumps(request), encoding="utf-8")
+    return path, request
+
+
+def test_pinned_synthetic_request_is_accepted(tmp_path: Path, monkeypatch) -> None:
+    path, _request = _pinned_request(tmp_path, monkeypatch)
+    assert read_worker_request(path)["schema"] == "packlab.vggt-worker-request.v1"
+
+
+def test_worker_rejects_a_different_upstream_commit(tmp_path: Path, monkeypatch) -> None:
+    # N3: a well-formed but different commit must not reach the git check.
+    path, _request = _pinned_request(tmp_path, monkeypatch, upstream_commit="b" * 40)
+    with pytest.raises(WorkerRequestError, match="not the PackLab pin"):
+        read_worker_request(path)
+
+
+def test_worker_rejects_output_paths_outside_its_private_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # N4: outputs must live next to the request file, nowhere else.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    path, _request = _pinned_request(
+        tmp_path, monkeypatch, result_path=str(elsewhere / "result.json")
+    )
+    with pytest.raises(WorkerRequestError, match="outside its private request directory"):
+        read_worker_request(path)
+
+
+def test_worker_rejects_an_image_whose_bytes_differ_from_its_digest(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # N8: same size, different content.
+    path, request = _pinned_request(tmp_path, monkeypatch)
+    Path(request["images"][0]["path"]).write_bytes(b"tampered-image!")
+    with pytest.raises(WorkerRequestError, match="worker image digest differs"):
+        read_worker_request(path)
+
+
+def test_subprocess_engine_rejects_a_wrong_sha_with_the_pinned_size() -> None:
+    # N9: only the SHA differs from the pin.
+    with pytest.raises(ValueError, match="identity or timeout"):
+        VGGTSubprocessWorkspaceEngine(
+            "python.exe",
+            "upstream",
+            "checkpoint.safetensors",
+            "output",
+            expected_checkpoint_size_bytes=5_026_367_224,
+            expected_checkpoint_sha256="0" * 64,
+            memory_budget=VGGTMemoryBudget(5_026_367_224, 1),
+            memory_reader=object(),
+        )
+
+
+def test_worker_still_refuses_existing_or_linked_output_paths(tmp_path: Path, monkeypatch) -> None:
+    path, request = _pinned_request(tmp_path, monkeypatch)
+    Path(request["point_cloud_path"]).write_bytes(b"pre-existing")
+    with pytest.raises(WorkerRequestError, match="output path already exists"):
+        read_worker_request(path)

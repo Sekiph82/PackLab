@@ -364,3 +364,52 @@ def test_vggt_workspace_runtime_rejects_metric_or_untyped_scale(tmp_path) -> Non
     assert "NeuralReconstructionIOError" in run.stage_results[0].failure_reason
     assert not (project / "derived").exists()
     assert list(runtime_output.glob(".packlab-vggt-cameras-*.json")) == []
+
+
+def test_published_manifest_file_carries_the_activation_identity(tmp_path) -> None:
+    # Review P2 (PL-0436): the saved manifest.json used placeholder build/licence values.
+    import json
+
+    project, runtime_output, digests = _workspace(tmp_path)
+    activation = _activation()
+    runtime = VGGTWorkspaceRuntime(
+        project,
+        digests,
+        runtime_output,
+        SyntheticWorkspaceEngine(runtime_output),
+        activation=activation,
+    )
+    backend = VGGTReconstructionBackend(activation, runtime)
+    output = backend.collect(backend.execute(backend.prepare(_job()), CancelToken()))
+    manifest_file = next((project / "derived" / "reconstruction").rglob("manifest.json"))
+    saved = json.loads(manifest_file.read_text(encoding="utf-8"))
+    text = json.dumps(saved)
+    assert activation.checkpoint_sha256 in text
+    assert activation.checkpoint_license_id in text
+    assert "injected-runtime" not in text and "configured-vggt-checkpoint" not in text
+    assert output.backend_build.endswith(activation.checkpoint_sha256)
+    assert output.backend_license == activation.checkpoint_license_id
+
+
+def test_workspace_runtime_rejects_an_incomplete_activation(tmp_path) -> None:
+    from dataclasses import replace
+
+    project, runtime_output, digests = _workspace(tmp_path)
+    with pytest.raises(ValueError, match="activation record is incomplete"):
+        VGGTWorkspaceRuntime(
+            project,
+            digests,
+            runtime_output,
+            SyntheticWorkspaceEngine(runtime_output),
+            activation=replace(_activation(), checkpoint_id="facebook/VGGT-1B"),
+        )
+
+
+def test_non_commercial_checkpoint_id_alone_is_rejected() -> None:
+    # Review mutant N2: the only previous test changed the ID and the hash together.
+    from dataclasses import replace
+
+    record = replace(_activation(), checkpoint_id="facebook/VGGT-1B")
+    assert record.checkpoint_sha256 == _activation().checkpoint_sha256  # only the ID differs
+    assert record.complete is False
+    assert VGGTReconstructionBackend(record).probe().available is False

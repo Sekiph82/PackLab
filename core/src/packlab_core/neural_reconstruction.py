@@ -93,6 +93,17 @@ class VGGTActivationRecord:
         )
 
 
+def _published_identity(activation: VGGTActivationRecord | None) -> tuple[str, str]:
+    """Build/licence strings for manifests; placeholders only without an activation."""
+    if activation is None:
+        return "injected-runtime", "configured-vggt-checkpoint"
+    return (
+        f"{activation.checkpoint_id}@{activation.checkpoint_revision}"
+        f"#sha256:{activation.checkpoint_sha256}",
+        activation.checkpoint_license_id,
+    )
+
+
 class VGGTInferenceRuntime(Protocol):
     """Injected adapter; implementations own image decoding and VGGT calls."""
 
@@ -152,11 +163,24 @@ class VGGTWorkspaceRuntime:
         expected_sha256: Mapping[str, str],
         runtime_output_root: str | Path,
         engine: VGGTWorkspaceEngine,
+        *,
+        activation: VGGTActivationRecord | None = None,
     ) -> None:
+        if activation is not None and (
+            not isinstance(activation, VGGTActivationRecord) or not activation.complete
+        ):
+            raise ValueError("VGGT workspace runtime activation record is incomplete")
+        # When supplied, the published manifest.json carries the real checkpoint identity
+        # and licence instead of placeholders (review P2, PL-0436).
+        self._activation = activation
         self._project_root = Path(project_root)
         self._expected_sha256 = dict(expected_sha256)
         self._runtime_output_root = Path(runtime_output_root)
         self._engine = engine
+
+    @property
+    def activation(self) -> VGGTActivationRecord | None:
+        return self._activation
 
     def available(self) -> bool:
         return (
@@ -278,13 +302,14 @@ class VGGTWorkspaceRuntime:
                 os.fsync(handle.fileno())
             if cancel.cancelled:
                 return self._cancelled_manifest(prepared)
+            build, license_id = _published_identity(self._activation)
             base_manifest = ReconstructionOutputManifest(
                 prepared.spec.project_id,
                 inference.reconstruction_revision,
                 ReconstructionBackendId.NEURAL_EXPERIMENTAL,
                 _ADAPTER_VERSION,
-                "injected-runtime",
-                "configured-vggt-checkpoint",
+                build,
+                license_id,
                 prepared.spec.configuration_digest,
                 prepared.spec.inputs.source_digest,
                 PACKSCAN_CAMERA_CONVENTION,
@@ -421,14 +446,21 @@ class VGGTReconstructionBackend(ReconstructionBackend):
             activation = self._activation
             if activation is None or not activation.complete:
                 raise ValueError("VGGT activation record became incomplete")
+            expected_build, expected_license = _published_identity(activation)
+            # The workspace runtime writes manifest.json to disk; with an activation it must
+            # have written exactly this identity, so the saved and returned manifests agree.
+            # Other injected runtimes report untrusted metadata, which is overwritten below.
+            if isinstance(self._runtime, VGGTWorkspaceRuntime) and (
+                self._runtime.activation is not None
+                and (output.backend_build, output.backend_license)
+                != (expected_build, expected_license)
+            ):
+                raise ValueError("published manifest identity differs from the activation record")
             output = replace(
                 output,
                 backend_version=_ADAPTER_VERSION,
-                backend_build=(
-                    f"{activation.checkpoint_id}@{activation.checkpoint_revision}"
-                    f"#sha256:{activation.checkpoint_sha256}"
-                ),
-                backend_license=activation.checkpoint_license_id,
+                backend_build=expected_build,
+                backend_license=expected_license,
                 authority_class=_AUTHORITY_CLASS,
             )
         except Exception as error:

@@ -73,6 +73,25 @@ def _vggt_worker_environment(
     return environment
 
 
+def _vggt_worker_command(python_executable: Path, request_path: Path) -> list[str]:
+    """Worker command line that cannot import code planted in its working directory.
+
+    ``-P`` stops ``-m`` from prepending the working directory to ``sys.path`` and ``-s``
+    skips the user site-packages, so only PYTHONPATH (pinned core + upstream) and the
+    interpreter's own site-packages are importable.
+    """
+    return [
+        str(python_executable),
+        "-B",
+        "-P",
+        "-s",
+        "-m",
+        "packlab_core.vggt_worker",
+        "--request",
+        str(request_path),
+    ]
+
+
 class VGGTWorkerError(RuntimeError):
     """The isolated local VGGT worker failed its bounded protocol."""
 
@@ -228,15 +247,9 @@ class VGGTSubprocessWorkspaceEngine:
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
             try:
                 process = subprocess.Popen(
-                    [
-                        str(self._python),
-                        "-B",
-                        "-m",
-                        "packlab_core.vggt_worker",
-                        "--request",
-                        str(request_path),
-                    ],
-                    cwd=output_root,
+                    _vggt_worker_command(self._python, request_path),
+                    # Private per-job directory, never the shared output root (review P2).
+                    cwd=work,
                     env=environment,
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,

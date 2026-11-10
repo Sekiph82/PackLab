@@ -285,3 +285,28 @@ def test_lazy_guard_rejects_invalid_or_failed_engine_factory_without_details(
     with pytest.raises(VGGTMemoryAdmissionError, match=message) as error:
         guarded.infer((), CancelToken())
     assert "private local path" not in str(error.value)
+
+
+def test_worker_command_cannot_import_modules_planted_in_its_working_directory(
+    tmp_path: Path,
+) -> None:
+    # Review P2 (PL-0436): `python -m` used to prepend the working directory, so a decoy
+    # package there shadowed the pinned upstream code.
+    import subprocess
+    import sys
+
+    from packlab_core.neural_reconstruction_runtime import _vggt_worker_command
+
+    command = _vggt_worker_command(Path(sys.executable), tmp_path / "request.json")
+    assert command[1:6] == ["-B", "-P", "-s", "-m", "packlab_core.vggt_worker"]
+    (tmp_path / "packlab_decoy_probe.py").write_text("raise SystemExit(42)\n", encoding="utf-8")
+    probe = [*command[:4], "-c", "import packlab_decoy_probe"]
+    result = subprocess.run(probe, cwd=tmp_path, capture_output=True, check=False)
+    assert result.returncode == 1 and b"ModuleNotFoundError" in result.stderr
+    unprotected = subprocess.run(
+        [sys.executable, "-B", "-c", "import packlab_decoy_probe"],
+        cwd=tmp_path,
+        capture_output=True,
+        check=False,
+    )
+    assert unprotected.returncode == 42  # control: without -P the decoy is imported

@@ -254,7 +254,9 @@ def read_worker_request(request_path: str | Path) -> dict[str, Any]:
             or output_path.parent.resolve(strict=True) != request_parent
         ):
             raise WorkerRequestError("worker output path is outside its private request directory")
-        if output_path.exists() or _is_reparse(output_path):
+        # lexists is true for any existing entry, including broken links and junctions.
+        # (_is_reparse() reports True for missing paths, so it rejected every valid request.)
+        if os.path.lexists(output_path):
             raise WorkerRequestError("worker output path already exists")
     return request
 
