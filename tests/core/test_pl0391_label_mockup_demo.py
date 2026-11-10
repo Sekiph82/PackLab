@@ -145,7 +145,9 @@ def test_rendered_mockup_runs_through_the_blender_scene_pipeline(tmp_path: Path)
 def test_front_label_artwork_reads_upright_and_left_to_right(tmp_path: Path) -> None:
     # Review P2-1: artwork rendered rotated 180 degrees. The synthetic 2x2 artwork is
     # red (top-left), green (top-right), blue (bottom-left), white (bottom-right); seen
-    # from the front, the label's corners must show the same layout.
+    # from outside, the label's corners must show the same layout. Note: the "FRONT"
+    # render preset looks from -Y, i.e. at the zone the core labels BACK; the scene smoke
+    # test's first-loop UV check covers all three overlays including the +Y zone and wrap.
     from PySide6.QtGui import QImage
 
     if not BLENDER.is_file():

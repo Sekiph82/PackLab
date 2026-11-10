@@ -777,12 +777,18 @@ def _viewer_orientation(overlay):
     else:
         import math as _math
         theta = (float(geometry["angular_start_radians"]) + float(geometry["angular_end_radians"])) / 2.0
-        if geometry.get("azimuth_direction") != "+Y_TO_PLUS_X":
-            raise ValueError("scene_wrap_azimuth_direction_unsupported")
+        if geometry.get("azimuth_direction") != "+Y_TO_PLUS_X" or [
+            float(c) for c in geometry["axis"]
+        ] != [0.0, 0.0, 1.0]:
+            raise ValueError("scene_wrap_orientation_unsupported")
         normal = [_math.sin(theta), _math.cos(theta), 0.0]
         u_axis = [_math.cos(theta), -_math.sin(theta), 0.0]
         sign = 1.0 if float(geometry["axial_end_mm_unverified"]) >= float(geometry["axial_start_mm_unverified"]) else -1.0
         v_axis = [sign * float(c) for c in geometry["axis"]]
+    # "Up" is only defined for zones whose v axis is vertical and whose normal is not
+    # vertical (e.g. not a top-face label); fail closed rather than guess (review P3-1).
+    if abs(v_axis[2]) < 0.999 or abs(normal[2]) > 1e-6:
+        raise ValueError("scene_artwork_up_direction_undefined")
     viewer_right = [-normal[1], normal[0], 0.0]  # world Z x outward normal
     mirror_u = sum(a * b for a, b in zip(u_axis, viewer_right)) < 0.0
     mirror_v = v_axis[2] > 0.0
