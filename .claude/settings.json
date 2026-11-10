@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit",
+      "Write",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git rev-parse *)",
+      "Bash(git fetch *)",
+      "Bash(git pull --ff-only *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push origin main)",
+      "Bash(git merge --ff-only *)",
+      "Bash(gh auth status)",
+      "Bash(gh run view *)",
+      "Bash(gh workflow list *)",
+      "Bash(gh workflow run *)",
+      "Bash(gh api repos/Sekiph82/PackLab *)",
+      "Bash(python -m pytest *)",
+      "Bash(py -m pytest *)",
+      "Bash(python -m compileall *)",
+      "Bash(uv run *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)",
+      "Bash(pwsh -File *)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File tools/dev/post_task_safe_sync.ps1 *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/.env)",
+      "Read(./**/.env.*)",
+      "Read(./**/*.p8)",
+      "Read(./**/*.p12)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "Bash(git push --force *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean -fdx *)"
+    ]
+  }
+}
