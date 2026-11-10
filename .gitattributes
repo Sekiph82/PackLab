@@ -1,2 +1,3 @@
 tools/packaging/windows_licenses/** text eol=lf
 tools/packaging/windows-runtime-prerequisite.json text eol=lf
+tests/fixtures/studio/legacy_pre_authority_project_v1/** -text
