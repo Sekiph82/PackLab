@@ -21,14 +21,18 @@ class CameraFov:
     vertical_deg: float
 
 
-def fov_from_35mm_equivalent(name: str, focal_mm: float, aspect: tuple[int, int], portrait: bool) -> CameraFov:
+def fov_from_35mm_equivalent(
+    name: str, focal_mm: float, aspect: tuple[int, int], portrait: bool
+) -> CameraFov:
     """FOV for a 35 mm-equivalent focal length on a frame of the given aspect."""
     diag = math.hypot(36.0, 24.0)
     long_mm = diag * aspect[0] / math.hypot(*aspect)
     short_mm = diag * aspect[1] / math.hypot(*aspect)
     long_deg = math.degrees(2 * math.atan(long_mm / 2 / focal_mm))
     short_deg = math.degrees(2 * math.atan(short_mm / 2 / focal_mm))
-    return CameraFov(name, short_deg, long_deg) if portrait else CameraFov(name, long_deg, short_deg)
+    return (
+        CameraFov(name, short_deg, long_deg) if portrait else CameraFov(name, long_deg, short_deg)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +72,11 @@ def _cross(a: Point, b: Point) -> Point:
 
 def camera_position(layout: StationLayout, azimuth_deg: float, height_mm: float) -> Point:
     a = math.radians(azimuth_deg)
-    return (layout.camera_distance_mm * math.sin(a), layout.camera_distance_mm * math.cos(a), height_mm)
+    return (
+        layout.camera_distance_mm * math.sin(a),
+        layout.camera_distance_mm * math.cos(a),
+        height_mm,
+    )
 
 
 def view_angles_deg(camera: Point, target: Point, point: Point) -> tuple[float, float, float]:
@@ -99,9 +107,14 @@ def layout_issues(
     fov: CameraFov,
     *,
     frame_fill_limit: float = 0.9,
-    min_stand_clearance_mm: float = 300.0,
+    min_stand_clearance_mm: float = 450.0,
 ) -> list[str]:
-    """Return human-readable violations; an empty list means the dry-run passed."""
+    """Return human-readable violations; an empty list means the dry-run passed.
+
+    Envelope fill is an angle ratio (|angle| / half-FOV), slightly conservative versus an
+    image-plane tan ratio. Stand clearance compares points, so the default 450 mm stands for
+    an assumed camera-tripod leg spread plus light-stand base radius; use measured values.
+    """
     issues: list[str] = []
     half_h, half_v = fov.horizontal_deg / 2, fov.vertical_deg / 2
     target = (0.0, 0.0, layout.aim_height_mm)
@@ -115,25 +128,42 @@ def layout_issues(
                 for h, v, _ in (view_angles_deg(cam, target, p) for p in envelope)
             )
             if worst > frame_fill_limit:
-                issues.append(f"{pose}: envelope fills {worst:.2f} of half-FOV (> {frame_fill_limit})")
+                issues.append(
+                    f"{pose}: envelope fills {worst:.2f} of half-FOV (> {frame_fill_limit})"
+                )
             for light in layout.lights:
                 for point in light.emitting_points:
                     h, v, depth = view_angles_deg(cam, target, point)
                     if depth > 0 and abs(h) <= half_h and abs(v) <= half_v:
-                        issues.append(f"{pose}: {light.name} emitting surface in frame at ({h:.1f}, {v:.1f}) deg")
+                        issues.append(
+                            f"{pose}: {light.name} emitting surface in frame at ({h:.1f}, {v:.1f}) deg"
+                        )
                         break
             for light in layout.lights:
                 gap = math.dist(cam[:2], light.stand_foot_xy)
                 if gap < min_stand_clearance_mm:
-                    issues.append(f"{pose}: {light.name} stand foot {gap:.0f} mm from camera (< {min_stand_clearance_mm:g})")
+                    issues.append(
+                        f"{pose}: {light.name} stand foot {gap:.0f} mm from camera (< {min_stand_clearance_mm:g})"
+                    )
     return issues
 
 
-def panel(name: str, center: Point, size_mm: float, stand_foot_xy: tuple[float, float]) -> LightFixture:
-    """Horizontal square emitting panel (corners and centre) facing down."""
-    s = size_mm / 2
+def min_stand_clearance_mm(layout: StationLayout) -> float:
+    """Smallest horizontal distance between any camera station and any light-stand foot."""
+    return min(
+        math.dist(camera_position(layout, az, layout.camera_heights_mm[0])[:2], light.stand_foot_xy)
+        for az in layout.camera_azimuths_deg
+        for light in layout.lights
+    )
+
+
+def panel(
+    name: str, center: Point, size_mm: float, stand_foot_xy: tuple[float, float]
+) -> LightFixture:
+    """Horizontal square emitting panel facing down, sampled on a 5 x 5 grid incl. edges."""
     cx, cy, cz = center
-    points = ((cx, cy, cz),) + tuple((cx + dx, cy + dy, cz) for dx in (-s, s) for dy in (-s, s))
+    steps = (-0.5, -0.25, 0.0, 0.25, 0.5)
+    points = tuple((cx + a * size_mm, cy + b * size_mm, cz) for a in steps for b in steps)
     return LightFixture(name, points, stand_foot_xy)
 
 
@@ -142,8 +172,12 @@ def _polar(radius: float, azimuth_deg: float) -> tuple[float, float]:
     return (radius * math.sin(a), radius * math.cos(a))
 
 
-IPHONE_16_MAIN_PORTRAIT = fov_from_35mm_equivalent("iPhone 16 main 26mm-eq portrait", 26.0, (4, 3), True)
-IPHONE_16_MAIN_LANDSCAPE = fov_from_35mm_equivalent("iPhone 16 main 26mm-eq landscape", 26.0, (4, 3), False)
+IPHONE_16_MAIN_PORTRAIT = fov_from_35mm_equivalent(
+    "iPhone 16 main 26mm-eq portrait", 26.0, (4, 3), True
+)
+IPHONE_16_MAIN_LANDSCAPE = fov_from_35mm_equivalent(
+    "iPhone 16 main 26mm-eq landscape", 26.0, (4, 3), False
+)
 
 
 def pl0397_v01_layout() -> StationLayout:
@@ -153,18 +187,39 @@ def pl0397_v01_layout() -> StationLayout:
         x, y = _polar(800.0, azimuth)
         # Vertical 300 mm panel facing the axis; emitting face sampled at centre/edges.
         tx, ty = _polar(150.0, azimuth + 90.0)
-        pts = tuple((x + sx * tx, y + sx * ty, 650.0 + dz) for sx in (-1.0, 0.0, 1.0) for dz in (-150.0, 0.0, 150.0))
+        pts = tuple(
+            (x + sx * tx, y + sx * ty, 650.0 + dz)
+            for sx in (-1.0, 0.0, 1.0)
+            for dz in (-150.0, 0.0, 150.0)
+        )
         return LightFixture(name, pts, (x, y))
 
-    return StationLayout(800.0, (120.0, 200.0, 320.0), tuple(float(a) for a in range(0, 360, 30)), 200.0,
-                         250.0, 400.0, (side_panel("left panel", -45.0), side_panel("right panel", 45.0)))
+    return StationLayout(
+        800.0,
+        (120.0, 200.0, 320.0),
+        tuple(float(a) for a in range(0, 360, 30)),
+        200.0,
+        250.0,
+        400.0,
+        (side_panel("left panel", -45.0), side_panel("right panel", 45.0)),
+    )
 
 
 def pl0397_v02_layout() -> StationLayout:
     """Revised proposal: overhead boom-arm panels, emitting faces above the camera frustum."""
     lights = tuple(
-        panel(name, (*_polar(300.0, az), 1300.0), 300.0, _polar(1100.0, az))
-        for name, az in (("left overhead panel", -90.0), ("right overhead panel", 90.0))
+        panel(name, (*_polar(300.0, az), 1300.0), 300.0, _polar(1300.0, foot_az))
+        for name, az, foot_az in (
+            ("left overhead panel", -90.0, -105.0),
+            ("right overhead panel", 90.0, 105.0),
+        )
     )
-    return StationLayout(800.0, (120.0, 200.0, 320.0), tuple(float(a) for a in range(0, 360, 30)), 200.0,
-                         250.0, 400.0, lights)
+    return StationLayout(
+        800.0,
+        (120.0, 200.0, 320.0),
+        tuple(float(a) for a in range(0, 360, 30)),
+        200.0,
+        250.0,
+        400.0,
+        lights,
+    )

@@ -45,7 +45,14 @@ def test_revised_layout_frames_envelope_without_lights_in_view(fov) -> None:
 
 def test_revised_layout_keeps_margin_for_larger_panels() -> None:
     layout = pl0397_v02_layout()
-    bigger = tuple(panel(light.name, light.emitting_points[0], 500.0, light.stand_foot_xy) for light in layout.lights)
+
+    def centre(points):
+        return tuple(sum(axis) / len(points) for axis in zip(*points))
+
+    bigger = tuple(
+        panel(light.name, centre(light.emitting_points), 500.0, light.stand_foot_xy)
+        for light in layout.lights
+    )
     for fov in FOVS:
         assert layout_issues(replace(layout, lights=bigger), fov) == []
 

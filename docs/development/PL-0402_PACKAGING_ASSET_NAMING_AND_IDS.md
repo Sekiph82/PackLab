@@ -41,6 +41,15 @@ Store descriptive fields separately: display name, package family, nominal capac
 - Keep supplier/customer names, addresses, confidential part numbers, country/site, capture dates, personal operator names, batch/lot data and product contents out of public IDs and filenames. Treat capture/image paths as internal/private unless separately reviewed for publication. Keep sensitive manufacturing fields in access-controlled metadata, not in public source repositories or sample fixtures.
 - Legacy IDs remain stored as source/alias metadata with their original values and mapping evidence. Migrate by adding a stable canonical ID and an explicit old-ID alias; do not rewrite capture files, alter published hashes or delete historical identifiers as a side effect.
 
+## Proposed grammar (machine-checkable)
+
+These patterns restate the rules above; `tests/ci/test_m18_station_sop_docs.py` checks the examples and negative cases against them. They are a proposal, not an implemented allocator.
+
+- Canonical ID: `^(PKG|CMP|ASM|SKU|CAP)-[0-9]{6}$` (uppercase only; no whitespace, slash, dot segment or semantic token).
+- Synthetic fixture ID: `^SYNTHETIC-TEST-(PKG|CMP|ASM|SKU|CAP)-[0-9]{4}$`.
+- View code: `^VIEW-[0-9]{4}$`.
+- Capture filename: `{asset_id}__{capture_id}__{view_code}__{sequence:04d}.{ext}` with an asset ID of type `PKG`, `CMP` or `ASM`, a capture ID of type `CAP`, extension in `jpg`, `png`, `heic`, `dng`, and a basename of at most 180 ASCII characters.
+
 ## Synthetic-only examples
 
 - Synthetic package asset: `SYNTHETIC-TEST-PKG-0001` (not a real asset).
