@@ -42,4 +42,4 @@ The repository's `tools/ci/ci_data_safety.py` guard correctly blocked the new `.
 sensitive payloads. Remediation: each of the 24 subset binaries is registered by exact path, byte size and SHA-256
 in `tools/ci/ci_safe_data_policy.json` (`approved_synthetic_fixtures`), and `maximum_manifested_payload_bytes` was
 raised from 65,536 to 524,288 because the largest render is 305,782 bytes. Every approved file still has to match
-its pinned hash and size. Local guard: `PACKLAB_CI_DATA_GUARD=PASS`; `tests/ci/test_ci_data_safety.py` 63 passed.
+its pinned hash and size. Local guard: `PACKLAB_CI_DATA_GUARD=PASS`; `pytest tests/ci -k "safety or safe_data or guard"` 63 passed (44 of them in `tests/ci/test_ci_data_safety.py`, per independent review).
