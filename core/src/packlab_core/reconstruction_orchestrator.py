@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -120,6 +120,19 @@ class ReconstructionStageContext:
 
 
 StageExecutor = Callable[[ReconstructionStageContext], ReconstructionStageExecution]
+
+
+@dataclass(frozen=True, slots=True)
+class StageCheckpoint:
+    """A completed stage bound to the exact request configuration and source input."""
+
+    execution: ReconstructionStageExecution
+    configuration_digest: str
+    source_digest: str
+
+
+CheckpointVerifier = Callable[[StageCheckpoint], bool]
+CheckpointSink = Callable[[StageCheckpoint], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,16 +285,27 @@ class ReconstructionOrchestrator:
         self,
         request: ReconstructionOrchestrationRequest,
         cancel: CancelToken | None = None,
+        *,
+        resume_from: Sequence[StageCheckpoint] = (),
+        verify_checkpoint: CheckpointVerifier | None = None,
+        on_checkpoint: CheckpointSink | None = None,
     ) -> ReconstructionOrchestrationResult:
+        """Run the plan, optionally reusing a verified prefix of completed stages.
+
+        Every resumed checkpoint must match the stage order, this request's
+        configuration and source digests, carry verified outputs, and pass
+        ``verify_checkpoint`` (which should confirm the artifacts still exist
+        unchanged). Any mismatch raises instead of silently restarting.
+        """
         if not isinstance(request, ReconstructionOrchestrationRequest):
             raise ReconstructionOrchestrationError(
                 "request must be ReconstructionOrchestrationRequest"
             )
         token = CancelToken() if cancel is None else cancel
-        executions: list[ReconstructionStageExecution] = []
-        results: list[ReconstructionStageResult] = []
+        executions = _validated_resume_prefix(request, tuple(resume_from), verify_checkpoint)
+        results: list[ReconstructionStageResult] = [item.stage_result for item in executions]
 
-        for definition in request.stages:
+        for definition in request.stages[len(executions) :]:
             if token.cancelled:
                 cancelled = _terminal_stage(
                     definition.stage_id,
@@ -369,6 +393,12 @@ class ReconstructionOrchestrator:
                 )
             executions.append(execution)
             results.append(stage_result)
+            if on_checkpoint is not None:
+                on_checkpoint(
+                    StageCheckpoint(
+                        execution, request.configuration_digest, request.job.inputs.source_digest
+                    )
+                )
 
         if token.cancelled:
             cancelled = _terminal_stage(
@@ -414,6 +444,52 @@ class ReconstructionOrchestrator:
         )
 
 
+def _validated_resume_prefix(
+    request: ReconstructionOrchestrationRequest,
+    checkpoints: tuple[StageCheckpoint, ...],
+    verify: CheckpointVerifier | None,
+) -> list[ReconstructionStageExecution]:
+    if not checkpoints:
+        return []
+    if verify is None:
+        raise ReconstructionOrchestrationError("resuming requires a checkpoint verifier")
+    if len(checkpoints) > len(STAGE_ORDER):
+        raise ReconstructionOrchestrationError("more checkpoints than stages")
+    executions: list[ReconstructionStageExecution] = []
+    for expected, checkpoint in zip(STAGE_ORDER, checkpoints):
+        if not isinstance(checkpoint, StageCheckpoint):
+            raise ReconstructionOrchestrationError(
+                "resume_from must contain StageCheckpoint values"
+            )
+        execution = checkpoint.execution
+        if execution.stage_id != expected:
+            raise ReconstructionOrchestrationError(
+                f"checkpoint order mismatch: expected {expected}, got {execution.stage_id}"
+            )
+        if checkpoint.configuration_digest != request.configuration_digest:
+            raise ReconstructionOrchestrationError(
+                f"checkpoint {expected} belongs to a different configuration"
+            )
+        if checkpoint.source_digest != request.job.inputs.source_digest:
+            raise ReconstructionOrchestrationError(
+                f"checkpoint {expected} belongs to a different source"
+            )
+        if (
+            execution.stage_result.status is not StageStatus.SUCCEEDED
+            or not execution.outputs_verified
+            or not execution.output_asset_ids
+        ):
+            raise ReconstructionOrchestrationError(
+                f"checkpoint {expected} is not a verified success"
+            )
+        if verify(checkpoint) is not True:
+            raise ReconstructionOrchestrationError(
+                f"checkpoint {expected} failed artifact verification"
+            )
+        executions.append(execution)
+    return executions
+
+
 def orchestrate_reconstruction(
     request: ReconstructionOrchestrationRequest,
     cancel: CancelToken | None = None,
@@ -431,6 +507,7 @@ __all__ = [
     "ReconstructionStageContext",
     "ReconstructionStageDefinition",
     "ReconstructionStageExecution",
+    "StageCheckpoint",
     "STAGE_ORDER",
     "orchestrate_reconstruction",
 ]

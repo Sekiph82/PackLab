@@ -234,3 +234,104 @@ def test_configuration_digest_is_stable_and_changes_with_stage_configuration() -
         second.configuration,
     )
     assert third.configuration_digest != first.configuration_digest
+
+
+def _interrupted_then_checkpoints(fail_stage: str):
+    calls: list[str] = []
+    saved = []
+
+    def counting(stage_id):
+        def run(_context):
+            calls.append(stage_id)
+            if stage_id == fail_stage:
+                raise RuntimeError("simulated crash mid-stage")
+            return ReconstructionStageExecution(
+                stage_id,
+                ReconstructionStageResult(stage_id, StageStatus.SUCCEEDED, 0, 0.01),
+                {"primary": f"working/reconstruction/r1/{stage_id}/output"},
+                outputs_verified=True,
+            )
+
+        return run
+
+    request = _request({stage: counting(stage) for stage in STAGE_ORDER})
+    first = ReconstructionOrchestrator().run(request, on_checkpoint=saved.append)
+    return request, first, calls, saved
+
+
+def test_interrupted_job_resumes_from_verified_checkpoints_without_rerunning() -> None:
+    from packlab_core.reconstruction_orchestrator import StageCheckpoint
+
+    failing = STAGE_ORDER[2]
+    request, first, calls, saved = _interrupted_then_checkpoints(failing)
+    assert first.status is RunStatus.FAILED and first.output is None
+    assert [item.execution.stage_id for item in saved] == list(STAGE_ORDER[:2])
+    assert all(isinstance(item, StageCheckpoint) for item in saved)
+
+    reruns: list[str] = []
+
+    def recording(stage_id):
+        def run(_context):
+            reruns.append(stage_id)
+            return ReconstructionStageExecution(
+                stage_id,
+                ReconstructionStageResult(stage_id, StageStatus.SUCCEEDED, 0, 0.01),
+                {"primary": f"working/reconstruction/r1/{stage_id}/output"},
+                outputs_verified=True,
+            )
+
+        return run
+
+    retry_request = _request({stage: recording(stage) for stage in STAGE_ORDER})
+    verified: list[str] = []
+    retry = ReconstructionOrchestrator().run(
+        retry_request,
+        resume_from=saved,
+        verify_checkpoint=lambda cp: verified.append(cp.execution.stage_id) is None,
+    )
+    assert retry.status is RunStatus.SUCCEEDED and retry.output is not None
+    assert reruns == list(STAGE_ORDER[2:])
+    assert verified == list(STAGE_ORDER[:2])
+    for stage in STAGE_ORDER[:2]:
+        assert (
+            retry.output.asset_paths[f"{stage}:primary"]
+            == f"working/reconstruction/r1/{stage}/output"
+        )
+    assert len(retry.stage_results) == len(STAGE_ORDER)
+
+
+def test_resume_rejects_unverified_mismatched_or_out_of_order_checkpoints() -> None:
+    from dataclasses import replace
+
+    request, _first, _calls, saved = _interrupted_then_checkpoints(STAGE_ORDER[2])
+    orchestrator = ReconstructionOrchestrator()
+    ok = lambda _cp: True  # noqa: E731
+
+    with pytest.raises(ReconstructionOrchestrationError, match="verifier"):
+        orchestrator.run(request, resume_from=saved)
+    with pytest.raises(ReconstructionOrchestrationError, match="artifact verification"):
+        orchestrator.run(request, resume_from=saved, verify_checkpoint=lambda _cp: False)
+    with pytest.raises(ReconstructionOrchestrationError, match="order mismatch"):
+        orchestrator.run(request, resume_from=saved[1:], verify_checkpoint=ok)
+    with pytest.raises(ReconstructionOrchestrationError, match="different configuration"):
+        orchestrator.run(
+            request,
+            resume_from=[replace(saved[0], configuration_digest="0" * 64)],
+            verify_checkpoint=ok,
+        )
+    with pytest.raises(ReconstructionOrchestrationError, match="different source"):
+        orchestrator.run(
+            request, resume_from=[replace(saved[0], source_digest="0" * 64)], verify_checkpoint=ok
+        )
+    unverified = replace(saved[0], execution=replace(saved[0].execution, outputs_verified=False))
+    with pytest.raises(ReconstructionOrchestrationError, match="not a verified success"):
+        orchestrator.run(request, resume_from=[unverified], verify_checkpoint=ok)
+
+
+def test_failed_resume_attempt_never_exposes_partial_output() -> None:
+    request, _first, _calls, saved = _interrupted_then_checkpoints(STAGE_ORDER[2])
+    again = ReconstructionOrchestrator().run(
+        request, resume_from=saved, verify_checkpoint=lambda _cp: True
+    )
+    assert again.status is RunStatus.FAILED and again.output is None
+    assert [r.stage_id for r in again.stage_results] == list(STAGE_ORDER[:3])
