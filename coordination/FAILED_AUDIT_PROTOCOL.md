@@ -1,57 +1,7 @@
-# PackLab Failed-Audit Protocol
+# PackLab Claude Review Failure/Remediation (2026-11-10)
 
-> **OPERATING AUTHORITY UPDATED 2026-11-04:** This file's historical ChatGPT-only TASKS editor, one-task handoff, mandatory frozen prompt, stop-on-any-blocker and cross-milestone prohibitions are superseded by the owner's `AGENTS.md`, `TASKS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Codex may independently schedule ready PL tasks, use distinct peer-review/testing/security subagents, record real `AUTO_AUDITED_PASS` and update the sole tracker, then continue. GitHub Actions are allowed. Prior historical audits, genuine test failures, secrets/privacy, technical contracts, physical/owner/legal gates and safe Git operations are NOT waived. New Codex peer review is NOT a forged ChatGPT audit. 
+Preserve the permanent PL ID, prior code/tests/prompts, reviewer findings, immutable historical Codex/ChatGPT audit files and accepted behaviors. A new Claude independent peer review records exact failed criterion, observed code diff/test evidence, severity and remediation. Claude builder repairs the verified finding on the same ID, reruns focused and impacted regressions; a distinct non-implementing reviewer re-inspects the fix.
 
+Do not rewrite a failed audit, downgrade tests, or check task completion merely because the builder claims a fix. Any mandatory CI/integration/real-world evidence that remains missing must keep the task unchecked. For genuine external data/owner/legal/physical/Apple signing blocks, record `EXTERNAL_PENDING`, dependency and re-entry evidence in sole root `TASKS.md`, then continue another dependency-independent task across milestones.
 
-## Preserve task identity and evidence
-
-An audit failure does not create a replacement task. The same permanent
-`PL-xxxx` ID remains the frontier and remains unchecked until a fresh
-independent audit passes. Prior prompts, criteria, implementation commits,
-logs, audits, findings, and accepted behavior are immutable evidence; a later
-cycle adds a new version rather than overwriting history.
-
-## Finding and remediation contract
-
-ChatGPT records exact failed criteria, actual GitHub evidence, severity,
-scope, expected correction, and any regression boundary. Remediation is
-bounded to those authorized findings. A new versioned `CODEX_PROMPT_VNN` and
-matching `CHATGPT_AUDIT_CRITERIA_VNN` define the correction; the builder fixes
-only that scope, reruns relevant required checks and regressions, and creates
-a new versioned Codex log.
-
-Root `TASKS.md` must show `CHANGES_REQUIRED`, preserve the same task ID, and
-name the next actor and concrete action. Only ChatGPT writes that tracker
-state. A builder must not mark the checkbox, erase a finding, rewrite the
-failed audit, or claim completion because a local correction looks plausible.
-
-## Fresh independent re-audit
-
-After remediation, ChatGPT independently inspects the new commit/diff/source,
-the exact failed criteria, the new log, and the integrity of previously
-accepted behavior. A remediation pass is not acceptance until the fresh audit
-disposes every mandatory criterion and the tracker is updated. If it fails
-again, the same task remains open with another versioned finding/remediation
-cycle.
-
-## Milestone-batch frontier
-
-In an explicitly authorized milestone batch, a failed child validation or
-failed audit stops the batch at that child frontier. Earlier independently
-accepted child audits and their evidence are not discarded. Later child work
-does not start silently, and a future milestone cannot be used to evade the
-failed child. The master evidence identifies the frontier, retained earlier
-results, exact blocker/findings, and next authorized action.
-
-## No false completion or skipping
-
-`CHANGES_REQUIRED` is distinct from `AUDITED_PASS`, `BLOCKED`, and
-`OWNER_REQUIRED`. It is not permission to check a box, advance to another
-task, or broaden the remediation. A task may be closed only by the authorized
-independent audit process after all mandatory criteria pass. Evidence can be
-preserved and partially useful without being acceptance.
-
-This protocol is evidence/reference only. Root `TASKS.md` remains the sole
-live project-status tracker, GitHub `main` remains repository truth, and this
-task does not implement a remediation engine or change any current tracker
-state.
+After real PASS, write `CLAUDE_PEER_AUDITED_PASS`, commit/push `origin/main` and verify safe Desktop synchronization. Only historical ChatGPT audits use `CHATGPT_AUDIT_*`; new autonomous Claude reviews must use a distinct filename and actor.
