@@ -81,3 +81,13 @@ Desktop.ini
 *.log
 *.trace
 reports/_local/
+
+# PL-0394: raw phone captures, local datasets and secret folders never belong in this public repo.
+*.heic
+*.HEIC
+*.dng
+*.DNG
+/datasets/
+/captures/
+/dist/
+secrets/
