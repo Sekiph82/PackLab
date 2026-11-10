@@ -30,9 +30,9 @@ def _text() -> str:
 
 def test_frozen_revision_and_no_mold_statement_are_present() -> None:
     text = _text()
-    assert "frozen V1 boundary statement, revision 1.0" in text
+    assert "frozen V1 boundary statement, revision 1.1" in text
     assert NO_MOLD in text
-    assert re.search(r"^\| 1\.0 \| 2026-11-10 \|", text, re.M)
+    assert re.search(r"^\| 1\.1 \| 2026-11-10 \|", text, re.M)
 
 
 def test_every_required_gap_family_is_stated() -> None:
@@ -63,3 +63,15 @@ def test_claim_words_are_always_qualified() -> None:
     for sentence in re.split(r"(?<=[.!?])\s+|\n", _text()):
         if CLAIM.search(sentence):
             assert QUALIFIER.search(sentence), sentence.strip()[:160]
+
+
+FROZEN_SHA256 = "cc8aeb9497858adf078319b3991b00a878aa4ede9bcbcbd3f56873186aa2641f"
+
+
+def test_frozen_text_is_pinned_by_digest() -> None:
+    # Review P3-3: keyword checks alone missed inverted or deleted sentences. Any change to
+    # the frozen statement must update this pin together with a new revision-history row.
+    import hashlib
+
+    data = DOC.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(data).hexdigest() == FROZEN_SHA256

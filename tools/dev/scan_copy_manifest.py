@@ -51,10 +51,14 @@ def _files(root: Path) -> dict[str, tuple[int, str]]:
         for name in sorted(filenames):
             path = here / name
             digest = hashlib.sha256()
-            with path.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1 << 20), b""):
-                    digest.update(chunk)
-            entries[path.relative_to(root).as_posix()] = (path.stat().st_size, digest.hexdigest())
+            try:
+                with path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1 << 20), b""):
+                        digest.update(chunk)
+                size = path.stat().st_size
+            except OSError as error:
+                raise ValueError(f"unreadable entry: {error.filename}") from error
+            entries[path.relative_to(root).as_posix()] = (size, digest.hexdigest())
     return dict(sorted(entries.items()))
 
 

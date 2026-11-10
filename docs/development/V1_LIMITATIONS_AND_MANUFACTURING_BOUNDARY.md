@@ -1,6 +1,6 @@
 # PackLab V1 limitations and manufacturing boundary
 
-Status: **frozen V1 boundary statement, revision 1.0 (2026-11-10)**. It is not a release approval, engineering certification, legal opinion, or manufacturing authorization. Any change needs a new entry under *Revision history* and an independent review. `tests/ci/test_v1_limitations_freeze.py` guards the no-mold statement and the gap list.
+Status: **frozen V1 boundary statement, revision 1.1 (2026-11-10)**. It is not a release approval, engineering certification, legal opinion, or manufacturing authorization. Any change needs a new entry under *Revision history* and an independent review. `tests/ci/test_v1_limitations_freeze.py` guards the no-mold statement and the gap list, and pins the SHA-256 of this exact text (line endings normalised), so any edit fails CI until the pin and this table are updated together.
 
 ## What PackLab V1 can support
 
@@ -41,4 +41,5 @@ M17 software tests, independent source/security review, hosted artifacts, iPhone
 | Revision | Date | Change | Review |
 | --- | --- | --- | --- |
 | 0.1 | 2026-11-04 | Initial statement (Codex, PL-0395 V01 log). | Codex-requested source review |
-| 1.0 | 2026-11-10 | Frozen. Recovery wording corrected for PL-0380 checkpoint resume; advisory QA/decision-tree limits added; CI freeze guard added. | Independent Claude peer review pending |
+| 1.0 | 2026-11-10 | Frozen. Recovery wording corrected for PL-0380 checkpoint resume; advisory QA/decision-tree limits added; CI freeze guard added. | See revision 1.1 |
+| 1.1 | 2026-11-10 | Records the independent review of 1.0; the CI guard now also pins this document's SHA-256. | `CLAUDE_PEER_REVIEW_PL0376_0418_0395_V02.md` PASS |
