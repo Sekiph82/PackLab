@@ -1,0 +1,10 @@
+# PL-0398 — Validation Criteria V01
+
+1. Explain the crossed linear-polarizer arrangement (polarized illumination and camera analyzer at approximately 90°) and keep it explicitly optional pending a controlled trial.
+2. Describe physically repeatable paired diffuse / parallel-polarized / cross-polarized acquisition with fixed camera pose, object pose, illumination positions, exposure, focus, white balance, and polarization orientation. Do not merge differently polarized duplicate views into one standard SfM set without validation; define separate comparison sets.
+3. Cite primary technical literature that supports reflection suppression / improved image matching or photogrammetric capture, while stating material and geometry dependence and not generalizing results to all packaging polymers.
+4. Identify trade-offs and likely failure modes, including light loss, residual or changed highlights on curved surfaces, reduced useful texture/contrast, and possible acquisition overhead.
+5. Treat transparent/translucent PET as a separate case: cross-polarization may alter surface glare but does not recover the correct transmitted/refracted geometry by itself. Label this as an optical/workflow limitation, not a PackLab experiment result.
+6. Specify a future controlled trial across glossy opaque packaging and clear/semiclear plastic, with success measures such as feature registration, reprojection residuals, reconstruction completeness, and independently measured dimension error. All proposed thresholds must be identified as future protocol decisions, not results.
+7. No hardware, sample, physical, software, Kenya, hosted CI, or production test is claimed or required for this documentation task. Record unavailable physical validation and defer software suites to the consolidated milestone checkpoint.
+8. The log identifies exact references, changed files, source/security review scope and result, no-tests rationale, no-publication reason, known limitations, and `LOCAL_COMPLETE_AUTONOMOUS_QUEUE_ARMED` if the document and reviews satisfy criteria.
