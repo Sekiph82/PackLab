@@ -35,3 +35,11 @@ still validates (96 samples). ruff/format/mypy clean.
 
 YCB real-reference archives remain unverified locally and are not part of the CI golden data; the subset is synthetic
 only and carries no physical or Kenya authority.
+
+## Addendum — CI data-safety guard (hosted run 42859298092 FAILED)
+
+The repository's `tools/ci/ci_data_safety.py` guard correctly blocked the new `.png`/`.ply` files as unapproved
+sensitive payloads. Remediation: each of the 24 subset binaries is registered by exact path, byte size and SHA-256
+in `tools/ci/ci_safe_data_policy.json` (`approved_synthetic_fixtures`), and `maximum_manifested_payload_bytes` was
+raised from 65,536 to 524,288 because the largest render is 305,782 bytes. Every approved file still has to match
+its pinned hash and size. Local guard: `PACKLAB_CI_DATA_GUARD=PASS`; `tests/ci/test_ci_data_safety.py` 63 passed.

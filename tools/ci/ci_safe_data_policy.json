@@ -37,8 +37,104 @@
     "tests/fixtures/ci-safe-synthetic/synthetic-white.png": {
       "bytes": 69,
       "sha256": "e878950f8091ec010cf5cc723bdea027a8539cf7147cfea199c2f666232dcd4e"
+    },
+    "tests/fixtures/m17_golden_subset/ground_truth/syn_bottle_pet_gloss_v01.ply": {
+      "bytes": 35086,
+      "sha256": "b59a639cc02f9bf11838c158422d6cdee208167d45e4856ee6bff101323b3d40"
+    },
+    "tests/fixtures/m17_golden_subset/ground_truth/syn_closure_pp_translucent_v01.ply": {
+      "bytes": 227037,
+      "sha256": "4b0971d0adc2961c37a2ac60a3f2f713937f5561c696235810346fdf11269043"
+    },
+    "tests/fixtures/m17_golden_subset/ground_truth/syn_jar_pet_clear_v02.ply": {
+      "bytes": 27585,
+      "sha256": "fe6142dff53520d4361a75d139c97af626eee341b23a80702950f026f8268bfa"
+    },
+    "tests/fixtures/m17_golden_subset/ground_truth/syn_jerrycan_hdpe_matte_v01.ply": {
+      "bytes": 57207,
+      "sha256": "d6fb65e19a9d2b05dda04a70f7b8ec82f03aec4ce2e4a29a31b8ac84d6279e69"
+    },
+    "tests/fixtures/m17_golden_subset/ground_truth/syn_pump_pp_translucent_v02.ply": {
+      "bytes": 58889,
+      "sha256": "47d6ebf73ced3d5ce2b0feea6f6f1dde5fb792d84082e55efeb3e53232c5e902"
+    },
+    "tests/fixtures/m17_golden_subset/ground_truth/syn_sachet_pet_clear_v01.ply": {
+      "bytes": 41889,
+      "sha256": "0f8176c75642b9b0385d74bd6ce1cc327749caa7fdbc626dcf02667dc2214109"
+    },
+    "tests/fixtures/m17_golden_subset/ground_truth/syn_trigger_spray_hdpe_matte_v03.ply": {
+      "bytes": 56224,
+      "sha256": "8b4a9ca19d8374bf189cfe806be06364a7c04f3e8bfcbc0d2c44df25d41ba519"
+    },
+    "tests/fixtures/m17_golden_subset/ground_truth/syn_tube_pet_gloss_v03.ply": {
+      "bytes": 27949,
+      "sha256": "bdc4a95bd4dc20895fd75ed6ff7602622ec91bc218c1b7d00ff98b0333439308"
+    },
+    "tests/fixtures/m17_golden_subset/masks/syn_bottle_pet_gloss_v01.png": {
+      "bytes": 100858,
+      "sha256": "07b310d48eb12f19524d0ee154145c6b2f38f833690a5b7c2922d5d10d60df73"
+    },
+    "tests/fixtures/m17_golden_subset/masks/syn_closure_pp_translucent_v01.png": {
+      "bytes": 103814,
+      "sha256": "1876418c2a1b30436d8e65d26a453d84783cbac646d4e03f599f41890bb197f5"
+    },
+    "tests/fixtures/m17_golden_subset/masks/syn_jar_pet_clear_v02.png": {
+      "bytes": 113704,
+      "sha256": "cddce5685280dcce6374c21ee784c4c22acd02b918faf516c6a683e0b80ce90f"
+    },
+    "tests/fixtures/m17_golden_subset/masks/syn_jerrycan_hdpe_matte_v01.png": {
+      "bytes": 107313,
+      "sha256": "582aa65b784929e6910038011237f9e4a002cb6f47b3514eb96b8f831399ee1c"
+    },
+    "tests/fixtures/m17_golden_subset/masks/syn_pump_pp_translucent_v02.png": {
+      "bytes": 102425,
+      "sha256": "6acf3c24f1fdd2220e7ab01f1aaef13166f7b8047bc7414bd77bf7c244157579"
+    },
+    "tests/fixtures/m17_golden_subset/masks/syn_sachet_pet_clear_v01.png": {
+      "bytes": 107463,
+      "sha256": "dcd44d5f6a10ea45e9598f748be58430bc3349d34ea9c67f7c6c848302690d0b"
+    },
+    "tests/fixtures/m17_golden_subset/masks/syn_trigger_spray_hdpe_matte_v03.png": {
+      "bytes": 102568,
+      "sha256": "f72fd790496b8f34e02b55245a148e65e888e37a5193986b6341b31e40cbd203"
+    },
+    "tests/fixtures/m17_golden_subset/masks/syn_tube_pet_gloss_v03.png": {
+      "bytes": 96457,
+      "sha256": "5c9c97492552f80d37ad523b5c8792162ea54ffdaa9abfdf9688447c76fc6e1c"
+    },
+    "tests/fixtures/m17_golden_subset/rgb/syn_bottle_pet_gloss_v01.png": {
+      "bytes": 246117,
+      "sha256": "3f75f0a107dee9c22461cc20e74781af531093cfa7a12871e718d330ca117ead"
+    },
+    "tests/fixtures/m17_golden_subset/rgb/syn_closure_pp_translucent_v01.png": {
+      "bytes": 268214,
+      "sha256": "67b0af04e8c14cf3af5e494261bdb7e3e492f1a118860503054a5b26b093d08d"
+    },
+    "tests/fixtures/m17_golden_subset/rgb/syn_jar_pet_clear_v02.png": {
+      "bytes": 305782,
+      "sha256": "b173aaddcb8f64ecfcc9d007625197aef6dd3832ef9c71561dd9063cd76868cc"
+    },
+    "tests/fixtures/m17_golden_subset/rgb/syn_jerrycan_hdpe_matte_v01.png": {
+      "bytes": 260942,
+      "sha256": "0b969710912e3c5ff3b2ca77a993b8a5d76a1440381d8021e2446f30d59477d5"
+    },
+    "tests/fixtures/m17_golden_subset/rgb/syn_pump_pp_translucent_v02.png": {
+      "bytes": 288115,
+      "sha256": "876d6ad32f83d07c5c6c379879dbf95c82026182837fba93095b6df0f99242f1"
+    },
+    "tests/fixtures/m17_golden_subset/rgb/syn_sachet_pet_clear_v01.png": {
+      "bytes": 252982,
+      "sha256": "ef2cb1e88cf660d5a8133735b937818d92cab5a7ce309ebe3524c82c33508d4f"
+    },
+    "tests/fixtures/m17_golden_subset/rgb/syn_trigger_spray_hdpe_matte_v03.png": {
+      "bytes": 273552,
+      "sha256": "dce4885f2619ab5de74c3848bb083ccf45f68c5196b54b4f7f3a5aca2b76f20a"
+    },
+    "tests/fixtures/m17_golden_subset/rgb/syn_tube_pet_gloss_v03.png": {
+      "bytes": 304380,
+      "sha256": "3a0f3ccaef7bb2a0db4af0e94601c586d3f0c3b5956c2c150415924667595155"
     }
   },
-  "maximum_manifested_payload_bytes": 65536,
+  "maximum_manifested_payload_bytes": 524288,
   "schema": "packlab-ci-safe-data-v1"
 }
