@@ -1,5 +1,8 @@
 # PackLab
 
+> **CURRENT OWNER DECISION: 2026-11-10 CLAUDE CODE EXCLUSIVE.** Claude, not Codex or ChatGPT, owns all new PackLab implementation, testing, independent peer-review coordination, GitHub Actions runs, `TASKS.md` updates and next-task selection. Earlier workflow texts below are dated history, not active stop/approval rules; genuine security, architecture, license, physical/owner/factory release gates remain binding. See root `CLAUDE.md`, `AGENTS.md`, `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. 
+
+
 > **2026-11-04 CURRENT MODE:** The owner authorized Codex to select all dependency-safe PL tasks, use GitHub Actions, assign separate peer reviews and update the sole `TASKS.md` tracker after genuine task acceptance. Any older ChatGPT-only, stop-after-child or zero-Actions instructions below are historical, superseded as workflow restrictions by `AGENTS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`; engineering, secrets, licensing, physical and release evidence obligations remain.
 
 
