@@ -86,7 +86,9 @@ def _safe_entry_name(name: object) -> str:
     if not isinstance(name, str) or not name or name.startswith(("/", "\\")) or "\\" in name:
         raise PackScanError("unsafe_path", "entry must be a non-empty relative UTF-8 path")
     if len(name) > 1024:
-        raise PackScanError("unsafe_path", "entry path exceeds the PackScan path-length limit", name[:128])
+        raise PackScanError(
+            "unsafe_path", "entry path exceeds the PackScan path-length limit", name[:128]
+        )
     if _DRIVE_RE.match(name):
         raise PackScanError("unsafe_path", "drive-prefixed entries are forbidden", name)
     parts = name.split("/")
@@ -97,11 +99,30 @@ def _safe_entry_name(name: object) -> str:
     return name
 
 
+MAX_JSON_NESTING_DEPTH = 64
+
+
+def _json_depth_exceeds(value: object, limit: int) -> bool:
+    stack: list[tuple[object, int]] = [(value, 1)]
+    while stack:
+        node, depth = stack.pop()
+        if isinstance(node, (dict, list)):
+            if depth > limit:
+                return True
+            children = node.values() if isinstance(node, dict) else node
+            stack.extend((child, depth + 1) for child in children)
+    return False
+
+
 def _read_json(data: bytes, code: str, path: str) -> object:
     try:
-        return json.loads(data.decode("utf-8"))
+        value = json.loads(data.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError, RecursionError) as error:
         raise PackScanError(code, "UTF-8 JSON is invalid", path) from error
+    # Python 3.12+ parses very deep nesting without RecursionError; bound it explicitly.
+    if _json_depth_exceeds(value, MAX_JSON_NESTING_DEPTH):
+        raise PackScanError(code, "JSON nesting exceeds the PackScan depth limit", path)
+    return value
 
 
 @cache
@@ -130,7 +151,9 @@ def _validate_against_schema(value: object, schema_name: str, path: str, code: s
         suffix = f" at {detail_path}" if detail_path else ""
         raise PackScanError(code, f"canonical schema validation failed{suffix}", path) from error
     except RecursionError as error:
-        raise PackScanError(code, "schema validation exceeded supported nesting depth", path) from error
+        raise PackScanError(
+            code, "schema validation exceeded supported nesting depth", path
+        ) from error
 
 
 def _validate_manifest(manifest: object) -> tuple[dict[str, object], dict[str, dict[str, object]]]:
@@ -190,10 +213,14 @@ def _validate_manifest(manifest: object) -> tuple[dict[str, object], dict[str, d
     for path, item in by_path.items():
         size = item["size_bytes"]
         if isinstance(size, bool) or not isinstance(size, int) or size > MAX_PACKSCAN_ENTRY_BYTES:
-            raise PackScanError("entry_too_large", "manifest payload size exceeds the PackScan limit", path)
+            raise PackScanError(
+                "entry_too_large", "manifest payload size exceeds the PackScan limit", path
+            )
         declared_total += size
         if declared_total > MAX_PACKSCAN_TOTAL_UNCOMPRESSED_BYTES:
-            raise PackScanError("package_expands_too_large", "manifest payload sizes exceed the PackScan limit")
+            raise PackScanError(
+                "package_expands_too_large", "manifest payload sizes exceed the PackScan limit"
+            )
     return manifest, by_path
 
 
@@ -224,24 +251,32 @@ def _preflight_zip_entry_count(stream, package_bytes: int) -> int:
     for index in range(len(tail) - 22, -1, -1):
         if tail[index : index + 4] != _ZIP_EOCD:
             continue
-        disk_number, central_disk, disk_entries, total_entries, central_size, central_offset, comment_size = (
-            struct.unpack_from("<HHHHIIH", tail, index + 4)
-        )
+        (
+            disk_number,
+            central_disk,
+            disk_entries,
+            total_entries,
+            central_size,
+            central_offset,
+            comment_size,
+        ) = struct.unpack_from("<HHHHIIH", tail, index + 4)
         if index + 22 + comment_size != len(tail):
             continue
         if comment_size != 0:
             raise PackScanError("corrupt_zip", "ZIP archive comments are unsupported")
+        if 0xFFFF in (disk_entries, total_entries) or 0xFFFFFFFF in (central_size, central_offset):
+            raise PackScanError("too_many_entries", "ZIP64 exceeds the bounded PackScan layout")
         if disk_number != 0 or central_disk != 0 or disk_entries != total_entries:
             raise PackScanError("corrupt_zip", "multi-disk ZIP archives are unsupported")
-        if total_entries == 0xFFFF or central_size == 0xFFFFFFFF or central_offset == 0xFFFFFFFF:
-            raise PackScanError("too_many_entries", "ZIP64 exceeds the bounded PackScan layout")
         if total_entries > MAX_PACKSCAN_ENTRIES:
             raise PackScanError("too_many_entries", "ZIP entry count exceeds the PackScan limit")
         eocd_offset = package_bytes - tail_size + index
         if central_size > MAX_PACKSCAN_CENTRAL_DIRECTORY_BYTES:
             raise PackScanError("corrupt_zip", "ZIP central directory exceeds the PackScan limit")
         if central_offset + central_size != eocd_offset:
-            raise PackScanError("corrupt_zip", "ZIP central directory bounds do not match its end record")
+            raise PackScanError(
+                "corrupt_zip", "ZIP central directory bounds do not match its end record"
+            )
         stream.seek(central_offset)
         parsed_bytes = 0
         for _ in range(total_entries):
@@ -250,7 +285,9 @@ def _preflight_zip_entry_count(stream, package_bytes: int) -> int:
                 raise PackScanError("corrupt_zip", "ZIP central-directory record is truncated")
             fields = struct.unpack("<4s6H3I5H2I", header)
             if fields[0] != b"PK\x01\x02":
-                raise PackScanError("corrupt_zip", "ZIP central-directory record signature is invalid")
+                raise PackScanError(
+                    "corrupt_zip", "ZIP central-directory record signature is invalid"
+                )
             compressed_size, uncompressed_size = fields[8], fields[9]
             name_size, extra_size, comment_size = fields[10], fields[11], fields[12]
             disk_start = fields[13]
@@ -265,7 +302,9 @@ def _preflight_zip_entry_count(stream, package_bytes: int) -> int:
                 or uncompressed_size == 0xFFFFFFFF
                 or local_offset == 0xFFFFFFFF
             ):
-                raise PackScanError("corrupt_zip", "ZIP central-directory metadata is outside PackScan bounds")
+                raise PackScanError(
+                    "corrupt_zip", "ZIP central-directory metadata is outside PackScan bounds"
+                )
             name = stream.read(name_size)
             if len(name) != name_size:
                 raise PackScanError("corrupt_zip", "ZIP central-directory name is truncated")
@@ -279,7 +318,9 @@ def _preflight_zip_entry_count(stream, package_bytes: int) -> int:
                 raise PackScanError("unsafe_path", "ZIP entry name is not valid UTF-8") from error
             parsed_bytes += 46 + name_size
         if parsed_bytes != central_size:
-            raise PackScanError("corrupt_zip", "ZIP central-directory size does not match its records")
+            raise PackScanError(
+                "corrupt_zip", "ZIP central-directory size does not match its records"
+            )
         return total_entries
     raise PackScanError("corrupt_zip", "valid ZIP end record is missing")
 
@@ -291,13 +332,17 @@ def _load_archive(path: Path) -> dict[str, bytes]:
             if not stat.S_ISREG(metadata.st_mode):
                 raise PackScanError("package_unavailable", "package must be a regular file")
             if metadata.st_size > MAX_PACKSCAN_BYTES:
-                raise PackScanError("package_too_large", "compressed package exceeds the PackScan limit")
+                raise PackScanError(
+                    "package_too_large", "compressed package exceeds the PackScan limit"
+                )
             declared_entry_count = _preflight_zip_entry_count(source, metadata.st_size)
             source.seek(0)
             with zipfile.ZipFile(source, mode="r") as archive:
                 infos = archive.infolist()
                 if len(infos) != declared_entry_count or len(infos) > MAX_PACKSCAN_ENTRIES:
-                    raise PackScanError("corrupt_zip", "ZIP entry count differs from its end record")
+                    raise PackScanError(
+                        "corrupt_zip", "ZIP entry count differs from its end record"
+                    )
                 names: set[str] = set()
                 folded: set[str] = set()
                 declared_total = 0
@@ -312,12 +357,24 @@ def _load_archive(path: Path) -> dict[str, bytes]:
                             "duplicate_entry", "duplicate or case-insensitive duplicate entry", name
                         )
                     if info.file_size > MAX_PACKSCAN_ENTRY_BYTES:
-                        raise PackScanError("entry_too_large", "ZIP entry exceeds the PackScan limit", name)
-                    if name in _CONTROL_ENTRIES | {"metadata/photos.json"} and info.file_size > MAX_PACKSCAN_CONTROL_ENTRY_BYTES:
-                        raise PackScanError("control_entry_too_large", "PackScan control entry exceeds its limit", name)
+                        raise PackScanError(
+                            "entry_too_large", "ZIP entry exceeds the PackScan limit", name
+                        )
+                    if (
+                        name in _CONTROL_ENTRIES | {"metadata/photos.json"}
+                        and info.file_size > MAX_PACKSCAN_CONTROL_ENTRY_BYTES
+                    ):
+                        raise PackScanError(
+                            "control_entry_too_large",
+                            "PackScan control entry exceeds its limit",
+                            name,
+                        )
                     declared_total += info.file_size
                     if declared_total > MAX_PACKSCAN_TOTAL_UNCOMPRESSED_BYTES:
-                        raise PackScanError("package_expands_too_large", "uncompressed package exceeds the PackScan limit")
+                        raise PackScanError(
+                            "package_expands_too_large",
+                            "uncompressed package exceeds the PackScan limit",
+                        )
                     names.add(name)
                     folded.add(name.casefold())
                 payloads: dict[str, bytes] = {}
@@ -327,17 +384,35 @@ def _load_archive(path: Path) -> dict[str, bytes]:
                     with archive.open(info, mode="r") as member:
                         while True:
                             remaining_entry = MAX_PACKSCAN_ENTRY_BYTES - len(data)
-                            remaining_total = MAX_PACKSCAN_TOTAL_UNCOMPRESSED_BYTES - actual_total - len(data)
-                            chunk = member.read(min(1024 * 1024, remaining_entry + 1, remaining_total + 1))
+                            remaining_total = (
+                                MAX_PACKSCAN_TOTAL_UNCOMPRESSED_BYTES - actual_total - len(data)
+                            )
+                            chunk = member.read(
+                                min(1024 * 1024, remaining_entry + 1, remaining_total + 1)
+                            )
                             if not chunk:
                                 break
                             if len(data) + len(chunk) > MAX_PACKSCAN_ENTRY_BYTES:
-                                raise PackScanError("entry_too_large", "ZIP entry exceeds the PackScan limit", info.filename)
-                            if actual_total + len(data) + len(chunk) > MAX_PACKSCAN_TOTAL_UNCOMPRESSED_BYTES:
-                                raise PackScanError("package_expands_too_large", "uncompressed package exceeds the PackScan limit")
+                                raise PackScanError(
+                                    "entry_too_large",
+                                    "ZIP entry exceeds the PackScan limit",
+                                    info.filename,
+                                )
+                            if (
+                                actual_total + len(data) + len(chunk)
+                                > MAX_PACKSCAN_TOTAL_UNCOMPRESSED_BYTES
+                            ):
+                                raise PackScanError(
+                                    "package_expands_too_large",
+                                    "uncompressed package exceeds the PackScan limit",
+                                )
                             data.extend(chunk)
                         if len(data) != info.file_size:
-                            raise PackScanError("corrupt_zip", "ZIP entry length differs from its central directory", info.filename)
+                            raise PackScanError(
+                                "corrupt_zip",
+                                "ZIP entry length differs from its central directory",
+                                info.filename,
+                            )
                     actual_total += len(data)
                     payloads[info.filename] = bytes(data)
                 return payloads
@@ -346,7 +421,9 @@ def _load_archive(path: Path) -> dict[str, bytes]:
     except (FileNotFoundError, IsADirectoryError) as error:
         raise PackScanError("package_unavailable", "package path cannot be opened") from error
     except NotImplementedError as error:
-        raise PackScanError("unsupported_compression", "ZIP compression method is not supported") from error
+        raise PackScanError(
+            "unsupported_compression", "ZIP compression method is not supported"
+        ) from error
     except (zipfile.BadZipFile, EOFError, RuntimeError, OSError, struct.error, zlib.error) as error:
         raise PackScanError("corrupt_zip", "ZIP structure or entry data is corrupt") from error
 
@@ -479,7 +556,9 @@ def write_packscan(
     if any(len(files[name]) > MAX_PACKSCAN_CONTROL_ENTRY_BYTES for name in control_names):
         raise PackScanError("control_entry_too_large", "PackScan control entry exceeds its limit")
     if sum(len(data) for data in files.values()) > MAX_PACKSCAN_TOTAL_UNCOMPRESSED_BYTES:
-        raise PackScanError("package_expands_too_large", "package contents exceed the PackScan limit")
+        raise PackScanError(
+            "package_expands_too_large", "package contents exceed the PackScan limit"
+        )
     output = Path(destination)
     output.parent.mkdir(parents=True, exist_ok=True)
     temp_name: str | None = None
@@ -501,7 +580,9 @@ def write_packscan(
                     info, files[name], compress_type=zipfile.ZIP_DEFLATED, compresslevel=9
                 )
         if Path(temp_name).stat().st_size > MAX_PACKSCAN_BYTES:
-            raise PackScanError("package_too_large", "compressed package exceeds the PackScan limit")
+            raise PackScanError(
+                "package_too_large", "compressed package exceeds the PackScan limit"
+            )
         os.replace(temp_name, output)
         temp_name = None
     finally:
@@ -516,17 +597,25 @@ def extract_packscan(source: str | Path, destination: str | Path) -> Path:
     report = validate_packscan(source)
     files = _load_archive(report.source)
     if set(files) - {"checksums.json"} != set(report.checksums):
-        raise PackScanError("package_changed", "package entries changed between validation and extraction")
+        raise PackScanError(
+            "package_changed", "package entries changed between validation and extraction"
+        )
     if _read_checksums(files["checksums.json"]) != report.checksums:
-        raise PackScanError("package_changed", "package checksums changed between validation and extraction")
+        raise PackScanError(
+            "package_changed", "package checksums changed between validation and extraction"
+        )
     for name, data in files.items():
         if name == "checksums.json":
             continue
         if _sha256(data) != report.checksums.get(name):
-            raise PackScanError("package_changed", "package bytes changed between validation and extraction", name)
+            raise PackScanError(
+                "package_changed", "package bytes changed between validation and extraction", name
+            )
     current_manifest = _read_json(files["manifest.json"], "corrupt_manifest", "manifest.json")
     if current_manifest != report.manifest:
-        raise PackScanError("package_changed", "package manifest changed between validation and extraction")
+        raise PackScanError(
+            "package_changed", "package manifest changed between validation and extraction"
+        )
     target = Path(destination)
     if target.exists():
         raise PackScanError("destination_exists", "refusing to overwrite an extraction destination")

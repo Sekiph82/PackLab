@@ -452,18 +452,19 @@ class VGGTReconstructionBackend(ReconstructionBackend):
 
     def provenance(self) -> BackendProvenance:
         activation = self._activation
-        complete = activation is not None and activation.complete
+        if activation is None or not activation.complete:
+            return BackendProvenance(
+                ReconstructionBackendId.NEURAL_EXPERIMENTAL,
+                _ADAPTER_VERSION,
+                "checkpoint-unconfigured",
+                "activation-gate-incomplete",
+                {},
+            )
         return BackendProvenance(
             ReconstructionBackendId.NEURAL_EXPERIMENTAL,
             _ADAPTER_VERSION,
-            (
-                f"{activation.checkpoint_id}@{activation.checkpoint_revision}"
-                f"#sha256:{activation.checkpoint_sha256}"
-                if complete
-                else "checkpoint-unconfigured"
-            ),
-            activation.checkpoint_license_id if complete else "activation-gate-incomplete",
-            {"checkpoint": activation.checkpoint_sha256}
-            if complete and activation is not None
-            else {},
+            f"{activation.checkpoint_id}@{activation.checkpoint_revision}"
+            f"#sha256:{activation.checkpoint_sha256}",
+            activation.checkpoint_license_id,
+            {"checkpoint": activation.checkpoint_sha256},
         )

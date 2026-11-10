@@ -16,6 +16,7 @@ import os
 import random
 import sys
 from pathlib import Path
+from typing import Any
 
 import bpy
 from mathutils import Vector
@@ -26,30 +27,126 @@ if str(PACKLAB_CORE_SOURCE) not in sys.path:
 DATASET_TOOLS_SOURCE = Path(__file__).resolve().parent
 if str(DATASET_TOOLS_SOURCE) not in sys.path:
     sys.path.insert(0, str(DATASET_TOOLS_SOURCE))
-from dataset_root import resolve_dataset_root
-from packlab_core.benchmark_metrics import synthetic_packaging_metric_bands
+from dataset_root import resolve_dataset_root  # noqa: E402
 
+from packlab_core.benchmark_metrics import synthetic_packaging_metric_bands  # noqa: E402
 
 GENERATOR_VERSION = "2.0.0"
 SEED = 3692026
 WIDTH, HEIGHT = 640, 480
-MATERIALS = {
-    "hdpe_matte": {"polymer": "HDPE", "roughness": 0.76, "metallic": 0.0, "transmission": 0.0, "base": (0.82, 0.86, 0.83, 1.0)},
-    "pet_gloss": {"polymer": "PET", "roughness": 0.12, "metallic": 0.0, "transmission": 0.0, "base": (0.13, 0.38, 0.63, 1.0)},
-    "pet_clear": {"polymer": "PET", "roughness": 0.025, "metallic": 0.0, "transmission": 0.08, "base": (0.38, 0.68, 0.77, 0.48)},
-    "pp_translucent": {"polymer": "PP", "roughness": 0.27, "metallic": 0.0, "transmission": 0.20, "base": (0.91, 0.78, 0.43, 0.68)},
+MATERIALS: dict[str, dict[str, Any]] = {
+    "hdpe_matte": {
+        "polymer": "HDPE",
+        "roughness": 0.76,
+        "metallic": 0.0,
+        "transmission": 0.0,
+        "base": (0.82, 0.86, 0.83, 1.0),
+    },
+    "pet_gloss": {
+        "polymer": "PET",
+        "roughness": 0.12,
+        "metallic": 0.0,
+        "transmission": 0.0,
+        "base": (0.13, 0.38, 0.63, 1.0),
+    },
+    "pet_clear": {
+        "polymer": "PET",
+        "roughness": 0.025,
+        "metallic": 0.0,
+        "transmission": 0.08,
+        "base": (0.38, 0.68, 0.77, 0.48),
+    },
+    "pp_translucent": {
+        "polymer": "PP",
+        "roughness": 0.27,
+        "metallic": 0.0,
+        "transmission": 0.20,
+        "base": (0.91, 0.78, 0.43, 0.68),
+    },
 }
 
 # Dimensions in mm; these are controlled synthetic nominal values. Tol. is a
 # generated test band, not an industry specification or measured process limit.
-FAMILIES = {
-    "bottle": {"size": (72, 72, 228), "profile": [(0, .47), (.04, .50), (.10, .48), (.58, .48), (.66, .43), (.73, .29), (.83, .25), (.91, .25), (.93, .17), (1, .17)], "tol": (0.35, 0.55)},
+FAMILIES: dict[str, dict[str, Any]] = {
+    "bottle": {
+        "size": (72, 72, 228),
+        "profile": [
+            (0, 0.47),
+            (0.04, 0.50),
+            (0.10, 0.48),
+            (0.58, 0.48),
+            (0.66, 0.43),
+            (0.73, 0.29),
+            (0.83, 0.25),
+            (0.91, 0.25),
+            (0.93, 0.17),
+            (1, 0.17),
+        ],
+        "tol": (0.35, 0.55),
+    },
     "jerrycan": {"size": (168, 92, 286), "box": True, "tol": (0.7, 1.0)},
-    "jar": {"size": (104, 104, 142), "profile": [(0, .46), (.05, .50), (.10, .50), (.78, .50), (.84, .48), (.88, .39), (.92, .39), (1, .39)], "tol": (0.4, 0.6)},
-    "closure": {"size": (42, 42, 28), "profile": [(0, .45), (.08, .50), (.88, .50), (.96, .45), (1, .44)], "tol": (0.15, 0.25)},
-    "trigger_spray": {"size": (92, 78, 244), "profile": [(0, .48), (.05, .50), (.12, .48), (.58, .48), (.66, .43), (.74, .27), (.88, .24), (.96, .21), (1, .20)], "tol": (0.45, 0.7)},
-    "pump": {"size": (82, 82, 218), "profile": [(0, .48), (.06, .50), (.58, .50), (.68, .34), (.76, .25), (.90, .24), (.94, .18), (1, .18)], "tol": (0.4, 0.65)},
-    "tube": {"size": (58, 42, 184), "profile": [(0, .50), (.06, .50), (.10, .45), (.30, .36), (.60, .25), (.86, .18), (.93, .18), (1, .18)], "tol": (0.35, 0.55)},
+    "jar": {
+        "size": (104, 104, 142),
+        "profile": [
+            (0, 0.46),
+            (0.05, 0.50),
+            (0.10, 0.50),
+            (0.78, 0.50),
+            (0.84, 0.48),
+            (0.88, 0.39),
+            (0.92, 0.39),
+            (1, 0.39),
+        ],
+        "tol": (0.4, 0.6),
+    },
+    "closure": {
+        "size": (42, 42, 28),
+        "profile": [(0, 0.45), (0.08, 0.50), (0.88, 0.50), (0.96, 0.45), (1, 0.44)],
+        "tol": (0.15, 0.25),
+    },
+    "trigger_spray": {
+        "size": (92, 78, 244),
+        "profile": [
+            (0, 0.48),
+            (0.05, 0.50),
+            (0.12, 0.48),
+            (0.58, 0.48),
+            (0.66, 0.43),
+            (0.74, 0.27),
+            (0.88, 0.24),
+            (0.96, 0.21),
+            (1, 0.20),
+        ],
+        "tol": (0.45, 0.7),
+    },
+    "pump": {
+        "size": (82, 82, 218),
+        "profile": [
+            (0, 0.48),
+            (0.06, 0.50),
+            (0.58, 0.50),
+            (0.68, 0.34),
+            (0.76, 0.25),
+            (0.90, 0.24),
+            (0.94, 0.18),
+            (1, 0.18),
+        ],
+        "tol": (0.4, 0.65),
+    },
+    "tube": {
+        "size": (58, 42, 184),
+        "profile": [
+            (0, 0.50),
+            (0.06, 0.50),
+            (0.10, 0.45),
+            (0.30, 0.36),
+            (0.60, 0.25),
+            (0.86, 0.18),
+            (0.93, 0.18),
+            (1, 0.18),
+        ],
+        "tol": (0.35, 0.55),
+    },
     "sachet": {"size": (125, 18.36, 190), "box": True, "tol": (0.45, 0.75)},
 }
 
@@ -73,14 +170,23 @@ def _material(name: str, spec: dict) -> bpy.types.Material:
     return material
 
 
-def _lathe(name: str, profile: list, radius_x: float, radius_y: float, height: float, material: bpy.types.Material) -> bpy.types.Object:
+def _lathe(
+    name: str,
+    profile: list,
+    radius_x: float,
+    radius_y: float,
+    height: float,
+    material: bpy.types.Material,
+) -> bpy.types.Object:
     sides = 64
     verts = []
-    faces = []
+    faces: list[tuple[int, ...]] = []
     for zf, rf in profile:
         for i in range(sides):
             angle = 2 * math.pi * i / sides
-            verts.append((radius_x * rf * math.cos(angle), radius_y * rf * math.sin(angle), height * zf))
+            verts.append(
+                (radius_x * rf * math.cos(angle), radius_y * rf * math.sin(angle), height * zf)
+            )
     for ring in range(len(profile) - 1):
         for i in range(sides):
             a = ring * sides + i
@@ -88,7 +194,9 @@ def _lathe(name: str, profile: list, radius_x: float, radius_y: float, height: f
             c = b + sides
             d = a + sides
             faces.append((a, b, c, d))
-    faces.extend([tuple(reversed(range(sides))), tuple((len(profile) - 1) * sides + i for i in range(sides))])
+    faces.extend(
+        [tuple(reversed(range(sides))), tuple((len(profile) - 1) * sides + i for i in range(sides))]
+    )
     mesh = bpy.data.meshes.new(f"{name}_mesh")
     mesh.from_pydata(verts, [], faces)
     mesh.materials.append(material)
@@ -100,7 +208,9 @@ def _lathe(name: str, profile: list, radius_x: float, radius_y: float, height: f
     return obj
 
 
-def _rounded_box(name: str, dims_m: tuple, material: bpy.types.Material, location=(0, 0, 0)) -> bpy.types.Object:
+def _rounded_box(
+    name: str, dims_m: tuple, material: bpy.types.Material, location=(0, 0, 0)
+) -> bpy.types.Object:
     bpy.ops.mesh.primitive_cube_add(size=1, location=location)
     obj = bpy.context.object
     obj.name = name
@@ -114,9 +224,13 @@ def _rounded_box(name: str, dims_m: tuple, material: bpy.types.Material, locatio
     return obj
 
 
-def _rod(name: str, start: Vector, end: Vector, radius: float, material: bpy.types.Material) -> bpy.types.Object:
+def _rod(
+    name: str, start: Vector, end: Vector, radius: float, material: bpy.types.Material
+) -> bpy.types.Object:
     delta = end - start
-    bpy.ops.mesh.primitive_cylinder_add(vertices=24, radius=radius, depth=delta.length, location=(start + end) / 2)
+    bpy.ops.mesh.primitive_cylinder_add(
+        vertices=24, radius=radius, depth=delta.length, location=(start + end) / 2
+    )
     obj = bpy.context.object
     obj.name = name
     obj.rotation_mode = "QUATERNION"
@@ -132,37 +246,108 @@ def _build_family(family: str, material: bpy.types.Material) -> None:
     sx, sy, sz = (v / 1000 for v in FAMILIES[family]["size"])
     if family in {"jerrycan", "sachet"}:
         body_dims = (sx, sy, sz * (0.78 if family == "jerrycan" else 0.90))
-        body = _rounded_box(f"{family}_body", body_dims, material, (0, 0, sz * (0.39 if family == "jerrycan" else 0.45)))
+        _rounded_box(
+            f"{family}_body",
+            body_dims,
+            material,
+            (0, 0, sz * (0.39 if family == "jerrycan" else 0.45)),
+        )
         if family == "jerrycan":
             # Raised molded handle loop and neck/cap; intentionally visible as
             # geometry while not claiming an injection-mold CAD surface.
             x, y, z = sx * 0.31, -sy * 0.12, sz * 0.80
-            for a, b in [((-x, y, z), (-x, y, z + sz * .14)), ((-x, y, z + sz * .14), (x, y, z + sz * .14)), ((x, y, z + sz * .14), (x, y, z))]:
-                _rod("jerrycan_handle_bridge", Vector(a), Vector(b), sy * .045, material)
-            _lathe("jerrycan_neck", [(0, .42), (.2, .5), (1, .5)], sx * .2, sx * .2, sz * .14, material).location.z = sz * .80
-            _lathe("jerrycan_cap", [(0, .45), (.1, .5), (.9, .5), (1, .45)], sx * .24, sx * .24, sz * .055, _material("PP_cap", MATERIALS["pp_translucent"])).location.z = sz * .945
+            for a, b in [
+                ((-x, y, z), (-x, y, z + sz * 0.14)),
+                ((-x, y, z + sz * 0.14), (x, y, z + sz * 0.14)),
+                ((x, y, z + sz * 0.14), (x, y, z)),
+            ]:
+                _rod("jerrycan_handle_bridge", Vector(a), Vector(b), sy * 0.045, material)
+            _lathe(
+                "jerrycan_neck",
+                [(0, 0.42), (0.2, 0.5), (1, 0.5)],
+                sx * 0.2,
+                sx * 0.2,
+                sz * 0.14,
+                material,
+            ).location.z = sz * 0.80
+            _lathe(
+                "jerrycan_cap",
+                [(0, 0.45), (0.1, 0.5), (0.9, 0.5), (1, 0.45)],
+                sx * 0.24,
+                sx * 0.24,
+                sz * 0.055,
+                _material("PP_cap", MATERIALS["pp_translucent"]),
+            ).location.z = sz * 0.945
         else:
             # Heat-seal bands and a ribbed fitment are represented as geometry.
-            for z in (sz * .0175, sz * .87, sz * .95):
-                _rounded_box("sachet_seal", (sx, sy, sz * .035), material, (0, 0, z))
-            _lathe("sachet_spout", [(0, .5), (1, .5)], sx * .12, sx * .12, sz * .10, _material("PP_fitment", MATERIALS["pp_translucent"])).location.z = sz * .90
+            for z in (sz * 0.0175, sz * 0.87, sz * 0.95):
+                _rounded_box("sachet_seal", (sx, sy, sz * 0.035), material, (0, 0, z))
+            _lathe(
+                "sachet_spout",
+                [(0, 0.5), (1, 0.5)],
+                sx * 0.12,
+                sx * 0.12,
+                sz * 0.10,
+                _material("PP_fitment", MATERIALS["pp_translucent"]),
+            ).location.z = sz * 0.90
         return
 
-    obj = _lathe(f"{family}_body", FAMILIES[family]["profile"], sx, sy, sz, material)
+    _lathe(f"{family}_body", FAMILIES[family]["profile"], sx, sy, sz, material)
     if family == "trigger_spray":
-        _rounded_box("trigger_sprayer_head", (sx * .62, sy * .42, sz * .10), _material("PP_sprayer", MATERIALS["pp_translucent"]), (sx * .18, 0, sz * .95))
-        _rod("trigger_nozzle", Vector((sx * .32, 0, sz * .97)), Vector((sx * .40, 0, sz * .97)), sy * .045, _material("PP_nozzle", MATERIALS["pp_translucent"]))
-        _rod("trigger_lever", Vector((sx * .10, -sy * .12, sz * .92)), Vector((sx * .32, -sy * .12, sz * .81)), sy * .035, _material("PP_lever", MATERIALS["pp_translucent"]))
+        _rounded_box(
+            "trigger_sprayer_head",
+            (sx * 0.62, sy * 0.42, sz * 0.10),
+            _material("PP_sprayer", MATERIALS["pp_translucent"]),
+            (sx * 0.18, 0, sz * 0.95),
+        )
+        _rod(
+            "trigger_nozzle",
+            Vector((sx * 0.32, 0, sz * 0.97)),
+            Vector((sx * 0.40, 0, sz * 0.97)),
+            sy * 0.045,
+            _material("PP_nozzle", MATERIALS["pp_translucent"]),
+        )
+        _rod(
+            "trigger_lever",
+            Vector((sx * 0.10, -sy * 0.12, sz * 0.92)),
+            Vector((sx * 0.32, -sy * 0.12, sz * 0.81)),
+            sy * 0.035,
+            _material("PP_lever", MATERIALS["pp_translucent"]),
+        )
     elif family == "pump":
-        _lathe("pump_collar", [(0, .45), (.1, .5), (.9, .5), (1, .45)], sx * .28, sx * .28, sz * .06, _material("PP_collar", MATERIALS["pp_translucent"])).location.z = sz * .91
-        _rounded_box("pump_press_head", (sx * .42, sy * .26, sz * .035), _material("PP_pump", MATERIALS["pp_translucent"]), (sx * .10, 0, sz * .98))
-        _rod("pump_stem", Vector((0, 0, sz * .92)), Vector((0, 0, sz * .98)), sx * .045, _material("PP_stem", MATERIALS["pp_translucent"]))
+        _lathe(
+            "pump_collar",
+            [(0, 0.45), (0.1, 0.5), (0.9, 0.5), (1, 0.45)],
+            sx * 0.28,
+            sx * 0.28,
+            sz * 0.06,
+            _material("PP_collar", MATERIALS["pp_translucent"]),
+        ).location.z = sz * 0.91
+        _rounded_box(
+            "pump_press_head",
+            (sx * 0.42, sy * 0.26, sz * 0.035),
+            _material("PP_pump", MATERIALS["pp_translucent"]),
+            (sx * 0.10, 0, sz * 0.98),
+        )
+        _rod(
+            "pump_stem",
+            Vector((0, 0, sz * 0.92)),
+            Vector((0, 0, sz * 0.98)),
+            sx * 0.045,
+            _material("PP_stem", MATERIALS["pp_translucent"]),
+        )
     elif family == "closure":
         # Vertical grip ribs make the low part visibly read as a screw cap.
         for idx in range(24):
             angle = 2 * math.pi * idx / 24
             r = sx * 0.235
-            _rod("closure_grip_rib", Vector((r * math.cos(angle), r * math.sin(angle), sz * .1)), Vector((r * math.cos(angle), r * math.sin(angle), sz * .9)), sx * .008, material)
+            _rod(
+                "closure_grip_rib",
+                Vector((r * math.cos(angle), r * math.sin(angle), sz * 0.1)),
+                Vector((r * math.cos(angle), r * math.sin(angle), sz * 0.9)),
+                sx * 0.008,
+                material,
+            )
 
 
 def _clear_scene() -> None:
@@ -171,7 +356,14 @@ def _clear_scene() -> None:
         scene.compositing_node_group = None
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
-    for datablocks in (bpy.data.meshes, bpy.data.curves, bpy.data.materials, bpy.data.cameras, bpy.data.lights, bpy.data.node_groups):
+    for datablocks in (
+        bpy.data.meshes,
+        bpy.data.curves,
+        bpy.data.materials,
+        bpy.data.cameras,
+        bpy.data.lights,
+        bpy.data.node_groups,
+    ):
         for item in list(datablocks):
             if item.users == 0:
                 datablocks.remove(item)
@@ -217,9 +409,13 @@ def _aim(obj: bpy.types.Object, point: Vector) -> None:
 def _lighting(seed: int, scale: float) -> list[dict]:
     rng = random.Random(seed)
     records = []
-    for idx, (loc, energy, size) in enumerate([
-        ((1.0, -1.2, 1.8), 240, 0.65), ((-1.1, -0.1, 1.4), 120, 0.45), ((0.2, 1.2, 1.0), 180, 0.55)
-    ]):
+    for idx, (loc, energy, size) in enumerate(
+        [
+            ((1.0, -1.2, 1.8), 240, 0.65),
+            ((-1.1, -0.1, 1.4), 120, 0.45),
+            ((0.2, 1.2, 1.0), 180, 0.55),
+        ]
+    ):
         data = bpy.data.lights.new(f"softbox_{idx}", "AREA")
         data.energy = energy * scale * rng.uniform(0.97, 1.03)
         data.shape = "DISK"
@@ -236,7 +432,15 @@ def _world_matrix_camera(camera: bpy.types.Object) -> list[float]:
     return [round(float(camera.matrix_world[r][c]), 9) for r in range(4) for c in range(4)]
 
 
-def _save_render(scene: bpy.types.Scene, camera: bpy.types.Object, mask_material: bpy.types.Material, ground: bpy.types.Object, out_rgb: Path, out_mask: Path, distortion: float) -> None:
+def _save_render(
+    scene: bpy.types.Scene,
+    camera: bpy.types.Object,
+    mask_material: bpy.types.Material,
+    ground: bpy.types.Object,
+    out_rgb: Path,
+    out_mask: Path,
+    distortion: float,
+) -> None:
     scene.camera = camera
     tree = bpy.data.node_groups.new("M17 synthetic lens distortion", "CompositorNodeTree")
     scene.compositing_node_group = tree
@@ -265,7 +469,7 @@ def _save_render(scene: bpy.types.Scene, camera: bpy.types.Object, mask_material
 def _mesh_truth(objects: list[bpy.types.Object], output: Path) -> dict:
     """Write a world-space ASCII PLY and return its exact generated bounds."""
     depsgraph = bpy.context.evaluated_depsgraph_get()
-    vertices: list[tuple[float, float, float]] = []
+    vertices: list[tuple[float, ...]] = []
     faces: list[tuple[int, ...]] = []
     for obj in objects:
         if obj.type != "MESH":
@@ -273,8 +477,15 @@ def _mesh_truth(objects: list[bpy.types.Object], output: Path) -> dict:
         evaluated = obj.evaluated_get(depsgraph)
         mesh = evaluated.to_mesh()
         base = len(vertices)
-        vertices.extend(tuple(float(component) for component in evaluated.matrix_world @ vertex.co) for vertex in mesh.vertices)
-        faces.extend(tuple(base + int(index) for index in polygon.vertices) for polygon in mesh.polygons if len(polygon.vertices) >= 3)
+        vertices.extend(
+            tuple(float(component) for component in evaluated.matrix_world @ vertex.co)
+            for vertex in mesh.vertices
+        )
+        faces.extend(
+            tuple(base + int(index) for index in polygon.vertices)
+            for polygon in mesh.polygons
+            if len(polygon.vertices) >= 3
+        )
         evaluated.to_mesh_clear()
     if not vertices or not faces:
         raise ValueError("generated ground-truth mesh is empty")
@@ -283,15 +494,28 @@ def _mesh_truth(objects: list[bpy.types.Object], output: Path) -> dict:
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("x", encoding="ascii", newline="\n") as stream:
         stream.write("ply\nformat ascii 1.0\n")
-        stream.write(f"comment units meters; generated geometry; not physical CAD\nelement vertex {len(vertices)}\n")
+        stream.write(
+            f"comment units meters; generated geometry; not physical CAD\nelement vertex {len(vertices)}\n"
+        )
         stream.write("property float x\nproperty float y\nproperty float z\n")
-        stream.write(f"element face {len(faces)}\nproperty list uchar int vertex_indices\nend_header\n")
+        stream.write(
+            f"element face {len(faces)}\nproperty list uchar int vertex_indices\nend_header\n"
+        )
         for vertex in vertices:
             stream.write(f"{vertex[0]:.9g} {vertex[1]:.9g} {vertex[2]:.9g}\n")
         for face in faces:
             stream.write(f"{len(face)} {' '.join(str(index) for index in face)}\n")
     bounds_mm = [round((upper[i] - lower[i]) * 1000.0, 3) for i in range(3)]
-    return {"path": output.name, "bytes": output.stat().st_size, "sha256": hashlib.sha256(output.read_bytes()).hexdigest(), "format": "PLY", "vertices": len(vertices), "faces": len(faces), "units": "meters", "bounds_mm_from_generated_vertices": bounds_mm}
+    return {
+        "path": output.name,
+        "bytes": output.stat().st_size,
+        "sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+        "format": "PLY",
+        "vertices": len(vertices),
+        "faces": len(faces),
+        "units": "meters",
+        "bounds_mm_from_generated_vertices": bounds_mm,
+    }
 
 
 def generate(output: Path, count_per_family: int = 12) -> dict:
@@ -307,7 +531,9 @@ def generate(output: Path, count_per_family: int = 12) -> dict:
     staging_parent = root / ".staging"
     staging = staging_parent / "synthetic-v1"
     if final_output.exists() or staging_parent.exists():
-        raise FileExistsError("refusing to overwrite an existing synthetic dataset or staging directory")
+        raise FileExistsError(
+            "refusing to overwrite an existing synthetic dataset or staging directory"
+        )
     staging.mkdir(parents=True, exist_ok=False)
     records = []
     for family_index, (family, spec) in enumerate(FAMILIES.items()):
@@ -323,16 +549,40 @@ def generate(output: Path, count_per_family: int = 12) -> dict:
                 bpy.ops.mesh.primitive_plane_add(size=20, location=(0, 0, 0))
                 ground = bpy.context.object
                 ground.name = "ground_non_object"
-                ground.data.materials.append(_material("studio_ground", {"polymer": "backdrop", "roughness": .85, "metallic": 0, "transmission": 0, "base": (.30, .32, .34, 1)}))
+                ground.data.materials.append(
+                    _material(
+                        "studio_ground",
+                        {
+                            "polymer": "backdrop",
+                            "roughness": 0.85,
+                            "metallic": 0,
+                            "transmission": 0,
+                            "base": (0.30, 0.32, 0.34, 1),
+                        },
+                    )
+                )
                 ground.pass_index = 0
                 sx, sy, sz = (v / 1000 for v in spec["size"])
                 target = Vector((0, 0, sz * 0.52))
                 azimuth = (0.0, math.radians(34), math.radians(-42))[view_index]
                 elevation = (math.radians(5), math.radians(12), math.radians(39))[view_index]
                 distance = max(sx, sy, sz) * 3.0
-                camera.location = target + Vector((math.sin(azimuth) * math.cos(elevation), -math.cos(azimuth) * math.cos(elevation), math.sin(elevation))) * distance
+                camera.location = (
+                    target
+                    + Vector(
+                        (
+                            math.sin(azimuth) * math.cos(elevation),
+                            -math.cos(azimuth) * math.cos(elevation),
+                            math.sin(elevation),
+                        )
+                    )
+                    * distance
+                )
                 _aim(camera, target)
-                lights = _lighting(SEED + family_index * 31 + variant_index * 7 + view_index, 0.72 + 0.28 * ((variant_index + view_index) % 3))
+                lights = _lighting(
+                    SEED + family_index * 31 + variant_index * 7 + view_index,
+                    0.72 + 0.28 * ((variant_index + view_index) % 3),
+                )
                 sample_id = f"syn_{family}_{material_id}_v{view_index + 1:02d}"
                 rgb_path = staging / "rgb" / f"{sample_id}.png"
                 mask_path = staging / "masks" / f"{sample_id}.png"
@@ -346,32 +596,96 @@ def generate(output: Path, count_per_family: int = 12) -> dict:
                 obj_objects = [obj for obj in scene.objects if obj != ground and obj.type == "MESH"]
                 mesh_record = _mesh_truth(obj_objects, mesh_path)
                 metric_bands = synthetic_packaging_metric_bands(
-                    nominal_dimensions_mm=tuple(float(value) for value in spec["size"]),
+                    nominal_dimensions_mm=(
+                        float(spec["size"][0]),
+                        float(spec["size"][1]),
+                        float(spec["size"][2]),
+                    ),
                     mesh_extent_mm=tuple(mesh_record["bounds_mm_from_generated_vertices"]),
-                    scenario_tolerances_mm=tuple(float(value) for value in spec["tol"]),
+                    scenario_tolerances_mm=(float(spec["tol"][0]), float(spec["tol"][1])),
                 )
                 record = {
                     "id": sample_id,
                     "family": family,
                     "synthetic": True,
-                    "source": {"kind": "procedural_blender", "generator": "tools/datasets/generate_packaging_benchmark.py", "version": GENERATOR_VERSION, "seed": SEED},
-                    "material_appearance": {"polymer_assumption": MATERIALS[material_id]["polymer"], "finish": material_id, "roughness": MATERIALS[material_id]["roughness"], "transmission_weight": MATERIALS[material_id]["transmission"], "warning": "idealized shader; not measured resin optical behavior"},
+                    "source": {
+                        "kind": "procedural_blender",
+                        "generator": "tools/datasets/generate_packaging_benchmark.py",
+                        "version": GENERATOR_VERSION,
+                        "seed": SEED,
+                    },
+                    "material_appearance": {
+                        "polymer_assumption": MATERIALS[material_id]["polymer"],
+                        "finish": material_id,
+                        "roughness": MATERIALS[material_id]["roughness"],
+                        "transmission_weight": MATERIALS[material_id]["transmission"],
+                        "warning": "idealized shader; not measured resin optical behavior",
+                    },
                     "dimensions_mm_nominal_simulated": list(spec["size"]),
-                    "manufacturing_tolerance_mm_simulated": {"each_axis_plus_minus": list(spec["tol"]), "source": "generator scenario input; not supplier or physical tolerance evidence"},
+                    "manufacturing_tolerance_mm_simulated": {
+                        "each_axis_plus_minus": list(spec["tol"]),
+                        "source": "generator scenario input; not supplier or physical tolerance evidence",
+                    },
                     "expected_geometry_extent_mm": mesh_record["bounds_mm_from_generated_vertices"],
                     "expected_software_metric_bands": {
-                        key: {"lower": band.lower, "upper": band.upper, "unit": band.unit, "provenance": band.provenance, "authority": band.authority}
+                        key: {
+                            "lower": band.lower,
+                            "upper": band.upper,
+                            "unit": band.unit,
+                            "provenance": band.provenance,
+                            "authority": band.authority,
+                        }
                         for key, band in sorted(metric_bands.items())
                     },
-                    "camera": {"model": "pinhole plus Blender compositor lens distortion", "resolution_px": [WIDTH, HEIGHT], "focal_length_mm": 50.0, "sensor_mm": [36.0, 27.0], "sensor_fit": "HORIZONTAL", "fx_px": round(WIDTH * 50.0 / 36.0, 6), "fy_px": round(WIDTH * 50.0 / 36.0, 6), "cx_px": WIDTH / 2, "cy_px": HEIGHT / 2, "camera_to_world_row_major": _world_matrix_camera(camera), "blender_lens_distortion_factor_simulated": distortion, "view_index": view_index},
-                    "lighting": lights,
-                    "render": {"engine": "Blender Eevee", "blender_version": bpy.app.version_string, "resolution_px": [WIDTH, HEIGHT], "color_management": "AgX", "controlled_sensor_noise": "not applied", "shadow_and_reflection": "Blender area-light approximations"},
-                    "files": {
-                        "rgb": {"path": rgb_path.relative_to(staging).as_posix(), "bytes": rgb_path.stat().st_size, "sha256": hashlib.sha256(rgb_path.read_bytes()).hexdigest(), "format": "PNG"},
-                        "mask": {"path": mask_path.relative_to(staging).as_posix(), "bytes": mask_path.stat().st_size, "sha256": hashlib.sha256(mask_path.read_bytes()).hexdigest(), "format": "PNG"},
-                        "geometry": {**mesh_record, "path": mesh_path.relative_to(staging).as_posix()},
+                    "camera": {
+                        "model": "pinhole plus Blender compositor lens distortion",
+                        "resolution_px": [WIDTH, HEIGHT],
+                        "focal_length_mm": 50.0,
+                        "sensor_mm": [36.0, 27.0],
+                        "sensor_fit": "HORIZONTAL",
+                        "fx_px": round(WIDTH * 50.0 / 36.0, 6),
+                        "fy_px": round(WIDTH * 50.0 / 36.0, 6),
+                        "cx_px": WIDTH / 2,
+                        "cy_px": HEIGHT / 2,
+                        "camera_to_world_row_major": _world_matrix_camera(camera),
+                        "blender_lens_distortion_factor_simulated": distortion,
+                        "view_index": view_index,
                     },
-                    "expected_software_use": ["reconstruction", "segmentation", "camera_calibration", "measurement", "scan_master_preview", "design_model_family_regression"],
+                    "lighting": lights,
+                    "render": {
+                        "engine": "Blender Eevee",
+                        "blender_version": bpy.app.version_string,
+                        "resolution_px": [WIDTH, HEIGHT],
+                        "color_management": "AgX",
+                        "controlled_sensor_noise": "not applied",
+                        "shadow_and_reflection": "Blender area-light approximations",
+                    },
+                    "files": {
+                        "rgb": {
+                            "path": rgb_path.relative_to(staging).as_posix(),
+                            "bytes": rgb_path.stat().st_size,
+                            "sha256": hashlib.sha256(rgb_path.read_bytes()).hexdigest(),
+                            "format": "PNG",
+                        },
+                        "mask": {
+                            "path": mask_path.relative_to(staging).as_posix(),
+                            "bytes": mask_path.stat().st_size,
+                            "sha256": hashlib.sha256(mask_path.read_bytes()).hexdigest(),
+                            "format": "PNG",
+                        },
+                        "geometry": {
+                            **mesh_record,
+                            "path": mesh_path.relative_to(staging).as_posix(),
+                        },
+                    },
+                    "expected_software_use": [
+                        "reconstruction",
+                        "segmentation",
+                        "camera_calibration",
+                        "measurement",
+                        "scan_master_preview",
+                        "design_model_family_regression",
+                    ],
                     "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
                 }
                 records.append(record)
@@ -397,7 +711,11 @@ def generate(output: Path, count_per_family: int = 12) -> dict:
     staging.rename(final_output)
     staging_parent.rmdir()
     manifest_path = final_output / "manifest.json"
-    return {"sample_count": len(records), "manifest": str(manifest_path), "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest()}
+    return {
+        "sample_count": len(records),
+        "manifest": str(manifest_path),
+        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+    }
 
 
 def _args() -> Path:

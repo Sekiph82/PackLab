@@ -62,7 +62,7 @@ _HUB_TOKEN_ENV_VARS = (
 def _vggt_worker_environment(
     base_environment: Mapping[str, str], core_source: Path, upstream_root: Path
 ) -> dict[str, str]:
-    environment = base_environment.copy()
+    environment = dict(base_environment)
     environment["PYTHONPATH"] = os.pathsep.join((str(core_source), str(upstream_root)))
     environment["HF_HUB_OFFLINE"] = "1"
     environment["TRANSFORMERS_OFFLINE"] = "1"

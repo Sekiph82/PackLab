@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 from .packaging_asset import PackagingAsset
 
@@ -227,7 +227,8 @@ def _field_values(asset: PackagingAsset) -> dict[str, tuple[str, str]]:
         "closure_description": neck_closure["closure_description"],
         "status": values["status"],
     }
-    provenance = {item["field_name"]: item["classification"] for item in values["field_provenance"]}
+    field_provenance: Any = values["field_provenance"]
+    provenance = {item["field_name"]: item["classification"] for item in field_provenance}
     result: dict[str, tuple[str, str]] = {}
     for field_name, _label in _FIELD_LABELS:
         value = raw[field_name]

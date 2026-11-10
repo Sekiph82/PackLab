@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import pytest
-
 from tools.codex.task_queue import parse_task_rows, validate_queue
 
 
-def tracker(current: str = "PL-0438 — Integrate autonomous queue", status: str = "IN_PROGRESS", row: str = "~") -> str:
+def tracker(
+    current: str = "PL-0438 — Integrate autonomous queue",
+    status: str = "IN_PROGRESS",
+    row: str = "~",
+) -> str:
     return f"""# PackLab
 
 ## Project Status

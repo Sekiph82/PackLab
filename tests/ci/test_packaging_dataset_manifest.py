@@ -33,16 +33,28 @@ TERMS = "PackLab development/CI and owner-controlled design-office and future Ke
 
 
 def _chunk(kind: bytes, data: bytes) -> bytes:
-    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    return (
+        struct.pack(">I", len(data))
+        + kind
+        + data
+        + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    )
 
 
 def _png(mask: bool = False) -> bytes:
     width, height, color_type = 640, 480, 6
     header = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
-    pixel_row = b"".join(bytes((255, 255, 255, 255 if not mask or 100 <= x < 540 else 0)) for x in range(width))
+    pixel_row = b"".join(
+        bytes((255, 255, 255, 255 if not mask or 100 <= x < 540 else 0)) for x in range(width)
+    )
     row = b"\x00" + pixel_row
     pixels = zlib.compress(row * height, level=1)
-    return b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", header) + _chunk(b"IDAT", pixels) + _chunk(b"IEND", b"")
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _chunk(b"IHDR", header)
+        + _chunk(b"IDAT", pixels)
+        + _chunk(b"IEND", b"")
+    )
 
 
 @pytest.fixture
@@ -67,12 +79,24 @@ def dataset_manifest(tmp_path: Path) -> Path:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     payload = image if role == "rgb" else mask_image
                     path.write_bytes(payload)
-                    files[role] = {"path": rel, "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest(), "format": "PNG"}
+                    files[role] = {
+                        "path": rel,
+                        "bytes": len(payload),
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                        "format": "PNG",
+                    }
                 geometry_rel = f"synthetic/ground_truth/{sample_id}.ply"
                 geometry_path = tmp_path / geometry_rel
                 geometry_path.parent.mkdir(parents=True, exist_ok=True)
                 geometry_path.write_bytes(ply)
-                files["geometry"] = {"path": geometry_rel, "bytes": len(ply), "sha256": hashlib.sha256(ply).hexdigest(), "format": "PLY", "vertices": 3, "faces": 1}
+                files["geometry"] = {
+                    "path": geometry_rel,
+                    "bytes": len(ply),
+                    "sha256": hashlib.sha256(ply).hexdigest(),
+                    "format": "PLY",
+                    "vertices": 3,
+                    "faces": 1,
+                }
                 samples.append(
                     {
                         "id": sample_id,
@@ -83,11 +107,48 @@ def dataset_manifest(tmp_path: Path) -> Path:
                         "dimensions_mm_nominal_simulated": [100, 90, 180],
                         "expected_geometry_extent_mm": [100.0, 90.0, 180.0],
                         "expected_software_metric_bands": {
-                            key: {"lower": band.lower, "upper": band.upper, "unit": band.unit, "provenance": band.provenance, "authority": band.authority}
+                            key: {
+                                "lower": band.lower,
+                                "upper": band.upper,
+                                "unit": band.unit,
+                                "provenance": band.provenance,
+                                "authority": band.authority,
+                            }
                             for key, band in metric_bands.items()
                         },
-                        "manufacturing_tolerance_mm_simulated": {"each_axis_plus_minus": [0.3, 0.6]},
-                        "camera": {"model": "pinhole plus Blender compositor lens distortion", "resolution_px": [640, 480], "focal_length_mm": 50.0, "sensor_mm": [36.0, 27.0], "sensor_fit": "HORIZONTAL", "fx_px": 888.888889, "fy_px": 888.888889, "cx_px": 320, "cy_px": 240, "camera_to_world_row_major": [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], "blender_lens_distortion_factor_simulated": 0.0},
+                        "manufacturing_tolerance_mm_simulated": {
+                            "each_axis_plus_minus": [0.3, 0.6]
+                        },
+                        "camera": {
+                            "model": "pinhole plus Blender compositor lens distortion",
+                            "resolution_px": [640, 480],
+                            "focal_length_mm": 50.0,
+                            "sensor_mm": [36.0, 27.0],
+                            "sensor_fit": "HORIZONTAL",
+                            "fx_px": 888.888889,
+                            "fy_px": 888.888889,
+                            "cx_px": 320,
+                            "cy_px": 240,
+                            "camera_to_world_row_major": [
+                                1,
+                                0,
+                                0,
+                                0,
+                                0,
+                                1,
+                                0,
+                                0,
+                                0,
+                                0,
+                                1,
+                                0,
+                                0,
+                                0,
+                                0,
+                                1,
+                            ],
+                            "blender_lens_distortion_factor_simulated": 0.0,
+                        },
                         "measurement_authority": "synthetic generator inputs only; no physical or Kenya ground truth",
                         "files": files,
                     }
@@ -150,7 +211,9 @@ def test_rejects_incomplete_family_and_ambiguous_json(dataset_manifest: Path) ->
 
 def test_rejects_metric_band_drift(dataset_manifest: Path) -> None:
     document = json.loads(dataset_manifest.read_text(encoding="utf-8"))
-    document["samples"][0]["expected_software_metric_bands"]["reconstruction_extent_x_mm"]["authority"] = "PHYSICAL_MEASUREMENT"
+    document["samples"][0]["expected_software_metric_bands"]["reconstruction_extent_x_mm"][
+        "authority"
+    ] = "PHYSICAL_MEASUREMENT"
     dataset_manifest.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="authority/provenance"):
         validate_manifest(dataset_manifest)
@@ -166,13 +229,17 @@ def test_synthetic_metric_harness_accepts_inclusive_edges(dataset_manifest: Path
     assert all(item.authority == "NONPHYSICAL_SOFTWARE_TEST_ONLY" for item in result.results)
 
 
-def test_synthetic_metric_harness_rejects_missing_unexpected_and_nonfinite(dataset_manifest: Path) -> None:
+def test_synthetic_metric_harness_rejects_missing_unexpected_and_nonfinite(
+    dataset_manifest: Path,
+) -> None:
     document = json.loads(dataset_manifest.read_text(encoding="utf-8"))
     sample = document["samples"][0]
     bands = sample["expected_software_metric_bands"]
     observed = {key: record["lower"] for key, record in bands.items()}
     with pytest.raises(ValueError, match="metric set mismatch"):
-        compare_synthetic_packaging_sample(sample, {key: value for key, value in observed.items() if key != "segmentation_iou"})
+        compare_synthetic_packaging_sample(
+            sample, {key: value for key, value in observed.items() if key != "segmentation_iou"}
+        )
     with pytest.raises(ValueError, match="metric set mismatch"):
         compare_synthetic_packaging_sample(sample, {**observed, "extra": 0.0})
     observed["segmentation_iou"] = float("nan")
@@ -180,7 +247,9 @@ def test_synthetic_metric_harness_rejects_missing_unexpected_and_nonfinite(datas
         compare_synthetic_packaging_sample(sample, observed)
 
 
-def test_synthetic_metric_harness_rejects_real_or_ambiguous_authority(dataset_manifest: Path) -> None:
+def test_synthetic_metric_harness_rejects_real_or_ambiguous_authority(
+    dataset_manifest: Path,
+) -> None:
     document = json.loads(dataset_manifest.read_text(encoding="utf-8"))
     sample = document["samples"][0]
     bands = sample["expected_software_metric_bands"]
@@ -191,14 +260,28 @@ def test_synthetic_metric_harness_rejects_real_or_ambiguous_authority(dataset_ma
 
 
 def test_archive_member_paths_reject_cross_platform_escape_forms() -> None:
-    for path in ("../escape", "pkg/../../escape", "..\\escape", "C:\\outside", "\\\\server\\share\\file", "/absolute", "pkg/drive:evil"):
+    for path in (
+        "../escape",
+        "pkg/../../escape",
+        "..\\escape",
+        "C:\\outside",
+        "\\\\server\\share\\file",
+        "/absolute",
+        "pkg/drive:evil",
+    ):
         with pytest.raises(ValueError, match="unsafe"):
             _safe_name(path)
     assert _safe_name("006_mustard_bottle/N1_000.jpg").as_posix() == "006_mustard_bottle/N1_000.jpg"
 
 
 def test_ycb_manifest_paths_reject_cross_platform_escape_forms(tmp_path: Path) -> None:
-    for path in ("../outside", "..\\outside", "C:\\outside", "\\\\server\\share\\file", "pkg/drive:evil"):
+    for path in (
+        "../outside",
+        "..\\outside",
+        "C:\\outside",
+        "\\\\server\\share\\file",
+        "pkg/drive:evil",
+    ):
         with pytest.raises(ValueError, match="unsafe"):
             _regular_ycb_file(tmp_path, path)
 
@@ -316,7 +399,10 @@ def test_ycb_source_archive_identity_is_pinned_to_reviewed_bytes() -> None:
 
 def _all_in_band(manifest: Path) -> dict[str, dict[str, float]]:
     samples = json.loads(manifest.read_text(encoding="utf-8"))["samples"]
-    return {s["id"]: {k: b["lower"] for k, b in s["expected_software_metric_bands"].items()} for s in samples}
+    return {
+        s["id"]: {k: b["lower"] for k, b in s["expected_software_metric_bands"].items()}
+        for s in samples
+    }
 
 
 def test_regression_harness_passes_engine_results_inside_bands(dataset_manifest: Path) -> None:
@@ -344,7 +430,7 @@ def test_regression_harness_fails_out_of_band_and_never_passes_unevaluated(
 
     partial = {first: {"segmentation_iou": 0.95}}
     report = run_regression(dataset_manifest, partial)
-    assert report["outcome"] == "PASS"
+    assert report["outcome"] == "PARTIAL_PASS"
     assert report["counts"] == {"PASS": 1, "FAIL": 0, "NOT_EVALUATED": 96 * 8 - 1}
 
     assert run_regression(dataset_manifest, {})["outcome"] == "FAIL"
@@ -370,7 +456,9 @@ def test_regression_harness_rejects_unknown_samples_and_unbanded_metrics(
 def test_builtin_segmentation_engine_scores_ground_truth_masks(dataset_manifest: Path) -> None:
     from tools.datasets.run_benchmark_regression import builtin_segmentation, read_mask_png
 
-    width, height, values = read_mask_png(dataset_manifest.parent / "synthetic/mask/syn_bottle_hdpe_matte_v01.png")
+    width, height, values = read_mask_png(
+        dataset_manifest.parent / "synthetic/mask/syn_bottle_hdpe_matte_v01.png"
+    )
     assert (width, height) == (640, 480) and sum(values) == 440 * 480
     sample = json.loads(dataset_manifest.read_text(encoding="utf-8"))["samples"][0]
     metrics = builtin_segmentation(sample, dataset_manifest.parent)

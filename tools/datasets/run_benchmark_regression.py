@@ -7,7 +7,7 @@ Usage:
 `results.json` maps sample id -> {metric key -> value}, produced by an engine run
 (COLMAP/OpenMVS, fitting, SAM 2.1, ...). `--builtin-segmentation` runs PackLab's
 mask post-processing engine on each ground-truth mask. Metrics no source covers
-are reported NOT_EVALUATED, never PASS. Bands are synthetic software ranges, not
+are reported NOT_EVALUATED, never PASS; any gap makes the run PARTIAL_PASS (exit 2). Bands are synthetic software ranges, not
 physical or Kenya acceptance.
 """
 
@@ -110,8 +110,15 @@ def builtin_segmentation(sample: Mapping[str, object], root: Path) -> dict[str, 
         mask_height=height,
         transform=CoordinateTransform(width, height, width, height),
         provenance=SegmentationProvenance(
-            "m17-synthetic-ground-truth", "1.0", "none", "1.0", "none",
-            files["mask"]["sha256"], "python", "3.12", "docs/datasets/M17_DATASET_CATALOG.md",
+            "m17-synthetic-ground-truth",
+            "1.0",
+            "none",
+            "1.0",
+            "none",
+            files["mask"]["sha256"],
+            "python",
+            "3.12",
+            "docs/datasets/M17_DATASET_CATALOG.md",
         ),
         prompt=PromptEvidence(PromptKind.AUTOMATIC),
         mask_revision="m17-gt",
@@ -121,8 +128,12 @@ def builtin_segmentation(sample: Mapping[str, object], root: Path) -> dict[str, 
     )
     child = post_process_mask(
         parent,
-        MaskPostProcessingParameters(max_hole_area=16, max_component_area_to_remove=16, fill_single_pixel_notches=True),
+        MaskPostProcessingParameters(
+            max_hole_area=16, max_component_area_to_remove=16, fill_single_pixel_notches=True
+        ),
     ).child
+    if child.raster is None:
+        raise ValueError(f"{sample['id']}: post-processing produced no raster")
     metrics = mask_quality_metrics(truth, child.raster)
     return {"segmentation_iou": metrics.intersection_over_union, "segmentation_dice": metrics.dice}
 
@@ -157,13 +168,28 @@ def run_regression(
             comparison = compare_synthetic_packaging_sample(subset, values)
             for result in comparison.results:
                 counts[result.outcome.value] += 1
-                rows.append({"sample": sample["id"], "metric": result.key, "observed": result.observed,
-                             "lower": result.lower, "upper": result.upper, "unit": result.unit,
-                             "outcome": result.outcome.value})
-        rows.extend({"sample": sample["id"], "metric": k, "outcome": "NOT_EVALUATED"} for k in not_evaluated)
+                rows.append(
+                    {
+                        "sample": sample["id"],
+                        "metric": result.key,
+                        "observed": result.observed,
+                        "lower": result.lower,
+                        "upper": result.upper,
+                        "unit": result.unit,
+                        "outcome": result.outcome.value,
+                    }
+                )
+        rows.extend(
+            {"sample": sample["id"], "metric": k, "outcome": "NOT_EVALUATED"} for k in not_evaluated
+        )
 
     evaluated = counts["PASS"] + counts["FAIL"]
-    outcome = "FAIL" if counts["FAIL"] or not evaluated else MetricOutcome.PASS.value
+    if counts["FAIL"] or not evaluated:
+        outcome = "FAIL"
+    elif counts["NOT_EVALUATED"]:
+        outcome = "PARTIAL_PASS"
+    else:
+        outcome = MetricOutcome.PASS.value
     return {
         "dataset_id": manifest["dataset_id"],
         "outcome": outcome,
@@ -179,6 +205,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--observed", type=Path)
     parser.add_argument("--builtin-segmentation", action="store_true")
     parser.add_argument("--report", type=Path)
+    parser.add_argument(
+        "--allow-not-evaluated",
+        action="store_true",
+        help="exit 0 on PARTIAL_PASS (evaluated metrics all pass, others not run)",
+    )
     args = parser.parse_args(argv)
     observed = json.loads(args.observed.read_text(encoding="utf-8")) if args.observed else None
     observers: tuple[Observer, ...] = (builtin_segmentation,) if args.builtin_segmentation else ()
@@ -187,7 +218,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.report:
         args.report.write_text(text + "\n", encoding="utf-8")
     print(json.dumps({"outcome": report["outcome"], "counts": report["counts"]}, sort_keys=True))
-    return 0 if report["outcome"] == "PASS" else 1
+    if report["outcome"] == "PASS":
+        return 0
+    if report["outcome"] == "PARTIAL_PASS":
+        return 0 if args.allow_not_evaluated else 2
+    return 1
 
 
 if __name__ == "__main__":

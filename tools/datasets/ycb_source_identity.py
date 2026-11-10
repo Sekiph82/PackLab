@@ -1,9 +1,11 @@
 """Reviewed, pinned identities for the exact YCB archives used by M17."""
 
+from typing import Any
+
 YCB_INDEX_URL = "https://ycb-benchmarks.s3.amazonaws.com/index.html"
 YCB_LICENSE_URL = "https://creativecommons.org/licenses/by/4.0/"
 
-YCB_ARCHIVE_IDENTITIES = {
+YCB_ARCHIVE_IDENTITIES: dict[str, dict[str, Any]] = {
     "006_mustard_bottle_google_16k.tgz": {
         "url": "https://ycb-benchmarks.s3.amazonaws.com/data/google/006_mustard_bottle_google_16k.tgz",
         "bytes": 10_703_139,

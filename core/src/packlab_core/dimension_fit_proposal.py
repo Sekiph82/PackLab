@@ -449,7 +449,8 @@ def _utc_timestamp(value: object) -> str:
         parsed = datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as error:
         raise DimensionFitProposalError("timestamp_invalid") from error
-    if parsed.utcoffset() is None or parsed.utcoffset().total_seconds() != 0:
+    offset = parsed.utcoffset()
+    if offset is None or offset.total_seconds() != 0:
         raise DimensionFitProposalError("timestamp_must_be_utc_z")
     return value
 

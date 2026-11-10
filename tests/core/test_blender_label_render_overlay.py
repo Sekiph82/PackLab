@@ -13,11 +13,6 @@ from packlab_core.blender_label_render_overlay import (
     LabelRenderOverlayError,
     create_label_render_overlay_binding,
 )
-from packlab_core.label_dieline_svg import export_label_dieline_svg
-from packlab_core.label_metric_surface_binding import (
-    create_label_dieline,
-    create_label_dieline_print_intent,
-)
 from packlab_core.cad_label_surface_analysis import (
     CadLabelSurfacePolicy,
     analyze_cad_label_surfaces,
@@ -27,7 +22,12 @@ from packlab_core.label_artwork import (
     ingest_label_artwork,
     map_label_artwork_to_zone,
 )
-from packlab_core.label_metric_surface_binding import create_label_metric_surface_binding
+from packlab_core.label_dieline_svg import export_label_dieline_svg
+from packlab_core.label_metric_surface_binding import (
+    create_label_dieline,
+    create_label_dieline_print_intent,
+    create_label_metric_surface_binding,
+)
 from packlab_core.label_zone import LabelZoneBoundary, LabelZoneKind, create_label_zone
 from packlab_core.label_zone_placement import create_label_zone_placement_revision
 
@@ -162,8 +162,8 @@ def test_overlay_binding_rejects_stale_metric_and_svg_media() -> None:
 
 
 def test_dieline_artwork_and_product_mockup_binding_share_authority() -> None:
-    model, brep, analysis, metric, placement, mapping, assignment, artwork, overlay = (
-        _make_binding(LabelZoneKind.FRONT)
+    model, brep, analysis, metric, placement, mapping, assignment, artwork, overlay = _make_binding(
+        LabelZoneKind.FRONT
     )
     source_dieline = create_label_dieline(metric, placement)
     print_intent = create_label_dieline_print_intent(

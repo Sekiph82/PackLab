@@ -8,9 +8,9 @@ manufacturing acceptance.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Mapping
 
 
 class MetricOutcome(StrEnum):
@@ -84,9 +84,10 @@ def compare_metric_bands(
         band = expected[key]
         if not isinstance(band, MetricBand) or band.key != key:
             raise ValueError(f"invalid expected metric band: {key}")
-        value = observed[key]
-        if type(value) not in (int, float) or not math.isfinite(value):
+        raw = observed[key]
+        if type(raw) not in (int, float) or not math.isfinite(raw):  # type: ignore[arg-type]
             raise ValueError(f"observed metric must be a finite real number: {key}")
+        value = float(raw)  # type: ignore[arg-type]
         outcome = MetricOutcome.PASS if band.lower <= value <= band.upper else MetricOutcome.FAIL
         results.append(
             MetricResult(
@@ -100,7 +101,11 @@ def compare_metric_bands(
                 authority=band.authority,
             )
         )
-    final = MetricOutcome.PASS if all(result.outcome is MetricOutcome.PASS for result in results) else MetricOutcome.FAIL
+    final = (
+        MetricOutcome.PASS
+        if all(result.outcome is MetricOutcome.PASS for result in results)
+        else MetricOutcome.FAIL
+    )
     return BenchmarkComparison(final, tuple(results))
 
 
@@ -111,10 +116,19 @@ def synthetic_packaging_metric_bands(
     scenario_tolerances_mm: tuple[float, float],
 ) -> dict[str, MetricBand]:
     """Build software-only ranges from generator truth and existing mask gates."""
-    if len(nominal_dimensions_mm) != 3 or len(mesh_extent_mm) != 3 or len(scenario_tolerances_mm) != 2:
-        raise ValueError("synthetic dimensions require three axes and a two-value scenario tolerance")
+    if (
+        len(nominal_dimensions_mm) != 3
+        or len(mesh_extent_mm) != 3
+        or len(scenario_tolerances_mm) != 2
+    ):
+        raise ValueError(
+            "synthetic dimensions require three axes and a two-value scenario tolerance"
+        )
     values = (*nominal_dimensions_mm, *mesh_extent_mm, *scenario_tolerances_mm)
-    if any(type(value) not in (int, float) or not math.isfinite(value) or value <= 0 for value in values):
+    if any(
+        type(value) not in (int, float) or not math.isfinite(value) or value <= 0
+        for value in values
+    ):
         raise ValueError("synthetic dimensions and tolerances must be positive finite values")
     if scenario_tolerances_mm[0] > scenario_tolerances_mm[1]:
         raise ValueError("scenario tolerance bounds are reversed")
@@ -124,12 +138,8 @@ def synthetic_packaging_metric_bands(
         "authority": "NONPHYSICAL_SOFTWARE_TEST_ONLY",
     }
     bands: dict[str, MetricBand] = {
-        "segmentation_iou": MetricBand(
-            "segmentation_iou", 0.80, 1.0, "ratio", **common
-        ),
-        "segmentation_dice": MetricBand(
-            "segmentation_dice", 0.88, 1.0, "ratio", **common
-        ),
+        "segmentation_iou": MetricBand("segmentation_iou", 0.80, 1.0, "ratio", **common),
+        "segmentation_dice": MetricBand("segmentation_dice", 0.88, 1.0, "ratio", **common),
     }
     tolerance = float(scenario_tolerances_mm[1])
     for axis, extent in zip("xyz", mesh_extent_mm, strict=True):
@@ -156,7 +166,10 @@ def compare_synthetic_packaging_sample(
     """
     if not isinstance(sample, Mapping) or sample.get("synthetic") is not True:
         raise ValueError("only explicitly synthetic benchmark samples are accepted")
-    if sample.get("measurement_authority") != "synthetic generator inputs only; no physical or Kenya ground truth":
+    if (
+        sample.get("measurement_authority")
+        != "synthetic generator inputs only; no physical or Kenya ground truth"
+    ):
         raise ValueError("sample does not declare synthetic-only measurement authority")
     raw_bands = sample.get("expected_software_metric_bands")
     if not isinstance(raw_bands, Mapping) or not raw_bands:
@@ -176,6 +189,9 @@ def compare_synthetic_packaging_sample(
             )
         except (KeyError, TypeError) as exc:
             raise ValueError(f"incomplete expected metric record: {key}") from exc
-        if bands[key].provenance != "SYNTHETIC_GENERATOR_SCENARIO" or bands[key].authority != "NONPHYSICAL_SOFTWARE_TEST_ONLY":
+        if (
+            bands[key].provenance != "SYNTHETIC_GENERATOR_SCENARIO"
+            or bands[key].authority != "NONPHYSICAL_SOFTWARE_TEST_ONLY"
+        ):
             raise ValueError(f"metric authority is not explicitly synthetic: {key}")
     return compare_metric_bands(bands, observed)

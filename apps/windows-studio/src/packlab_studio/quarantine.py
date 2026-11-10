@@ -41,7 +41,9 @@ class QuarantineStore:
             if source.stat().st_size > packscan_container.MAX_PACKSCAN_BYTES:
                 return None
             with source.open("rb") as stream:
-                entry_count = packscan_container._preflight_zip_entry_count(stream, source.stat().st_size)
+                entry_count = packscan_container._preflight_zip_entry_count(
+                    stream, source.stat().st_size
+                )
                 if entry_count > packscan_container.MAX_PACKSCAN_ENTRIES:
                     return None
                 stream.seek(0)
@@ -53,29 +55,52 @@ class QuarantineStore:
                         manifest_bytes = member.read(
                             packscan_container.MAX_PACKSCAN_CONTROL_ENTRY_BYTES + 1
                         )
-                        if len(manifest_bytes) > packscan_container.MAX_PACKSCAN_CONTROL_ENTRY_BYTES:
+                        if (
+                            len(manifest_bytes)
+                            > packscan_container.MAX_PACKSCAN_CONTROL_ENTRY_BYTES
+                        ):
                             return None
                         value = json.loads(manifest_bytes.decode("utf-8"))
             capture_id = value.get("capture_id") if isinstance(value, dict) else None
-            return capture_id if isinstance(capture_id, str) and 0 < len(capture_id) <= 128 else None
-        except (OSError, KeyError, ValueError, RuntimeError, NotImplementedError, EOFError, zlib.error, zipfile.BadZipFile):
+            return (
+                capture_id if isinstance(capture_id, str) and 0 < len(capture_id) <= 128 else None
+            )
+        except (
+            OSError,
+            KeyError,
+            ValueError,
+            RuntimeError,
+            NotImplementedError,
+            EOFError,
+            zlib.error,
+            zipfile.BadZipFile,
+        ):
             return None
 
-    def preserve(self, source: str | Path, *, source_channel: str, error_code: str, diagnostic: str) -> QuarantineRecord:
+    def preserve(
+        self, source: str | Path, *, source_channel: str, error_code: str, diagnostic: str
+    ) -> QuarantineRecord:
         path = Path(source)
         digest: str | None = None
         preserved = False
         if path.is_file():
             try:
                 if path.stat().st_size <= packscan_container.MAX_PACKSCAN_BYTES:
-                    fd, temporary_name = tempfile.mkstemp(prefix=".quarantine-", suffix=".part", dir=self.packages)
+                    fd, temporary_name = tempfile.mkstemp(
+                        prefix=".quarantine-", suffix=".part", dir=self.packages
+                    )
                     hasher = hashlib.sha256()
                     copied = 0
                     try:
                         with os.fdopen(fd, "wb") as handle:
-                            with path.open("rb") as source:
+                            with path.open("rb") as stream:
                                 while True:
-                                    chunk = source.read(min(1024 * 1024, packscan_container.MAX_PACKSCAN_BYTES - copied + 1))
+                                    chunk = stream.read(
+                                        min(
+                                            1024 * 1024,
+                                            packscan_container.MAX_PACKSCAN_BYTES - copied + 1,
+                                        )
+                                    )
                                     if not chunk:
                                         break
                                     if copied + len(chunk) > packscan_container.MAX_PACKSCAN_BYTES:
@@ -100,8 +125,13 @@ class QuarantineStore:
                                         existing_hash = hashlib.sha256()
                                         existing_size = 0
                                         with target.open("rb") as existing:
-                                            for chunk in iter(lambda: existing.read(1024 * 1024), b""):
-                                                if existing_size + len(chunk) > packscan_container.MAX_PACKSCAN_BYTES:
+                                            for chunk in iter(
+                                                lambda: existing.read(1024 * 1024), b""
+                                            ):
+                                                if (
+                                                    existing_size + len(chunk)
+                                                    > packscan_container.MAX_PACKSCAN_BYTES
+                                                ):
                                                     break
                                                 existing_hash.update(chunk)
                                                 existing_size += len(chunk)
@@ -123,26 +153,55 @@ class QuarantineStore:
                         Path(temporary_name).unlink(missing_ok=True)
             except OSError:
                 digest = None
-        quarantine_id = digest or hashlib.sha256(path.name.encode("utf-8", errors="replace")).hexdigest()
+        quarantine_id = (
+            digest or hashlib.sha256(path.name.encode("utf-8", errors="replace")).hexdigest()
+        )
         record = QuarantineRecord(
-            quarantine_id=quarantine_id, package_sha256=digest, source_channel=source_channel,
-            capture_id=self._safe_capture_id(path) if digest else None, error_code=error_code,
-            diagnostic=error_code, package_preserved=preserved,
-            quarantined_at=datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+            quarantine_id=quarantine_id,
+            package_sha256=digest,
+            source_channel=source_channel,
+            capture_id=self._safe_capture_id(path) if digest else None,
+            error_code=error_code,
+            diagnostic=error_code,
+            package_preserved=preserved,
+            quarantined_at=datetime.now(UTC)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z"),
         )
         record_path = self.records / f"{quarantine_id}.json"
         events: list[dict[str, object]] = []
         if record_path.exists():
             try:
                 existing = json.loads(record_path.read_text(encoding="utf-8"))
-                events = existing.get("events", []) if isinstance(existing, dict) and isinstance(existing.get("events"), list) else []
+                events = (
+                    existing.get("events", [])
+                    if isinstance(existing, dict) and isinstance(existing.get("events"), list)
+                    else []
+                )
             except (OSError, ValueError):
                 events = []
-        events.append({"source_channel": record.source_channel, "capture_id": record.capture_id, "error_code": record.error_code, "diagnostic": record.diagnostic, "package_preserved": record.package_preserved, "quarantined_at": record.quarantined_at})
-        fd, temporary_name = tempfile.mkstemp(prefix=f".{quarantine_id}-", suffix=".json", dir=self.records)
+        events.append(
+            {
+                "source_channel": record.source_channel,
+                "capture_id": record.capture_id,
+                "error_code": record.error_code,
+                "diagnostic": record.diagnostic,
+                "package_preserved": record.package_preserved,
+                "quarantined_at": record.quarantined_at,
+            }
+        )
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{quarantine_id}-", suffix=".json", dir=self.records
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump({"quarantine_id": quarantine_id, "package_sha256": digest, "events": events}, handle, sort_keys=True, separators=(",", ":"))
+                json.dump(
+                    {"quarantine_id": quarantine_id, "package_sha256": digest, "events": events},
+                    handle,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())

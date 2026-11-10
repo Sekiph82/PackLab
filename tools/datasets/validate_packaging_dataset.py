@@ -9,9 +9,18 @@ import math
 import struct
 import zlib
 from pathlib import Path, PurePosixPath
+from typing import Any
 
-
-REQUIRED_FAMILIES = {"bottle", "jerrycan", "jar", "closure", "trigger_spray", "pump", "tube", "sachet"}
+REQUIRED_FAMILIES = {
+    "bottle",
+    "jerrycan",
+    "jar",
+    "closure",
+    "trigger_spray",
+    "pump",
+    "tube",
+    "sachet",
+}
 EXPECTED_MATERIALS = {"hdpe_matte", "pet_gloss", "pet_clear", "pp_translucent"}
 MAX_MANIFEST_BYTES = 32 * 1024 * 1024
 MAX_SAMPLE_BYTES = 32 * 1024 * 1024
@@ -43,7 +52,9 @@ def _is_reparse_point(path: Path) -> bool:
         return False
 
 
-def _png_integrity(path: Path, *, inspect_mask_coverage: bool = False) -> tuple[int, int, int, int, int]:
+def _png_integrity(
+    path: Path, *, inspect_mask_coverage: bool = False
+) -> tuple[int, int, int, int, int]:
     if path.stat().st_size > MAX_SAMPLE_BYTES:
         raise ValueError(f"sample exceeds size cap: {path.name}")
     with path.open("rb") as stream:
@@ -69,8 +80,16 @@ def _png_integrity(path: Path, *, inspect_mask_coverage: bool = False) -> tuple[
             if chunk_type == b"IHDR":
                 if length != 13:
                     raise ValueError(f"invalid PNG IHDR: {path.name}")
-                width, height, bit_depth, color_type, compression, filtering, interlace = struct.unpack(">IIBBBBB", payload)
-                if (width, height) != (640, 480) or bit_depth != 8 or compression != 0 or filtering != 0 or interlace != 0:
+                width, height, bit_depth, color_type, compression, filtering, interlace = (
+                    struct.unpack(">IIBBBBB", payload)
+                )
+                if (
+                    (width, height) != (640, 480)
+                    or bit_depth != 8
+                    or compression != 0
+                    or filtering != 0
+                    or interlace != 0
+                ):
                     raise ValueError(f"unexpected PNG encoding or dimensions: {path.name}")
             elif chunk_type == b"IDAT":
                 image_data.extend(payload)
@@ -92,8 +111,15 @@ def _png_integrity(path: Path, *, inspect_mask_coverage: bool = False) -> tuple[
         raw = decoder.decompress(bytes(image_data), expected_size + 1)
     except zlib.error as exc:
         raise ValueError(f"invalid PNG image stream: {path.name}") from exc
-    if len(raw) > expected_size or decoder.unconsumed_tail or decoder.unused_data or not decoder.eof:
-        raise ValueError(f"PNG decompressed content exceeds or violates expected bounds: {path.name}")
+    if (
+        len(raw) > expected_size
+        or decoder.unconsumed_tail
+        or decoder.unused_data
+        or not decoder.eof
+    ):
+        raise ValueError(
+            f"PNG decompressed content exceeds or violates expected bounds: {path.name}"
+        )
     if len(raw) != expected_size:
         raise ValueError(f"unexpected decompressed PNG payload length: {path.name}")
 
@@ -125,7 +151,13 @@ def _png_integrity(path: Path, *, inspect_mask_coverage: bool = False) -> tuple[
                 elif filter_type == 4:
                     base = left + above - upper_left
                     distances = (abs(base - left), abs(base - above), abs(base - upper_left))
-                    predictor = left if distances[0] <= distances[1] and distances[0] <= distances[2] else above if distances[1] <= distances[2] else upper_left
+                    predictor = (
+                        left
+                        if distances[0] <= distances[1] and distances[0] <= distances[2]
+                        else above
+                        if distances[1] <= distances[2]
+                        else upper_left
+                    )
                 else:
                     predictor = 0
                 alpha = (raw[encoded + pixel * bytes_per_pixel + 3] + predictor) & 0xFF
@@ -177,7 +209,11 @@ def _validate_ply(path: Path) -> tuple[list[float], int, int]:
                 raise ValueError(f"truncated PLY face list: {path.name}")
             count = int(fields[0])
             indices = [int(value) for value in fields[1:]]
-            if count < 3 or count != len(indices) or any(index < 0 or index >= vertex_count for index in indices):
+            if (
+                count < 3
+                or count != len(indices)
+                or any(index < 0 or index >= vertex_count for index in indices)
+            ):
                 raise ValueError(f"invalid PLY face index: {path.name}")
     bounds_mm = [round((upper[i] - lower[i]) * 1000.0, 6) for i in range(3)]
     return bounds_mm, vertex_count, face_count
@@ -191,18 +227,33 @@ def _validate_software_metric_bands(sample: dict, mesh_extent: list[float]) -> N
     tolerance = sample["manufacturing_tolerance_mm_simulated"]["each_axis_plus_minus"][1]
     for axis, extent in zip("xyz", mesh_extent, strict=True):
         for stage in ("reconstruction", "parametric_fit"):
-            expected[f"{stage}_extent_{axis}_mm"] = (max(0.0, extent - tolerance), extent + tolerance, "mm_simulated")
+            expected[f"{stage}_extent_{axis}_mm"] = (
+                max(0.0, extent - tolerance),
+                extent + tolerance,
+                "mm_simulated",
+            )
     if set(records) != set(expected):
         raise ValueError("expected software metric set is incomplete or contains unknown metrics")
     for key, (lower, upper, unit) in expected.items():
         record = records[key]
         if type(record) is not dict:
             raise ValueError(f"invalid expected metric record: {key}")
-        if any(type(record.get(bound)) not in (int, float) or not math.isfinite(record[bound]) for bound in ("lower", "upper")):
+        if any(
+            type(record.get(bound)) not in (int, float) or not math.isfinite(record[bound])
+            for bound in ("lower", "upper")
+        ):
             raise ValueError(f"expected metric bounds must be finite: {key}")
-        if not math.isclose(record["lower"], lower, rel_tol=0, abs_tol=0.005) or not math.isclose(record["upper"], upper, rel_tol=0, abs_tol=0.005):
-            raise ValueError(f"expected metric range differs from its declared synthetic scenario: {key}")
-        if record.get("unit") != unit or record.get("provenance") != "SYNTHETIC_GENERATOR_SCENARIO" or record.get("authority") != "NONPHYSICAL_SOFTWARE_TEST_ONLY":
+        if not math.isclose(record["lower"], lower, rel_tol=0, abs_tol=0.005) or not math.isclose(
+            record["upper"], upper, rel_tol=0, abs_tol=0.005
+        ):
+            raise ValueError(
+                f"expected metric range differs from its declared synthetic scenario: {key}"
+            )
+        if (
+            record.get("unit") != unit
+            or record.get("provenance") != "SYNTHETIC_GENERATOR_SCENARIO"
+            or record.get("authority") != "NONPHYSICAL_SOFTWARE_TEST_ONLY"
+        ):
             raise ValueError(f"expected metric authority/provenance is invalid: {key}")
 
 
@@ -211,15 +262,29 @@ def validate_manifest(manifest_path: Path) -> dict:
     if manifest_path.stat().st_size > MAX_MANIFEST_BYTES:
         raise ValueError("manifest exceeds size cap")
     root = manifest_path.parent.resolve(strict=True)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys)
-    if manifest.get("schema_version") != "1.0" or manifest.get("dataset_id") != "packlab-m17-synthetic-packaging-v2":
+    manifest = json.loads(
+        manifest_path.read_text(encoding="utf-8"), object_pairs_hook=_no_duplicate_keys
+    )
+    if (
+        manifest.get("schema_version") != "1.0"
+        or manifest.get("dataset_id") != "packlab-m17-synthetic-packaging-v2"
+    ):
         raise ValueError("unsupported manifest identity/version")
-    if manifest.get("fully_synthetic") is not True or manifest.get("physical_measurements_present") is not False:
+    if (
+        manifest.get("fully_synthetic") is not True
+        or manifest.get("physical_measurements_present") is not False
+    ):
         raise ValueError("synthetic/physical authority flags must be exact booleans")
-    if manifest.get("owner_internal_use_scope") != "PackLab development/CI and owner-controlled design-office and future Kenya-factory use; no external reuse, sublicense, sale or marketing permission":
+    if (
+        manifest.get("owner_internal_use_scope")
+        != "PackLab development/CI and owner-controlled design-office and future Kenya-factory use; no external reuse, sublicense, sale or marketing permission"
+    ):
         raise ValueError("dataset-specific internal-use terms are missing or changed")
     samples = manifest.get("samples")
-    if type(samples) is not list or len(samples) != len(REQUIRED_FAMILIES) * len(EXPECTED_MATERIALS) * 3:
+    if (
+        type(samples) is not list
+        or len(samples) != len(REQUIRED_FAMILIES) * len(EXPECTED_MATERIALS) * 3
+    ):
         raise ValueError("unexpected sample count")
     identities: set[str] = set()
     folded_paths: set[str] = set()
@@ -228,10 +293,17 @@ def validate_manifest(manifest_path: Path) -> dict:
     for sample in samples:
         if type(sample) is not dict or sample.get("synthetic") is not True:
             raise ValueError("sample must be an explicitly synthetic object")
-        if sample.get("measurement_authority") != "synthetic generator inputs only; no physical or Kenya ground truth":
+        if (
+            sample.get("measurement_authority")
+            != "synthetic generator inputs only; no physical or Kenya ground truth"
+        ):
             raise ValueError("sample measurement authority is missing or overstated")
         sample_id = sample.get("id")
-        if type(sample_id) is not str or not sample_id.startswith("syn_") or sample_id in identities:
+        if (
+            type(sample_id) is not str
+            or not sample_id.startswith("syn_")
+            or sample_id in identities
+        ):
             raise ValueError("invalid or duplicate sample identity")
         identities.add(sample_id)
         family = sample.get("family")
@@ -243,36 +315,71 @@ def validate_manifest(manifest_path: Path) -> dict:
             raise ValueError(f"unsupported material appearance: {finish!r}")
         materials.add(finish)
         dimensions = sample.get("dimensions_mm_nominal_simulated")
-        tolerance = sample.get("manufacturing_tolerance_mm_simulated", {}).get("each_axis_plus_minus")
-        if type(dimensions) is not list or len(dimensions) != 3 or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in dimensions):
+        tolerance = sample.get("manufacturing_tolerance_mm_simulated", {}).get(
+            "each_axis_plus_minus"
+        )
+        if (
+            type(dimensions) is not list
+            or len(dimensions) != 3
+            or any(
+                type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in dimensions
+            )
+        ):
             raise ValueError("invalid simulated dimensions")
-        if type(tolerance) is not list or len(tolerance) != 2 or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in tolerance):
+        if (
+            type(tolerance) is not list
+            or len(tolerance) != 2
+            or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in tolerance)
+        ):
             raise ValueError("invalid simulated tolerance")
         camera = sample.get("camera")
-        if type(camera) is not dict or camera.get("model") != "pinhole plus Blender compositor lens distortion":
+        if (
+            type(camera) is not dict
+            or camera.get("model") != "pinhole plus Blender compositor lens distortion"
+        ):
             raise ValueError("camera model metadata is missing")
         if camera.get("resolution_px") != [640, 480] or camera.get("sensor_fit") != "HORIZONTAL":
             raise ValueError("unsupported camera resolution or sensor fit")
-        focal = camera.get("focal_length_mm")
-        sensor = camera.get("sensor_mm")
-        intrinsics = [camera.get(key) for key in ("fx_px", "fy_px", "cx_px", "cy_px")]
-        if type(focal) not in (int, float) or not math.isfinite(focal) or focal <= 0 or type(sensor) is not list or len(sensor) != 2 or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in sensor):
+        focal: Any = camera.get("focal_length_mm")
+        sensor: Any = camera.get("sensor_mm")
+        intrinsics: list[Any] = [camera.get(key) for key in ("fx_px", "fy_px", "cx_px", "cy_px")]
+        if (
+            type(focal) not in (int, float)
+            or not math.isfinite(focal)
+            or focal <= 0
+            or type(sensor) is not list
+            or len(sensor) != 2
+            or any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0 for v in sensor)
+        ):
             raise ValueError("invalid camera lens/sensor metadata")
         if any(type(v) not in (int, float) or not math.isfinite(v) for v in intrinsics):
             raise ValueError("invalid camera intrinsics")
         expected_focal_px = 640 * focal / sensor[0]
-        if abs(intrinsics[0] - expected_focal_px) > 1e-5 or abs(intrinsics[1] - expected_focal_px) > 1e-5 or intrinsics[2:] != [320, 240]:
+        if (
+            abs(intrinsics[0] - expected_focal_px) > 1e-5
+            or abs(intrinsics[1] - expected_focal_px) > 1e-5
+            or intrinsics[2:] != [320, 240]
+        ):
             raise ValueError("camera intrinsics do not match the declared sensor fit")
         matrix = camera.get("camera_to_world_row_major")
-        if type(matrix) is not list or len(matrix) != 16 or any(type(v) not in (int, float) or not math.isfinite(v) for v in matrix):
+        if (
+            type(matrix) is not list
+            or len(matrix) != 16
+            or any(type(v) not in (int, float) or not math.isfinite(v) for v in matrix)
+        ):
             raise ValueError("invalid camera pose")
-        if any(abs(matrix[12 + index] - expected) > 1e-6 for index, expected in enumerate((0, 0, 0, 1))):
+        if any(
+            abs(matrix[12 + index] - expected) > 1e-6 for index, expected in enumerate((0, 0, 0, 1))
+        ):
             raise ValueError("camera pose is not a homogeneous transform")
         axes = [[matrix[row * 4 + col] for row in range(3)] for col in range(3)]
         for axis in axes:
             if abs(sum(component * component for component in axis) - 1) > 1e-4:
                 raise ValueError("camera rotation axis is not unit length")
-        if any(abs(sum(axes[a][i] * axes[b][i] for i in range(3))) > 1e-4 for a, b in ((0, 1), (0, 2), (1, 2))):
+        if any(
+            abs(sum(axes[a][i] * axes[b][i] for i in range(3))) > 1e-4
+            for a, b in ((0, 1), (0, 2), (1, 2))
+        ):
             raise ValueError("camera rotation axes are not orthogonal")
         determinant = (
             matrix[0] * (matrix[5] * matrix[10] - matrix[6] * matrix[9])
@@ -281,7 +388,10 @@ def validate_manifest(manifest_path: Path) -> dict:
         )
         if abs(determinant - 1.0) > 1e-4:
             raise ValueError("camera pose rotation must be right-handed")
-        if type(camera.get("blender_lens_distortion_factor_simulated")) not in (int, float) or not math.isfinite(camera["blender_lens_distortion_factor_simulated"]):
+        if type(camera.get("blender_lens_distortion_factor_simulated")) not in (
+            int,
+            float,
+        ) or not math.isfinite(camera["blender_lens_distortion_factor_simulated"]):
             raise ValueError("invalid simulated radial distortion")
         files = sample.get("files")
         if type(files) is not dict:
@@ -295,28 +405,51 @@ def validate_manifest(manifest_path: Path) -> dict:
             if type(rel) is not str or file_record.get("format") != "PNG":
                 raise ValueError(f"invalid {role} file identity")
             path = PurePosixPath(rel)
-            if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts) or "\\" in rel:
+            if (
+                path.is_absolute()
+                or any(part in {"", ".", ".."} for part in path.parts)
+                or "\\" in rel
+            ):
                 raise ValueError(f"unsafe sample path: {rel!r}")
             folded = rel.casefold()
             if folded in folded_paths:
                 raise ValueError("case-insensitive sample path collision")
             folded_paths.add(folded)
             resolved = root.joinpath(*path.parts)
-            if any(_is_reparse_point(part) for part in [resolved, *resolved.parents] if part != root.parent) or not resolved.is_file():
+            if (
+                any(
+                    _is_reparse_point(part)
+                    for part in [resolved, *resolved.parents]
+                    if part != root.parent
+                )
+                or not resolved.is_file()
+            ):
                 raise ValueError(f"missing or linked sample file: {rel}")
             try:
                 resolved.resolve(strict=True).relative_to(root)
             except ValueError as exc:
                 raise ValueError(f"sample path escapes dataset root: {rel}") from exc
-            if type(file_record.get("bytes")) is not int or file_record["bytes"] != resolved.stat().st_size:
+            if (
+                type(file_record.get("bytes")) is not int
+                or file_record["bytes"] != resolved.stat().st_size
+            ):
                 raise ValueError(f"file byte length mismatch: {rel}")
-            if type(file_record.get("sha256")) is not str or _sha256(resolved) != file_record["sha256"]:
+            if (
+                type(file_record.get("sha256")) is not str
+                or _sha256(resolved) != file_record["sha256"]
+            ):
                 raise ValueError(f"file SHA-256 mismatch: {rel}")
             image_records[role] = _png_integrity(resolved, inspect_mask_coverage=role == "mask")
         if image_records["rgb"][:2] != image_records["mask"][:2]:
             raise ValueError(f"RGB/mask dimensions differ for sample {sample_id}")
-        if image_records["mask"][2] != 6 or image_records["mask"][3] != 0 or image_records["mask"][4] != 255:
-            raise ValueError(f"mask must have transparent background and opaque object coverage: {sample_id}")
+        if (
+            image_records["mask"][2] != 6
+            or image_records["mask"][3] != 0
+            or image_records["mask"][4] != 255
+        ):
+            raise ValueError(
+                f"mask must have transparent background and opaque object coverage: {sample_id}"
+            )
 
         geometry = files.get("geometry")
         if type(geometry) is not dict or geometry.get("format") != "PLY":
@@ -326,30 +459,65 @@ def validate_manifest(manifest_path: Path) -> dict:
             raise ValueError(f"missing ground-truth geometry path: {sample_id}")
         geometry_path = PurePosixPath(rel)
         folded = rel.casefold()
-        if geometry_path.is_absolute() or any(part in {"", ".", ".."} for part in geometry_path.parts) or "\\" in rel or folded in folded_paths:
+        if (
+            geometry_path.is_absolute()
+            or any(part in {"", ".", ".."} for part in geometry_path.parts)
+            or "\\" in rel
+            or folded in folded_paths
+        ):
             raise ValueError(f"unsafe or colliding geometry path: {rel}")
         folded_paths.add(folded)
         resolved_geometry = root.joinpath(*geometry_path.parts)
-        if any(_is_reparse_point(part) for part in [resolved_geometry, *resolved_geometry.parents] if part != root.parent) or not resolved_geometry.is_file():
+        if (
+            any(
+                _is_reparse_point(part)
+                for part in [resolved_geometry, *resolved_geometry.parents]
+                if part != root.parent
+            )
+            or not resolved_geometry.is_file()
+        ):
             raise ValueError(f"missing or linked PLY file: {rel}")
         try:
             resolved_geometry.resolve(strict=True).relative_to(root)
         except ValueError as exc:
             raise ValueError(f"geometry path escapes dataset root: {rel}") from exc
-        if type(geometry.get("bytes")) is not int or geometry["bytes"] != resolved_geometry.stat().st_size or geometry.get("sha256") != _sha256(resolved_geometry):
+        if (
+            type(geometry.get("bytes")) is not int
+            or geometry["bytes"] != resolved_geometry.stat().st_size
+            or geometry.get("sha256") != _sha256(resolved_geometry)
+        ):
             raise ValueError(f"PLY length/hash mismatch: {rel}")
         actual_bounds, vertices, faces = _validate_ply(resolved_geometry)
         expected_bounds = sample.get("expected_geometry_extent_mm")
-        if type(expected_bounds) is not list or len(expected_bounds) != 3 or any(type(value) not in (int, float) or not math.isfinite(value) or not math.isclose(actual_bounds[axis], value, rel_tol=0, abs_tol=0.005) for axis, value in enumerate(expected_bounds)) or vertices != geometry.get("vertices") or faces != geometry.get("faces"):
+        if (
+            type(expected_bounds) is not list
+            or len(expected_bounds) != 3
+            or any(
+                type(value) not in (int, float)
+                or not math.isfinite(value)
+                or not math.isclose(actual_bounds[axis], value, rel_tol=0, abs_tol=0.005)
+                for axis, value in enumerate(expected_bounds)
+            )
+            or vertices != geometry.get("vertices")
+            or faces != geometry.get("faces")
+        ):
             raise ValueError(f"PLY geometry metrics do not match manifest: {sample_id}")
         _validate_software_metric_bands(sample, actual_bounds)
         nominal = sample["dimensions_mm_nominal_simulated"]
         tolerances = sample["manufacturing_tolerance_mm_simulated"]["each_axis_plus_minus"]
         if any(abs(actual_bounds[axis] - nominal[axis]) > max(tolerances) for axis in range(3)):
-            raise ValueError(f"generated mesh extent exceeds its simulated tolerance band: {sample_id}")
+            raise ValueError(
+                f"generated mesh extent exceeds its simulated tolerance band: {sample_id}"
+            )
     if families != REQUIRED_FAMILIES or materials != EXPECTED_MATERIALS:
         raise ValueError("required family or appearance coverage is incomplete")
-    return {"dataset_id": manifest["dataset_id"], "sample_count": len(samples), "families": sorted(families), "materials": sorted(materials), "manifest_sha256": _sha256(manifest_path)}
+    return {
+        "dataset_id": manifest["dataset_id"],
+        "sample_count": len(samples),
+        "families": sorted(families),
+        "materials": sorted(materials),
+        "manifest_sha256": _sha256(manifest_path),
+    }
 
 
 def main() -> int:

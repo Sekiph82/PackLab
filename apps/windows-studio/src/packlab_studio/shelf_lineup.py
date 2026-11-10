@@ -136,6 +136,8 @@ def _dimension_mm(measurement: object, field: str) -> float:
         raise ShelfLineupError(f"shelf_lineup_{field}_missing")
     unit = getattr(measurement, "unit", None)
     value = getattr(measurement, "value", None)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ShelfLineupError(f"shelf_lineup_{field}_value_invalid")
     if unit is MeasurementUnit.MILLIMETER:
         normalized = float(value)
     elif unit is MeasurementUnit.CENTIMETER:

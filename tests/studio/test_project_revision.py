@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import errno
+import json
 
 import pytest
 
@@ -131,9 +131,10 @@ def test_restart_repairs_mirrors_from_authority_after_interrupted_commit(tmp_pat
 
     # Simulate the crash window: authority is durable while compatibility mirrors are stale.
     assert json.loads((root / "working" / "state.json").read_text(encoding="utf-8")) == {}
-    assert json.loads((root / "working" / "project.json").read_text(encoding="utf-8"))[
-        "revision"
-    ] == initial.revision
+    assert (
+        json.loads((root / "working" / "project.json").read_text(encoding="utf-8"))["revision"]
+        == initial.revision
+    )
 
     restarted = ProjectManager()
     recovered = restarted.open_project(root)
@@ -141,9 +142,10 @@ def test_restart_repairs_mirrors_from_authority_after_interrupted_commit(tmp_pat
     assert json.loads((root / "working" / "state.json").read_text(encoding="utf-8")) == {
         "value": "durable"
     }
-    assert json.loads((root / "working" / "project.json").read_text(encoding="utf-8"))[
-        "revision"
-    ] == recovered.revision
+    assert (
+        json.loads((root / "working" / "project.json").read_text(encoding="utf-8"))["revision"]
+        == recovered.revision
+    )
     assert raw_path.read_bytes() == b"immutable raw"
 
 
