@@ -274,11 +274,19 @@ class BoundedGridFitOptimizer:
     def optimize(self, request: DimensionFitOptimizationRequest) -> DimensionFitProposal:
         if not isinstance(request, DimensionFitOptimizationRequest):
             raise DimensionFitProposalError("request_required")
-        if not 1 <= self.maximum_candidates <= 64:
+        if (
+            isinstance(self.maximum_candidates, bool)
+            or not isinstance(self.maximum_candidates, int)
+            or not 1 <= self.maximum_candidates <= 64
+        ):
             raise DimensionFitProposalError("maximum_candidates_invalid")
         axes = [
             [
-                item.target_value + item.tolerance * (2 * step / (_GRID_STEPS - 1) - 1)
+                _within_tolerance(
+                    item.target_value + item.tolerance * (2 * step / (_GRID_STEPS - 1) - 1),
+                    item.target_value,
+                    item.tolerance,
+                )
                 for step in range(_GRID_STEPS)
             ]
             for item in request.constraints
@@ -292,7 +300,10 @@ class BoundedGridFitOptimizer:
                 NumericParameterValue(parameter_id, value)
                 for parameter_id, value in zip(ids, values, strict=True)
             )
-            deviation, evaluation_sha256 = self.evaluate(parameters)
+            result = self.evaluate(parameters)
+            if not isinstance(result, tuple) or len(result) != 2:
+                raise DimensionFitProposalError("evaluator_result_invalid")
+            deviation, evaluation_sha256 = result
             candidate = DimensionFitCandidate(
                 f"grid-{index:04d}", parameters, deviation, evaluation_sha256
             )
@@ -399,7 +410,11 @@ def accept_dimension_fit_proposal(
         raise DimensionFitProposalError("user_request_required")
     # Targets, tolerances, deviation budget and deviation evidence must be exactly what the
     # user requested; a backend cannot widen bounds by echoing a different request.
-    if proposal.request != request:
+    if (
+        type(proposal.request) is not DimensionFitOptimizationRequest
+        or type(request) is not DimensionFitOptimizationRequest
+        or proposal.request.as_dict() != request.as_dict()
+    ):
         raise DimensionFitProposalError("proposal_request_mismatch")
     if (
         request.model_revision_id != model.revision_id
@@ -470,6 +485,17 @@ def accept_dimension_fit_proposal(
         created_at_utc=timestamp,
     )
     return AcceptedDimensionFitProposal(successor, record)
+
+
+def _within_tolerance(value: float, target: float, tolerance: float) -> float:
+    """Step a grid endpoint toward the target until the acceptance check holds exactly.
+
+    Float rounding can place target +/- tolerance a hair outside ``abs(v - t) <= tol``
+    (e.g. 31.0 +/- 0.3); proposing such a point would only be rejected at acceptance.
+    """
+    while abs(value - target) > tolerance:
+        value = math.nextafter(value, target)
+    return value
 
 
 def _identifier(value: object, name: str) -> None:

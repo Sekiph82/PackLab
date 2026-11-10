@@ -11,6 +11,7 @@ from packlab_core.design_model import revise_design_model_revision
 from packlab_core.dimension_fit_proposal import (
     BoundedGridFitOptimizer,
     DimensionFitCandidate,
+    DimensionFitOptimizationRequest,
     DimensionFitOptimizerBackend,
     DimensionFitProposal,
     DimensionFitProposalError,
@@ -356,3 +357,60 @@ def test_bounded_grid_optimizer_reports_when_nothing_meets_the_budget() -> None:
     _model_unused, proposal = _scenario()
     with pytest.raises(DimensionFitProposalError, match="no_candidate_within_deviation_budget"):
         BoundedGridFitOptimizer(lambda parameters: (9.0, "a" * 64)).optimize(proposal.request)
+
+
+@pytest.mark.parametrize(("target", "tolerance"), [(31.0, 0.3), (1.0, 0.1), (102.0, 5.0)])
+def test_every_grid_point_satisfies_the_acceptance_tolerance_check(target, tolerance) -> None:
+    # Re-review V2-1: float rounding put endpoints like 31.0 +/- 0.3 just outside tolerance.
+    constraint = MeasuredParameterConstraint(
+        "height",
+        "m-1",
+        "1" * 64,
+        target,
+        tolerance,
+        "mm_unverified",
+        "owner-1",
+        "2026-10-22T19:00:00Z",
+    )
+    request = DimensionFitOptimizationRequest(
+        "model-1", "scan-1", "2" * 64, "3" * 64, 10.0, (constraint,)
+    )
+    proposal = BoundedGridFitOptimizer(lambda parameters: (0.0, "4" * 64), 64).optimize(request)
+    values = [item.parameter_values[0].value for item in proposal.candidates]
+    assert len(values) == 5
+    assert all(abs(value - target) <= tolerance for value in values)
+    assert min(values) < target < max(values)
+
+
+def test_optimizer_bounds_inputs_and_budget_boundary() -> None:
+    constraints = tuple(
+        MeasuredParameterConstraint(
+            f"p{index}",
+            f"m-{index}",
+            "1" * 64,
+            10.0,
+            1.0,
+            "mm_unverified",
+            "owner-1",
+            "2026-10-22T19:00:00Z",
+        )
+        for index in range(5)
+    )
+    five = DimensionFitOptimizationRequest(
+        "model-1", "scan-1", "2" * 64, "3" * 64, 1.0, constraints
+    )
+    calls: list[object] = []
+    with pytest.raises(DimensionFitProposalError, match="grid_search_exceeds_evaluation_bound"):
+        BoundedGridFitOptimizer(lambda p: calls.append(p) or (0.0, "4" * 64)).optimize(five)
+    assert calls == []  # rejected before any evaluation
+    one = DimensionFitOptimizationRequest(
+        "model-1", "scan-1", "2" * 64, "3" * 64, 0.5, constraints[:1]
+    )
+    at_budget = BoundedGridFitOptimizer(lambda p: (0.5, "4" * 64), 64).optimize(one)
+    assert len(at_budget.candidates) == 5  # budget boundary is inclusive, like acceptance
+    assert len(BoundedGridFitOptimizer(lambda p: (0.5, "4" * 64), 1).optimize(one).candidates) == 1
+    for bad in (True, 0, 65, 2.5):
+        with pytest.raises(DimensionFitProposalError, match="maximum_candidates_invalid"):
+            BoundedGridFitOptimizer(lambda p: (0.0, "4" * 64), bad).optimize(one)  # type: ignore[arg-type]
+    with pytest.raises(DimensionFitProposalError, match="evaluator_result_invalid"):
+        BoundedGridFitOptimizer(lambda p: 0.0).optimize(one)  # type: ignore[arg-type,return-value]
