@@ -139,8 +139,8 @@ def test_povu_sku_variants_reuse_one_immutable_package_geometry_revision() -> No
     assert artwork_a.artwork_revision_id != artwork_b.artwork_revision_id
     assert artwork_a.artwork_content_sha256 != artwork_b.artwork_content_sha256
     assert asset.revision_id == source_asset_revision
-    assert all(item.as_dict()["geometry_copied"] is False for item in related)
-    assert all(item.as_dict()["source_mutated"] is False for item in related)
+    assert all(item.as_dict()["geometry_reference"]["geometry_copied"] is False for item in related)
+    assert all(item.as_dict()["geometry_reference"]["source_mutated"] is False for item in related)
     serialized = json.dumps(catalog.as_dict(), sort_keys=True)
     assert '"artwork_bytes_included": false' in serialized
     assert '"geometry_copied": false' in serialized

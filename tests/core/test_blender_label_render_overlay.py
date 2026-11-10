@@ -171,7 +171,8 @@ def test_dieline_artwork_and_product_mockup_binding_share_authority() -> None:
     )
     exported = export_label_dieline_svg(print_intent, placement)
 
-    assert exported.as_dict()["source_dieline_revision_id"] == source_dieline.revision_id
+    assert exported.as_dict()["source_dieline_revision_id"] == print_intent.revision_id
+    assert print_intent.source_dieline_revision_id == source_dieline.revision_id
     assert exported.as_dict()["physical_accuracy_validation_status"] == "DEFERRED_OWNER_VALIDATION"
     assert exported.as_dict()["manufacturing_authorized"] is False
     assert overlay.source_design_model_revision_id == model.revision_id
