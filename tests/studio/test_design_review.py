@@ -172,3 +172,73 @@ def test_exact_parent_enables_ghost_mode_and_renders_distinct_overlay() -> None:
     assert mesh_sha256(scan.mesh) in widget.overlay_caption.text()
     assert widget.binding.design_preview_sha256 in widget.overlay_caption.text()
     assert widget.binding.design_preview_sha256 in widget.status_label.text()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("authority_class", "DESIGN_MODEL"),
+        ("mold_use_authorized", True),
+        ("physical_accuracy_validation_status", "ACCEPTED"),
+        ("output_geometry_sha256", "0" * 64),
+    ],
+)
+def test_scan_master_manifest_authority_is_enforced(key: str, value: object) -> None:
+    # Review P2-3: the authority half of the manifest check had no test.
+    scan = _scan()
+    forged = ScanMasterRevision(scan.revision_id, PROJECT, MESH, {**scan.manifest, key: value})
+    with pytest.raises(
+        DesignReviewError, match="scan_master_manifest_identity_or_authority_invalid"
+    ):
+        ScanDesignReviewBinding.create(forged, _model(scan), PREVIEW)
+
+
+def test_matching_revision_id_with_a_different_geometry_digest_is_not_exactly_fitted() -> None:
+    import copy
+
+    scan = _scan()
+    stale = copy.copy(_model(scan))
+    # Test-only forgery of a model whose revision id matches but whose digest does not.
+    object.__setattr__(stale, "scan_master_geometry_sha256", "0" * 64)
+    assert stale.fitted_to_scan_master_revision_id == scan.revision_id
+    binding = ScanDesignReviewBinding.create(scan, stale, PREVIEW)
+    assert binding.is_exactly_scan_fitted is False
+    assert binding.metadata()["relationship"] == "UNLINKED_OR_STANDALONE"
+
+
+def test_combo_box_cannot_enable_ghosting_for_an_unlinked_model() -> None:
+    # The real user path (combo box) must apply the same guard as set_mode.
+    create_application(["packlab-design-review-combo-test"])
+    widget = ScanDesignReviewWidget(
+        ScanDesignReviewBinding.create(_scan(), _standalone_model(), PREVIEW)
+    )
+    widget.mode_picker.setCurrentIndex(1)
+    assert widget.mode is DesignReviewMode.SIDE_BY_SIDE
+    assert widget.mode_picker.currentIndex() == 0
+    assert widget.status_label.text().startswith("REVIEW ONLY")
+    assert "Ghosting unavailable" in widget.status_label.text()
+    assert "unverified" in widget.design_caption.text()
+
+
+def test_ghost_composite_matches_the_reference_mask_and_is_fast() -> None:
+    import time
+
+    from PySide6.QtGui import QColor, QImage
+
+    from packlab_studio.design_review import _BACKGROUND, _ghost_composite
+
+    create_application(["packlab-design-review-composite-test"])
+    scan = QImage(1600, 900, QImage.Format.Format_ARGB32)
+    scan.fill(_BACKGROUND)
+    design = QImage(scan)
+    for x in range(100, 300):
+        scan.setPixelColor(x, 50, QColor("#ffffff"))
+        design.setPixelColor(x, 60, QColor("#808080"))
+    started = time.perf_counter()
+    result = _ghost_composite(scan, design)
+    elapsed = time.perf_counter() - started
+    assert result.pixelColor(150, 50) != _BACKGROUND
+    assert result.pixelColor(150, 60) != _BACKGROUND
+    assert result.pixelColor(150, 55) == _BACKGROUND
+    assert result.pixelColor(150, 50) != result.pixelColor(150, 60)
+    assert elapsed < 0.5, elapsed

@@ -167,14 +167,23 @@ def plan_adaptive_angles(
         if len(angles) + count > min(policy.maximum_total_angles, _MAX_ANGLES):
             raise AdaptiveAnglePlanError("planned_angle_count_exceeds_limit")
         sector_width = sector.end_degrees - sector.start_degrees
-        for sector_index in range(count):
-            angle = sector.start_degrees + (sector_index + 0.5) * sector_width / count
+        planned = [
+            round(sector.start_degrees + (index + 0.5) * sector_width / count, 9)
+            for index in range(count)
+        ]
+        # Criterion 4 (review P2-1): after rounding, every angle must lie strictly inside its
+        # sector and be distinct; a sector too narrow for its count fails closed.
+        if any(not sector.start_degrees < angle < sector.end_degrees for angle in planned) or len(
+            set(planned)
+        ) != len(planned):
+            raise AdaptiveAnglePlanError("sector_too_narrow_for_planned_angles")
+        for sector_index, angle in enumerate(planned):
             angles.append(
                 PlannedAzimuth(
                     len(angles),
                     sector.sector_id,
                     sector_index,
-                    round(angle, 9),
+                    angle,
                     sector.evidence_sha256,
                 )
             )

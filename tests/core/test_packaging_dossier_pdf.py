@@ -138,3 +138,29 @@ def test_dossier_field_order_is_stable_and_unknowns_keep_unknown_provenance() ->
 def test_dossier_rejects_non_asset_source() -> None:
     with pytest.raises(PackagingDossierPdfError, match="packaging_asset_required"):
         export_packaging_dossier_pdf(object())  # type: ignore[arg-type]
+
+
+def test_rendered_page_draws_disclaimer_every_field_and_its_provenance_tag(monkeypatch) -> None:
+    # Review P2-5: assert what is actually painted into the PDF, not a constant string.
+    from PySide6.QtGui import QPainter
+
+    from packlab_core.packaging_dossier_pdf import _DISCLAIMER, _FIELD_LABELS, _field_values
+
+    drawn: list[str] = []
+    original = QPainter.drawText
+
+    def recording_draw_text(self, *args):
+        drawn.extend(arg for arg in args if isinstance(arg, str))
+        return original(self, *args)
+
+    monkeypatch.setattr(QPainter, "drawText", recording_draw_text)
+    asset = _asset()
+    export_packaging_dossier_pdf(asset)
+
+    assert _DISCLAIMER in drawn
+    values = _field_values(asset)
+    for field_name, label in _FIELD_LABELS:
+        value, provenance = values[field_name]
+        assert label in drawn, label
+        assert f"{value}  [{provenance}]" in drawn, field_name
+    assert any(asset.revision_id in text for text in drawn)

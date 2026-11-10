@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPixmap
+from PySide6.QtGui import QBitmap, QColor, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from packlab_core.design_model import DesignModelRevision
@@ -188,7 +188,8 @@ class ScanDesignReviewWidget(QWidget):
         if mode is DesignReviewMode.GHOSTED and not self.binding.is_exactly_scan_fitted:
             self.mode_picker.setCurrentIndex(0)
             self.status_label.setText(
-                "Ghosting unavailable: Design Model is not bound to this exact Scan Master revision."
+                "REVIEW ONLY · NON-AUTHORITATIVE · Ghosting unavailable: Design Model is not"
+                " bound to this exact Scan Master revision."
             )
             return
         self.mode = mode
@@ -233,7 +234,7 @@ class ScanDesignReviewWidget(QWidget):
                 "Scan Master · " + self.binding.scan_master.revision_id + " · sha256:" + scan_digest
             )
             self.design_caption.setText(
-                "Design Model preview · "
+                "Design Model preview (caller-supplied, unverified) · "
                 + self.binding.design_model.revision_id
                 + " · sha256:"
                 + design_digest
@@ -286,23 +287,23 @@ class ScanDesignReviewWidget(QWidget):
 
 
 def _ghost_composite(scan: QImage, design: QImage) -> QImage:
-    """Recolor geometry pixels over the viewport's known flat background."""
+    """Recolor geometry pixels over the viewport's known flat background.
+
+    Uses Qt's native colour mask instead of a per-pixel Python loop (review P2-4: the loop
+    took seconds per resize at desktop sizes).
+    """
 
     result = QImage(scan.size(), QImage.Format.Format_ARGB32)
     result.fill(_BACKGROUND)
     painter = QPainter(result)
     for image, color in ((scan, QColor("#38bdf8")), (design, QColor("#f59e0b"))):
-        mask = QImage(image.size(), QImage.Format.Format_ARGB32)
-        mask.fill(Qt.GlobalColor.transparent)
-        for y in range(image.height()):
-            for x in range(image.width()):
-                pixel = image.pixelColor(x, y)
-                if pixel != _BACKGROUND:
-                    color_pixel = QColor(color)
-                    color_pixel.setAlpha(pixel.alpha())
-                    mask.setPixelColor(x, y, color_pixel)
+        source = image.convertToFormat(QImage.Format.Format_ARGB32)
+        geometry_mask = source.createMaskFromColor(_BACKGROUND.rgba(), Qt.MaskMode.MaskInColor)
+        layer = QPixmap(source.size())
+        layer.fill(color)
+        layer.setMask(QBitmap.fromImage(geometry_mask))
         painter.setOpacity(0.62)
-        painter.drawImage(0, 0, mask)
+        painter.drawPixmap(0, 0, layer)
     painter.end()
     return result
 
