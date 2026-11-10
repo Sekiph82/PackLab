@@ -33,7 +33,7 @@ no longer exists, but it was dormant write-privileged automation with a mutable 
 the workflow is removed. Git history keeps it as evidence. Every other workflow uses `contents: read` and
 SHA-pinned actions.
 
-**F2 (P1, owner decision, NOT changed).** The Actions artifact
+**F2 (P1, RESOLVED 2026-11-10 by owner decision: artifact deleted).** The Actions artifact
 `packlab-internal-installer-candidate-pl0350-warm-452fe893…` (877.6 MB, expires 2026-12-14) is still live.
 Artifacts of a **public** repository can be downloaded by any signed-in GitHub user. The workflow and log
 names (`pl0352-private-installer-retention`, `repository_private=true`) show this installer was meant to stay
@@ -68,3 +68,11 @@ discloses only the local account name. The GitHub owner handle is already public
 - No repository settings were changed and no artifact was deleted.
 - An independent security reviewer must inspect this report and the remediation diff before PL-0394 can be
   checked. F2 stays open until the owner decides.
+
+## Post-audit action
+
+- 2026-11-10: the owner answered "Delete it". Artifact `11959245441`
+  (`packlab-internal-installer-candidate-pl0350-warm-452fe893…`, 877,601,969 bytes, sha256 `b976c7d4…3da4ac`,
+  run `38707054365`) was deleted with `gh api -X DELETE`.
+- A follow-up GET returns HTTP 404, and no `packlab-internal-installer*` artifact remains.
+- The PL-0351/PL-0352 tracker lines record that their digest evidence remains but the binary is gone.
