@@ -1,9 +1,12 @@
 # PackLab GitHub Actions artifact retention
 
+> **CURRENT OWNER DECISION: 2026-11-10 CLAUDE CODE EXCLUSIVE.** Claude, not Codex or ChatGPT, owns all new PackLab implementation, testing, independent peer-review coordination, GitHub Actions runs, `TASKS.md` updates and next-task selection. Earlier workflow texts below are dated history, not active stop/approval rules; genuine security, architecture, license, physical/owner/factory release gates remain binding. See root `CLAUDE.md`, `AGENTS.md`, `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. 
+
+
 > **2026-11-04 CURRENT MODE AND PRIVACY WARNING:** GitHub's current metadata reports `Sekiph82/PackLab` as PUBLIC, contradicting the older PRIVATE-repository assumption below. Do not upload private installers, private scan evidence, Apple signing material, supplier assets or confidential data into public repository/artifact exposure without verifying access and licensing. Hosted Actions are now owner-authorized for legitimate test workflows, but historical legal, factory release and protected-artifact requirements remain.
 
 
-PackLab's repository is private and the product is proprietary internal factory software. Workflow artifacts are temporary, owner-private engineering evidence unless an explicitly approved internal deployment candidate is retained. No artifact is a public release, legal sign-off, or factory rollout authorization.
+At the 2026-11-10 handoff, GitHub reports PackLab's repository visibility as PUBLIC. The product's internal/factory artifacts may still be proprietary and must not be assumed private or safely distributable by Actions. Workflow artifacts are temporary, owner-private engineering evidence unless an explicitly approved internal deployment candidate is retained. No artifact is a public release, legal sign-off, or factory rollout authorization.
 
 ## Retention classes
 
