@@ -76,6 +76,9 @@ class LabelArtworkAssetRevision:
         }
 
 
+_ASPECT_BASES = frozenset({"NORMALIZED_ZONE_UNITS", "METRIC_ZONE_MM_UNVERIFIED"})
+
+
 @dataclass(frozen=True, slots=True)
 class LabelArtworkMappingRevision:
     revision_id: str
@@ -90,11 +93,13 @@ class LabelArtworkMappingRevision:
     scale_v: float
     translate_u: float
     translate_v: float
+    aspect_basis: str = "NORMALIZED_ZONE_UNITS"
     contract: str = LABEL_ARTWORK_MAPPING_CONTRACT
 
     def __post_init__(self) -> None:
         if (
             self.contract != LABEL_ARTWORK_MAPPING_CONTRACT
+            or self.aspect_basis not in _ASPECT_BASES
             or not _SHA256.fullmatch(self.source_artwork_sha256)
             or self.fit_mode not in {"CONTAIN", "COVER", "STRETCH"}
             or not self.source_artwork_revision_id
@@ -137,6 +142,7 @@ class LabelArtworkMappingRevision:
             "scale_v": self.scale_v,
             "translate_u": self.translate_u,
             "translate_v": self.translate_v,
+            "aspect_basis": self.aspect_basis,
             "geometry_authority_created": False,
             "physical_fit_verified": False,
         }
@@ -367,8 +373,15 @@ def map_label_artwork_to_zone(
     placement: LabelZonePlacementRevision,
     *,
     fit_mode: str = "CONTAIN",
+    host_size_mm_unverified: tuple[float, float] | None = None,
 ) -> LabelArtworkMappingRevision:
-    """Map artwork to exact placement intent in normalized UV without changing geometry."""
+    """Map artwork to exact placement intent in normalized UV without changing geometry.
+
+    Without ``host_size_mm_unverified`` CONTAIN/COVER preserve aspect in normalized zone
+    units, which stretches artwork on non-square host faces. Supplying the host face size
+    (e.g. a metric surface binding's host width/height) preserves the artwork's aspect in
+    millimetres; the mapping then records ``aspect_basis=METRIC_ZONE_MM_UNVERIFIED``.
+    """
     if not isinstance(artwork, LabelArtworkAssetRevision):
         raise LabelArtworkError("label_artwork_asset_required")
     if not isinstance(placement, LabelZonePlacementRevision):
@@ -376,10 +389,29 @@ def map_label_artwork_to_zone(
     if not isinstance(fit_mode, str) or fit_mode.upper() not in {"CONTAIN", "COVER", "STRETCH"}:
         raise LabelArtworkError("label_artwork_fit_mode_unsupported")
     fit = fit_mode.upper()
+    if host_size_mm_unverified is None:
+        host_width = host_height = 1.0
+        aspect_basis = "NORMALIZED_ZONE_UNITS"
+    else:
+        if (
+            not isinstance(host_size_mm_unverified, tuple)
+            or len(host_size_mm_unverified) != 2
+            or any(
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0.0
+                for value in host_size_mm_unverified
+            )
+        ):
+            raise LabelArtworkError("label_artwork_host_size_invalid")
+        host_width, host_height = (float(value) for value in host_size_mm_unverified)
+        aspect_basis = "METRIC_ZONE_MM_UNVERIFIED"
     boundary = placement.boundary
     target_width, target_height = boundary.u_max - boundary.u_min, boundary.v_max - boundary.v_min
     source_aspect = artwork.width / artwork.height
-    target_aspect = target_width / target_height
+    # Physical aspect of the zone; equals the normalized aspect when no host size is given.
+    target_aspect = (target_width * host_width) / (target_height * host_height)
     if fit == "STRETCH":
         target = (boundary.u_min, boundary.v_min, boundary.u_max, boundary.v_max)
         crop = (0.0, 0.0, artwork.width, artwork.height)
@@ -387,15 +419,17 @@ def map_label_artwork_to_zone(
     elif fit == "CONTAIN":
         if source_aspect >= target_aspect:
             drawn_width = target_width
-            drawn_height = target_width / source_aspect
+            drawn_height = target_width * host_width / source_aspect / host_height
         else:
             drawn_height = target_height
-            drawn_width = target_height * source_aspect
+            drawn_width = target_height * host_height * source_aspect / host_width
         u0 = boundary.u_min + (target_width - drawn_width) / 2.0
         v0 = boundary.v_min + (target_height - drawn_height) / 2.0
         target = (u0, v0, u0 + drawn_width, v0 + drawn_height)
         crop = (0.0, 0.0, artwork.width, artwork.height)
-        scale_u = scale_v = drawn_width / artwork.width
+        scale_u = drawn_width / artwork.width
+        # Normalized basis: keep the historical uniform scale bit-for-bit (stable ids).
+        scale_v = scale_u if host_size_mm_unverified is None else drawn_height / artwork.height
     else:
         if source_aspect >= target_aspect:
             crop_width = artwork.height * target_aspect
@@ -434,6 +468,8 @@ def map_label_artwork_to_zone(
         "translate_u": translate_u,
         "translate_v": translate_v,
     }
+    if aspect_basis != "NORMALIZED_ZONE_UNITS":
+        values["aspect_basis"] = aspect_basis  # default keeps historical revision ids stable
     return LabelArtworkMappingRevision(
         "label-artwork-mapping:" + _digest(values),
         artwork.revision_id,
@@ -447,6 +483,7 @@ def map_label_artwork_to_zone(
         scale_v,
         translate_u,
         translate_v,
+        aspect_basis,
     )
 
 
@@ -652,6 +689,11 @@ def _mapping_digest(mapping: LabelArtworkMappingRevision) -> str:
             "scale_v": mapping.scale_v,
             "translate_u": mapping.translate_u,
             "translate_v": mapping.translate_v,
+            **(
+                {"aspect_basis": mapping.aspect_basis}
+                if mapping.aspect_basis != "NORMALIZED_ZONE_UNITS"
+                else {}
+            ),
         }
     )
 

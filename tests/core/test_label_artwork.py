@@ -300,3 +300,60 @@ def test_assignment_replacement_cannot_retarget_another_variant_or_zone() -> Non
     original = create_label_artwork_assignment(mapping, placement, variant_id="front-a")
     with pytest.raises(LabelArtworkError, match="previous_assignment_mismatch"):
         create_label_artwork_assignment(mapping, placement, variant_id="front-b", previous=original)
+
+
+def test_metric_host_size_keeps_artwork_aspect_in_millimetres() -> None:
+    # Review O-1: CONTAIN/COVER used normalized zone units, stretching square artwork on a
+    # 70 x 28 mm zone. With the host face size the drawn artwork keeps its true aspect.
+    from packlab_core.label_artwork import map_label_artwork_to_zone
+
+    artwork, placement = _square_artwork_and_wide_placement()
+    host = (100.0, 40.0)  # mm_unverified host face; zone = boundary fraction of it
+    boundary = placement.boundary
+    zone_mm = (
+        (boundary.u_max - boundary.u_min) * host[0],
+        (boundary.v_max - boundary.v_min) * host[1],
+    )
+    contain = map_label_artwork_to_zone(
+        artwork, placement, fit_mode="CONTAIN", host_size_mm_unverified=host
+    )
+    u0, v0, u1, v1 = contain.target_rect_normalized_uv
+    drawn_mm = ((u1 - u0) * host[0], (v1 - v0) * host[1])
+    assert abs(drawn_mm[0] / drawn_mm[1] - artwork.width / artwork.height) < 1e-9
+    assert drawn_mm[0] <= zone_mm[0] + 1e-9 and drawn_mm[1] <= zone_mm[1] + 1e-9
+    assert contain.as_dict()["aspect_basis"] == "METRIC_ZONE_MM_UNVERIFIED"
+
+    cover = map_label_artwork_to_zone(
+        artwork, placement, fit_mode="COVER", host_size_mm_unverified=host
+    )
+    cu0, cv0, cu1, cv1 = cover.source_crop_rect
+    zone_aspect = zone_mm[0] / zone_mm[1]
+    assert abs((cu1 - cu0) / (cv1 - cv0) - zone_aspect) < 1e-9
+
+
+def test_default_normalized_mapping_ids_are_unchanged() -> None:
+    from packlab_core.label_artwork import map_label_artwork_to_zone
+
+    artwork, placement = _square_artwork_and_wide_placement()
+    mapping = map_label_artwork_to_zone(artwork, placement, fit_mode="CONTAIN")
+    assert mapping.aspect_basis == "NORMALIZED_ZONE_UNITS"
+    assert mapping.scale_u == mapping.scale_v
+    assert "aspect_basis" not in mapping.revision_id
+    for bad in ((0.0, 1.0), (1.0,), (float("nan"), 1.0), (True, 1.0)):
+        with pytest.raises(Exception, match="host_size_invalid"):
+            map_label_artwork_to_zone(
+                artwork,
+                placement,
+                fit_mode="CONTAIN",
+                host_size_mm_unverified=bad,  # type: ignore[arg-type]
+            )
+
+
+def _square_artwork_and_wide_placement():
+    from packlab_core.label_artwork import ingest_label_artwork
+
+    square = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" '
+        b'viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
+    )
+    return ingest_label_artwork(square), _placement()
