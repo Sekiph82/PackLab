@@ -1,6 +1,6 @@
 # PackLab V1 limitations and manufacturing boundary
 
-Status: development boundary statement; not a release approval, engineering certification, legal opinion, or manufacturing authorization.
+Status: **frozen V1 boundary statement, revision 1.0 (2026-11-10)**. It is not a release approval, engineering certification, legal opinion, or manufacturing authorization. Any change needs a new entry under *Revision history* and an independent review. `tests/ci/test_v1_limitations_freeze.py` guards the no-mold statement and the gap list.
 
 ## What PackLab V1 can support
 
@@ -13,12 +13,12 @@ These functions produce software records and geometry. A successful import, reco
 - **Relative scale:** image-derived geometry may have only relative scale. Pixel, camera-prior, and reconstruction units do not establish physical dimensions.
 - **Metric-unverified scale:** a stored millimetre coordinate or CAD export may carry `mm_unverified` authority. It remains unverified until compared against an independent, suitable physical measurement.
 - **Physical metrology:** no PackLab software test, public YCB scanner scale, or synthetic tolerance band substitutes for a calibrated measurement plan, traceable reference, uncertainty analysis, repeat captures, and owner acceptance.
-- **Capture/reconstruction:** phone imagery and photogrammetry can lose detail on low-texture white HDPE, glossy surfaces, transparent PET, occluded handles, thin walls, sharp edges, internal cavities, and reflective/translucent closures. Warnings and a successful pipeline do not prove missing surfaces are complete.
+- **Capture/reconstruction:** phone imagery and photogrammetry can lose detail on low-texture white HDPE, glossy surfaces, transparent PET, occluded handles, thin walls, sharp edges, internal cavities, and reflective/translucent closures. Warnings and a successful pipeline do not prove missing surfaces are complete. The pre-reconstruction object-texture check and the rescan/recapture decision tree are advisory. Their thresholds are calibrated only on synthetic renders and simulated noise/highlights, so a QA "pass" says nothing about reconstruction quality.
 - **Synthetic data:** Blender-generated dimensions, masks, camera intrinsics/poses, lighting, distortion, shader response, and tolerance bands are simulated software fixtures. They are not physical camera/resin measurements or Kenya field evidence.
 - **Public references:** YCB assets retain their own attribution/license terms. A scanned model or photograph is not necessarily a calibrated/registered pair or independently measured physical reference. Third-party trademarks and trade dress are not cleared by dataset licensing.
 - **Parametric fit:** software fit metrics apply only to the exact input geometry/revision and chosen algorithm. They do not prove the design matches a production container or meets supplier process tolerances.
 - **CAD/render/export:** a valid BREP, STEP round trip, dieline, label overlay, or product render demonstrates software geometry/presentation only. Label print fit, wall thickness, draft, shrinkage, stackability, leakage, strength, chemical compatibility, mold release, and regulatory suitability require separate engineering/physical validation.
-- **Recovery/reliability:** deterministic unit or fault-injection tests cover only their simulated failure boundary. Reconstruction orchestration currently does not resume from persisted stage checkpoints; restart/resume from those checkpoints is not demonstrated. Tests do not prove durability on every filesystem, disk, driver, engine build, or power-loss condition.
+- **Recovery/reliability:** deterministic unit or fault-injection tests cover only their simulated failure boundary. The core reconstruction orchestrator can resume from verified stage checkpoints (request binding plus output digests). Windows Studio does not yet persist those checkpoints, so end-to-end restart after an application crash is not demonstrated. Tests do not prove durability on every filesystem, disk, driver, engine build, or power-loss condition.
 - **Device and hosted evidence:** simulator/local builds do not prove operation on the owner's iPhone 16. A local workflow does not prove a GitHub Actions artifact exists. Hosted results require a run for the exact committed revision and artifact identity.
 - **Kenya operations:** no Kenya factory or Kenya package scan set is available yet. No PackLab benchmark in this repository constitutes Kenya process acceptance.
 
@@ -35,3 +35,10 @@ If physical accuracy or authority is absent, keep the result labeled relative, u
 ## Acceptance status
 
 M17 software tests, independent source/security review, hosted artifacts, iPhone capture/transfer, physical package accuracy, and future Kenya operational validation are separate acceptance records. This document does not close those gates or authorize release.
+
+## Revision history
+
+| Revision | Date | Change | Review |
+| --- | --- | --- | --- |
+| 0.1 | 2026-11-04 | Initial statement (Codex, PL-0395 V01 log). | Codex-requested source review |
+| 1.0 | 2026-11-10 | Frozen. Recovery wording corrected for PL-0380 checkpoint resume; advisory QA/decision-tree limits added; CI freeze guard added. | Independent Claude peer review pending |
