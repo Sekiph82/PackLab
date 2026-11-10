@@ -540,6 +540,7 @@ for _spec in _preset['lights']:
 bpy.context.view_layer.update()
 _mesh_objects=[_obj for _obj in _scene.objects if _obj.type=='MESH' and _obj.get('packlab_presentation_only') is not True]
 if not _mesh_objects: raise ValueError('render_scene_mesh_missing')
+if any(_obj.get('packlab_scene_object') is not True for _obj in _mesh_objects): raise ValueError('render_scene_foreign_mesh_present')
 _bounds=[]
 for _obj in _mesh_objects:
  for _corner in _obj.bound_box: _bounds.append(_obj.matrix_world @ Vector(_corner))
@@ -560,6 +561,10 @@ for _spec in _preset['lights']:
  _light_relative=[(_spec['location'][_axis]-_preset_target[_axis])/_preset_span for _axis in range(3)]
  _object.location=_center+Vector(_light_relative)*_scene_span
  _object.data.size=_spec['size']/_preset_span*_scene_span
+ # Preset watts are calibrated for a 3 m scene; lights sit at a fixed multiple of the
+ # scene span, so power follows the inverse-square law (fixed watts blew small packages
+ # out to white). The scene span is measured in Blender metres, independent of preset units.
+ _object.data.energy=_spec['energy_watts']*(_scene_span/3.0)**2
  _object.rotation_euler=(_center-_object.location).to_track_quat('-Z','Y').to_euler()
 bpy.context.view_layer.update()
 _framed=_distance*math.sin(_fov/2.0) >= _radius*_preset['camera']['margin_factor']*0.99

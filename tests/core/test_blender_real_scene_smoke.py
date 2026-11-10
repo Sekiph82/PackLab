@@ -69,7 +69,8 @@ def _png_rgba_2x2() -> bytes:
     )
 
 
-def _hybrid_sources(root: Path):
+def _hybrid_scene(root: Path):
+    """Scene package plus the exact model, BREP and artwork bindings it was built from."""
     model = _model(label="pl0326-real-scene")
     brep_api = importlib.import_module("OCP.BRepPrimAPI")
     boolean_api = importlib.import_module("OCP.BRepAlgoAPI")
@@ -209,7 +210,11 @@ def _hybrid_sources(root: Path):
     )
     (root / "blender_scene_manifest.json").write_bytes(package.manifest_bytes)
     (root / "blender_scene_runner.py").write_bytes(package.runner_script)
-    return package
+    return package, model, brep, tuple(contexts)
+
+
+def _hybrid_sources(root: Path):
+    return _hybrid_scene(root)[0]
 
 
 @pytest.mark.skipif(

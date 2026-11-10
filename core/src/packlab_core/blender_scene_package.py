@@ -581,10 +581,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path, PurePosixPath
 
 import bpy
+from mathutils import Matrix
 
 CONTRACT = "packlab.blender-scene-package.v2"
 SCHEMA_VERSION = 2
@@ -871,12 +873,22 @@ def _build_scene(root, body, assets, scene, result_relative, package_revision_id
     glb_path = root.joinpath(*glb_relative.parts).resolve(strict=True)
     if not glb_path.is_relative_to(root):
         raise ValueError("scene_glb_outside_project")
+    # --factory-startup loads Blender's default cube, light and camera; a 2 m default cube
+    # silently enclosed the package and was what got rendered. Start from an empty scene.
+    for stale in list(bpy.data.objects):
+        bpy.data.objects.remove(stale, do_unlink=True)
     before = set(bpy.data.objects.keys())
     bpy.ops.import_scene.gltf(filepath=str(glb_path))
     imported = [item for item in bpy.data.objects if item.name not in before and item.type == "MESH"]
     if len(imported) != 1:
         raise ValueError("scene_fused_glb_must_import_as_one_mesh")
     base = imported[0]
+    base["packlab_scene_object"] = True
+    # The exported GLB keeps CAD Z-up source coordinates (scaled to metres), while the glTF
+    # importer assumes Y-up and bakes (x, y, z) -> (x, -z, y) into the mesh. Undo it so the
+    # body and the label overlays (built in the source frame) share one frame.
+    base.data.transform(Matrix.Rotation(-math.pi / 2.0, 4, "X"))
+    base.data.update()
     if len(base.data.materials) > 1:
         raise ValueError("scene_glb_material_slots_unexpected")
     base.data.materials.clear()
