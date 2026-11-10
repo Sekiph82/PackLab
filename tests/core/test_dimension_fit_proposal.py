@@ -414,3 +414,41 @@ def test_optimizer_bounds_inputs_and_budget_boundary() -> None:
             BoundedGridFitOptimizer(lambda p: (0.0, "4" * 64), bad).optimize(one)  # type: ignore[arg-type]
     with pytest.raises(DimensionFitProposalError, match="evaluator_result_invalid"):
         BoundedGridFitOptimizer(lambda p: 0.0).optimize(one)  # type: ignore[arg-type,return-value]
+
+
+def test_every_optimizer_candidate_including_endpoints_is_acceptable_end_to_end() -> None:
+    # Re-review V3-1: pass boundary grid candidates through real acceptance, so a stricter
+    # acceptance comparison or an endpoint outside tolerance fails here.
+    model, _proposal = _scenario()
+    constraints = (
+        MeasuredParameterConstraint(
+            "height",
+            "m-h",
+            "1" * 64,
+            102.0,
+            5.0,
+            "mm_unverified",
+            "owner-1",
+            "2026-10-22T19:00:00Z",
+        ),
+        MeasuredParameterConstraint(
+            "width", "m-w", "2" * 64, 31.0, 0.3, "mm_unverified", "owner-1", "2026-10-22T19:00:00Z"
+        ),
+    )
+    request = create_dimension_fit_request(
+        model, deviation_evidence_sha256="3" * 64, maximum_deviation=0.5, constraints=constraints
+    )
+    proposal = BoundedGridFitOptimizer(lambda parameters: (0.0, "4" * 64), 64).optimize(request)
+    assert len(proposal.candidates) == 25
+    widths = {item.parameter_values[1].value for item in proposal.candidates}
+    assert min(widths) < 30.71 and max(widths) > 31.29  # endpoints present
+    for candidate in proposal.candidates:
+        accept_dimension_fit_proposal(
+            model,
+            proposal,
+            request=request,
+            candidate_id=candidate.candidate_id,
+            actor_id="owner-1",
+            reason="Endpoint acceptance check.",
+            created_at_utc="2026-10-22T19:05:00Z",
+        )
