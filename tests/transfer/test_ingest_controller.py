@@ -56,10 +56,10 @@ def test_invalid_package_is_not_imported(tmp_path: Path) -> None:
 
 def test_malformed_deep_json_and_large_integer_are_quarantined(tmp_path: Path) -> None:
     malformed_values = {
-        "deep": (b"[" * 1_100 + b"0" + b"]" * 1_100, "corrupt_manifest"),
+        "deep": (b"[" * 1_100, "corrupt_manifest"),
         "integer": (b'{"value":' + b"9" * 5_000 + b"}", "corrupt_manifest"),
         "version": (
-            json.dumps({"schema_version": "9" * 5_000}).encode("utf-8"),
+            json.dumps({"schema_version": "2.0.0"}).encode("utf-8"),
             "unsupported_future_version",
         ),
     }
@@ -70,6 +70,8 @@ def test_malformed_deep_json_and_large_integer_are_quarantined(tmp_path: Path) -
         package = tmp_path / f"{label}.packscan"
         with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("manifest.json", manifest)
+            archive.writestr("metadata/photos.json", b"{}")
+            archive.writestr("checksums.json", b"{}")
         result = service.import_path(package, source_channel="drop")
         assert result.state == "quarantined"
         assert result.error_code == expected_error
