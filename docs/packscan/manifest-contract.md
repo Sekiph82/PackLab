@@ -39,7 +39,8 @@ Each variant rejects fields belonging to another mode.
   frozen convention `clockwise_from_reference`; the index identifies the
   frame's position in the declared sequence. `clockwise_from_reference` means
   the platter turns clockwise as seen from above (looking down the subject's
-  vertical axis) from the reference position. The metadata does not implement
+  vertical axis) from the reference position (clarified under PL-0426; schema
+  unchanged). The metadata does not implement
   motor control or infer an angle from pixels.
 
 Adding a future mode requires a new versioned schema variant with explicit

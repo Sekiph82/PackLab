@@ -104,9 +104,9 @@ def test_virtual_camera_follows_the_clockwise_from_above_convention() -> None:
     pose = virtual_camera_to_world(camera, 90.0)
     assert (pose[3], pose[7], pose[11]) == pytest.approx((1.0, 0.0, 0.3), abs=1e-12)
     assert virtual_camera_to_world(camera, 0.0) == pytest.approx(camera)
-    # Direction pin: the platter point at +x, turned 90 degrees clockwise seen from above,
-    # lands at -y, exactly where the camera is; in the object frame the virtual camera must
-    # therefore coincide with that point's object-frame position (+x).
+    # Why (1, 0) above pins the direction: the platter point at +x, turned 90 degrees
+    # clockwise seen from above, lands at -y where this synthetic camera sits, so in the
+    # object frame the virtual camera must sit at that point's object position (+x).
     rotation = [pose[0:3], pose[4:7], pose[8:11]]
     for i in range(3):
         for j in range(3):
@@ -118,6 +118,10 @@ def test_virtual_camera_follows_the_clockwise_from_above_convention() -> None:
     sheared[1] = 0.5
     with pytest.raises(TurntableSyncError, match="not_rigid"):
         virtual_camera_to_world(tuple(sheared), 10.0)
+    mirrored = list(camera)
+    mirrored[0] = -1.0  # det -1: orthonormal rows, but a reflection
+    with pytest.raises(TurntableSyncError, match="not_rigid"):
+        virtual_camera_to_world(tuple(mirrored), 10.0)
 
 
 def test_emitted_parameters_validate_against_the_packscan_turntable_schema() -> None:
@@ -184,4 +188,7 @@ def test_tolerance_edges_and_invalid_measurements() -> None:
         TurntableAngleEvent(-1, 10.0, None, SOURCE)
     with pytest.raises(TurntableSyncError):
         synchronize_turntable_angles((("p", 0),), (), tolerance_deg=10.01)
-    assert TurntableAngleEvent(0, -0.0, None, SOURCE).commanded_angle_deg == 0.0
+    import math
+
+    angle = TurntableAngleEvent(0, -0.0, None, SOURCE).commanded_angle_deg
+    assert math.copysign(1.0, angle) == 1.0  # -0.0 normalised to +0.0

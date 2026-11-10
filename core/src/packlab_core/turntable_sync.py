@@ -192,7 +192,9 @@ def virtual_camera_to_world(
     -angle about the station +z axis (PL-0397 frame: origin on the turntable axis, z up).
     Seen from the object, the camera moves by the inverse rotation:
     ``R_z(+angle) @ camera_to_world`` (row-major 4x4 in and out). The pose must be a rigid
-    transform in the z-up station frame (ARKit y-up poses must be converted first).
+    transform in the z-up station frame (ARKit y-up poses must be converted first). A
+    camera at station azimuth ``a`` ends up at virtual azimuth ``a - angle`` measured
+    clockwise from above, i.e. it sweeps around the object opposite to the platter.
     """
     angle = math.radians(_angle(turntable_angle_deg, "turntable_angle"))
     if len(camera_to_world) != 16 or any(
@@ -208,7 +210,13 @@ def virtual_camera_to_world(
         for i in range(3)
         for j in range(3)
     )
-    if not orthonormal or m0[12:16] != [0.0, 0.0, 0.0, 1.0]:
+    determinant = (
+        rows[0][0] * (rows[1][1] * rows[2][2] - rows[1][2] * rows[2][1])
+        - rows[0][1] * (rows[1][0] * rows[2][2] - rows[1][2] * rows[2][0])
+        + rows[0][2] * (rows[1][0] * rows[2][1] - rows[1][1] * rows[2][0])
+    )
+    # Reject mirror images (det -1) as well as non-orthonormal matrices (review P3-1).
+    if not orthonormal or determinant <= 0.0 or m0[12:16] != [0.0, 0.0, 0.0, 1.0]:
         raise TurntableSyncError("camera_to_world_not_rigid")
     c, s = math.cos(angle), math.sin(angle)
     rotation = (c, -s, 0.0, 0.0, s, c, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
