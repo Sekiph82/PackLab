@@ -283,7 +283,9 @@ def test_vggt_workspace_runtime_wires_verified_inputs_cameras_and_derived_output
 ) -> None:
     project, runtime_output, digests = _workspace(tmp_path)
     engine = SyntheticWorkspaceEngine(runtime_output)
-    runtime = VGGTWorkspaceRuntime(project, digests, runtime_output, engine)
+    runtime = VGGTWorkspaceRuntime(
+        project, digests, runtime_output, engine, activation=_activation()
+    )
     backend = VGGTReconstructionBackend(_activation(), runtime)
 
     output = backend.collect(backend.execute(backend.prepare(_job()), CancelToken()))
@@ -314,7 +316,9 @@ def test_vggt_workspace_runtime_fails_closed_before_engine_on_digest_mismatch(tm
     first_asset = _job().inputs.image_asset_ids[0]
     digests[first_asset] = "0" * 64
     engine = SyntheticWorkspaceEngine(runtime_output)
-    runtime = VGGTWorkspaceRuntime(project, digests, runtime_output, engine)
+    runtime = VGGTWorkspaceRuntime(
+        project, digests, runtime_output, engine, activation=_activation()
+    )
     backend = VGGTReconstructionBackend(_activation(), runtime)
 
     run = backend.execute(backend.prepare(_job()), CancelToken())
@@ -328,7 +332,9 @@ def test_vggt_workspace_runtime_fails_closed_before_engine_on_digest_mismatch(tm
 def test_vggt_workspace_runtime_rejects_incomplete_cameras_and_honors_cancel(tmp_path) -> None:
     project, runtime_output, digests = _workspace(tmp_path)
     engine = SyntheticWorkspaceEngine(runtime_output, omit_last_camera=True)
-    runtime = VGGTWorkspaceRuntime(project, digests, runtime_output, engine)
+    runtime = VGGTWorkspaceRuntime(
+        project, digests, runtime_output, engine, activation=_activation()
+    )
     backend = VGGTReconstructionBackend(_activation(), runtime)
     failed = backend.execute(backend.prepare(_job()), CancelToken())
     assert failed.status is RunStatus.FAILED
@@ -343,6 +349,7 @@ def test_vggt_workspace_runtime_rejects_incomplete_cameras_and_honors_cancel(tmp
         cancelled_digests,
         cancelled_runtime,
         cancel_engine,
+        activation=_activation(),
     )
     cancelled_backend = VGGTReconstructionBackend(_activation(), cancel_runtime)
     cancelled = cancelled_backend.execute(cancelled_backend.prepare(_job()), cancel)
@@ -355,7 +362,9 @@ def test_vggt_workspace_runtime_rejects_incomplete_cameras_and_honors_cancel(tmp
 def test_vggt_workspace_runtime_rejects_metric_or_untyped_scale(tmp_path) -> None:
     project, runtime_output, digests = _workspace(tmp_path)
     engine = SyntheticWorkspaceEngine(runtime_output, scale_state="metric-verified")
-    runtime = VGGTWorkspaceRuntime(project, digests, runtime_output, engine)
+    runtime = VGGTWorkspaceRuntime(
+        project, digests, runtime_output, engine, activation=_activation()
+    )
     backend = VGGTReconstructionBackend(_activation(), runtime)
 
     run = backend.execute(backend.prepare(_job()), CancelToken())
@@ -413,3 +422,36 @@ def test_non_commercial_checkpoint_id_alone_is_rejected() -> None:
     assert record.checkpoint_sha256 == _activation().checkpoint_sha256  # only the ID differs
     assert record.complete is False
     assert VGGTReconstructionBackend(record).probe().available is False
+
+
+def test_workspace_runtime_requires_an_activation_record(tmp_path) -> None:
+    # Re-review V02: a missing activation used to publish placeholder identity.
+    project, runtime_output, digests = _workspace(tmp_path)
+    with pytest.raises(TypeError):
+        VGGTWorkspaceRuntime(  # type: ignore[call-arg]
+            project, digests, runtime_output, SyntheticWorkspaceEngine(runtime_output)
+        )
+    with pytest.raises(ValueError, match="activation record is incomplete"):
+        VGGTWorkspaceRuntime(
+            project,
+            digests,
+            runtime_output,
+            SyntheticWorkspaceEngine(runtime_output),
+            activation=None,  # type: ignore[arg-type]
+        )
+
+
+def test_backend_rejects_a_runtime_published_under_a_different_licence(tmp_path) -> None:
+    # Re-review mutant F5: the saved-vs-returned identity check had no test.
+    project, runtime_output, digests = _workspace(tmp_path)
+    runtime = VGGTWorkspaceRuntime(
+        project,
+        digests,
+        runtime_output,
+        SyntheticWorkspaceEngine(runtime_output),
+        activation=replace(_activation(), checkpoint_license_id="other-licence-id"),
+    )
+    backend = VGGTReconstructionBackend(_activation(), runtime)
+    run = backend.execute(backend.prepare(_job()), CancelToken())
+    assert run.status is RunStatus.FAILED
+    assert run.output is None

@@ -164,11 +164,11 @@ class VGGTWorkspaceRuntime:
         runtime_output_root: str | Path,
         engine: VGGTWorkspaceEngine,
         *,
-        activation: VGGTActivationRecord | None = None,
+        activation: VGGTActivationRecord,
     ) -> None:
-        if activation is not None and (
-            not isinstance(activation, VGGTActivationRecord) or not activation.complete
-        ):
+        # Required (re-review V02): without it the published manifest.json would carry
+        # placeholder identity while the backend reports the real one.
+        if not isinstance(activation, VGGTActivationRecord) or not activation.complete:
             raise ValueError("VGGT workspace runtime activation record is incomplete")
         # When supplied, the published manifest.json carries the real checkpoint identity
         # and licence instead of placeholders (review P2, PL-0436).
