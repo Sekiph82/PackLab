@@ -14,7 +14,14 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 function Git([string[]]$GitArgs) {
-    $result = & git.exe -C $Workspace @GitArgs 2>&1
+    # Windows PowerShell 5.1 wraps native stderr (e.g. fetch progress) as errors under Stop.
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $result = & git.exe -C $Workspace @GitArgs 2>&1 | ForEach-Object { "$_" }
+    } finally {
+        $ErrorActionPreference = $previous
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "git $($GitArgs -join ' ') failed: $($result -join '; ')"
     }
