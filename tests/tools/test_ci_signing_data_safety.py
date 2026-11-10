@@ -94,6 +94,37 @@ class SigningMaterialSafetyTests(unittest.TestCase):
                 ["DIRECT_SECRET_ASSIGNMENT"],
             )
 
+    def test_alphanumeric_token_shapes_are_not_mistaken_for_constant_names(self) -> None:
+        # PL-0394 N1: values were upper-cased before the constant-name exemption, so any
+        # letters/digits/underscore secret slipped through. Synthetic shapes only.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            leaking = (
+                'APPLE_TEAM_ID = "Q7SYNTH3TC"',
+                "APPLE_API_KEY_ID = K9SYNTH4XZ",
+                'GITHUB_TOKEN = "ghp_SynthEticCanary0123456789abcdefABCD"',
+                "API_TOKEN = glpatSynthEticCanary0123",
+                'ACCESS_TOKEN = "AKIASYNTHETIC0CANARY"',
+            )
+            for index, line in enumerate(leaking):
+                with self.subTest(line=line.split("=")[0]):
+                    source = root / f"leak-{index}.py"
+                    source.write_text(line + "\n", encoding="utf-8")
+                    self.assertEqual(
+                        [finding.code for finding in scan_signing_material(root, [source])],
+                        ["DIRECT_SECRET_ASSIGNMENT"],
+                    )
+            references = (
+                'APPLE_API_TOKEN = "APPLE_API_TOKEN_ENV_NAME"',
+                "GITHUB_TOKEN = settings.github_token",
+                "API_TOKEN = api_token",
+            )
+            for index, line in enumerate(references):
+                with self.subTest(reference=line):
+                    source = root / f"ref-{index}.py"
+                    source.write_text(line + "\n", encoding="utf-8")
+                    self.assertEqual(scan_signing_material(root, [source]), [])
+
     def test_common_signing_exports_are_detected_without_echoing_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -91,3 +91,12 @@ reports/_local/
 /captures/
 /dist/
 secrets/
+# PL-0394 N5: further key/keystore shapes.
+id_rsa*
+id_ed25519*
+id_ecdsa*
+*.der
+*.jks
+*.keystore
+*.ppk
+.env.*

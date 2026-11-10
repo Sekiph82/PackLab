@@ -116,6 +116,7 @@ PRIVATE_KEY_HEADER = re.compile(
     r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----",
     re.IGNORECASE,
 )
+TOKEN_PREFIXES = ("ghp_", "gho_", "ghs_", "ghu_", "ghr_", "github_pat_", "glpat", "sk-", "xox")
 SECRET_ASSIGNMENT = re.compile(
     r"(?im)^\s*(?:export\s+)?(?:APPLE|APP_STORE|APPSTORE|ASC|GITHUB|GH|SIGNING|PROVISIONING|"
     r"DISTRIBUTION|PRIVATE|CLIENT|ACCESS|API|DEPLOY|CERTIFICATE|MATCH|KEYCHAIN)"
@@ -581,7 +582,20 @@ def scan_signing_material(
                 continue
             if value.startswith("$") or marker in {"NONE", "NULL", "OS.ENVIRON", "ENV_VAR"}:
                 continue
-            if re.fullmatch(r"[A-Z_][A-Z0-9_]*(?:\.[A-Z_][A-Z0-9_]*)*", marker):
+            # Exempt only genuine references, tested case-sensitively (PL-0394 N1): an
+            # UPPER_SNAKE constant/env-var name with at least one underscore, or an unquoted
+            # lower-case / dotted identifier. Alphanumeric token shapes (Apple Team/Key IDs,
+            # AKIA..., ghp_..., glpat-...) are never exempt.
+            if re.fullmatch(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+", value):
+                continue
+            if (
+                match.group(2) is None
+                and not value.casefold().startswith(TOKEN_PREFIXES)
+                and re.fullmatch(
+                    r"[a-z_][a-z0-9_]*|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+",
+                    value,
+                )
+            ):
                 continue
             if any(character in value for character in "\\[](){}"):
                 continue

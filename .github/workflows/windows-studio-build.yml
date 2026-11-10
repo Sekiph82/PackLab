@@ -477,6 +477,7 @@ jobs:
       group: controlled-ocp-runtime-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: false
     env:
+      PACKLAB_REUSE_OCP_RUN_ID: ${{ inputs.reuse_quarantined_ocp_run_id }}
       UV_NO_PROGRESS: "1"
     outputs:
       max-run-artifact-bytes: ${{ needs.occt-sdk.outputs.max-run-artifact-bytes }}
@@ -562,7 +563,7 @@ jobs:
         if: inputs.reuse_quarantined_ocp_run_id != ''
         shell: pwsh
         run: |
-          if ("${{ inputs.reuse_quarantined_ocp_run_id }}" -ne "38399051467") { throw "Only the owner-authorized first cold-build checkpoint is accepted for source-preserving remediation." }
+          if ($env:PACKLAB_REUSE_OCP_RUN_ID -ne "38399051467") { throw "Only the owner-authorized first cold-build checkpoint is accepted for source-preserving remediation." }
       - name: Download exact quarantined OCP checkpoint for post-link remediation
         if: inputs.reuse_quarantined_ocp_run_id != ''
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -630,7 +631,7 @@ jobs:
           $sourceEvidence = Join-Path $env:RUNNER_TEMP "source-evidence\windows-native-source-evidence.json"
           $manifest = Join-Path $env:RUNNER_TEMP "windows-ocp-controlled-runtime-manifest.json"
           $builderArgs = @("-m", "tools.packaging.build_controlled_ocp_from_generated_sources", "--generated-source-zip", $env:PACKLAB_OCP_GENERATED_ZIP, "--occt-source-archive", $occtArchive, "--occt-sdk", (Join-Path $env:RUNNER_TEMP "occt-sdk"), "--expected-run-id", "${{ needs.occt-sdk.outputs.sdk-producer-run-id }}", "--expected-attempt", "${{ needs.occt-sdk.outputs.sdk-producer-attempt }}", "--expected-cache-key", "${{ needs.occt-sdk.outputs.sdk-cache-key }}", "--expected-source-lock-sha256", (python -c "import hashlib,pathlib; print(hashlib.sha256(pathlib.Path('tools/packaging/windows_native_source_lock.json').read_bytes()).hexdigest())"), "--build-root", (Join-Path $env:RUNNER_TEMP "packlab-ocp-generated-build"), "--site-packages", $sitePackages, "--manifest", $manifest, "--quarantine-dir", (Join-Path $env:RUNNER_TEMP "pl0350-quarantine"), "--compile-timeout-seconds", "16200")
-          if ("${{ inputs.reuse_quarantined_ocp_run_id }}" -ne "") {
+          if ($env:PACKLAB_REUSE_OCP_RUN_ID -ne "") {
             $builderArgs += @("--prebuilt-extension", (Join-Path $env:RUNNER_TEMP "pl0350-quarantine-reuse\OCP.cp312-win_amd64.pyd"), "--prebuilt-producer-run-id", "38399051467", "--prebuilt-producer-revision", "ae47269a7314cb57cbed3a67f810eceedcd74364", "--prebuilt-build-started-utc", "2026-10-13T12:57:34.9736887+00:00", "--prebuilt-build-ended-utc", "2026-10-13T14:49:06.4102430+00:00", "--prebuilt-build-duration-seconds", "6691.436555")
           }
           & micromamba run -n packlab-ocp-bindings python @builderArgs
