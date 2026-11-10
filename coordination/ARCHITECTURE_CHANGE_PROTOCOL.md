@@ -1,73 +1,9 @@
-# PackLab Architecture-Change Protocol
+# PackLab Architecture Change Protocol (Claude owner 2026-11-10)
 
-> **ACTIVE OPERATING UPDATE 2026-11-04:** Owner has authorized Codex to complete and peer-review all remaining PL tasks, edit root `TASKS.md` after genuine verified review, re-enable GitHub Actions, select dependency-safe work across milestones and continue without a ChatGPT handoff. Older statements below forbidding these operations are HISTORICAL and superseded by root `AGENTS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Preserve protected product architecture, license/security/privacy, real tests, real external/owner/physical/legal release gates, accepted evidence and safe non-destructive Git sync. Historical ChatGPT audit files are immutable. 
+Claude Code has owner authorization to research and implement architecture-preserving upgrades needed for any remaining PL task without waiting for a per-task Codex or ChatGPT prompt. Every substantive change must honor existing accepted ADRs and product authority: PackScan immutable source evidence, separate Scan Mesh/Scan Master/editable Design Model, metric units/coordinates, source/provenance/traceability, reconstruction/segmentation/CAD responsibility, licenses and commercial safety.
 
+When a genuine architecture change is needed, Claude drafts a new versioned ADR explaining problem, alternatives, migration, compatibility, recovery, tests and safety implications; an independent Claude reviewer/security reviewer inspects it before implementation. Implement only reversible or migration-controlled changes whose real prerequisites are available. Never casually rewrite an accepted ADR to erase old meaning.
 
-## Architecture change versus bounded implementation
+If a decision requires an owner-exclusive physical factory choice, external license/legal clearance, access credential or irreversible policy commitment, record its exact `EXTERNAL_PENDING_OWNER` condition in TASKS and work on a dependency-independent PL task. Do not invent owner approval. When data source/capability can be legitimately simulated, build the validated software path first while keeping genuine physical acceptance open.
 
-An architecture change alters a canonical ownership boundary, contract
-meaning, system topology, authority, or compatibility philosophy. A bounded
-implementation detail stays inside an already approved boundary and preserves
-its public ownership, units, semantics, and authority. Size or code volume
-alone does not decide the classification.
-
-When uncertain, the builder treats the contradiction as architectural and
-stops with `ADR_REQUIRED` rather than choosing a new boundary silently.
-
-## ADR-required boundaries
-
-An approved ADR is required before implementation changes any of these
-canonical boundaries:
-
-- monorepo topology or ownership of major areas;
-- PackScan authority, schema philosophy, compatibility, or immutable-evidence
-  meaning;
-- separation of Scan Mesh, Scan Master, and editable Design Model;
-- canonical engineering units or coordinate-system truth;
-- major engine ownership, such as reconstruction, CAD/BREP, rendering, or
-  capture authority; or
-- live tracking/project-status authority.
-
-The existing ADR process in `docs/architecture/adr/README.md` and
-`docs/architecture/adr/ADR-0001-monorepo-architecture.md` is the reference
-for decision records, status, alternatives, consequences, and linkage.
-
-## Builder stop behavior
-
-If a frozen prompt conflicts with an established boundary or implementation
-would require an unapproved architecture decision, the builder stops before
-the conflicting change, records `ADR_REQUIRED`, the evidence and exact
-decision needed, and hands off to ChatGPT/owner governance. The builder does
-not implement a workaround, rewrite `TASKS.md`, or claim partial architecture
-acceptance.
-
-Codex must not create an opportunistic ADR merely to keep moving when the
-prompt requires stopping for ChatGPT or an owner decision. The builder may
-reference the existing process and record the need; only a later authorized
-prompt may define the ADR task and implementation scope.
-
-## Decision and implementation linkage
-
-After evidence review, ChatGPT may issue a dedicated ADR work order when the
-change is genuinely architectural, the affected boundary and alternatives
-are clear, the owner decision is available where needed, and the task remains
-within governed scope. A later implementation prompt must link the approved
-ADR by repository path/ID and commit or GitHub URL, state which decision it
-implements, and preserve all unaffected boundaries. An ADR approval is not
-itself implementation evidence.
-
-## Milestone-batch behavior
-
-In an explicitly authorized milestone batch, an architecture contradiction or
-`ADR_REQUIRED` stop ends execution at that child before later children start.
-Earlier child evidence is preserved; the master log records the exact
-contradiction, last completed child, and `BATCH_STOPPED` handoff. A batch
-exception permits sequential frozen children but never bypasses ADR review.
-
-## Authority and scope boundary
-
-GitHub `main` is repository truth and root `TASKS.md` is the sole live
-project-status tracker. This document is evidence/reference only and does not
-create tracker state, an ADR, an architecture change, or M01 work. This task
-creates no implementation change to topology, PackScan, scan/design
-separation, units, coordinates, engine ownership, or tracking authority.
+Old frozen ChatGPT-only prompt and batch-stop governance is historical and superseded for new work. Root `TASKS.md` remains sole live tracker. New review artifacts must not impersonate `CHATGPT_AUDIT` history.
