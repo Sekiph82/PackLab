@@ -1,5 +1,8 @@
 # PackLab Source-Control Policy
 
+> **CURRENT OWNER DECISION: 2026-11-10 CLAUDE CODE EXCLUSIVE.** Claude, not Codex or ChatGPT, owns all new PackLab implementation, testing, independent peer-review coordination, GitHub Actions runs, `TASKS.md` updates and next-task selection. Earlier workflow texts below are dated history, not active stop/approval rules; genuine security, architecture, license, physical/owner/factory release gates remain binding. See root `CLAUDE.md`, `AGENTS.md`, `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. 
+
+
 > **ACTIVE OPERATING UPDATE 2026-11-04:** Owner has authorized Codex to complete and peer-review all remaining PL tasks, edit root `TASKS.md` after genuine verified review, re-enable GitHub Actions, select dependency-safe work across milestones and continue without a ChatGPT handoff. Older statements below forbidding these operations are HISTORICAL and superseded by root `AGENTS.md` and `coordination/AUTONOMOUS_EXECUTION_POLICY.md`. Preserve protected product architecture, license/security/privacy, real tests, real external/owner/physical/legal release gates, accepted evidence and safe non-destructive Git sync. Historical ChatGPT audit files are immutable. 
 
 
@@ -14,12 +17,9 @@ checkouts are execution workspaces. Root [`TASKS.md`](../../TASKS.md) is the
 only live project-status tracker; this document and other coordination files
 must not become a competing current-task ledger.
 
-The current owner-authorized AI workflow may execute directly on `main` when
-the active prompt explicitly requires it. That workflow still requires a
+Claude Code is explicitly owner-authorized to execute scoped, tested and peer-reviewed work directly on `main` under the 2026-11-10 handoff. That workflow still requires a
 freshness check, protected-file review, bounded commits, and push evidence.
-Future branch and pull-request workflows are defined below as conventions;
-they require their own authorized task and do not silently replace the
-current workflow.
+Future branch and pull-request workflows remain conventions; Claude may choose safe bounded branches when justified, while main stays canonical and owner edits cannot be discarded.
 
 ## Task and branch identity
 
