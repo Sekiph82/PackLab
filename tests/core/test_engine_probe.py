@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,13 @@ from packlab_core.engine_probe import (
     probe_openmvs,
     probe_openmvs_components,
 )
+
+
+def _fixture_executable(path: Path, contents: bytes = b"fixture") -> Path:
+    path.write_bytes(contents)
+    if os.name != "nt":
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+    return path
 
 
 def _runner(output: str, returncode: int = 0, expected_args: tuple[str, ...] | None = None):
@@ -32,7 +41,7 @@ def test_colmap_parser_accepts_the_selected_banner() -> None:
 
 def test_colmap_help_fixture_is_command_sensitive(tmp_path) -> None:
     executable = tmp_path / "colmap.exe"
-    executable.write_bytes(b"fixture")
+    _fixture_executable(executable)
     output = "COLMAP 3.12.6 -- Structure-from-Motion and Multi-View Stereo\nUsage: colmap help"
     result = probe_colmap(executable, runner=_runner(output, expected_args=("help",)))
     assert result.status is EngineProbeStatus.VALID
@@ -40,7 +49,7 @@ def test_colmap_help_fixture_is_command_sensitive(tmp_path) -> None:
 
 def test_wrong_colmap_argv_fails_the_fixture(tmp_path) -> None:
     executable = tmp_path / "colmap.exe"
-    executable.write_bytes(b"fixture")
+    _fixture_executable(executable)
 
     def run(_path: Path, args: tuple[str, ...]) -> tuple[int, str, str]:
         assert args == ("help",)
@@ -56,7 +65,7 @@ def test_probe_distinguishes_missing_invalid_unsupported_and_valid(tmp_path) -> 
     assert missing.configured is True
 
     executable = tmp_path / "colmap.exe"
-    executable.write_bytes(b"fixture")
+    _fixture_executable(executable)
     invalid = probe_colmap(executable, runner=_runner("COLMAP unavailable"))
     assert invalid.status is EngineProbeStatus.INVALID
 
@@ -69,9 +78,21 @@ def test_probe_distinguishes_missing_invalid_unsupported_and_valid(tmp_path) -> 
     assert valid.version == EngineVersion(3, 12, 6)
 
 
+def test_malformed_version_response_has_stable_fail_closed_diagnostic(tmp_path) -> None:
+    executable = tmp_path / "colmap.exe"
+    _fixture_executable(executable, b"fixture executable placeholder")
+    first = probe_colmap(executable, runner=_runner("COLMAP 3.12"))
+    second = probe_colmap(executable, runner=_runner("COLMAP 3.12"))
+
+    assert first.status is EngineProbeStatus.INVALID
+    assert first.version is None
+    assert first.detail == "version banner was not parseable"
+    assert first.as_dict() == second.as_dict()
+
+
 def test_probe_reports_unexecutable_runner_failure_without_writing(tmp_path) -> None:
     executable = tmp_path / "colmap.exe"
-    executable.write_bytes(b"fixture")
+    _fixture_executable(executable)
     before = executable.read_bytes()
     result = probe_colmap(executable, runner=_runner("", returncode=17))
     assert result.status is EngineProbeStatus.UNEXECUTABLE
@@ -80,7 +101,7 @@ def test_probe_reports_unexecutable_runner_failure_without_writing(tmp_path) -> 
 
 def test_openmvs_help_fixture_accepts_expected_no_input_exit(tmp_path) -> None:
     executable = tmp_path / "DensifyPointCloud.exe"
-    executable.write_bytes(b"fixture")
+    _fixture_executable(executable)
     result = probe_openmvs(
         executable,
         runner=_runner(
@@ -93,7 +114,7 @@ def test_openmvs_help_fixture_accepts_expected_no_input_exit(tmp_path) -> None:
 
 def test_openmvs_nonzero_without_banner_is_not_valid(tmp_path) -> None:
     executable = tmp_path / "DensifyPointCloud.exe"
-    executable.write_bytes(b"fixture")
+    _fixture_executable(executable)
     result = probe_openmvs(
         executable, runner=_runner("unknown option", returncode=1, expected_args=("-h",))
     )
@@ -102,7 +123,7 @@ def test_openmvs_nonzero_without_banner_is_not_valid(tmp_path) -> None:
 
 def test_openmvs_unexpected_exit_is_unexecutable_even_with_banner(tmp_path) -> None:
     executable = tmp_path / "DensifyPointCloud.exe"
-    executable.write_bytes(b"fixture")
+    _fixture_executable(executable)
     result = probe_openmvs(executable, runner=_runner("OpenMVS x64 v2.4.0", returncode=2))
     assert result.status is EngineProbeStatus.UNEXECUTABLE
 
@@ -117,7 +138,7 @@ def test_openmvs_component_suite_reports_each_component_and_readiness(tmp_path) 
     paths = {}
     for component in OPENMVS_COMPONENTS:
         path = tmp_path / f"{component}.exe"
-        path.write_bytes(b"fixture")
+        _fixture_executable(path)
         paths[component] = path
 
     calls: dict[str, tuple[str, ...]] = {}

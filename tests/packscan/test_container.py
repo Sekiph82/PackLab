@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 import zipfile
 from pathlib import Path
 
 import pytest
 
 from packlab_core.packscan import PackScanError, read_packscan, write_packscan
+from packlab_core.packscan import container as container_module
 
 CANONICALIZATION = "sha256_32_bytes_lowercase_hex_64_chars_v1"
 
@@ -227,3 +229,204 @@ def test_validate_packscan_rejects_checksum_schema_drift(tmp_path: Path, repo_ro
     with pytest.raises(PackScanError) as error:
         read_packscan(tmp_path / "checksum-schema-drift.packscan")
     assert error.value.code == "invalid_checksums"
+
+
+def test_packscan_loader_rejects_compressed_package_over_limit(tmp_path: Path, monkeypatch) -> None:
+    package = tmp_path / "small.zip"
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr("entry.bin", b"payload")
+    monkeypatch.setattr(container_module, "MAX_PACKSCAN_BYTES", 1)
+    with pytest.raises(PackScanError) as error:
+        container_module._load_archive(package)
+    assert error.value.code == "package_too_large"
+
+
+def test_packscan_loader_bounds_control_entry_size(tmp_path: Path, repo_root: Path, monkeypatch) -> None:
+    package = write_packscan(
+        tmp_path / "valid.packscan",
+        _manifest(repo_root),
+        {"images/0001.jpg": b"IMG", "metadata/photos.json": b"{}"},
+    )
+    monkeypatch.setattr(container_module, "MAX_PACKSCAN_CONTROL_ENTRY_BYTES", 1)
+    with pytest.raises(PackScanError) as error:
+        container_module._load_archive(package)
+    assert error.value.code == "control_entry_too_large"
+
+
+def test_packscan_writer_refuses_control_entry_above_control_limit(
+    tmp_path: Path, repo_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(container_module, "MAX_PACKSCAN_CONTROL_ENTRY_BYTES", 1)
+    with pytest.raises(PackScanError) as error:
+        write_packscan(
+            tmp_path / "control-too-large.packscan",
+            _manifest(repo_root),
+            {"images/0001.jpg": b"IMG", "metadata/photos.json": b"{}"},
+        )
+    assert error.value.code == "control_entry_too_large"
+    assert not (tmp_path / "control-too-large.packscan").exists()
+
+
+def test_packscan_writer_refuses_declared_payload_above_entry_limit(
+    tmp_path: Path, repo_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(container_module, "MAX_PACKSCAN_ENTRY_BYTES", 2)
+    with pytest.raises(PackScanError) as error:
+        write_packscan(
+            tmp_path / "too-large.packscan",
+            _manifest(repo_root),
+            {"images/0001.jpg": b"IMG", "metadata/photos.json": b"{}"},
+        )
+    assert error.value.code == "entry_too_large"
+    assert not (tmp_path / "too-large.packscan").exists()
+
+
+def test_packscan_writer_removes_temp_when_compressed_limit_is_exceeded(
+    tmp_path: Path, repo_root: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(container_module, "MAX_PACKSCAN_BYTES", 1)
+    destination = tmp_path / "too-large.packscan"
+    with pytest.raises(PackScanError) as error:
+        write_packscan(
+            destination,
+            _manifest(repo_root),
+            {"images/0001.jpg": b"IMG", "metadata/photos.json": b"{}"},
+        )
+    assert error.value.code == "package_too_large"
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".packscan-*.tmp"))
+
+
+def test_packscan_loader_bounds_central_directory_entry_count(tmp_path: Path, monkeypatch) -> None:
+    package = tmp_path / "many-entries.zip"
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr("one.bin", b"1")
+        archive.writestr("two.bin", b"2")
+    monkeypatch.setattr(container_module, "MAX_PACKSCAN_ENTRIES", 1)
+    with pytest.raises(PackScanError) as error:
+        container_module._load_archive(package)
+    assert error.value.code == "too_many_entries"
+
+
+def test_packscan_loader_rejects_eocd_count_smaller_than_central_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    package = tmp_path / "forged-count.zip"
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr("one.bin", b"1")
+        archive.writestr("two.bin", b"2")
+    payload = bytearray(package.read_bytes())
+    eocd = payload.rfind(b"PK\x05\x06")
+    assert eocd >= 0
+    struct.pack_into("<H", payload, eocd + 8, 1)
+    struct.pack_into("<H", payload, eocd + 10, 1)
+    package.write_bytes(payload)
+
+    def unexpected_zipfile_materialization(*args, **kwargs):
+        raise AssertionError("ZipFile must not materialize a forged central directory")
+
+    monkeypatch.setattr(container_module.zipfile, "ZipFile", unexpected_zipfile_materialization)
+
+    with pytest.raises(PackScanError) as error:
+        container_module._load_archive(package)
+    assert error.value.code == "corrupt_zip"
+
+
+@pytest.mark.parametrize(
+    ("field_offset", "value", "expected_code"),
+    [
+        (4, 1, "corrupt_zip"),  # disk number
+        (6, 1, "corrupt_zip"),  # central-directory disk number
+        (10, 0xFFFF, "too_many_entries"),  # ZIP64 entry-count sentinel
+    ],
+)
+def test_packscan_loader_rejects_multidisk_and_zip64_eocd(
+    tmp_path: Path, field_offset: int, value: int, expected_code: str
+) -> None:
+    package = tmp_path / "unsupported-layout.zip"
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr("one.bin", b"1")
+    payload = bytearray(package.read_bytes())
+    eocd = payload.rfind(b"PK\x05\x06")
+    assert eocd >= 0
+    struct.pack_into("<H", payload, eocd + field_offset, value)
+    package.write_bytes(payload)
+
+    with pytest.raises(PackScanError) as error:
+        container_module._load_archive(package)
+    assert error.value.code == expected_code
+
+
+def test_packscan_loader_rejects_archive_comment_before_zipfile(
+    tmp_path: Path, monkeypatch
+) -> None:
+    package = tmp_path / "commented.zip"
+    with zipfile.ZipFile(package, "w") as archive:
+        archive.writestr("one.bin", b"1")
+        archive.comment = b"not canonical PackScan framing"
+
+    def unexpected_zipfile_materialization(*args, **kwargs):
+        raise AssertionError("archive comments must fail before ZipFile materialization")
+
+    monkeypatch.setattr(container_module.zipfile, "ZipFile", unexpected_zipfile_materialization)
+    with pytest.raises(PackScanError) as error:
+        container_module._load_archive(package)
+    assert error.value.code == "corrupt_zip"
+
+
+@pytest.mark.parametrize(
+    ("files", "entry_limit", "total_limit", "expected_code"),
+    [
+        ({"large.bin": b"123"}, 2, 100, "entry_too_large"),
+        ({"one.bin": b"12", "two.bin": b"34"}, 100, 3, "package_expands_too_large"),
+    ],
+)
+def test_packscan_loader_bounds_declared_uncompressed_payloads(
+    tmp_path: Path,
+    monkeypatch,
+    files: dict[str, bytes],
+    entry_limit: int,
+    total_limit: int,
+    expected_code: str,
+) -> None:
+    package = tmp_path / "expanded.zip"
+    with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, data in files.items():
+            archive.writestr(name, data)
+    monkeypatch.setattr(container_module, "MAX_PACKSCAN_ENTRY_BYTES", entry_limit)
+    monkeypatch.setattr(container_module, "MAX_PACKSCAN_TOTAL_UNCOMPRESSED_BYTES", total_limit)
+    with pytest.raises(PackScanError) as error:
+        container_module._load_archive(package)
+    assert error.value.code == expected_code
+
+
+def test_extract_packscan_rejects_source_change_after_validation(
+    tmp_path: Path, repo_root: Path, monkeypatch
+) -> None:
+    source = write_packscan(
+        tmp_path / "capture.packscan",
+        _manifest(repo_root),
+        {"images/0001.jpg": b"IMG", "metadata/photos.json": b"{}"},
+    )
+    original_validate = container_module.validate_packscan
+    original_manifest = _manifest(repo_root)
+    changed_manifest = json.loads(json.dumps(original_manifest))
+    changed_manifest["payloads"][0]["sha256"] = hashlib.sha256(b"ALT").hexdigest()
+
+    def validate_then_replace(package: Path):
+        report = original_validate(package)
+        replacement = tmp_path / "replacement.packscan"
+        write_packscan(
+            replacement,
+            changed_manifest,
+            {"images/0001.jpg": b"ALT", "metadata/photos.json": b"{}"},
+        )
+        replacement.replace(package)
+        return report
+
+    monkeypatch.setattr(container_module, "validate_packscan", validate_then_replace)
+    destination = tmp_path / "extracted"
+    with pytest.raises(PackScanError, match="changed between validation and extraction"):
+        container_module.extract_packscan(source, destination)
+    assert not destination.exists()
+

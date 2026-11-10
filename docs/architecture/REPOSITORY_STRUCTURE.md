@@ -49,10 +49,10 @@ PackLab has one live project-state authority and a separate evidence trail. The 
 | --- | --- | --- |
 | Repository contents and shared branch history | GitHub `main` in `Sekiph82/PackLab` | GitHub `main` is repository truth. Local checkouts are working copies and must be synchronized before implementation. |
 | Live task, milestone, sprint, actor, and workflow state | Root `TASKS.md` | Root `TASKS.md` is the only live H!veAI/project-state tracker. No document, log, dashboard, or provider-specific file may compete with it. |
-| Prompts and frozen audit criteria | ChatGPT | ChatGPT authors versioned work orders and their matching criteria under `coordination/sessions/<CYCLE_ID>/`. |
-| Independent audit verdicts and audit artifacts | ChatGPT | ChatGPT independently audits the implementation and writes the matching audit artifact. Codex does not self-audit or assign a verdict. |
-| `TASKS.md` lifecycle writes | ChatGPT | ChatGPT is the sole writer of task closure and lifecycle state. Codex must not edit `TASKS.md`. |
-| Implementation, test execution, and implementation log | Codex | Codex implements the active work order, runs its required checks, and writes the matching `CODEX_LOG_VNN.md`. Codex does not write audit verdicts or task lifecycle state. |
+| Prompts and validation criteria | Codex under owner delegation | Codex writes versioned bounded work orders and their matching criteria under `coordination/sessions/<CYCLE_ID>/`; any external reviewer input is advisory unless the owner explicitly gates a task on it. |
+| Independent review verdicts and review artifacts | The actual reviewer | Only the person who performed a review may author its verdict. Codex records implementation evidence and never fabricates independent review. |
+| `TASKS.md` lifecycle writes | Codex under current owner delegation | The owner delegated queue sequencing and live tracker maintenance to Codex on 2026-10-22. Codex records only locally evidenced state and does not fabricate hosted, device, independent-review, or release acceptance. |
+| Implementation, test execution, and implementation log | Codex | Codex implements bounded tasks, runs their required checks, writes matching `CODEX_LOG_VNN.md` files, and continues through eligible tasks. Historical audit verdicts remain attributable to their original reviewers. |
 | Session work orders and evidence | The named author under the coordination protocol | Session artifacts record scope and evidence for a cycle; they do not override live state in `TASKS.md` and do not form a second task ledger. |
 
 The normal authority sequence is therefore: GitHub `main` for repository truth, root `TASKS.md` for live project state, the active versioned prompt and criteria for the current implementation scope, and coordination policy/guidance for the operating rules. Logs and handoff/history files are evidence unless an explicit higher-authority rule says otherwise.

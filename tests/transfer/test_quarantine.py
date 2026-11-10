@@ -27,6 +27,29 @@ def test_quarantine_preserves_invalid_bytes_and_redacted_record_idempotently(tmp
     assert source.exists()
 
 
+def test_quarantine_digest_path_collision_does_not_claim_mismatched_bytes(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "collision.packscan"
+    source.write_bytes(b"incoming bytes")
+    digest = hashlib.sha256(b"incoming bytes").hexdigest()
+    store = QuarantineStore(tmp_path / "quarantine")
+    target = store.packages / f"{digest}.packscan"
+    target.write_bytes(b"different pre-existing bytes")
+
+    record = store.preserve(
+        source,
+        source_channel="drop",
+        error_code="corrupt_zip",
+        diagnostic="corrupt_zip",
+    )
+
+    assert record.package_preserved is False
+    assert record.package_sha256 is None
+    assert target.read_bytes() == b"different pre-existing bytes"
+    assert not list(store.packages.glob(".quarantine-*.part"))
+
+
 def test_future_and_unsafe_packages_are_quarantined_without_normal_artifacts(tmp_path: Path) -> None:
     future = tmp_path / "future.packscan"
     future.write_bytes(b"future bytes")

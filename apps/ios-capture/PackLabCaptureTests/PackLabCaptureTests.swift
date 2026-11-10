@@ -931,6 +931,28 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertThrowsError(try SessionFinalizer().validate(input)) { error in XCTAssertEqual(error as? FinalizationError, .invalidManifest) }
     }
 
+    func testPackScanWriterRejectsPythonIncompatiblePaths() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let metadata = Data("{}".utf8)
+        let image = Data([1])
+        let writer = PackScanWriter()
+
+        for invalidPath in ["images/" + String(repeating: "a", count: 1_025), "images/bad\u{1F}name.heic"] {
+            let payloads = ["metadata/photos.json": metadata, invalidPath: image]
+            let manifest = try JSONSerialization.data(withJSONObject: [
+                "schema_version": "1.0.0",
+                "capture_id": "path-limits",
+                "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization],
+                "payloads": [
+                    ["path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": metadata.count, "sha256": SourceIntegrity.digest(metadata)],
+                    ["path": invalidPath, "kind": "image", "required": true, "authority": "source", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)],
+                ],
+            ])
+            XCTAssertThrowsError(try writer.write(manifestJSON: manifest, payloads: payloads, to: root.appendingPathComponent(UUID().uuidString + ".packscan")))
+        }
+    }
+
     func testPL0119CanonicalWorkflowRequiresAuthoritativeRecordsAndUsesSourceEntryPoint() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

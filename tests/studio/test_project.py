@@ -31,6 +31,43 @@ def test_duplicate_corrupt_and_partial_creation_fail_cleanly(tmp_path) -> None:
     assert not list(tmp_path.glob(".*.creating-*"))
 
 
+def test_project_open_is_deterministic_and_rejects_future_schema_without_rewriting_source(
+    tmp_path,
+) -> None:
+    import json
+
+    root = tmp_path / "project"
+    creator = ProjectManager()
+    metadata = creator.new_project(root, "Project")
+    creator.commit_edit({"value": "preserve"}, expected_revision=0)
+    authority_before = (root / "working" / "authority.json").read_bytes()
+    state_before = (root / "working" / "state.json").read_bytes()
+
+    first = ProjectManager().open_project(root)
+    second = ProjectManager().open_project(root)
+    assert first == second
+    assert first.project_id == metadata.project_id
+    assert (root / "working" / "authority.json").read_bytes() == authority_before
+    assert (root / "working" / "state.json").read_bytes() == state_before
+
+    metadata_path = root / "working" / "project.json"
+    future_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    future_metadata["schema_version"] = "99.0"
+    metadata_path.write_text(json.dumps(future_metadata), encoding="utf-8")
+    unsupported_source = metadata_path.read_bytes()
+    with pytest.raises(ProjectError, match="malformed or unsupported"):
+        ProjectManager().open_project(root)
+    assert metadata_path.read_bytes() == unsupported_source
+    assert (root / "working" / "authority.json").read_bytes() == authority_before
+
+    malformed = b'{"schema_version":'
+    metadata_path.write_bytes(malformed)
+    with pytest.raises(ProjectError):
+        ProjectManager().open_project(root)
+    assert metadata_path.read_bytes() == malformed
+    assert (root / "working" / "authority.json").read_bytes() == authority_before
+
+
 def test_active_job_requires_explicit_close_policy(monkeypatch, tmp_path) -> None:
     jobs = JobManager()
     manager = ProjectManager(job_manager=jobs)

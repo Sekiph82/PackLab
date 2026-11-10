@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import os
 import re
+import shutil
 import tempfile
 import uuid
 from collections.abc import Callable
@@ -89,8 +91,16 @@ class ProjectMetadata:
 
 
 class ProjectManager:
-    def __init__(self, *, job_manager: JobManager | None = None) -> None:
+    _PROJECT_WRITE_RESERVE_BYTES = 64 * 1024
+
+    def __init__(
+        self,
+        *,
+        job_manager: JobManager | None = None,
+        free_space_reader: Callable[[Path], int] | None = None,
+    ) -> None:
         self.job_manager = job_manager
+        self._free_space_reader = free_space_reader or (lambda path: shutil.disk_usage(path).free)
         self.layout: ProjectLayout | None = None
         self.metadata: ProjectMetadata | None = None
         self.recovery: RecoveryManager | None = None
@@ -540,7 +550,9 @@ class ProjectManager:
         try:
             layout = ProjectLayout.open(target)
             metadata, _ = self._read_authority(layout)
-        except (OSError, ValueError, ProjectLayoutError, ProjectError) as error:
+        except ProjectError:
+            raise
+        except (OSError, ValueError, ProjectLayoutError) as error:
             raise ProjectError("project cannot be opened") from error
         self.close()
         self.layout = layout
@@ -601,7 +613,35 @@ class ProjectManager:
             self.metadata.schema_version,
             self.metadata.revision + 1,
         )
-        self._write_authority(self.layout, next_metadata, state)
+        authority_value = {
+            "schema_version": AUTHORITY_SCHEMA_VERSION,
+            "metadata": next_metadata.to_dict(),
+            "state": state,
+        }
+        payload_size = len(
+            (json.dumps(authority_value, sort_keys=True, separators=(",", ":")) + "\n").encode(
+                "utf-8"
+            )
+        )
+        try:
+            free_bytes = self._free_space_reader(self.layout.root)
+        except Exception as error:
+            raise ProjectError("cannot verify free disk space before saving project") from error
+        if type(free_bytes) is not int or free_bytes < 0:
+            raise ProjectError("free disk space provider returned an invalid result")
+        required_bytes = payload_size + self._PROJECT_WRITE_RESERVE_BYTES
+        if free_bytes < required_bytes:
+            raise ProjectError(
+                f"insufficient disk space to save project; need at least {required_bytes} bytes free"
+            )
+        try:
+            self._write_authority(self.layout, next_metadata, state)
+        except OSError as error:
+            if error.errno == errno.ENOSPC:
+                raise ProjectError(
+                    "insufficient disk space while saving project; previous revision is preserved"
+                ) from error
+            raise
         self._after_authority_publish(next_metadata, state)
         self._atomic_json(self.layout.path("working", "state.json"), state)
         self._write_metadata(self.layout, next_metadata)

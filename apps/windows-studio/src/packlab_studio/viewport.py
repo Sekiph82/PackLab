@@ -12,6 +12,8 @@ from typing import Self
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPolygonF
 
+from packlab_core.visual_reference import VisualReferenceRecord
+
 
 class ViewportErrorCode(StrEnum):
     MISSING = "missing"
@@ -87,7 +89,9 @@ def _parse_float_triplet(parts: list[str], line_number: int) -> Point3:
             raise ValueError
         return float(parts[0]), float(parts[1]), float(parts[2])
     except ValueError as error:
-        raise ViewportLoadError(ViewportErrorCode.CORRUPT, f"invalid point at line {line_number}") from error
+        raise ViewportLoadError(
+            ViewportErrorCode.CORRUPT, f"invalid point at line {line_number}"
+        ) from error
 
 
 def load_geometry(path: str | Path) -> Geometry:
@@ -100,7 +104,9 @@ def load_geometry(path: str | Path) -> Geometry:
     try:
         lines = source.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeError) as error:
-        raise ViewportLoadError(ViewportErrorCode.CORRUPT, "geometry file cannot be read as text") from error
+        raise ViewportLoadError(
+            ViewportErrorCode.CORRUPT, "geometry file cannot be read as text"
+        ) from error
     if suffix == ".obj":
         return _load_obj(lines)
     if suffix == ".ply":
@@ -128,8 +134,13 @@ def _load_obj(lines: list[str]) -> MeshGeometry:
                     index = int(token.split("/")[0])
                     indices.append(index - 1 if index > 0 else len(vertices) + index)
                 except ValueError as error:
-                    raise ViewportLoadError(ViewportErrorCode.CORRUPT, f"invalid face at line {number}") from error
-            triangles.extend((indices[0], indices[index], indices[index + 1]) for index in range(1, len(indices) - 1))
+                    raise ViewportLoadError(
+                        ViewportErrorCode.CORRUPT, f"invalid face at line {number}"
+                    ) from error
+            triangles.extend(
+                (indices[0], indices[index], indices[index + 1])
+                for index in range(1, len(indices) - 1)
+            )
     _validate_triangles(vertices, triangles)
     if not vertices:
         raise ViewportLoadError(ViewportErrorCode.EMPTY, "OBJ has no vertices")
@@ -156,7 +167,10 @@ def _load_ascii_ply(lines: list[str]) -> MeshGeometry:
         raise ViewportLoadError(ViewportErrorCode.CORRUPT, "PLY ASCII header is incomplete")
     if len(lines) < end_header + vertex_count + face_count:
         raise ViewportLoadError(ViewportErrorCode.CORRUPT, "PLY payload is truncated")
-    vertices = tuple(_parse_float_triplet(lines[end_header + index].split(), end_header + index + 1) for index in range(vertex_count))
+    vertices = tuple(
+        _parse_float_triplet(lines[end_header + index].split(), end_header + index + 1)
+        for index in range(vertex_count)
+    )
     triangles: list[Triangle] = []
     for index in range(face_count):
         parts = lines[end_header + vertex_count + index].split()
@@ -166,8 +180,12 @@ def _load_ascii_ply(lines: list[str]) -> MeshGeometry:
         except (ValueError, IndexError) as error:
             raise ViewportLoadError(ViewportErrorCode.CORRUPT, "PLY face is malformed") from error
         if len(values) < 3:
-            raise ViewportLoadError(ViewportErrorCode.CORRUPT, "PLY face has fewer than three indices")
-        triangles.extend((values[0], values[item], values[item + 1]) for item in range(1, len(values) - 1))
+            raise ViewportLoadError(
+                ViewportErrorCode.CORRUPT, "PLY face has fewer than three indices"
+            )
+        triangles.extend(
+            (values[0], values[item], values[item + 1]) for item in range(1, len(values) - 1)
+        )
     _validate_triangles(list(vertices), triangles)
     return MeshGeometry(vertices, tuple(triangles))
 
@@ -192,7 +210,9 @@ def _load_points(lines: list[str], *, pcd: bool) -> PointCloudGeometry:
 
 def _validate_triangles(vertices: list[Point3], triangles: list[Triangle]) -> None:
     if any(index < 0 or index >= len(vertices) for triangle in triangles for index in triangle):
-        raise ViewportLoadError(ViewportErrorCode.CORRUPT, "triangle index is outside the vertex buffer")
+        raise ViewportLoadError(
+            ViewportErrorCode.CORRUPT, "triangle index is outside the vertex buffer"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,15 +235,36 @@ class ViewportCamera:
         )
 
     def pan(self, delta_x: float, delta_y: float) -> Self:
-        return self.__class__(self.target, self.distance, self.yaw_degrees, self.pitch_degrees, self.pan_x + delta_x, self.pan_y + delta_y)
+        return self.__class__(
+            self.target,
+            self.distance,
+            self.yaw_degrees,
+            self.pitch_degrees,
+            self.pan_x + delta_x,
+            self.pan_y + delta_y,
+        )
 
     def zoom(self, factor: float) -> Self:
         if factor <= 0:
             raise ValueError("zoom factor must be positive")
-        return self.__class__(self.target, max(0.001, self.distance * factor), self.yaw_degrees, self.pitch_degrees, self.pan_x, self.pan_y)
+        return self.__class__(
+            self.target,
+            max(0.001, self.distance * factor),
+            self.yaw_degrees,
+            self.pitch_degrees,
+            self.pan_x,
+            self.pan_y,
+        )
 
     def fit(self, bounds: Bounds) -> Self:
-        return self.__class__(bounds.center, max(bounds.radius * 2.4, 0.001), self.yaw_degrees, self.pitch_degrees, 0.0, 0.0)
+        return self.__class__(
+            bounds.center,
+            max(bounds.radius * 2.4, 0.001),
+            self.yaw_degrees,
+            self.pitch_degrees,
+            0.0,
+            0.0,
+        )
 
     def reset(self) -> Self:
         return self.__class__()
@@ -245,7 +286,14 @@ class ViewportCamera:
         target = tuple(float(item) for item in value["target"])
         if len(target) != 3:
             raise ValueError("camera target must have three coordinates")
-        return cls(target, float(value["distance"]), float(value["yaw_degrees"]), float(value["pitch_degrees"]), float(value["pan_x"]), float(value["pan_y"]))
+        return cls(
+            target,
+            float(value["distance"]),
+            float(value["yaw_degrees"]),
+            float(value["pitch_degrees"]),
+            float(value["pan_x"]),
+            float(value["pan_y"]),
+        )
 
 
 class ViewportRenderMode(StrEnum):
@@ -325,6 +373,7 @@ class ViewportState:
 class SceneObjectKind(StrEnum):
     SCAN_MESH = "scan-mesh"
     DESIGN_MODEL = "design-model"
+    AI_VISUAL_REFERENCE = "ai-visual-reference"
     CAP = "cap"
     LABEL = "label"
     REFERENCE_GEOMETRY = "reference-geometry"
@@ -333,6 +382,7 @@ class SceneObjectKind(StrEnum):
 class SceneObjectId(StrEnum):
     SCAN_MESH = "scan-mesh"
     DESIGN_MODEL = "design-model"
+    AI_VISUAL_REFERENCE = "ai-visual-reference"
     CAP = "cap"
     LABEL = "label"
     REFERENCE_GEOMETRY = "reference-geometry"
@@ -345,15 +395,30 @@ class SceneObject:
     geometry: Geometry | None = None
     visible: bool = True
     selectable: bool = True
+    visual_reference: VisualReferenceRecord | None = None
+
+    def __post_init__(self) -> None:
+        is_ai_reference = self.kind is SceneObjectKind.AI_VISUAL_REFERENCE
+        if is_ai_reference != (self.visual_reference is not None):
+            raise ValueError("AI visual reference scene objects require their generated record")
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "object_id": self.object_id,
             "kind": self.kind.value,
             "visible": self.visible,
             "selectable": self.selectable,
             "has_geometry": self.geometry is not None,
         }
+        if self.kind is SceneObjectKind.AI_VISUAL_REFERENCE:
+            assert self.visual_reference is not None
+            value.update(
+                authority_class="AI_VISUAL_REFERENCE",
+                generated=True,
+                caveat="Unseen geometry may be invented by the generator.",
+                visual_reference=self.visual_reference.as_dict(),
+            )
+        return value
 
 
 class SceneModel:
@@ -376,6 +441,12 @@ class SceneModel:
     def get(self, object_id: str) -> SceneObject:
         return self._objects[object_id]
 
+    def remove(self, object_id: str) -> SceneObject:
+        item = self._objects.pop(object_id)
+        if self._selected == object_id:
+            self._selected = None
+        return item
+
     def select(self, object_id: str | None) -> bool:
         if object_id is None:
             self._selected = None
@@ -392,7 +463,14 @@ class SceneModel:
 
     def set_visible(self, object_id: str, visible: bool) -> None:
         item = self._objects[object_id]
-        self._objects[object_id] = SceneObject(item.object_id, item.kind, item.geometry, visible, item.selectable)
+        self._objects[object_id] = SceneObject(
+            item.object_id,
+            item.kind,
+            item.geometry,
+            visible,
+            item.selectable,
+            item.visual_reference,
+        )
         if not visible and self._selected == object_id:
             self._selected = None
 
@@ -406,7 +484,12 @@ class SceneModel:
         }
 
     def bounds(self) -> Bounds:
-        points = [point for item in self.visible_objects() if item.geometry is not None for point in _geometry_points(item.geometry)]
+        points = [
+            point
+            for item in self.visible_objects()
+            if item.geometry is not None
+            for point in _geometry_points(item.geometry)
+        ]
         return _bounds(points)
 
 
@@ -422,9 +505,16 @@ class QtRasterViewportAdapter:
         return load_geometry(path)
 
     def capabilities(self) -> dict[str, object]:
-        return {"headless": True, "software_rendering": True, "native_gpu": False, "backend": self.backend_name}
+        return {
+            "headless": True,
+            "software_rendering": True,
+            "native_gpu": False,
+            "backend": self.backend_name,
+        }
 
-    def render(self, scene: SceneModel, state: ViewportState, size: QSize = QSize(960, 640)) -> QImage:
+    def render(
+        self, scene: SceneModel, state: ViewportState, size: QSize = QSize(960, 640)
+    ) -> QImage:
         image = QImage(size, QImage.Format.Format_ARGB32)
         image.fill(QColor("#101820"))
         painter = QPainter(image)
@@ -436,6 +526,16 @@ class QtRasterViewportAdapter:
         for item in scene.visible_objects():
             if item.geometry is not None:
                 self._draw_geometry(painter, item, state, size)
+        has_visible_ai_reference = any(
+            item.kind is SceneObjectKind.AI_VISUAL_REFERENCE for item in scene.visible_objects()
+        )
+        if has_visible_ai_reference:
+            painter.setPen(QPen(QColor("#101820"), 1.0))
+            painter.setBrush(QColor("#ffd166"))
+            painter.drawRoundedRect(8, 8, min(size.width() - 16, 360), 48, 5, 5)
+            painter.setPen(QPen(QColor("#101820"), 1.0))
+            painter.drawText(16, 26, "AI Visual Reference · GENERATED")
+            painter.drawText(16, 44, "Unseen geometry may be invented.")
         painter.end()
         return image
 
@@ -450,13 +550,21 @@ class QtRasterViewportAdapter:
         if z2 <= 0.001:
             return None
         scale = min(size.width(), size.height()) * 0.8 / camera.distance
-        return QPointF(size.width() / 2 + (x1 + camera.pan_x) * scale / z2 * camera.distance, size.height() / 2 - (y1 + camera.pan_y) * scale / z2 * camera.distance)
+        return QPointF(
+            size.width() / 2 + (x1 + camera.pan_x) * scale / z2 * camera.distance,
+            size.height() / 2 - (y1 + camera.pan_y) * scale / z2 * camera.distance,
+        )
 
-    def _draw_geometry(self, painter: QPainter, item: SceneObject, state: ViewportState, size: QSize) -> None:
+    def _draw_geometry(
+        self, painter: QPainter, item: SceneObject, state: ViewportState, size: QSize
+    ) -> None:
         assert item.geometry is not None
         selected = item.object_id == state.selected_object_id
         color = QColor("#ffd166") if selected else QColor("#4cc9f0")
-        if isinstance(item.geometry, PointCloudGeometry) or state.render_mode is ViewportRenderMode.POINT_CLOUD:
+        if (
+            isinstance(item.geometry, PointCloudGeometry)
+            or state.render_mode is ViewportRenderMode.POINT_CLOUD
+        ):
             painter.setPen(QPen(color, state.point_size))
             for point in _geometry_points(item.geometry):
                 projected = self._project(point, state.camera, size)
@@ -465,7 +573,10 @@ class QtRasterViewportAdapter:
             return
         painter.setPen(QPen(color, 1.5 if selected else 1.0))
         for triangle in item.geometry.triangles:
-            points = [self._project(item.geometry.vertices[index], state.camera, size) for index in triangle]
+            points = [
+                self._project(item.geometry.vertices[index], state.camera, size)
+                for index in triangle
+            ]
             if any(point is None for point in points):
                 continue
             polygon = QPolygonF([point for point in points if point is not None])
@@ -477,24 +588,43 @@ class QtRasterViewportAdapter:
         if state.render_mode is ViewportRenderMode.NORMALS:
             self._draw_normals(painter, item.geometry, state.camera, size, color)
 
-    def _draw_normals(self, painter: QPainter, mesh: MeshGeometry, camera: ViewportCamera, size: QSize, color: QColor) -> None:
+    def _draw_normals(
+        self,
+        painter: QPainter,
+        mesh: MeshGeometry,
+        camera: ViewportCamera,
+        size: QSize,
+        color: QColor,
+    ) -> None:
         painter.setPen(QPen(QColor("#f72585"), 1.0))
         for index, point in enumerate(mesh.vertices):
-            normal = mesh.normals[index] if index < len(mesh.normals) else _temporary_vertex_normal(mesh, index)
-            endpoint: Point3 = tuple(point[axis] + normal[axis] * max(mesh.bounds.radius * 0.08, 0.1) for axis in range(3))  # type: ignore[assignment]
+            normal = (
+                mesh.normals[index]
+                if index < len(mesh.normals)
+                else _temporary_vertex_normal(mesh, index)
+            )
+            endpoint: Point3 = tuple(
+                point[axis] + normal[axis] * max(mesh.bounds.radius * 0.08, 0.1)
+                for axis in range(3)
+            )  # type: ignore[assignment]
             start = self._project(point, camera, size)
             end = self._project(endpoint, camera, size)
             if start is not None and end is not None:
                 painter.drawLine(start, end)
 
-    def _draw_grid(self, painter: QPainter, camera: ViewportCamera, size: QSize, *, show_label: bool) -> None:
+    def _draw_grid(
+        self, painter: QPainter, camera: ViewportCamera, size: QSize, *, show_label: bool
+    ) -> None:
         spec = grid_spec(camera.distance)
         spacing = spec.spacing_mm
         painter.setPen(QPen(QColor("#324b60" if show_label else "#263746"), 1.0))
         extent = spacing * 10
         for index in range(-10, 11):
             offset = index * spacing
-            for start, end in [((-extent, 0.0, offset), (extent, 0.0, offset)), ((offset, 0.0, -extent), (offset, 0.0, extent))]:
+            for start, end in [
+                ((-extent, 0.0, offset), (extent, 0.0, offset)),
+                ((offset, 0.0, -extent), (offset, 0.0, extent)),
+            ]:
                 first = self._project(start, camera, size)
                 second = self._project(end, camera, size)
                 if first is not None and second is not None:
@@ -507,7 +637,9 @@ class QtRasterViewportAdapter:
         origin = self._project((0.0, 0.0, 0.0), camera, size)
         if origin is None:
             return
-        for axis, endpoint in zip(axis_metadata(), ((40.0, 0.0, 0.0), (0.0, 40.0, 0.0), (0.0, 0.0, 40.0))):
+        for axis, endpoint in zip(
+            axis_metadata(), ((40.0, 0.0, 0.0), (0.0, 40.0, 0.0), (0.0, 0.0, 40.0))
+        ):
             projected = self._project(endpoint, camera, size)
             if projected is not None:
                 painter.setPen(QPen(QColor(str(axis["color"])), 2.0))
@@ -522,7 +654,11 @@ def _temporary_vertex_normal(mesh: MeshGeometry, vertex_index: int) -> Point3:
         a, b, c = (mesh.vertices[index] for index in triangle)
         ab = tuple(b[index] - a[index] for index in range(3))
         ac = tuple(c[index] - a[index] for index in range(3))
-        normal = (ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0])
+        normal = (
+            ab[1] * ac[2] - ab[2] * ac[1],
+            ab[2] * ac[0] - ab[0] * ac[2],
+            ab[0] * ac[1] - ab[1] * ac[0],
+        )
         normals.append(normal)
     if not normals:
         return (0.0, 1.0, 0.0)
@@ -555,11 +691,46 @@ class ViewportService:
         self.state = self._state(visibility={**self.state.visibility, object_id: True})
         return item
 
-    def add_geometry(self, object_id: str, kind: SceneObjectKind, geometry: Geometry) -> SceneObject:
+    def add_geometry(
+        self, object_id: str, kind: SceneObjectKind, geometry: Geometry
+    ) -> SceneObject:
         item = SceneObject(object_id, kind, geometry)
         self.scene.add(item)
         self.state = self._state(visibility={**self.state.visibility, object_id: True})
         return item
+
+    def add_visual_reference(
+        self,
+        record: VisualReferenceRecord,
+        geometry: Geometry,
+    ) -> SceneObject:
+        """Add generated display geometry with its non-authoritative provenance."""
+
+        if not isinstance(record, VisualReferenceRecord):
+            raise ValueError("visual_reference_record_required")
+        item = SceneObject(
+            record.reference_id,
+            SceneObjectKind.AI_VISUAL_REFERENCE,
+            geometry,
+            visual_reference=record,
+        )
+        self.scene.add(item)
+        self.state = self._state(visibility={**self.state.visibility, item.object_id: True})
+        return item
+
+    def remove_visual_reference(self, reference_id: str) -> None:
+        """Remove only the selected visual-reference layer."""
+
+        item = self.scene.get(reference_id)
+        if item.kind is not SceneObjectKind.AI_VISUAL_REFERENCE:
+            raise ValueError("removal_requires_ai_visual_reference")
+        self.scene.remove(reference_id)
+        visibility = dict(self.state.visibility)
+        visibility.pop(reference_id, None)
+        self.state = self._state(
+            visibility=visibility,
+            selected_object_id=self.scene.selected_object_id,
+        )
 
     def orbit(self, delta_yaw: float, delta_pitch: float) -> None:
         self.state = self._state(camera=self.state.camera.orbit(delta_yaw, delta_pitch))
@@ -587,7 +758,10 @@ class ViewportService:
 
     def set_visible(self, object_id: str, visible: bool) -> None:
         self.scene.set_visible(object_id, visible)
-        self.state = self._state(visibility={**self.state.visibility, object_id: visible}, selected_object_id=self.scene.selected_object_id)
+        self.state = self._state(
+            visibility={**self.state.visibility, object_id: visible},
+            selected_object_id=self.scene.selected_object_id,
+        )
 
     def set_render_mode(self, mode: ViewportRenderMode) -> None:
         self.state = self._state(render_mode=ViewportRenderMode(mode))

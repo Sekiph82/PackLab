@@ -19,19 +19,17 @@ The required lifecycle is:
 
 ```text
 TASKS.md authorization
-  -> frozen Codex prompt + matching ChatGPT criteria
+  -> Codex prompt + local validation criteria
   -> Codex implementation and required checks
-  -> Codex log and AWAITING_AUDIT (or child READY_FOR_INDEPENDENT_AUDIT)
-  -> ChatGPT actual GitHub audit
-  -> ChatGPT writes audit artifact and updates TASKS.md
+  -> Codex log and truthful local/blocked handoff
+  -> autonomous continuation to next eligible task
 ```
 
-The prompt and criteria freeze scope before implementation. Codex reads the
-current tracker, synchronizes safely, changes only the authorized scope, runs
-checks, records exact evidence and limitations, and publishes the matching
-log. ChatGPT independently inspects the GitHub range/source/diff and every
-mandatory criterion, then is the sole actor that writes lifecycle/closure
-state back to `TASKS.md`.
+The prompt and criteria record scope before implementation. Codex reads the
+current tracker, synchronizes safely, changes authorized PackLab scope, runs
+checks, records exact evidence and limitations, and updates the tracker under
+the owner delegation. Independent review may be advisory; it does not control
+task order or require a stop.
 
 ## Historical evidence
 
@@ -72,15 +70,12 @@ or `BATCH_COMPLETED` and ends `AWAITING_MILESTONE_AUDIT`.
 
 ## Separation of duties
 
-Codex cannot edit `TASKS.md`, create ChatGPT audit files, assign
-`AUDITED_PASS`, mark checkboxes, reprioritize tasks, or self-audit. It may
-record E1/E2 builder evidence, truthful failures/fixes, and the required
-handoff.
+Codex may edit `TASKS.md`, update task state, and reprioritize tasks under the
+active owner delegation. It may not fabricate independent verdicts or E3
+hosted/device evidence.
 
-ChatGPT is the independent auditor and sole lifecycle/closure writer. It
-reads current `TASKS.md` before each decision, inspects actual GitHub source,
-diffs, commit ancestry, changed files and evidence, disposes every frozen
-criterion, and writes `CHATGPT_AUDIT_VNN.md` plus any required tracker update.
+An independent reviewer may inspect source, diffs, ancestry, changed files,
+and evidence when requested. Historical audit artifacts remain immutable.
 
 `CHANGES_REQUIRED` retains the same permanent PL task ID, unchecked state,
 prior evidence and accepted behavior. ChatGPT publishes a new versioned

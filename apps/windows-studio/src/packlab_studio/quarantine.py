@@ -7,9 +7,12 @@ import json
 import os
 import tempfile
 import zipfile
+import zlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+
+from packlab_core.packscan import container as packscan_container
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,11 +38,27 @@ class QuarantineStore:
     @staticmethod
     def _safe_capture_id(source: Path) -> str | None:
         try:
-            with zipfile.ZipFile(source) as archive:
-                value = json.loads(archive.read("manifest.json").decode("utf-8"))
+            if source.stat().st_size > packscan_container.MAX_PACKSCAN_BYTES:
+                return None
+            with source.open("rb") as stream:
+                entry_count = packscan_container._preflight_zip_entry_count(stream, source.stat().st_size)
+                if entry_count > packscan_container.MAX_PACKSCAN_ENTRIES:
+                    return None
+                stream.seek(0)
+                with zipfile.ZipFile(stream) as archive:
+                    info = archive.getinfo("manifest.json")
+                    if info.file_size > packscan_container.MAX_PACKSCAN_CONTROL_ENTRY_BYTES:
+                        return None
+                    with archive.open(info, mode="r") as member:
+                        manifest_bytes = member.read(
+                            packscan_container.MAX_PACKSCAN_CONTROL_ENTRY_BYTES + 1
+                        )
+                        if len(manifest_bytes) > packscan_container.MAX_PACKSCAN_CONTROL_ENTRY_BYTES:
+                            return None
+                        value = json.loads(manifest_bytes.decode("utf-8"))
             capture_id = value.get("capture_id") if isinstance(value, dict) else None
             return capture_id if isinstance(capture_id, str) and 0 < len(capture_id) <= 128 else None
-        except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        except (OSError, KeyError, ValueError, RuntimeError, NotImplementedError, EOFError, zlib.error, zipfile.BadZipFile):
             return None
 
     def preserve(self, source: str | Path, *, source_channel: str, error_code: str, diagnostic: str) -> QuarantineRecord:
@@ -48,20 +67,60 @@ class QuarantineStore:
         preserved = False
         if path.is_file():
             try:
-                data = path.read_bytes()
-                digest = hashlib.sha256(data).hexdigest()
-                target = self.packages / f"{digest}.packscan"
-                if not target.exists():
-                    fd, temporary_name = tempfile.mkstemp(prefix=f".{digest}-", suffix=".part", dir=self.packages)
+                if path.stat().st_size <= packscan_container.MAX_PACKSCAN_BYTES:
+                    fd, temporary_name = tempfile.mkstemp(prefix=".quarantine-", suffix=".part", dir=self.packages)
+                    hasher = hashlib.sha256()
+                    copied = 0
                     try:
                         with os.fdopen(fd, "wb") as handle:
-                            handle.write(data)
-                            handle.flush()
-                            os.fsync(handle.fileno())
-                        os.replace(temporary_name, target)
+                            with path.open("rb") as source:
+                                while True:
+                                    chunk = source.read(min(1024 * 1024, packscan_container.MAX_PACKSCAN_BYTES - copied + 1))
+                                    if not chunk:
+                                        break
+                                    if copied + len(chunk) > packscan_container.MAX_PACKSCAN_BYTES:
+                                        break
+                                    handle.write(chunk)
+                                    hasher.update(chunk)
+                                    copied += len(chunk)
+                            if copied == path.stat().st_size:
+                                handle.flush()
+                                os.fsync(handle.fileno())
+                                digest = hasher.hexdigest()
+                        if digest is not None:
+                            target = self.packages / f"{digest}.packscan"
+                            if target.exists() or target.is_symlink():
+                                matches = False
+                                try:
+                                    if (
+                                        not target.is_symlink()
+                                        and target.is_file()
+                                        and target.stat().st_size == copied
+                                    ):
+                                        existing_hash = hashlib.sha256()
+                                        existing_size = 0
+                                        with target.open("rb") as existing:
+                                            for chunk in iter(lambda: existing.read(1024 * 1024), b""):
+                                                if existing_size + len(chunk) > packscan_container.MAX_PACKSCAN_BYTES:
+                                                    break
+                                                existing_hash.update(chunk)
+                                                existing_size += len(chunk)
+                                        matches = (
+                                            existing_size == copied
+                                            and existing_hash.hexdigest() == digest
+                                        )
+                                except OSError:
+                                    matches = False
+                                Path(temporary_name).unlink(missing_ok=True)
+                                if matches:
+                                    preserved = True
+                                else:
+                                    digest = None
+                            else:
+                                os.replace(temporary_name, target)
+                                preserved = True
                     finally:
                         Path(temporary_name).unlink(missing_ok=True)
-                preserved = True
             except OSError:
                 digest = None
         quarantine_id = digest or hashlib.sha256(path.name.encode("utf-8", errors="replace")).hexdigest()

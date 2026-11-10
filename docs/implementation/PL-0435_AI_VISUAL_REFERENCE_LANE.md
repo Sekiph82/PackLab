@@ -1,6 +1,6 @@
 # PL-0435 Implementation Spec — AI Visual Reference Lane
 
-Status: future M19 work, not authorized for early execution.
+Status: Owner authorized isolated offline implementation on 2026-10-22. Model download, execution, or enablement remains prohibited until the licensing and pinned-checkpoint gates below are documented. No hosted CI, native builds, or release acceptance is part of this work.
 
 ## Objective
 

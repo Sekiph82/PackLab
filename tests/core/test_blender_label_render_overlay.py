@@ -13,6 +13,11 @@ from packlab_core.blender_label_render_overlay import (
     LabelRenderOverlayError,
     create_label_render_overlay_binding,
 )
+from packlab_core.label_dieline_svg import export_label_dieline_svg
+from packlab_core.label_metric_surface_binding import (
+    create_label_dieline,
+    create_label_dieline_print_intent,
+)
 from packlab_core.cad_label_surface_analysis import (
     CadLabelSurfacePolicy,
     analyze_cad_label_surfaces,
@@ -154,3 +159,27 @@ def test_overlay_binding_rejects_stale_metric_and_svg_media() -> None:
         create_label_render_overlay_binding(
             model, brep, analysis, metric, placement, svg_mapping, svg_assignment, svg
         )
+
+
+def test_dieline_artwork_and_product_mockup_binding_share_authority() -> None:
+    model, brep, analysis, metric, placement, mapping, assignment, artwork, overlay = (
+        _make_binding(LabelZoneKind.FRONT)
+    )
+    source_dieline = create_label_dieline(metric, placement)
+    print_intent = create_label_dieline_print_intent(
+        source_dieline, safe_margin_mm_unverified=2.0, bleed_mm_unverified=1.5
+    )
+    exported = export_label_dieline_svg(print_intent, placement)
+
+    assert exported.as_dict()["source_dieline_revision_id"] == source_dieline.revision_id
+    assert exported.as_dict()["physical_accuracy_validation_status"] == "DEFERRED_OWNER_VALIDATION"
+    assert exported.as_dict()["manufacturing_authorized"] is False
+    assert overlay.source_design_model_revision_id == model.revision_id
+    assert overlay.source_brep_revision_id == brep.revision_id
+    assert overlay.analysis_revision_id == analysis.revision_id
+    assert overlay.metric_surface_binding_revision_id == metric.revision_id
+    assert overlay.mapping_revision_id == mapping.revision_id
+    assert overlay.assignment_revision_id == assignment.revision_id
+    assert overlay.artwork_revision_id == artwork.revision_id
+    assert overlay.as_dict()["physical_fit_verified"] is False
+    assert overlay.as_dict()["manufacturing_authorized"] is False

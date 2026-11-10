@@ -11,6 +11,13 @@ import zlib
 public struct PackScanWriter: Sendable {
     public static let schemaVersion = "1.0.0"
     public static let checksumCanonicalization = "sha256_32_bytes_lowercase_hex_64_chars_v1"
+    private static let maximumPackageBytes = 512 * 1024 * 1024
+    private static let maximumEntryCount = 1_024
+    private static let maximumEntryBytes = 64 * 1024 * 1024
+    private static let maximumControlEntryBytes = 4 * 1024 * 1024
+    private static let maximumExpandedBytes = 512 * 1024 * 1024
+    private static let maximumPathCharacters = 1_024
+    private static let maximumPathBytes = 4_096
 
     public init() {}
 
@@ -39,7 +46,28 @@ public struct PackScanWriter: Sendable {
             "entries": checksums,
         ]
         files["checksums.json"] = try canonicalJSON(index)
+        guard files.count <= Self.maximumEntryCount else {
+            throw PackScanWriterError.resourceLimit
+        }
+        var expandedBytes = 0
+        for (path, bytes) in files {
+            guard bytes.count <= Self.maximumEntryBytes else {
+                throw PackScanWriterError.resourceLimit
+            }
+            if ["manifest.json", "checksums.json", "metadata/photos.json"].contains(path),
+               bytes.count > Self.maximumControlEntryBytes {
+                throw PackScanWriterError.resourceLimit
+            }
+            let (nextTotal, overflow) = expandedBytes.addingReportingOverflow(bytes.count)
+            guard !overflow, nextTotal <= Self.maximumExpandedBytes else {
+                throw PackScanWriterError.resourceLimit
+            }
+            expandedBytes = nextTotal
+        }
         let archive = try DeterministicZipArchive(files: files).data()
+        guard archive.count <= Self.maximumPackageBytes else {
+            throw PackScanWriterError.resourceLimit
+        }
         try finalize(archive, at: destination)
     }
 
@@ -51,12 +79,15 @@ public struct PackScanWriter: Sendable {
             contract["algorithm"] as? String == "sha256",
             contract["canonicalization"] as? String == Self.checksumCanonicalization,
             let declaredPayloads = object["payloads"] as? [[String: Any]],
-            declaredPayloads.count >= 2
+            declaredPayloads.count >= 2,
+            declaredPayloads.count + 2 <= Self.maximumEntryCount,
+            manifest.count <= Self.maximumControlEntryBytes
         else {
             throw PackScanWriterError.schemaInvalid
         }
 
         var declared = Set<String>()
+        var totalBytes = 0
         for item in declaredPayloads {
             guard
                 let path = item["path"] as? String,
@@ -65,6 +96,8 @@ public struct PackScanWriter: Sendable {
                 path != "checksums.json",
                 let size = item["size_bytes"] as? Int,
                 size >= 0,
+                size <= Self.maximumEntryBytes,
+                path != "metadata/photos.json" || size <= Self.maximumControlEntryBytes,
                 let digest = item["sha256"] as? String,
                 digest == sha256(payloads[path] ?? Data()),
                 payloads[path]?.count == size,
@@ -72,6 +105,11 @@ public struct PackScanWriter: Sendable {
             else {
                 throw PackScanWriterError.schemaInvalid
             }
+            let (nextTotal, overflow) = totalBytes.addingReportingOverflow(size)
+            guard !overflow, nextTotal <= Self.maximumExpandedBytes else {
+                throw PackScanWriterError.resourceLimit
+            }
+            totalBytes = nextTotal
             if let kind = item["kind"] as? String, kind == "image", !path.hasPrefix("images/") {
                 throw PackScanWriterError.schemaInvalid
             }
@@ -97,6 +135,11 @@ public struct PackScanWriter: Sendable {
     }
 
     private func safePath(_ path: String) -> Bool {
+        guard path.unicodeScalars.count <= Self.maximumPathCharacters,
+              path.utf8.count <= Self.maximumPathBytes,
+              !path.unicodeScalars.contains(where: { $0.value < 0x20 }) else {
+            return false
+        }
         guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\"), !path.contains(":") else {
             return false
         }
@@ -130,6 +173,7 @@ public enum PackScanWriterError: Error, Equatable {
     case finalizationFailed
     case missingPayload(String)
     case payloadSetMismatch
+    case resourceLimit
     case schemaInvalid
     case zipEncodingFailed
 }

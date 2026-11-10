@@ -36,7 +36,7 @@ Each reusable finding uses a permanent `AL-PL-xxxx` ID and records:
 
 **Finding:** Duplicating current task/progress/actor in logs, handoff files or coordination indexes creates drift.
 
-**Required behavior:** only root `TASKS.md` carries live H!veAI state. ChatGPT is the sole writer of lifecycle/progress/task closure. Session artifacts are evidence only.
+**Required behavior:** only root `TASKS.md` carries live H!veAI state. Codex maintains lifecycle/progress/task closure under the active owner delegation. Session artifacts are evidence only.
 
 **Origin:** PackLab coordination architecture initialization.
 

@@ -50,10 +50,11 @@ authoritative source by changing its manifest kind.
 
 ## Path, ordering, and compression rules
 
-Paths use UTF-8 forward slashes, are relative, and contain no empty, `.` or
-`..` component, leading slash, backslash, drive prefix, or case-insensitive
-duplicate. A path is normalized before comparison; duplicate names are always
-rejected. Directory entries are rejected. The writer orders the three control
+Paths use UTF-8 forward slashes, are relative, contain at most 1,024 Unicode
+code points and 4,096 UTF-8 bytes, and contain no control character below
+U+0020, empty, `.` or `..` component, leading slash, backslash, drive prefix,
+or case-insensitive duplicate. A path is normalized before comparison;
+duplicate names are always rejected. Directory entries are rejected. The writer orders the three control
 entries first and all remaining normalized paths lexicographically by UTF-8
 bytes. Every deterministic writer MUST set the ZIP central-directory DOS
 timestamp of every entry to exactly `1980-01-01T00:00:00` (UTC-independent
@@ -63,6 +64,23 @@ Timestamp-related ZIP extra fields MUST be omitted, including extended/UT
 explicit omission rule are implementable by both Python and Swift without
 platform-local time conversion. The reader validates the path and duplicate
 rules before reading content.
+
+## V1 implementation resource ceiling
+
+The current PackLab V1 reader/writer accepts packages up to 512 MiB compressed,
+with at most 1,024 ZIP entries, 64 MiB per entry, 4 MiB for each control entry
+(`manifest.json`, `checksums.json`, and `metadata/photos.json`), and 512 MiB
+total expanded content. Readers check the ZIP entry count before materializing
+the central directory and enforce declared and actual decompressed byte limits.
+Packages beyond these limits are rejected with a stable resource-limit error;
+this is a software safety ceiling, not a camera or physical packaging limit.
+
+The bounded V1 reader accepts single-disk, non-ZIP64 archives with no archive
+preamble, central-directory extra fields, or member/archive comments.
+It verifies the end record against the complete central-directory record
+sequence before asking the ZIP library to materialize entries. These framing
+rules keep the preflight bounded and match PackLab's deterministic Python and
+iOS writers.
 
 ## Compatibility and authority
 

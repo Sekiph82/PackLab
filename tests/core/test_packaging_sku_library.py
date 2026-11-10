@@ -13,6 +13,7 @@ from packlab_core.label_artwork import (
 )
 from packlab_core.label_zone import LabelZoneKind
 from packlab_core.label_zone_placement import create_label_zone_placement_revision
+from packlab_core.packaging_asset import AssetStatus, MeasurementUnit, PackagingMeasurement
 from packlab_core.packaging_sku_library import (
     PackagingSkuCatalog,
     PackagingSkuError,
@@ -90,6 +91,68 @@ def test_two_skus_share_exact_geometry_and_keep_distinct_artwork_authority() -> 
     assert '"artwork_bytes_included": false' in serialized
     assert "<svg" not in serialized
     assert '"geometry_copied": false' in serialized
+
+
+def test_povu_sku_variants_reuse_one_immutable_package_geometry_revision() -> None:
+    asset = _asset(
+        asset_id="synthetic-fixture-povu-geometry",
+        display_name="Synthetic test fixture; not Kenya inventory",
+        nominal_volume=PackagingMeasurement(1, MeasurementUnit.LITER),
+        supplier_id=None,
+        supplier_name=None,
+        status=AssetStatus.UNKNOWN,
+    )
+    source_asset_revision = asset.revision_id
+    artwork_a = _artwork_reference("green", "povu-label-a")
+    artwork_b = _artwork_reference("blue", "povu-label-b")
+    sku_a = PackagingSkuRevision.create(
+        asset,
+        sku_id="SYNTHETIC-TEST-POVU-1L-CLEANER-A",
+        display_name="Synthetic test POVU 1 L Cleaner A",
+        status=PackagingSkuStatus.DRAFT,
+        artwork_references=(artwork_a,),
+    )
+    sku_b = PackagingSkuRevision.create(
+        asset,
+        sku_id="SYNTHETIC-TEST-POVU-1L-CLEANER-B",
+        display_name="Synthetic test POVU 1 L Cleaner B",
+        status=PackagingSkuStatus.DRAFT,
+        artwork_references=(artwork_b,),
+    )
+    catalog = PackagingSkuCatalog()
+    catalog = catalog.with_revision(
+        sku_a, assets=(asset,), artwork_references=(artwork_a, artwork_b)
+    )
+    catalog = catalog.with_revision(
+        sku_b, assets=(asset,), artwork_references=(artwork_a, artwork_b)
+    )
+
+    related = catalog.skus_for_geometry(asset.asset_id, include_history=True)
+    assert asset.asset_id.startswith("synthetic-fixture-")
+    assert asset.status is AssetStatus.UNKNOWN
+    assert asset.supplier_id is None and asset.supplier_name is None
+    assert all(item.sku_id.startswith("SYNTHETIC-TEST-POVU-") for item in (sku_a, sku_b))
+    assert sku_a.status is sku_b.status is PackagingSkuStatus.DRAFT
+    assert {item.sku_id for item in related} == {sku_a.sku_id, sku_b.sku_id}
+    assert {item.packaging_asset_revision_id for item in related} == {asset.revision_id}
+    assert sku_a.artwork_references != sku_b.artwork_references
+    assert artwork_a.artwork_revision_id != artwork_b.artwork_revision_id
+    assert artwork_a.artwork_content_sha256 != artwork_b.artwork_content_sha256
+    assert asset.revision_id == source_asset_revision
+    assert all(item.as_dict()["geometry_copied"] is False for item in related)
+    assert all(item.as_dict()["source_mutated"] is False for item in related)
+    serialized = json.dumps(catalog.as_dict(), sort_keys=True)
+    assert '"artwork_bytes_included": false' in serialized
+    assert '"geometry_copied": false' in serialized
+    assert '"source_mutated": false' in serialized
+    assert "<svg" not in serialized
+    sku_records = catalog.as_dict()["sku_revisions"]
+    assert isinstance(sku_records, list)
+    assert all(
+        set(record["geometry_reference"])
+        == {"packaging_asset_id", "revision_id", "geometry_copied", "source_mutated"}
+        for record in sku_records
+    )
 
 
 def test_catalog_retains_deterministic_history_and_updates_current_pointer() -> None:

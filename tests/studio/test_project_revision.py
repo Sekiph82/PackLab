@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import errno
 
 import pytest
 
@@ -16,6 +17,134 @@ def test_revision_changes_only_on_authoritative_edit(tmp_path) -> None:
     assert updated.revision == 1
     assert manager.metadata is not None and manager.metadata.project_id == metadata.project_id
     manager.close()
+
+
+def test_disk_full_during_authority_publish_preserves_last_committed_project(
+    tmp_path, monkeypatch
+) -> None:
+    """An ENOSPC at the atomic publish boundary leaves the prior revision recoverable."""
+    import packlab_studio.project as project_module
+
+    root = tmp_path / "project"
+    manager = ProjectManager()
+    manager.new_project(root, "Project")
+    manager.commit_edit({"value": "committed"}, expected_revision=0)
+    raw_path = root / "raw" / "capture.packscan"
+    raw_path.write_bytes(b"immutable raw")
+    prior_authority = (root / "working" / "authority.json").read_bytes()
+    real_replace = project_module.os.replace
+
+    def fail_authority_publish(source, target):
+        if str(target).endswith("authority.json"):
+            raise OSError(errno.ENOSPC, "No space left on device")
+        return real_replace(source, target)
+
+    monkeypatch.setattr(project_module.os, "replace", fail_authority_publish)
+    with pytest.raises(ProjectError, match="previous revision is preserved") as error:
+        manager.commit_edit({"value": "uncommitted"}, expected_revision=1)
+
+    assert isinstance(error.value.__cause__, OSError)
+    assert error.value.__cause__.errno == errno.ENOSPC
+    assert manager.metadata is not None and manager.metadata.revision == 1
+    assert (root / "working" / "authority.json").read_bytes() == prior_authority
+    assert json.loads((root / "working" / "state.json").read_text(encoding="utf-8")) == {
+        "value": "committed"
+    }
+    assert raw_path.read_bytes() == b"immutable raw"
+    assert not list((root / "working").glob(".authority.json-*.tmp"))
+
+
+def test_low_space_preflight_is_injected_and_preserves_prior_revision(tmp_path) -> None:
+    root = tmp_path / "project"
+    manager = ProjectManager(free_space_reader=lambda _path: 0)
+    manager.new_project(root, "Project")
+    prior_authority = (root / "working" / "authority.json").read_bytes()
+    prior_state = (root / "working" / "state.json").read_bytes()
+    raw_path = root / "raw" / "capture.packscan"
+    raw_path.write_bytes(b"immutable raw")
+
+    with pytest.raises(ProjectError, match="insufficient disk space"):
+        manager.commit_edit({"value": "not committed"}, expected_revision=0)
+
+    assert manager.metadata is not None and manager.metadata.revision == 0
+    assert (root / "working" / "authority.json").read_bytes() == prior_authority
+    assert (root / "working" / "state.json").read_bytes() == prior_state
+    assert raw_path.read_bytes() == b"immutable raw"
+    assert not list((root / "working").glob(".authority.json-*.tmp"))
+
+
+@pytest.mark.parametrize(
+    "provider_behavior",
+    [
+        OSError("usage unavailable"),
+        RuntimeError("provider failed"),
+        True,
+        -1,
+        1.5,
+        None,
+    ],
+)
+def test_invalid_or_failing_space_provider_fails_closed_without_mutation(
+    tmp_path, provider_behavior
+) -> None:
+    def read_space(_path):
+        if isinstance(provider_behavior, BaseException):
+            raise provider_behavior
+        return provider_behavior
+
+    root = tmp_path / "project"
+    manager = ProjectManager(free_space_reader=read_space)
+    manager.new_project(root, "Project")
+    prior_authority = (root / "working" / "authority.json").read_bytes()
+    prior_state = (root / "working" / "state.json").read_bytes()
+    raw_path = root / "raw" / "capture.packscan"
+    raw_path.write_bytes(b"immutable raw")
+    expected = (
+        "cannot verify free disk space"
+        if isinstance(provider_behavior, BaseException)
+        else "invalid result"
+    )
+
+    with pytest.raises(ProjectError, match=expected):
+        manager.commit_edit({"value": "not committed"}, expected_revision=0)
+
+    assert manager.metadata is not None and manager.metadata.revision == 0
+    assert (root / "working" / "authority.json").read_bytes() == prior_authority
+    assert (root / "working" / "state.json").read_bytes() == prior_state
+    assert raw_path.read_bytes() == b"immutable raw"
+    assert not list((root / "working").glob(".authority.json-*.tmp"))
+
+
+def test_restart_repairs_mirrors_from_authority_after_interrupted_commit(tmp_path) -> None:
+    root = tmp_path / "project"
+
+    class InterruptedProjectManager(ProjectManager):
+        def _after_authority_publish(self, _metadata, _state) -> None:
+            raise OSError("simulated process interruption after durable authority publish")
+
+    interrupted = InterruptedProjectManager()
+    initial = interrupted.new_project(root, "Project")
+    raw_path = root / "raw" / "capture.packscan"
+    raw_path.write_bytes(b"immutable raw")
+    with pytest.raises(OSError, match="simulated process interruption"):
+        interrupted.commit_edit({"value": "durable"}, expected_revision=0)
+
+    # Simulate the crash window: authority is durable while compatibility mirrors are stale.
+    assert json.loads((root / "working" / "state.json").read_text(encoding="utf-8")) == {}
+    assert json.loads((root / "working" / "project.json").read_text(encoding="utf-8"))[
+        "revision"
+    ] == initial.revision
+
+    restarted = ProjectManager()
+    recovered = restarted.open_project(root)
+    assert recovered.revision == 1
+    assert json.loads((root / "working" / "state.json").read_text(encoding="utf-8")) == {
+        "value": "durable"
+    }
+    assert json.loads((root / "working" / "project.json").read_text(encoding="utf-8"))[
+        "revision"
+    ] == recovered.revision
+    assert raw_path.read_bytes() == b"immutable raw"
 
 
 def test_stale_disk_revision_and_expected_revision_are_rejected(tmp_path) -> None:

@@ -187,6 +187,36 @@ def test_low_sharpness_and_exposure_boundary_values_are_explainable() -> None:
     assert over_result["photos"][0]["pixel_exposure"]["status"] == "warning"
 
 
+def test_m17_uniform_white_hdpe_is_flagged_for_low_texture_and_clipping() -> None:
+    # A uniformly lit, low-texture white container is intentionally a hard
+    # visual input: the QA lane must ask for review instead of implying that
+    # the package is readily reconstructable.
+    report = _report(width=8, height=8)
+    white_surface = GrayImageSamples(8, 8, bytes([248] * 64), "test-decoder", "1", 8, 8)
+    result = build_pre_reconstruction_qa(report, {"images/000.jpg": white_surface}).as_dict()
+    photo = result["photos"][0]
+    assert photo["sharpness"]["status"] == "warning"
+    assert photo["sharpness"]["value"] == 0
+    assert photo["pixel_exposure"]["status"] == "warning"
+    assert result["authority"] == "non_authoritative_capture_qa"
+    assert result["overall"]["status"] == "review_required"
+
+
+def test_m17_glossy_pet_specular_clipping_is_reported_as_review_warning() -> None:
+    # Six saturated highlight pixels among one hundred exceed the existing
+    # 5% clipped-pixel threshold while the mean remains in its normal range.
+    luminance = bytes([255] * 6 + [110] * 94)
+    highlight = GrayImageSamples(10, 10, luminance, "test-decoder", "1", 10, 10)
+    result = build_pre_reconstruction_qa(
+        _report(width=10, height=10), {"images/000.jpg": highlight}
+    ).as_dict()
+    exposure = result["photos"][0]["pixel_exposure"]
+    assert exposure["value"]["overexposed_pixel_fraction_above_239"] == 0.06
+    assert exposure["status"] == "warning"
+    assert result["authority"] == "non_authoritative_capture_qa"
+    assert result["overall"]["status"] == "review_required"
+
+
 def test_missing_decoder_and_freehand_coverage_have_explicit_unavailable_disposition() -> None:
     report = _report()
     result = build_pre_reconstruction_qa(

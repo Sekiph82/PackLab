@@ -31,3 +31,24 @@ def test_resumable_restart_invalid_and_accept_discard(tmp_path) -> None:
     recovery.discard("job-restart")
     assert not restart.exists()
     assert recovery.inspect()[0].job_id == "job-invalid"
+
+
+def test_reconstruction_checkpoint_digest_mismatch_is_not_resumable(tmp_path) -> None:
+    layout = ProjectLayout.create(tmp_path / "project")
+    recovery = RecoveryManager(layout)
+    recovery.mark_start()
+    checkpoint = layout.path("derived", "reconstruction/sparse.bin")
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(b"validated sparse checkpoint")
+    recovery.checkpoint(
+        "reconstruction-1",
+        area="derived",
+        relative_path="reconstruction/sparse.bin",
+        resumable=True,
+    )
+    assert recovery.inspect()[0].status is RecoveryStatus.RESUMABLE
+
+    checkpoint.write_bytes(b"changed after checkpoint")
+    item = recovery.inspect()[0]
+    assert item.job_id == "reconstruction-1"
+    assert item.status is RecoveryStatus.INVALID

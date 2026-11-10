@@ -23,6 +23,7 @@ CAMERA_PRIOR_POLICY_VERSION = "packlab_camera_prior_policy_v1"
 
 class ReconstructionBackendId(StrEnum):
     COLMAP_OPENMVS = "colmap-openmvs"
+    NEURAL_EXPERIMENTAL = "neural-experimental"
 
 
 class ReconstructionCapability(StrEnum):
@@ -118,12 +119,16 @@ class CameraPrior:
         if self.height is not None and self.height <= 0:
             return False
         if self.intrinsics is not None:
-            if len(self.intrinsics) != 9 or not all(math.isfinite(value) for value in self.intrinsics):
+            if len(self.intrinsics) != 9 or not all(
+                math.isfinite(value) for value in self.intrinsics
+            ):
                 return False
             if self.intrinsics[0] <= 0 or self.intrinsics[4] <= 0 or self.intrinsics[8] != 1:
                 return False
         if self.pose is not None:
-            if len(self.pose) not in {7, 12, 16} or not all(math.isfinite(value) for value in self.pose):
+            if len(self.pose) not in {7, 12, 16} or not all(
+                math.isfinite(value) for value in self.pose
+            ):
                 return False
             if len(self.pose) == 16 and self.pose[15] != 1:
                 return False
@@ -140,11 +145,20 @@ class CameraPrior:
             return False
         if self.intrinsics_unit is not None and self.intrinsics_unit != "px":
             return False
-        if self.intrinsics_convention is not None and self.intrinsics_convention != PACKSCAN_INTRINSICS_CONVENTION:
+        if (
+            self.intrinsics_convention is not None
+            and self.intrinsics_convention != PACKSCAN_INTRINSICS_CONVENTION
+        ):
             return False
-        if self.pixel_coordinate_origin is not None and self.pixel_coordinate_origin != PACKSCAN_PIXEL_ORIGIN:
+        if (
+            self.pixel_coordinate_origin is not None
+            and self.pixel_coordinate_origin != PACKSCAN_PIXEL_ORIGIN
+        ):
             return False
-        if self.camera_convention is not None and self.camera_convention != PACKSCAN_CAMERA_CONVENTION:
+        if (
+            self.camera_convention is not None
+            and self.camera_convention != PACKSCAN_CAMERA_CONVENTION
+        ):
             return False
         if self.pose_convention is not None and self.pose_convention != PACKSCAN_POSE_CONVENTION:
             return False
@@ -210,9 +224,7 @@ class CameraPrior:
             "policy_version": self.policy_version,
             "distortion_model": self.distortion_model,
             "distortion_coefficients": (
-                None
-                if self.distortion_coefficients is None
-                else list(self.distortion_coefficients)
+                None if self.distortion_coefficients is None else list(self.distortion_coefficients)
             ),
         }
 
@@ -227,7 +239,11 @@ class ReconstructionInputSet:
 
     def __post_init__(self) -> None:
         _relative_asset_id(self.raw_capture_asset_id)
-        if not self.project_id or not self.source_revision or not re.fullmatch(r"[0-9a-f]{64}", self.source_digest):
+        if (
+            not self.project_id
+            or not self.source_revision
+            or not re.fullmatch(r"[0-9a-f]{64}", self.source_digest)
+        ):
             raise ValueError("reconstruction input identity is invalid")
         if not self.image_asset_ids:
             raise ValueError("at least one source image is required")
@@ -270,7 +286,9 @@ def assess_camera_priors(
             resolved.append(CameraPrior.missing(image))
             warnings.append(f"missing camera prior: {image}")
         elif prior.source_revision is not None and prior.source_revision != inputs.source_revision:
-            resolved.append(prior.rejected("camera prior working-set revision does not match inputs"))
+            resolved.append(
+                prior.rejected("camera prior working-set revision does not match inputs")
+            )
             warnings.append(f"camera prior revision mismatch rejected: {image}")
         elif prior.source_digest is not None and prior.source_digest != inputs.source_digest:
             resolved.append(prior.rejected("camera prior source digest does not match inputs"))
@@ -306,7 +324,11 @@ class ReconstructionJobSpec:
     )
 
     def __post_init__(self) -> None:
-        if not self.job_id or self.project_revision < 0 or self.project_id != self.inputs.project_id:
+        if (
+            not self.job_id
+            or self.project_revision < 0
+            or self.project_id != self.inputs.project_id
+        ):
             raise ValueError("reconstruction job identity is invalid")
         object.__setattr__(self, "configuration", dict(self.configuration))
         object.__setattr__(self, "camera_priors", tuple(self.camera_priors))
