@@ -9,8 +9,7 @@ import zlib
 from pathlib import Path
 
 import pytest
-
-from packlab_core.benchmark_metrics import compare_synthetic_packaging_sample, synthetic_packaging_metric_bands
+from tools.datasets.dataset_root import resolve_dataset_root
 from tools.datasets.extract_ycb_subset import (
     _copy_or_verify,
     _resolve_dataset_root,
@@ -18,12 +17,15 @@ from tools.datasets.extract_ycb_subset import (
     _verified_archive,
     _write_manifest,
 )
-from tools.datasets.dataset_root import resolve_dataset_root
 from tools.datasets.validate_packaging_dataset import validate_manifest
 from tools.datasets.validate_ycb_manifest import _regular_file as _regular_ycb_file
 from tools.datasets.validate_ycb_manifest import _verify_archive_members
 from tools.datasets.ycb_source_identity import YCB_ARCHIVE_IDENTITIES
 
+from packlab_core.benchmark_metrics import (
+    compare_synthetic_packaging_sample,
+    synthetic_packaging_metric_bands,
+)
 
 FAMILIES = ("bottle", "jerrycan", "jar", "closure", "trigger_spray", "pump", "tube", "sachet")
 MATERIALS = ("hdpe_matte", "pet_gloss", "pet_clear", "pp_translucent")
@@ -310,3 +312,66 @@ def test_ycb_source_archive_identity_is_pinned_to_reviewed_bytes() -> None:
     assert YCB_ARCHIVE_IDENTITIES["021_bleach_cleanser_google_16k.tgz"]["sha256"] == (
         "2d71162158f5b51089a08ea12180d47a6480f4ba986af0c887a93ad5fc867588"
     )
+
+
+def _all_in_band(manifest: Path) -> dict[str, dict[str, float]]:
+    samples = json.loads(manifest.read_text(encoding="utf-8"))["samples"]
+    return {s["id"]: {k: b["lower"] for k, b in s["expected_software_metric_bands"].items()} for s in samples}
+
+
+def test_regression_harness_passes_engine_results_inside_bands(dataset_manifest: Path) -> None:
+    from tools.datasets.run_benchmark_regression import run_regression
+
+    report = run_regression(dataset_manifest, _all_in_band(dataset_manifest))
+    assert report["outcome"] == "PASS"
+    assert report["counts"] == {"PASS": 96 * 8, "FAIL": 0, "NOT_EVALUATED": 0}
+
+
+def test_regression_harness_fails_out_of_band_and_never_passes_unevaluated(
+    dataset_manifest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tools.datasets.run_benchmark_regression as harness
+    from tools.datasets.run_benchmark_regression import run_regression
+
+    # Full manifest validation is exercised by the in-band test; skip repeats here.
+    monkeypatch.setattr(harness, "validate_manifest", lambda _path: None)
+
+    observed = _all_in_band(dataset_manifest)
+    first = next(iter(observed))
+    observed[first]["reconstruction_extent_x_mm"] = 100.7
+    report = run_regression(dataset_manifest, observed)
+    assert report["outcome"] == "FAIL" and report["counts"]["FAIL"] == 1
+
+    partial = {first: {"segmentation_iou": 0.95}}
+    report = run_regression(dataset_manifest, partial)
+    assert report["outcome"] == "PASS"
+    assert report["counts"] == {"PASS": 1, "FAIL": 0, "NOT_EVALUATED": 96 * 8 - 1}
+
+    assert run_regression(dataset_manifest, {})["outcome"] == "FAIL"
+
+
+def test_regression_harness_rejects_unknown_samples_and_unbanded_metrics(
+    dataset_manifest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tools.datasets.run_benchmark_regression as harness
+    from tools.datasets.run_benchmark_regression import run_regression
+
+    monkeypatch.setattr(harness, "validate_manifest", lambda _path: None)
+
+    with pytest.raises(ValueError, match="unknown samples"):
+        run_regression(dataset_manifest, {"real_kenya_bottle": {"segmentation_iou": 1.0}})
+    first = next(iter(_all_in_band(dataset_manifest)))
+    with pytest.raises(ValueError, match="no band"):
+        run_regression(dataset_manifest, {first: {"volume_ml": 1000.0}})
+    with pytest.raises(ValueError, match="finite"):
+        run_regression(dataset_manifest, {first: {"segmentation_iou": float("nan")}})
+
+
+def test_builtin_segmentation_engine_scores_ground_truth_masks(dataset_manifest: Path) -> None:
+    from tools.datasets.run_benchmark_regression import builtin_segmentation, read_mask_png
+
+    width, height, values = read_mask_png(dataset_manifest.parent / "synthetic/mask/syn_bottle_hdpe_matte_v01.png")
+    assert (width, height) == (640, 480) and sum(values) == 440 * 480
+    sample = json.loads(dataset_manifest.read_text(encoding="utf-8"))["samples"][0]
+    metrics = builtin_segmentation(sample, dataset_manifest.parent)
+    assert metrics == {"segmentation_iou": 1.0, "segmentation_dice": 1.0}

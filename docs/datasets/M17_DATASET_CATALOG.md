@@ -36,3 +36,10 @@ The deterministic Blender generator produces parameterized bottle, jerrycan, jar
 
 The PackLab-created dataset notice is restricted to owner-controlled internal PackLab development/CI and the owner's design office/future factory. It does not grant external reuse, sublicensing, redistribution, sale or marketing. Upstream licenses and attribution govern included third-party data. This scope does not change root repository/dependency licenses and has not received formal legal review.
 
+
+## Regeneration record and regression harness (Claude, 2026-11-10)
+
+- Regenerated with Blender 5.2 (`generate_packaging_benchmark.py` v2.0.0, seed 3692026): 96 samples, 8 families x 4 appearances x 3 views, ~43 MB, manifest SHA-256 `3a37b55d8b93affdba73d23a39ba299c12053f433000a5911ac7f6e71ea3601b`; `validate_packaging_dataset.py` passes.
+- Location caveat: when tools run inside a packaged (MSIX) desktop app, Windows may virtualize `%LOCALAPPDATA%` writes into that app's private `...\Packages\<app>\LocalCache\Local\` folder. The dataset is then visible only to that app context, which is why an earlier copy generated from another app was not found. Regenerate from the generator rather than copying between contexts; the generator is deterministic and the manifest hash pins the result.
+- `tools/datasets/run_benchmark_regression.py` compares engine results with each sample's synthetic bands. Inputs: `--observed results.json` (sample id -> metric -> value from an engine run) and/or `--builtin-segmentation` (PackLab `post_process_mask` on each ground-truth mask, scored by `mask_quality_metrics`). Metrics without an engine result are `NOT_EVALUATED`, never PASS; zero evaluated metrics is FAIL. Exit code 0 only on PASS.
+- Real Kenya packaging data does not exist yet. These ranges are `NONPHYSICAL_SOFTWARE_TEST_ONLY` and are not physical, factory or Kenya acceptance evidence.
