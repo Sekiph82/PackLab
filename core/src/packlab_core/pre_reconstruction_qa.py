@@ -8,7 +8,7 @@ import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, cast
 
 from .packscan.container import PackScanReport
 
@@ -19,6 +19,17 @@ EXPOSURE_ALGORITHM: Final = "mean_luma_and_clipped_fraction_8bit_grayscale_v1"
 EXPOSURE_MIN_MEAN: Final = 40.0
 EXPOSURE_MAX_MEAN: Final = 215.0
 EXPOSURE_CLIPPED_LIMIT: Final = 0.05
+# Object-surface texture: mean luma over 4x4 sample blocks suppresses per-pixel sensor
+# noise; a block counts as textured when its block-scale Laplacian magnitude reaches the
+# DN threshold. Only blocks whose 4-neighbourhood lies fully inside the object mask are
+# assessed, so silhouette edges and the backdrop do not count as surface texture.
+# Calibrated on synthetic M17 renders only (PL-0375_OBJECT_TEXTURE_CALIBRATION_V01.md).
+OBJECT_TEXTURE_ALGORITHM: Final = "masked_block4_mean_laplacian_textured_fraction_v1"
+OBJECT_TEXTURE_BLOCK: Final = 4
+OBJECT_TEXTURE_LAPLACIAN_MIN_DN: Final = 32.0
+OBJECT_TEXTURE_MIN_FRACTION: Final = 0.12
+OBJECT_TEXTURE_MIN_CELLS: Final = 64
+OBJECT_TEXTURE_CALIBRATION: Final = "synthetic-m17-golden-subset-renders-v1-not-physical"
 MAX_SAMPLES_PER_IMAGE: Final = 1_000_000
 MAX_QA_IMAGES: Final = 512
 MAX_TOTAL_QA_SAMPLES: Final = 64_000_000
@@ -84,6 +95,31 @@ class ImageDecodeFailure:
 DecodedImage = GrayImageSamples | ImageDecodeFailure
 
 
+@dataclass(frozen=True, slots=True)
+class ObjectMaskSamples:
+    """Row-major object mask aligned to decoded samples; any non-zero byte is inside."""
+
+    width: int
+    height: int
+    inside: bytes
+    mask_source_id: str
+    mask_source_version: str
+
+    def __post_init__(self) -> None:
+        for name in ("width", "height"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                raise PreReconstructionQAError(f"mask {name} must be a positive integer")
+        if self.width * self.height > MAX_SAMPLES_PER_IMAGE:
+            raise PreReconstructionQAError("mask sample count exceeds the profile limit")
+        if not isinstance(self.inside, bytes) or len(self.inside) != self.width * self.height:
+            raise PreReconstructionQAError("mask bytes must match mask dimensions")
+        for name in ("mask_source_id", "mask_source_version"):
+            value = getattr(self, name)
+            if not isinstance(value, str) or not value or len(value) > 64:
+                raise PreReconstructionQAError(f"{name} must be bounded non-empty text")
+
+
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -130,6 +166,70 @@ def _measure_pixels(samples: GrayImageSamples) -> dict[str, object]:
         "sharpness_laplacian_variance": sharpness,
         "decoder": {"id": samples.decoder_id, "version": samples.decoder_version},
     }
+
+
+def _object_texture(
+    samples: GrayImageSamples, object_masks: Mapping[str, object] | None, path: str
+) -> dict[str, object]:
+    if object_masks is None:
+        return {"status": "not_requested", "reason_code": "object_masks_not_supplied"}
+    mask = object_masks.get(path)
+    base: dict[str, object] = {
+        "algorithm": OBJECT_TEXTURE_ALGORITHM,
+        "block_size_samples": OBJECT_TEXTURE_BLOCK,
+        "laplacian_minimum_dn": OBJECT_TEXTURE_LAPLACIAN_MIN_DN,
+        "minimum_textured_fraction": OBJECT_TEXTURE_MIN_FRACTION,
+        "minimum_assessed_cells": OBJECT_TEXTURE_MIN_CELLS,
+        "calibration": OBJECT_TEXTURE_CALIBRATION,
+    }
+    if mask is None:
+        return {**base, "status": "unavailable", "reason_code": "object_mask_missing"}
+    if not isinstance(mask, ObjectMaskSamples):
+        return {**base, "status": "unavailable", "reason_code": "object_mask_invalid"}
+    if mask.width != samples.width or mask.height != samples.height:
+        return {**base, "status": "unavailable", "reason_code": "object_mask_dimension_mismatch"}
+    block = OBJECT_TEXTURE_BLOCK
+    width = samples.width
+    cells_x, cells_y = width // block, samples.height // block
+    means: list[float] = []
+    inside: list[bool] = []
+    pixels, flags = samples.pixels, mask.inside
+    for cell_y in range(cells_y):
+        for cell_x in range(cells_x):
+            total = 0
+            full = True
+            for row in range(cell_y * block, cell_y * block + block):
+                start = row * width + cell_x * block
+                total += sum(pixels[start : start + block])
+                full = full and all(flags[start : start + block])
+            means.append(total / (block * block))
+            inside.append(full)
+    assessed = textured = 0
+    for cell_y in range(1, cells_y - 1):
+        for cell_x in range(1, cells_x - 1):
+            index = cell_y * cells_x + cell_x
+            neighbours = (index - 1, index + 1, index - cells_x, index + cells_x)
+            if not inside[index] or not all(inside[item] for item in neighbours):
+                continue
+            response = 4 * means[index] - sum(means[item] for item in neighbours)
+            assessed += 1
+            textured += abs(response) >= OBJECT_TEXTURE_LAPLACIAN_MIN_DN
+    evidence = {
+        **base,
+        "mask_source": {"id": mask.mask_source_id, "version": mask.mask_source_version},
+        "assessed_cell_count": assessed,
+    }
+    if assessed < OBJECT_TEXTURE_MIN_CELLS:
+        return {**evidence, "status": "unavailable", "reason_code": "object_area_too_small"}
+    fraction = textured / assessed
+    if fraction < OBJECT_TEXTURE_MIN_FRACTION:
+        return {
+            **evidence,
+            "status": "warning",
+            "reason_code": "low_object_surface_texture",
+            "textured_cell_fraction": fraction,
+        }
+    return {**evidence, "status": "pass", "textured_cell_fraction": fraction}
 
 
 def _metadata_component(
@@ -416,13 +516,21 @@ class PreReconstructionQAReport:
 
 
 def build_pre_reconstruction_qa(
-    report: PackScanReport, decoded_images: Mapping[str, DecodedImage]
+    report: PackScanReport,
+    decoded_images: Mapping[str, DecodedImage],
+    object_masks: Mapping[str, ObjectMaskSamples] | None = None,
 ) -> PreReconstructionQAReport:
-    """Build source-digest-bound QA evidence from a validated PackScan report."""
+    """Build source-digest-bound QA evidence from a validated PackScan report.
+
+    ``object_masks`` (path-keyed, aligned to the decoded samples) enables the
+    object-surface texture check; without it that component is ``not_requested``.
+    """
     if not isinstance(report, PackScanReport):
         raise PreReconstructionQAError("a validated PackScanReport is required")
     if not isinstance(decoded_images, Mapping):
         raise PreReconstructionQAError("decoded_images must be a path-keyed mapping")
+    if object_masks is not None and not isinstance(object_masks, Mapping):
+        raise PreReconstructionQAError("object_masks must be a path-keyed mapping")
     image_payloads = report.manifest.get("payloads")
     if not isinstance(image_payloads, list):
         raise PreReconstructionQAError("validated manifest payload declarations are required")
@@ -486,6 +594,7 @@ def build_pre_reconstruction_qa(
     photo_reports: list[dict[str, object]] = []
     sharpness_statuses: list[str] = []
     exposure_statuses: list[str] = []
+    texture_statuses: list[str] = []
     for record in records:
         path = record["image_path"]
         if not isinstance(path, str):
@@ -530,6 +639,8 @@ def build_pre_reconstruction_qa(
                 )
                 sharpness_statuses.append(sharpness_state)
                 exposure_statuses.append(exposure_state)
+                texture = _object_texture(decoded, object_masks, path)
+                texture_statuses.append(cast(str, texture["status"]))
                 photo_reports.append(
                     {
                         **record,
@@ -549,6 +660,7 @@ def build_pre_reconstruction_qa(
                             "max_clipped_pixel_fraction": EXPOSURE_CLIPPED_LIMIT,
                             "value": measurements,
                         },
+                        "object_surface_texture": texture,
                         "decode_status": "decoded",
                     }
                 )
@@ -563,11 +675,17 @@ def build_pre_reconstruction_qa(
                 **record,
                 "sharpness": {"status": "unavailable", "reason_code": reason},
                 "pixel_exposure": {"status": "unavailable", "reason_code": reason},
+                "object_surface_texture": (
+                    {"status": "not_requested", "reason_code": "object_masks_not_supplied"}
+                    if object_masks is None
+                    else {"status": "unavailable", "reason_code": reason}
+                ),
                 "decode_status": "unavailable",
             }
         )
         sharpness_statuses.append("unavailable")
         exposure_statuses.append("unavailable")
+        texture_statuses.append("not_requested" if object_masks is None else "unavailable")
     metadata_measurements = [item["exposure"] for item in records]
     metadata_recorded = sum(
         isinstance(value, dict) and value.get("status") in {"available", "estimated"}
@@ -606,6 +724,26 @@ def build_pre_reconstruction_qa(
                 "metadata_exposure_recorded_count": metadata_recorded,
             },
         ),
+        "object_surface_texture": _component(
+            "not_requested"
+            if object_masks is None
+            else "warning"
+            if "warning" in texture_statuses
+            else "unavailable"
+            if not texture_statuses or "unavailable" in texture_statuses
+            else "pass",
+            {
+                "algorithm": OBJECT_TEXTURE_ALGORITHM,
+                "minimum_textured_fraction": OBJECT_TEXTURE_MIN_FRACTION,
+                "calibration": OBJECT_TEXTURE_CALIBRATION,
+                "low_texture_image_count": texture_statuses.count("warning"),
+                "assessed_image_count": sum(
+                    status in {"pass", "warning"} for status in texture_statuses
+                ),
+                "unavailable_image_count": texture_statuses.count("unavailable"),
+                "claim_limit": "texture_evidence_only_not_reconstruction_quality",
+            },
+        ),
         "coverage": _coverage_component(report, records),
         "metadata_consistency": _component(metadata_status, metadata_evidence),
     }
@@ -640,6 +778,8 @@ def build_pre_reconstruction_qa(
             "sharpness_minimum_laplacian_variance": SHARPNESS_MIN_VARIANCE,
             "exposure_mean_luma_acceptable_range": [EXPOSURE_MIN_MEAN, EXPOSURE_MAX_MEAN],
             "exposure_max_clipped_fraction": EXPOSURE_CLIPPED_LIMIT,
+            "object_texture_laplacian_minimum_dn": OBJECT_TEXTURE_LAPLACIAN_MIN_DN,
+            "object_texture_minimum_textured_fraction": OBJECT_TEXTURE_MIN_FRACTION,
         },
         "components": components,
         "photos": photo_reports,

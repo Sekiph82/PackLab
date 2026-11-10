@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QSize, qVersion
 from PySide6.QtGui import QImage, QImageReader
@@ -15,6 +16,7 @@ from packlab_core.pre_reconstruction_qa import (
     MAX_TOTAL_QA_SAMPLES,
     GrayImageSamples,
     ImageDecodeFailure,
+    ObjectMaskSamples,
     PreReconstructionQAReport,
     build_pre_reconstruction_qa,
 )
@@ -24,7 +26,9 @@ _DECODER_ID = "qt-qimagereader-grayscale8"
 _SAMPLE_PROFILE = "nearest-scale-fit-1024x1024-v1"
 
 
-def build_packscan_pre_reconstruction_qa(report: PackScanReport) -> PreReconstructionQAReport:
+def build_packscan_pre_reconstruction_qa(
+    report: PackScanReport, object_masks: Mapping[str, ObjectMaskSamples] | None = None
+) -> PreReconstructionQAReport:
     """Decode verified PackScan image bytes and invoke the core QA profile.
 
     Decoding is read-only. Each source payload is hash-checked against its
@@ -116,4 +120,4 @@ def build_packscan_pre_reconstruction_qa(report: PackScanReport) -> PreReconstru
             source_height=source_height,
         )
         total_samples += actual_samples
-    return build_pre_reconstruction_qa(report, decoded)
+    return build_pre_reconstruction_qa(report, decoded, object_masks)

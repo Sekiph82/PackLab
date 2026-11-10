@@ -104,6 +104,81 @@ def _put_camera_centers_in_all_azimuth_sectors(geometry: ObjectCaptureGeometry):
     return replace(geometry, camera_evidence=tuple(cameras))
 
 
+def _orbit_with_designed_gap(geometry: ObjectCaptureGeometry, observed_sectors: tuple[int, ...]):
+    """SYNTHETIC orbit: camera i sits at the centre of azimuth sector observed_sectors[i % n].
+
+    Eight 45-degree azimuth sectors, one elevation band, unit radius at the centroid
+    height in the normalized relative frame. No physical camera pose is implied.
+    """
+    center = tuple(
+        sum(point[axis] for point in geometry.filtered_points) / len(geometry.filtered_points)
+        for axis in range(3)
+    )
+    cameras = []
+    for index, camera in enumerate(geometry.camera_evidence):
+        sector = observed_sectors[index % len(observed_sectors)]
+        angle = math.radians((sector + 0.5) * 45.0)
+        position = (center[0] + math.cos(angle), center[1] + math.sin(angle), center[2])
+        matrix = (1, 0, 0, -position[0], 0, 1, 0, -position[1], 0, 0, 1, -position[2], 0, 0, 0, 1)
+        cameras.append(replace(camera, normalized_world_to_camera=matrix))
+    return replace(geometry, camera_evidence=tuple(cameras))
+
+
+_KNOWN_GAP_POLICY = RecaptureSectorPolicy(azimuth_sector_count=8, elevation_band_count=1)
+
+
+def _known_gap_report(observed_sectors: tuple[int, ...]) -> dict:
+    geometry, registration, _coverage, _source = _inputs(registered=5)
+    orbit = _orbit_with_designed_gap(geometry, observed_sectors)
+    coverage = build_object_geometry_coverage_report(
+        orbit,
+        policy=ObjectGeometryCoveragePolicy(
+            grid_resolution=2,
+            minimum_selected_point_ratio=0.2,
+            minimum_mean_support_ratio=0.7,
+            minimum_projected_coverage_ratio=0.25,
+        ),
+    )
+    return suggest_recapture_sectors(
+        orbit, registration, coverage, policy=_KNOWN_GAP_POLICY
+    ).as_dict()
+
+
+def test_pl0378_single_known_missing_sector_is_the_only_suggestion() -> None:
+    observed = (0, 1, 2, 3, 4, 6, 7)  # sector 5 (225-270 degrees) deliberately never captured
+    first = _known_gap_report(observed)
+    assert first == _known_gap_report(observed)
+    assert first["decision"] == "targeted_recapture"
+    assert first["occupied_sector_count"] == 7
+    assert [item["sector_id"] for item in first["suggestions"]] == ["az05-el00"]
+    suggestion = first["suggestions"][0]
+    assert suggestion["azimuth_degrees"] == {"start_inclusive": 225.0, "end_exclusive": 270.0}
+    assert suggestion["nearest_observed_view_gap_degrees"] == 45.0
+    assert suggestion["physical_orientation_claimed"] is False
+    assert first["authority"] == "diagnostic_only_no_capture_mutation_or_acceptance"
+
+
+def test_pl0378_contiguous_gap_ranks_its_centre_first_and_never_repeats_captured_sectors() -> None:
+    observed = (0, 1, 2, 6, 7)  # sectors 3, 4, 5 deliberately missing
+    payload = _known_gap_report(observed)
+    suggested = [item["sector_id"] for item in payload["suggestions"]]
+    assert suggested == ["az04-el00", "az03-el00", "az05-el00"]
+    assert [item["nearest_observed_view_gap_degrees"] for item in payload["suggestions"]] == [
+        90.0,
+        45.0,
+        45.0,
+    ]
+    assert not {f"az{sector:02d}-el00" for sector in observed} & set(suggested)
+    assert payload["occupied_sector_count"] == len(observed)
+
+
+def test_pl0378_full_orbit_with_qa_gap_falls_back_instead_of_inventing_a_sector() -> None:
+    payload = _known_gap_report(tuple(range(8)))
+    assert payload["suggestions"] == []
+    assert payload["decision"] == "full_rescan"
+    assert payload["fallback"]["reason_code"] == "qa_gaps_remain_with_all_view_sectors_observed"
+
+
 def test_partial_coverage_suggests_bounded_deterministic_relative_sectors() -> None:
     geometry, registration, coverage, source_bytes = _inputs(registered=5)
     original_geometry = geometry.as_dict()
