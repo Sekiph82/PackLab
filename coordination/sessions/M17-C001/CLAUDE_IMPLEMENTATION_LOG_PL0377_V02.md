@@ -9,7 +9,7 @@ and the iOS test could not run on Windows.
   - **Criterion 1:** the clear-PET render deterministically triggers the object-surface low-texture
     warning, gives `review_required`, and makes the PL-0414 rescan decision route to
     surface-treatment review and never `proceed`.
-  - **Criterion 2:** the generated mesh is closed (control: 0 boundary edges). A seeded, labelled
+  - **Criterion 2:** the generated mesh is closed (control: 0 boundary edges). A fixed-window, labelled
     simulated transparency dropout removes a camera-facing window (98 and 22 boundary edges). The
     PL-0424 anomaly detector then reports `REVIEW_REQUIRED` with `mesh_boundary_edges_present`.
     Physical status stays `DEFERRED_OWNER_VALIDATION`, mould use is not authorized, and scale stays

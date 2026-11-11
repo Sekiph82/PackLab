@@ -120,6 +120,11 @@ def test_incomplete_clear_pet_reconstruction_is_flagged_not_complete(sample_id: 
     )
     # Control: the generated mesh is closed, so any boundary edge below comes from dropout.
     assert dict(intact_statistics.topology_indicators)["boundary_edge_count"] == 0
+    intact_codes = {
+        item.code
+        for item in detect_reconstruction_anomalies(intact_statistics, _confidence()).findings
+    }
+    assert "mesh_boundary_edges_present" not in intact_codes
     holed = _simulated_transparency_dropout(intact)
     statistics = compute_geometry_statistics(
         holed,
