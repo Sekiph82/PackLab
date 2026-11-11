@@ -22,6 +22,9 @@ public struct ARPreviewPackage: Sendable, Equatable {
     public static let maximumBytes = 8 * 1024 * 1024
     public static let maximumVertices = 65_535
     public static let maximumTriangles = 131_072
+    static let allowedScaleBases: Set<String> = [
+        "MM_UNVERIFIED_TO_METRES_DISPLAY_ONLY", "RELATIVE_NORMALIZED_TO_0_1_M_DISPLAY_ONLY",
+    ]
 
     public let designModelRevisionID: String
     public let displayScaleBasis: String
@@ -46,12 +49,14 @@ public struct ARPreviewPackage: Sendable, Equatable {
             authority["class"] as? String == "AR_VISUAL_REFERENCE_ONLY",
             authority["mold_use_authorized"] as? Bool == false,
             authority["scan_master_replaced"] as? Bool == false,
-            authority["on_device_scale_verified"] as? Bool == false
+            authority["on_device_scale_verified"] as? Bool == false,
+            authority["physical_accuracy_validation_status"] as? String == "DEFERRED_OWNER_VALIDATION"
         else { throw ARPreviewPackageError.authorityInvalid }
         guard
             let source = root["source"] as? [String: Any],
             let revision = source["design_model_revision_id"] as? String, !revision.isEmpty,
-            let basis = root["display_scale_basis"] as? String, !basis.isEmpty,
+            let basis = root["display_scale_basis"] as? String, allowedScaleBases.contains(basis),
+            root["frame"] as? String == "REALITYKIT_Y_UP_METRES_ORIGIN_BASE_CENTRE",
             let rawPositions = root["positions"] as? [Double],
             let rawIndices = root["indices"] as? [Int]
         else { throw ARPreviewPackageError.malformed }
@@ -132,6 +137,8 @@ struct ARPreviewEntryView: View {
                 let url = try result.get()
                 let scoped = url.startAccessingSecurityScopedResource()
                 defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
+                guard size <= ARPreviewPackage.maximumBytes else { throw ARPreviewPackageError.tooLarge }
                 package = try ARPreviewPackage.parse(Data(contentsOf: url))
             } catch {
                 package = nil
@@ -146,17 +153,27 @@ struct ARPreviewRealityView: UIViewRepresentable {
     let package: ARPreviewPackage
 
     func makeUIView(context: Context) -> ARView {
-        let view = ARView(frame: .zero)
-        let configuration = ARWorldTrackingConfiguration()
-        configuration.planeDetection = [.horizontal]
-        view.session.run(configuration)
+        // Reuse the app's single shared ARSession instead of running a second one, which
+        // would compete for the camera and inject resets into a scan (review P2-3). The
+        // shared owner keeps its delegate, configuration and lifecycle.
+        let view = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
+        let owner = SharedARSessionOwner.shared
+        view.session = owner.session
+        owner.start()
         var descriptor = MeshDescriptor(name: "packlab-ar-preview")
         descriptor.positions = MeshBuffers.Positions(package.positions)
         descriptor.primitives = .triangles(package.indices)
         if let mesh = try? MeshResource.generate(from: [descriptor]) {
             let material = SimpleMaterial(color: .systemOrange.withAlphaComponent(0.8), isMetallic: false)
             let entity = ModelEntity(mesh: mesh, materials: [material])
-            let anchor = AnchorEntity(.plane(.horizontal, classification: .any, minimumBounds: [0.1, 0.1]))
+            // No plane detection on the shared session: place the model 0.6 m ahead of and
+            // 0.25 m below the current camera, in world space (visual reference only).
+            var position = SIMD3<Float>(0, -0.25, -0.6)
+            if let camera = owner.session.currentFrame?.camera.transform {
+                let ahead = camera * SIMD4<Float>(0, -0.25, -0.6, 1)
+                position = SIMD3<Float>(ahead.x, ahead.y, ahead.z)
+            }
+            let anchor = AnchorEntity(world: position)
             anchor.addChild(entity)
             view.scene.addAnchor(anchor)
         }

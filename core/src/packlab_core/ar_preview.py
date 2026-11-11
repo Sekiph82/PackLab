@@ -7,7 +7,8 @@ digest-bound JSON document that the PackLab Capture app can render with RealityK
 the source authority so the phone can show it, and it never carries Scan Master,
 measurement or manufacturing authority. AR placement on a real surface is a visual
 reference: on-device scale, tracking accuracy and physical fit are not validated
-(the iPhone target gate of PL-0429 applies).
+(pending physical iPhone 16 evidence). Traceability follows the PL-0233 authority model:
+the package names the exact Design Model, BREP, preview and parent-authority revisions.
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ AR_PREVIEW_CONTRACT: Final = "packlab.ar-preview-mesh.v1"
 MAX_AR_VERTICES: Final = 65_535
 MAX_AR_TRIANGLES: Final = 131_072
 _UNIT_TO_METRES: Final = {"mm_unverified": 0.001}
+_RELATIVE_UNITS: Final = frozenset({"reconstruction_units"})
+MAX_AR_EXTENT_M: Final = 10.0  # matches the phone-side coordinate bound
 
 
 class ArPreviewError(ValueError):
@@ -39,8 +42,18 @@ def build_ar_preview_package(preview: CadPreviewMeshRevision) -> bytes:
     """Return canonical JSON bytes for the phone; raises if bounds or authority are unsafe."""
     if not isinstance(preview, CadPreviewMeshRevision):
         raise ArPreviewError("cad_preview_required")
-    if preview.mold_use_authorized is not False:
+    if (
+        preview.contract != "packlab.cad-brep-preview.v1"
+        or preview.authority_class != "PREVIEW_PROXY"
+        or preview.mold_use_authorized is not False
+        or preview.physical_accuracy_validation_status != "DEFERRED_OWNER_VALIDATION"
+    ):
         raise ArPreviewError("preview_authority_invalid")
+    if (
+        preview.coordinate_unit not in _UNIT_TO_METRES
+        and preview.coordinate_unit not in _RELATIVE_UNITS
+    ):
+        raise ArPreviewError("preview_coordinate_unit_unsupported")
     mesh = preview.mesh
     if (
         not 3 <= len(mesh.vertices) <= MAX_AR_VERTICES
@@ -62,6 +75,8 @@ def build_ar_preview_package(preview: CadPreviewMeshRevision) -> bytes:
     # Centre on the footprint and rest on the base (z = 0), then convert source z-up to the
     # RealityKit y-up frame: (x, y, z) -> (x, z, -y).
     centre = ((low[0] + high[0]) / 2.0, (low[1] + high[1]) / 2.0, low[2])
+    if max(high[axis] - low[axis] for axis in range(3)) * scale > MAX_AR_EXTENT_M:
+        raise ArPreviewError("preview_extent_exceeds_display_bound")
     positions: list[float] = []
     for x, y, z in mesh.vertices:
         local = ((x - centre[0]) * scale, (y - centre[1]) * scale, (z - centre[2]) * scale)
@@ -82,6 +97,7 @@ def build_ar_preview_package(preview: CadPreviewMeshRevision) -> bytes:
             "design_model_revision_id": preview.source_design_model_revision_id,
             "brep_revision_id": preview.source_brep_revision_id,
             "parent_kind": preview.parent_kind,
+            "parent_authority_revision_id": preview.parent_authority_revision_id,
             "scale_state": preview.scale_state,
             "coordinate_unit": preview.coordinate_unit,
         },

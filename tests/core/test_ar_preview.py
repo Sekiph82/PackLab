@@ -84,3 +84,81 @@ def test_swift_golden_literal_is_the_canonical_form_this_module_writes() -> None
     claimed = document.pop("content_sha256")
     assert hashlib.sha256(_canonical(document)).hexdigest() == claimed
     assert _canonical({**document, "content_sha256": claimed}).decode("ascii") == literal.group(1)
+
+
+def _signed_volume(document: dict) -> float:
+    p = document["positions"]
+    points = [tuple(p[i : i + 3]) for i in range(0, len(p), 3)]
+    total = 0.0
+    idx = document["indices"]
+    for i in range(0, len(idx), 3):
+        a, b, c = (points[idx[i]], points[idx[i + 1]], points[idx[i + 2]])
+        total += (
+            a[0] * (b[1] * c[2] - b[2] * c[1])
+            - a[1] * (b[0] * c[2] - b[2] * c[0])
+            + a[2] * (b[0] * c[1] - b[1] * c[0])
+        )
+    return total / 6.0
+
+
+def test_frame_conversion_is_a_rotation_and_keeps_outward_winding() -> None:
+    # Review P2-1: a mirrored axis map or reversed triangle winding flips the sign and
+    # would render the one-sided material inside-out on the phone.
+    preview = _preview()
+    source_volume = _signed_volume(
+        {
+            "positions": [value * 0.001 for vertex in preview.mesh.vertices for value in vertex],
+            "indices": [index for triangle in preview.mesh.triangles for index in triangle],
+        }
+    )
+    document = json.loads(build_ar_preview_package(preview))
+    volume = _signed_volume(document)
+    assert source_volume > 0
+    assert volume == pytest.approx(source_volume, rel=1e-3)
+
+
+def _forged(preview, **changes):
+    import copy
+
+    forged = copy.copy(preview)
+    for name, value in changes.items():
+        object.__setattr__(forged, name, value)  # test-only forgery past __post_init__
+    return forged
+
+
+@pytest.mark.parametrize(
+    ("changes", "code"),
+    [
+        ({"mold_use_authorized": True}, "preview_authority_invalid"),
+        ({"physical_accuracy_validation_status": "VALIDATED"}, "preview_authority_invalid"),
+        ({"authority_class": "SCAN_MASTER"}, "preview_authority_invalid"),
+        ({"coordinate_unit": "mm"}, "preview_coordinate_unit_unsupported"),
+    ],
+)
+def test_authority_and_unit_guards(changes: dict, code: str) -> None:
+    # Review P2-2 / P3-5 / P3-6.
+    with pytest.raises(ArPreviewError, match=code):
+        build_ar_preview_package(_forged(_preview(), **changes))
+
+
+def test_size_and_extent_guards() -> None:
+    from packlab_core.geometry_adapter import TriangleMeshData
+
+    preview = _preview()
+    tiny = TriangleMeshData(((0.0, 0.0, 0.0), (1.0, 0.0, 0.0)), ())
+    with pytest.raises(ArPreviewError, match="mesh_size_out_of_bounds"):
+        build_ar_preview_package(_forged(preview, mesh=tiny))
+    huge = TriangleMeshData(
+        tuple((x * 1000.0, y * 1000.0, z * 1000.0) for x, y, z in preview.mesh.vertices),
+        preview.mesh.triangles,
+    )
+    with pytest.raises(ArPreviewError, match="extent_exceeds_display_bound"):
+        build_ar_preview_package(_forged(preview, mesh=huge))
+
+
+def test_package_names_the_parent_authority_revision() -> None:
+    preview = _preview()
+    document = json.loads(build_ar_preview_package(preview))
+    assert (
+        document["source"]["parent_authority_revision_id"] == preview.parent_authority_revision_id
+    )
