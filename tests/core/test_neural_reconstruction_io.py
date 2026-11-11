@@ -126,7 +126,10 @@ def test_image_resolver_rejects_file_changed_during_digest_check(
 
     def hash_then_mutate(path: Path) -> str:
         digest = original_hash(path)
-        path.write_bytes(b"mutated!")
+        # Change the size: a same-size rewrite within one filesystem timestamp tick is not
+        # observable by the size/mtime/inode guard (it flaked on hosted CI). Same-size,
+        # same-tick swaps are caught later by the worker's own image re-hash.
+        path.write_bytes(b"mutated and longer")
         return digest
 
     monkeypatch.setattr(neural_io, "_file_sha256", hash_then_mutate)
