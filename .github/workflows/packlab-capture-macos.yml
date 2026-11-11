@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       focused_group:
-        description: Run all 206 tests or one bounded recovery family
+        description: Run all 209 tests or one bounded recovery family
         type: choice
         required: true
         default: all
@@ -572,7 +572,7 @@ jobs:
           failed="$(printf '%s' "$safe_summary" | jq -r '.failedTests // 0')"
           skipped="$(printf '%s' "$safe_summary" | jq -r '.skippedTests // 0')"
           case "$FOCUSED_GROUP" in
-            all) expected=206 ;;
+            all) expected=209 ;;
             recovery_all) expected=25 ;;
             pl0119_finalization_failures) expected=1 ;;
             session_integrity) expected=7 ;;

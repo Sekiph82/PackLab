@@ -3175,3 +3175,57 @@ final class PackLabCaptureTests: XCTestCase {
 
 // Static verification on Windows covers target wiring, source membership, and privacy settings.
 // xcodebuild execution on simulator/macOS CI is intentionally deferred to the authorized M16 runner.
+
+/// PL-0430: AR preview packages produced by `packlab_core.ar_preview` (golden below is a
+/// synthetic tetrahedron canonicalised by that module; tests/core/test_ar_preview.py
+/// re-checks this literal's digest from Python).
+final class ARPreviewPackageTests: XCTestCase {
+    static let golden = #"{"authority":{"class":"AR_VISUAL_REFERENCE_ONLY","mold_use_authorized":false,"on_device_scale_verified":false,"physical_accuracy_validation_status":"DEFERRED_OWNER_VALIDATION","scan_master_replaced":false},"content_sha256":"d01e251a87afaff78ecf6d3460d5a02f1c4ba503dad278015711671b0e05073d","contract":"packlab.ar-preview-mesh.v1","display_scale_basis":"MM_UNVERIFIED_TO_METRES_DISPLAY_ONLY","frame":"REALITYKIT_Y_UP_METRES_ORIGIN_BASE_CENTRE","indices":[0,2,1,0,1,3,1,2,3,2,0,3],"positions":[-0.05,0.0,0.05,0.05,0.0,0.05,0.0,0.0,-0.05,0.0,0.1,0.0],"source":{"brep_revision_id":"cad-brep:synthetic","cad_preview_revision_id":"cad-preview:synthetic","coordinate_unit":"mm_unverified","design_model_revision_id":"design-model:synthetic-tetra","parent_kind":"STANDALONE_DESIGN_GEOMETRY","scale_state":"metric-unverified"}}"#
+
+    func testPL0430GoldenPackageParsesWithVerifiedDigestAndVisualOnlyAuthority() throws {
+        let package = try ARPreviewPackage.parse(Data(Self.golden.utf8))
+        XCTAssertEqual(package.contentSHA256, "d01e251a87afaff78ecf6d3460d5a02f1c4ba503dad278015711671b0e05073d")
+        XCTAssertEqual(package.designModelRevisionID, "design-model:synthetic-tetra")
+        XCTAssertEqual(package.positions.count, 4)
+        XCTAssertEqual(package.indices.count, 12)
+        XCTAssertEqual(package.positions[3], SIMD3<Float>(0.0, 0.1, 0.0))
+        XCTAssertTrue(package.authorityBanner.hasPrefix("AR VISUAL REFERENCE ONLY"))
+        XCTAssertFalse(ARPreviewFeatureFlag.isEnabled(UserDefaults(suiteName: UUID().uuidString)!))
+    }
+
+    func testPL0430TamperedBytesAreRejectedByTheDigest() {
+        let tampered = Self.golden.replacingOccurrences(of: "0.1,0.0]", with: "0.2,0.0]")
+        XCTAssertThrowsError(try ARPreviewPackage.parse(Data(tampered.utf8))) { error in
+            XCTAssertEqual(error as? ARPreviewPackageError, .digestMismatch)
+        }
+        XCTAssertThrowsError(try ARPreviewPackage.parse(Data())) { error in
+            XCTAssertEqual(error as? ARPreviewPackageError, .tooLarge)
+        }
+    }
+
+    func testPL0430AuthorityUpgradeAndBadGeometryFailClosedEvenWithAValidDigest() throws {
+        func resealed(_ body: String) -> Data {
+            let withoutDigest = body.replacingOccurrences(
+                of: #""content_sha256":"d01e251a87afaff78ecf6d3460d5a02f1c4ba503dad278015711671b0e05073d","#,
+                with: ""
+            )
+            let digest = SourceIntegrity.digest(Data(withoutDigest.utf8))
+            return Data(withoutDigest.replacingOccurrences(
+                of: #"},"contract""#, with: #"},"content_sha256":"\#(digest)","contract""#
+            ).utf8)
+        }
+        XCTAssertNoThrow(try ARPreviewPackage.parse(resealed(Self.golden)))
+        let upgraded = Self.golden.replacingOccurrences(of: #""mold_use_authorized":false"#, with: #""mold_use_authorized":true"#)
+        XCTAssertThrowsError(try ARPreviewPackage.parse(resealed(upgraded))) { error in
+            XCTAssertEqual(error as? ARPreviewPackageError, .authorityInvalid)
+        }
+        let outOfRange = Self.golden.replacingOccurrences(of: "[0,2,1,", with: "[0,2,9,")
+        XCTAssertThrowsError(try ARPreviewPackage.parse(resealed(outOfRange))) { error in
+            XCTAssertEqual(error as? ARPreviewPackageError, .geometryInvalid)
+        }
+        let degenerate = Self.golden.replacingOccurrences(of: "[0,2,1,", with: "[0,0,1,")
+        XCTAssertThrowsError(try ARPreviewPackage.parse(resealed(degenerate))) { error in
+            XCTAssertEqual(error as? ARPreviewPackageError, .geometryInvalid)
+        }
+    }
+}

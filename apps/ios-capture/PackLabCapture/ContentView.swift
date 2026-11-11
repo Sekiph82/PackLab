@@ -653,6 +653,7 @@ struct ContentView: View {
     @State private var showResume = false
     @State private var showActiveProtocol = false
     @State private var showHistory = false
+    @State private var showARPreview = false
     @State private var turntableAngleText = "0"
     @StateObject private var runtime = CaptureRuntimeViewModel()
 
@@ -777,6 +778,9 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarLeading) { Button("New Scan") { showNewScan = true } }
                 ToolbarItem(placement: .topBarLeading) { Button("History") { showHistory = true } }
                 ToolbarItem(placement: .topBarTrailing) { Button("Protocol") { showActiveProtocol = true } }
+                if ARPreviewFeatureFlag.isEnabled() {
+                    ToolbarItem(placement: .topBarTrailing) { Button("AR Preview") { showARPreview = true } }
+                }
                 ToolbarItem(placement: .topBarTrailing) { Button(showPoseDebug ? "Hide Debug" : "Show Debug") { showPoseDebug.toggle() } }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission, readiness: runtime.newScanReadiness) { draft in
@@ -784,6 +788,7 @@ struct ContentView: View {
                 showNewScan = false
             } } }
             .sheet(isPresented: $showHistory) { NavigationStack { LocalScanHistoryView(root: ContentView.sessionRoot) } }
+            .sheet(isPresented: $showARPreview) { NavigationStack { ARPreviewEntryView() } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
                 if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
