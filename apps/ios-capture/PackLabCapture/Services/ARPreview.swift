@@ -9,8 +9,8 @@ import RealityKit
 /// PL-0430 prototype: AR preview of an edited Design Model on iPhone.
 ///
 /// The Windows Studio core writes a digest-bound `packlab.ar-preview-mesh.v1` JSON document
-/// (`packlab_core.ar_preview`). This file validates it and, on a device, places the mesh on a
-/// detected horizontal plane. The preview is a visual reference only: it carries no Scan
+/// (`packlab_core.ar_preview`). This file validates it and, on a device, places the mesh in world
+/// space in front of the camera, on the app's shared ARSession. The preview is a visual reference only: it carries no Scan
 /// Master, measurement or mould authority, and on-device scale/tracking accuracy is not
 /// validated. The feature is off unless `PackLabARPreviewEnabled` is set in user defaults.
 public enum ARPreviewPackageError: Error, Sendable, Equatable {
@@ -166,12 +166,16 @@ struct ARPreviewRealityView: UIViewRepresentable {
         if let mesh = try? MeshResource.generate(from: [descriptor]) {
             let material = SimpleMaterial(color: .systemOrange.withAlphaComponent(0.8), isMetallic: false)
             let entity = ModelEntity(mesh: mesh, materials: [material])
-            // No plane detection on the shared session: place the model 0.6 m ahead of and
-            // 0.25 m below the current camera, in world space (visual reference only).
+            // No plane detection on the shared session: place the model 0.6 m ahead (level,
+            // gravity-aligned world axes) and 0.25 m below the camera. Camera-space offsets
+            // would follow the landscape sensor axes and push it sideways in portrait.
             var position = SIMD3<Float>(0, -0.25, -0.6)
             if let camera = owner.session.currentFrame?.camera.transform {
-                let ahead = camera * SIMD4<Float>(0, -0.25, -0.6, 1)
-                position = SIMD3<Float>(ahead.x, ahead.y, ahead.z)
+                let origin = SIMD3<Float>(camera.columns.3.x, camera.columns.3.y, camera.columns.3.z)
+                var forward = SIMD3<Float>(-camera.columns.2.x, 0, -camera.columns.2.z)
+                let length = (forward.x * forward.x + forward.z * forward.z).squareRoot()
+                forward = length > 1e-4 ? forward / length : SIMD3<Float>(0, 0, -1)
+                position = origin + forward * 0.6 + SIMD3<Float>(0, -0.25, 0)
             }
             let anchor = AnchorEntity(world: position)
             anchor.addChild(entity)

@@ -3203,6 +3203,33 @@ final class ARPreviewPackageTests: XCTestCase {
         }
     }
 
+    func testPL0430FrameScaleBasisContractAndBoundsAreEnforced() throws {
+        func resealed(_ body: String) -> Data {
+            let withoutDigest = body.replacingOccurrences(
+                of: #""content_sha256":"d01e251a87afaff78ecf6d3460d5a02f1c4ba503dad278015711671b0e05073d","#,
+                with: ""
+            )
+            let digest = SourceIntegrity.digest(Data(withoutDigest.utf8))
+            return Data(withoutDigest.replacingOccurrences(
+                of: #"},"contract""#, with: #"},"content_sha256":"\#(digest)","contract""#
+            ).utf8)
+        }
+        let cases: [(String, String, ARPreviewPackageError)] = [
+            ("REALITYKIT_Y_UP_METRES_ORIGIN_BASE_CENTRE", "OTHER_FRAME", .malformed),
+            ("MM_UNVERIFIED_TO_METRES_DISPLAY_ONLY", "ANY TEXT FOR THE BANNER", .malformed),
+            (#""contract":"packlab.ar-preview-mesh.v1""#, #""contract":"packlab.ar-preview-mesh.v2""#, .unsupportedContract),
+            ("0.0,0.1,0.0]", "0.0,10.5,0.0]", .geometryInvalid),
+        ]
+        for (old, new, expected) in cases {
+            XCTAssertThrowsError(try ARPreviewPackage.parse(resealed(Self.golden.replacingOccurrences(of: old, with: new)))) { error in
+                XCTAssertEqual(error as? ARPreviewPackageError, expected, new)
+            }
+        }
+        XCTAssertThrowsError(try ARPreviewPackage.parse(Data(count: ARPreviewPackage.maximumBytes + 1))) { error in
+            XCTAssertEqual(error as? ARPreviewPackageError, .tooLarge)
+        }
+    }
+
     func testPL0430AuthorityUpgradeAndBadGeometryFailClosedEvenWithAValidDigest() throws {
         func resealed(_ body: String) -> Data {
             let withoutDigest = body.replacingOccurrences(
@@ -3222,6 +3249,16 @@ final class ARPreviewPackageTests: XCTestCase {
         let outOfRange = Self.golden.replacingOccurrences(of: "[0,2,1,", with: "[0,2,9,")
         XCTAssertThrowsError(try ARPreviewPackage.parse(resealed(outOfRange))) { error in
             XCTAssertEqual(error as? ARPreviewPackageError, .geometryInvalid)
+        }
+        for (old, new) in [
+            (#""scan_master_replaced":false"#, #""scan_master_replaced":true"#),
+            (#""on_device_scale_verified":false"#, #""on_device_scale_verified":true"#),
+            (#""class":"AR_VISUAL_REFERENCE_ONLY""#, #""class":"SCAN_MASTER""#),
+            (#""DEFERRED_OWNER_VALIDATION""#, #""VALIDATED""#),
+        ] {
+            XCTAssertThrowsError(try ARPreviewPackage.parse(resealed(Self.golden.replacingOccurrences(of: old, with: new)))) { error in
+                XCTAssertEqual(error as? ARPreviewPackageError, .authorityInvalid)
+            }
         }
         let degenerate = Self.golden.replacingOccurrences(of: "[0,2,1,", with: "[0,0,1,")
         XCTAssertThrowsError(try ARPreviewPackage.parse(resealed(degenerate))) { error in

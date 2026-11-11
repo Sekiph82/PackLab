@@ -133,6 +133,7 @@ def _forged(preview, **changes):
         ({"physical_accuracy_validation_status": "VALIDATED"}, "preview_authority_invalid"),
         ({"authority_class": "SCAN_MASTER"}, "preview_authority_invalid"),
         ({"coordinate_unit": "mm"}, "preview_coordinate_unit_unsupported"),
+        ({"contract": "packlab.cad-brep-preview.v0"}, "preview_authority_invalid"),
     ],
 )
 def test_authority_and_unit_guards(changes: dict, code: str) -> None:
@@ -162,3 +163,17 @@ def test_package_names_the_parent_authority_revision() -> None:
     assert (
         document["source"]["parent_authority_revision_id"] == preview.parent_authority_revision_id
     )
+
+
+def test_vertex_and_triangle_upper_bounds(monkeypatch) -> None:
+    # Review V02 P3-4: the upper bounds had no test.
+    import packlab_core.ar_preview as module
+
+    preview = _preview()
+    monkeypatch.setattr(module, "MAX_AR_VERTICES", len(preview.mesh.vertices) - 1)
+    with pytest.raises(ArPreviewError, match="mesh_size_out_of_bounds"):
+        build_ar_preview_package(preview)
+    monkeypatch.setattr(module, "MAX_AR_VERTICES", len(preview.mesh.vertices))
+    monkeypatch.setattr(module, "MAX_AR_TRIANGLES", len(preview.mesh.triangles) - 1)
+    with pytest.raises(ArPreviewError, match="mesh_size_out_of_bounds"):
+        build_ar_preview_package(preview)
