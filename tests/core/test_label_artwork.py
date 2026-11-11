@@ -331,6 +331,10 @@ def test_metric_host_size_keeps_artwork_aspect_in_millimetres() -> None:
     assert abs((cu1 - cu0) / (cv1 - cv0) - zone_aspect) < 1e-9
 
 
+_SEVEN_BY_THREE_SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" width="7" height="3" '
+    b'viewBox="0 0 7 3"><rect width="7" height="3" fill="blue"/></svg>'
+)
 GOLDEN_DEFAULT_MAPPING_IDS = {
     # Computed with the module as of e97d4027^ (before the metric-aspect option).
     (
@@ -358,6 +362,20 @@ GOLDEN_DEFAULT_MAPPING_IDS = {
         "STRETCH",
     ): "label-artwork-mapping:34348220a0ded6d3fd522ae7346fac248be8f049033baeace96661de98e3b1ff",
 }
+# 7x3 artwork: drawn_height/height differs from drawn_width/width in the last float bit,
+# so these pin the historical uniform default scale (review V02 N-2).
+GOLDEN_DEFAULT_MAPPING_IDS.update(
+    {
+        (
+            "7x3",
+            "CONTAIN",
+        ): "label-artwork-mapping:caaaa12594b621e362ecce0026754d81050a433ba5ad8dc6c310b7501b637f87",
+        (
+            "7x3",
+            "COVER",
+        ): "label-artwork-mapping:31c817209b4148d0959fcdf7fd96a24023b0936abaa2d37e544ac023e72c8fc3",
+    }
+)
 
 
 @pytest.mark.parametrize(("kind", "fit"), sorted(GOLDEN_DEFAULT_MAPPING_IDS))
@@ -365,7 +383,8 @@ def test_default_mapping_ids_match_the_pre_change_golden_values(kind: str, fit: 
     # Review P2-2: pins historical ids; the default path must not drift.
     from packlab_core.label_artwork import ingest_label_artwork, map_label_artwork_to_zone
 
-    artwork = ingest_label_artwork(_svg() if kind == "svg" else _png())
+    content = {"svg": _svg(), "png": _png(), "7x3": _SEVEN_BY_THREE_SVG}[kind]
+    artwork = ingest_label_artwork(content)
     mapping = map_label_artwork_to_zone(artwork, _placement(), fit_mode=fit)
     assert mapping.revision_id == GOLDEN_DEFAULT_MAPPING_IDS[(kind, fit)]
     assert "aspect_basis" not in mapping.as_dict()  # keeps overlay/scene digests unchanged
@@ -376,19 +395,26 @@ def test_metric_and_default_mappings_have_distinct_ids_and_reject_bad_host_sizes
 
     artwork, placement = _square_artwork_and_wide_placement()
     default = map_label_artwork_to_zone(artwork, placement, fit_mode="CONTAIN")
-    # A host whose aspect makes the metric result coincide geometrically with the default.
-    boundary = placement.boundary
-    ratio = (boundary.u_max - boundary.u_min) / (boundary.v_max - boundary.v_min)
+    # A unit host gives the same geometry as the default, but the basis differs, so the id must.
     same_shape = map_label_artwork_to_zone(
         artwork, placement, fit_mode="CONTAIN", host_size_mm_unverified=(1.0, 1.0)
     )
     assert same_shape.revision_id != default.revision_id
-    assert ratio > 0
-    for bad in ((0.0, 1.0), (1.0,), (float("nan"), 1.0), (True, 1.0), (5e-324, 1.0)):
+    bad_hosts = (
+        (0.0, 1.0),
+        (1.0,),
+        (float("nan"), 1.0),
+        (True, 1.0),
+        (5e-324, 1.0),
+        (1e-300, 1e300),
+        (1e300, 1e-300),
+    )
+    for bad in bad_hosts:
         # Extreme ratios may instead trip the mapping's own validity check; either way it is
-        # the module's error, never an uncaught ZeroDivisionError (review P3-2).
-        with pytest.raises(LabelArtworkError, match="host_size_invalid|mapping_invalid"):
-            for fit in ("CONTAIN", "COVER"):
+        # the module's error, never an uncaught ZeroDivisionError (review P3-2). Each fit
+        # mode is checked on its own (review V02 N-1).
+        for fit in ("CONTAIN", "COVER"):
+            with pytest.raises(LabelArtworkError, match="host_size_invalid|mapping_invalid"):
                 map_label_artwork_to_zone(
                     artwork,
                     placement,
