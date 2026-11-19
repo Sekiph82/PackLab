@@ -312,7 +312,7 @@ jobs:
           # Prints counts only: the total and fixed diagnostic categories, never log text.
           report_failure() {
             local log="$2"
-            _n() { grep -ciE "$1" "$log" 2>/dev/null || echo 0; }
+            _n() { grep -ciE "$1" "$log" 2>/dev/null || true; }
             echo "xcodebuild $1 failed with $(_n 'error:') error line(s); log kept on the runner only." >&2
             echo "error categories (counts only): profile=$(_n 'error:.*(provisioning profile|no profile)') certificate=$(_n 'error:.*(certificate|signing identit)') entitlement=$(_n 'error:.*entitlement') team=$(_n 'error:.*(development team|team id)') compile=$(_n 'error:.*([.]swift|cannot find|expected )')" >&2
           }

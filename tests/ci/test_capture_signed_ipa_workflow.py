@@ -254,7 +254,7 @@ def test_xcodebuild_failure_never_prints_the_log() -> None:
     body = archive.split("report_failure() {", 1)[1].split("\n}\n", 1)[0]
     assert len(body.splitlines()) == 5, body
     greps = re.findall(r"\bgrep\b[^\n;]*", body)
-    assert greps == ['grep -ciE "$1" "$log" 2>/dev/null || echo 0'], greps
+    assert greps == ['grep -ciE "$1" "$log" 2>/dev/null || true'], greps
     # Every output line is an echo of counts produced by the counting helper only.
     for line in body.splitlines()[1:]:
         stripped = line.strip()
