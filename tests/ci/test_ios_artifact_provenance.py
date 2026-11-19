@@ -69,10 +69,54 @@ def test_artifact_type_and_signing_state_must_agree(tmp_path: Path) -> None:
         build_manifest(artifact, _metadata(signing_state="SIGNED"))
 
     with pytest.raises(ProvenanceError, match="PROVENANCE_ARTIFACT_TYPE_INVALID"):
-        build_manifest(
-            artifact,
-            _metadata(artifact_type="ios_signed_ipa", signing_state="SIGNED"),
-        )
+        build_manifest(artifact, _metadata(artifact_type="ios_signed_xcarchive"))
+
+    # PL-0358: a signed IPA must declare SIGNED and the device SDK.
+    with pytest.raises(ProvenanceError, match="PROVENANCE_SIGNING_STATE_INVALID"):
+        build_manifest(artifact, _metadata(artifact_type="ios_signed_ipa"))
+    signed_metadata = _metadata(
+        artifact_type="ios_signed_ipa",
+        signing_state="SIGNED",
+        product_name="PackLabCapture.ipa",
+        sdk_name="iphoneos",
+        event_name="workflow_dispatch",
+        workflow_name="PackLab Capture Signed IPA",
+    )
+    with pytest.raises(ProvenanceError, match="PROVENANCE_SDK_NAME_INVALID"):
+        build_manifest(artifact, {**signed_metadata, "sdk_name": "iphonesimulator"})
+    # A multi-file tree is never a signed IPA.
+    with pytest.raises(ProvenanceError, match="PROVENANCE_SIGNED_IPA_NOT_SINGLE_FILE"):
+        build_manifest(artifact, signed_metadata)
+    for override in (
+        {"product_name": "PackLabCapture.app"},
+        {"event_name": "push"},
+        {"workflow_name": "PackLab Capture macOS CI"},
+    ):
+        with pytest.raises(ProvenanceError, match="PROVENANCE_SIGNED_IPA_ORIGIN_INVALID"):
+            build_manifest(artifact, {**signed_metadata, **override})
+    ipa = tmp_path / "PackLabCapture.ipa"
+    ipa.write_bytes(b"PK-signed-ipa-fixture")
+    signed = build_manifest(ipa, signed_metadata)
+    assert signed["signing_state"] == "SIGNED"
+    assert signed["artifact_file_count"] == 1
+    sidecar = tmp_path / "signed.json"
+    sidecar.write_text(json.dumps(signed), encoding="utf-8")
+    assert verify_manifest(ipa, sidecar)["artifact_type"] == "ios_signed_ipa"
+    # Swapping the single file for a directory fails even with a forged count.
+    tree = tmp_path / "tree.ipa"
+    tree.mkdir()
+    (tree / "a").write_bytes(b"a")
+    (tree / "b").write_bytes(b"b")
+    with pytest.raises(ProvenanceError, match="PROVENANCE_SIGNED_IPA_NOT_SINGLE_FILE"):
+        verify_manifest(tree, sidecar)
+    # A directory wrapping exactly one file is still not a regular-file IPA.
+    wrapper = tmp_path / "wrapper.ipa"
+    wrapper.mkdir()
+    (wrapper / "PackLabCapture.ipa").write_bytes(b"PK-signed-ipa-fixture")
+    with pytest.raises(ProvenanceError, match="PROVENANCE_SIGNED_IPA_NOT_SINGLE_FILE"):
+        build_manifest(wrapper, signed_metadata)
+    with pytest.raises(ProvenanceError, match="PROVENANCE_SIGNED_IPA_NOT_SINGLE_FILE"):
+        verify_manifest(wrapper, sidecar)
 
 
 def test_unknown_or_secret_like_fields_are_rejected(tmp_path: Path) -> None:

@@ -16,6 +16,8 @@ TREE_ALGORITHM = "packlab-sorted-path-length-content-sha256-v1"
 ARTIFACT_STATES = {
     "ios_simulator_app": "UNSIGNED",
     "ios_device_archive": "UNSIGNED",
+    # PL-0358: only the protected, manually dispatched signing workflow emits this.
+    "ios_signed_ipa": "SIGNED",
 }
 METADATA_FIELDS = (
     "artifact_type",
@@ -43,6 +45,7 @@ VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+\Z")
 BUNDLE_ID_RE = re.compile(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\Z")
 PRODUCT_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._ -]{0,127}\Z")
 SAFE_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
+SIGNED_IPA_WORKFLOW = "PackLab Capture Signed IPA"
 
 
 class ProvenanceError(ValueError):
@@ -120,6 +123,13 @@ def _validate_metadata(metadata: dict[str, Any]) -> None:
         metadata["product_name"]
     ):
         raise ProvenanceError("PROVENANCE_PRODUCT_NAME_INVALID")
+    # PL-0358: SIGNED is workflow-asserted after codesign verify, not SIGNED_VERIFIED.
+    if artifact_type == "ios_signed_ipa" and (
+        not metadata["product_name"].endswith(".ipa")
+        or metadata.get("event_name") != "workflow_dispatch"
+        or metadata.get("workflow_name") != SIGNED_IPA_WORKFLOW
+    ):
+        raise ProvenanceError("PROVENANCE_SIGNED_IPA_ORIGIN_INVALID")
     for field in ("capture_version", "packscan_schema_version"):
         if not isinstance(metadata.get(field), str) or not VERSION_RE.fullmatch(metadata[field]):
             raise ProvenanceError("PROVENANCE_VERSION_INVALID")
@@ -135,6 +145,8 @@ def _validate_metadata(metadata: dict[str, Any]) -> None:
         if not isinstance(metadata.get(field), str) or not SAFE_TOKEN_RE.fullmatch(metadata[field]):
             raise ProvenanceError("PROVENANCE_TOOLCHAIN_FIELD_INVALID")
     if metadata.get("sdk_name") not in {"iphoneos", "iphonesimulator"}:
+        raise ProvenanceError("PROVENANCE_SDK_NAME_INVALID")
+    if artifact_type != "ios_simulator_app" and metadata["sdk_name"] != "iphoneos":
         raise ProvenanceError("PROVENANCE_SDK_NAME_INVALID")
     if not isinstance(metadata.get("bundle_identifier"), str) or not BUNDLE_ID_RE.fullmatch(
         metadata["bundle_identifier"]
@@ -158,9 +170,18 @@ def _validate_metadata(metadata: dict[str, Any]) -> None:
             raise ProvenanceError("PROVENANCE_WORKFLOW_RUN_INVALID")
 
 
+def _check_signed_ipa_shape(metadata: dict[str, Any], artifact: Path, file_count: int) -> None:
+    # A signed IPA is one regular file; a directory holding one file is rejected too.
+    if metadata["artifact_type"] == "ios_signed_ipa" and (
+        file_count != 1 or artifact.is_symlink() or not artifact.is_file()
+    ):
+        raise ProvenanceError("PROVENANCE_SIGNED_IPA_NOT_SINGLE_FILE")
+
+
 def build_manifest(artifact: Path, metadata: dict[str, Any]) -> dict[str, Any]:
     _validate_metadata(metadata)
     digest, byte_length, file_count = _artifact_inventory(artifact)
+    _check_signed_ipa_shape(metadata, artifact, file_count)
     manifest: dict[str, Any] = {
         "format": FORMAT,
         **metadata,
@@ -201,6 +222,7 @@ def verify_manifest(artifact: Path, provenance: Path) -> dict[str, Any]:
         if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
             raise ProvenanceError("PROVENANCE_ARTIFACT_SIZE_INVALID")
     digest, byte_length, file_count = _artifact_inventory(artifact)
+    _check_signed_ipa_shape(metadata, artifact, file_count)
     if digest != manifest["artifact_sha256"]:
         raise ProvenanceError("PROVENANCE_ARTIFACT_DIGEST_MISMATCH")
     if byte_length != manifest.get("artifact_byte_length"):
