@@ -397,9 +397,11 @@ jobs:
           PACKLAB_SDK_NAME: iphoneos
           PACKLAB_SDK_VERSION: ${{ steps.archive-xcode.outputs.ios_sdk }}
           PACKLAB_BUNDLE_IDENTIFIER: com.packlab.capture
-          PACKLAB_PACKAGE_RESOLVED_SHA256: ${{ hashFiles('apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
         run: |
           set -euo pipefail
+          # Plain SHA-256 of Package.resolved; hashFiles() would hash the file's hash.
+          PACKLAB_PACKAGE_RESOLVED_SHA256="$(shasum -a 256 'apps/ios-capture/PackLabCapture.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved' | awk '{ print $1 }')"
+          export PACKLAB_PACKAGE_RESOLVED_SHA256
           python3 tools/ci/ios_artifact_provenance.py prepare \
             --artifact "$RUNNER_TEMP/packlab-signed-export/PackLabCapture.ipa" \
             --sidecar "$RUNNER_TEMP/packlab-capture-signed-ipa-provenance.json"

@@ -193,3 +193,13 @@ def test_junction_artifact_entry_is_rejected(
     monkeypatch.setattr(Path, "is_junction", is_junction, raising=False)
     with pytest.raises(ProvenanceError, match="ARTIFACT_LINK_BLOCKED"):
         build_manifest(artifact, _metadata())
+
+
+def test_workflows_record_the_plain_sha256_of_package_resolved() -> None:
+    # hashFiles() returns sha256 of the file's sha256, which never matches the release
+    # manifest's plain file digest (review PL0358_SIGNED_RUN_V01 P2).
+    root = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+    for name in ("packlab-capture-macos.yml", "packlab-capture-signed-ipa.yml"):
+        text = (root / name).read_text(encoding="utf-8")
+        assert "PACKLAB_PACKAGE_RESOLVED_SHA256: ${{" not in text, name
+        assert 'PACKLAB_PACKAGE_RESOLVED_SHA256="$(shasum -a 256 ' in text, name
