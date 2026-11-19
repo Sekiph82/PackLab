@@ -226,9 +226,12 @@ jobs:
           profile_uuid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile_uuid"])' "$signing_dir/signing.json")"
           echo "::add-mask::$team_id"
           echo "::add-mask::$profile_uuid"
-          profiles_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
-          mkdir -p "$profiles_dir"
-          cp "$signing_dir/profile.mobileprovision" "$profiles_dir/$profile_uuid.mobileprovision"
+          # Xcode 16 reads profiles from UserData; older Xcode from MobileDevice. Install in both.
+          for profiles_dir in "$HOME/Library/MobileDevice/Provisioning Profiles" \
+            "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"; do
+            mkdir -p "$profiles_dir"
+            cp "$signing_dir/profile.mobileprovision" "$profiles_dir/$profile_uuid.mobileprovision"
+          done
           keychain_password="$(openssl rand -hex 32)"
           security create-keychain -p "$keychain_password" "$keychain"
           security set-keychain-settings -lut 3600 "$keychain"
@@ -306,10 +309,12 @@ jobs:
           PY
           # Actions logs are public: never print xcodebuild output (certificate common
           # names, profile names, team IDs). Report only a count; logs stay on the runner.
+          # Prints counts only: the total and fixed diagnostic categories, never log text.
           report_failure() {
-            local errors
-            errors="$(grep -ci 'error:' "$2" || true)"
-            echo "xcodebuild $1 failed with ${errors:-0} error line(s); log kept on the runner only." >&2
+            local log="$2"
+            _n() { grep -ciE "$1" "$log" 2>/dev/null || echo 0; }
+            echo "xcodebuild $1 failed with $(_n 'error:') error line(s); log kept on the runner only." >&2
+            echo "error categories (counts only): profile=$(_n 'error:.*(provisioning profile|no profile)') certificate=$(_n 'error:.*(certificate|signing identit)') entitlement=$(_n 'error:.*entitlement') team=$(_n 'error:.*(development team|team id)') compile=$(_n 'error:.*([.]swift|cannot find|expected )')" >&2
           }
           if ! xcodebuild archive \
             -project "$PROJECT" \
@@ -374,7 +379,9 @@ jobs:
           signing_dir="$RUNNER_TEMP/packlab-signing"
           profile_uuid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile_uuid"])' "$signing_dir/signing.json")"
           security delete-keychain "$signing_dir/packlab-signing.keychain-db"
-          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision" "$signing_dir/profile.mobileprovision" "$signing_dir/profile.plist"
+          rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision" \
+            "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$profile_uuid.mobileprovision" \
+            "$signing_dir/profile.mobileprovision" "$signing_dir/profile.plist"
 
       - name: Prepare signed IPA provenance sidecar
         if: ${{ steps.signing-inputs.outputs.configured == 'true' }}
@@ -427,7 +434,8 @@ jobs:
           if [[ -f "$signing_dir/signing.json" ]]; then
             profile_uuid="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["profile_uuid"])' "$signing_dir/signing.json" 2> /dev/null || true)"
             if [[ -n "$profile_uuid" ]]; then
-              rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision"
+              rm -f "$HOME/Library/MobileDevice/Provisioning Profiles/$profile_uuid.mobileprovision" \
+                "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/$profile_uuid.mobileprovision"
             fi
           fi
           if [[ -e "$keychain" ]]; then

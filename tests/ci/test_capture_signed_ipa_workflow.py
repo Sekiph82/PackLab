@@ -252,8 +252,15 @@ def test_xcodebuild_failure_never_prints_the_log() -> None:
     assert archive.count("report_failure ") == 2
     assert "| tee" not in archive.split("report_failure()")[1].split("echo '- Signed")[0]
     body = archive.split("report_failure() {", 1)[1].split("\n}\n", 1)[0]
-    assert len(body.splitlines()) == 4, body
-    assert re.findall(r"\bgrep\b[^\n]*", body) == ['grep -ci \'error:\' "$2" || true)"']
+    assert len(body.splitlines()) == 5, body
+    greps = re.findall(r"\bgrep\b[^\n;]*", body)
+    assert greps == ['grep -ciE "$1" "$log" 2>/dev/null || echo 0'], greps
+    # Every output line is an echo of counts produced by the counting helper only.
+    for line in body.splitlines()[1:]:
+        stripped = line.strip()
+        assert stripped.startswith(("local log=", "_n() {", "echo ")), stripped
+        if stripped.startswith("echo "):
+            assert "$log" not in stripped and "$2" not in stripped, stripped
     assert not re.search(r"\b(?:cat|tail|head|sed|awk)\b", body)
 
 
@@ -282,6 +289,7 @@ def test_failure_report_emits_only_a_count(tmp_path: Path) -> None:
     )
     output = result.stdout + result.stderr
     assert "failed with 2 error line(s); log kept on the runner only." in output
+    assert "profile=1 certificate=1 entitlement=0 team=0 compile=0" in output
     for leaked in ("Jane", "ABCDE12345", "Secret Owner", "Apple Distribution"):
         assert leaked not in output
 
@@ -296,3 +304,14 @@ def test_keychain_is_deleted_before_uploads_and_cleanup_covers_outputs() -> None
     cleanup = _job()["steps"][-1]["run"]
     assert '"$RUNNER_TEMP/packlab-signed-export"' in cleanup
     assert '"$RUNNER_TEMP/packlab-capture-archive-derived-data"' in cleanup
+
+
+def test_profile_is_installed_and_removed_in_both_xcode_profile_directories() -> None:
+    job = _job()
+    old = "$HOME/Library/MobileDevice/Provisioning Profiles"
+    new = "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"
+    install = _step(job, "Install signing material into a temporary keychain")["run"]
+    early = _step(job, "Delete temporary keychain once signing is verified")["run"]
+    cleanup = _step(job, "Delete temporary keychain and signing material")["run"]
+    for script in (install, early, cleanup):
+        assert old in script and new in script
