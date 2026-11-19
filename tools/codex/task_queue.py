@@ -13,14 +13,20 @@ from urllib.parse import urlsplit
 TASK_ID = r"[A-Z][A-Z0-9]*-\d+(?:\.\d+)?"
 TASK_ROW = re.compile(rf"^- \[([ x~!])\] (?:\*\*)?({TASK_ID})(?:\*\*)?(?: — | )(.+)$")
 CURRENT_TASK = re.compile(rf"^({TASK_ID}) — (.+)$")
+# "none ..." records that no task is dependency-ready (every open task externally gated).
+# It must not name a task ID, so an idle line cannot smuggle in a task.
+IDLE_TASK = re.compile(r"^none(?:[\s;,.]|$)")
+# Claude Code is the sole authorized executor since the 2026-11-10 owner handoff.
+# The first token must be CLAUDE or CLAUDE_<WORDS>, and must not mention CODEX.
+AUTHORIZED_ACTOR = re.compile(r"^CLAUDE(?:_[A-Z0-9_]+)?(?=\s|$)")
 
 
 @dataclass(frozen=True)
 class QueueState:
     repository: str
     branch: str
-    task_id: str
-    title: str
+    task_id: str | None
+    title: str | None
     status: str
     next_action: str
     task_count: int
@@ -40,7 +46,11 @@ def parse_task_rows(source: str) -> list[tuple[str, str, str]]:
     if len(headings) != 1:
         raise ValueError("TASKS.md must contain exactly one canonical ## Tasks ledger")
     end = next(
-        (index for index in range(headings[0] + 1, len(lines)) if lines[index] == "# Execution Rules"),
+        (
+            index
+            for index in range(headings[0] + 1, len(lines))
+            if lines[index].startswith("# Execution Rules")
+        ),
         len(lines),
     )
     rows: list[tuple[str, str, str]] = []
@@ -48,7 +58,9 @@ def parse_task_rows(source: str) -> list[tuple[str, str, str]]:
         match = TASK_ROW.fullmatch(line)
         if match:
             rows.append((match.group(1), match.group(2), match.group(3)))
-        elif line.startswith("- [") and re.search(r"(?:\*\*)?[A-Z][A-Z0-9]*-\d", line):
+        # Any list item (indented or not) with a checkbox and a task ID must be canonical,
+        # so a malformed or indented row cannot hide an in-progress task.
+        elif re.match(r"^\s*[-*]\s*\[", line) and re.search(TASK_ID, line):
             raise ValueError(f"Malformed canonical task row: {line}")
     if not rows:
         raise ValueError("The canonical task ledger is empty")
@@ -59,31 +71,42 @@ def parse_task_rows(source: str) -> list[tuple[str, str, str]]:
 
 
 def validate_queue(source: str, expected_task: str | None = None) -> QueueState:
-    current = CURRENT_TASK.fullmatch(_field(source, "Current Task"))
-    if not current:
+    current_field = _field(source, "Current Task")
+    current = CURRENT_TASK.fullmatch(current_field)
+    idle = (
+        current is None
+        and IDLE_TASK.match(current_field) is not None
+        and re.search(TASK_ID, current_field) is None
+    )
+    if not current and not idle:
         raise ValueError("Current Task must explicitly identify one task ID and title")
-    task_id, title = current.groups()
+    task_id, title = current.groups() if current else (None, None)
     if expected_task and task_id != expected_task:
         raise ValueError(f"Expected {expected_task}; canonical Current Task is {task_id}")
 
-    status = _field(source, "Current Task Status").split(" / ", 1)[0]
     required_actor = _field(source, "Required Actor")
-    if required_actor.split(" ", 1)[0] != "CODEX":
-        raise ValueError("Required Actor must authorize CODEX")
+    if not AUTHORIZED_ACTOR.match(required_actor) or "CODEX" in required_actor.split()[0]:
+        raise ValueError("Required Actor must authorize CLAUDE")
     branch = _field(source, "Tracking Branch")
     repository = _field(source, "Tracking Repository")
     next_action = _field(source, "Next Task/Action")
     rows = parse_task_rows(source)
-    matches = [row for row in rows if row[1] == task_id and row[2] == title]
-    if len(matches) != 1:
-        raise ValueError(f"Current Task {task_id} must match exactly one task row")
-
-    expected_marker = {"READY": " ", "IN_PROGRESS": "~", "BLOCKED": "!"}.get(status)
-    if expected_marker is None:
-        raise ValueError(f"Unsupported Current Task Status: {status}")
-    if matches[0][0] != expected_marker:
-        raise ValueError(f"Current Task Status {status} does not match its task row")
     in_progress = [row[1] for row in rows if row[0] == "~"]
+    if idle:
+        # No explicit task: nothing may be marked in progress, and nothing is inferred.
+        status = "IDLE"
+        if in_progress:
+            raise ValueError("An idle tracker cannot have an in-progress task row")
+    else:
+        status = _field(source, "Current Task Status").split(" / ", 1)[0]
+        matches = [row for row in rows if row[1] == task_id and row[2] == title]
+        if len(matches) != 1:
+            raise ValueError(f"Current Task {task_id} must match exactly one task row")
+        expected_marker = {"READY": " ", "IN_PROGRESS": "~", "BLOCKED": "!"}.get(status)
+        if expected_marker is None:
+            raise ValueError(f"Unsupported Current Task Status: {status}")
+        if matches[0][0] != expected_marker:
+            raise ValueError(f"Current Task Status {status} does not match its task row")
     if len(in_progress) > 1 or (status == "IN_PROGRESS" and in_progress != [task_id]):
         raise ValueError("Only the explicit Current Task may be marked in progress")
     if status != "IN_PROGRESS" and in_progress:
@@ -94,14 +117,12 @@ def validate_queue(source: str, expected_task: str | None = None) -> QueueState:
         and parsed_repository.hostname == "github.com"
         and parsed_repository.username is None
         and parsed_repository.password is None
+        and parsed_repository.netloc == "github.com"
         and not parsed_repository.query
         and not parsed_repository.fragment
         and parsed_repository.path.rstrip("/") in {"/Sekiph82/PackLab", "/Sekiph82/PackLab.git"}
     )
-    if (
-        branch != "main"
-        or not valid_repository
-    ):
+    if branch != "main" or not valid_repository:
         raise ValueError("Queue authority must target Sekiph82/PackLab on main")
 
     return QueueState(
@@ -129,7 +150,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.json:
         print(json.dumps(asdict(state), ensure_ascii=False, sort_keys=True))
     else:
-        print(f"TASKS.md valid: {state.task_id} ({state.status}); {state.completed_count}/{state.task_count} accepted")
+        print(
+            f"TASKS.md valid: {state.task_id or 'no current task'} ({state.status}); "
+            f"{state.completed_count}/{state.task_count} accepted"
+        )
     return 0
 
 

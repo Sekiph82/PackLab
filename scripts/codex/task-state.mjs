@@ -3,6 +3,10 @@ import { resolve } from "node:path";
 
 const taskPattern = /^- \[([ x~!])\] (?:\*\*)?(PL-\d{4})(?:\*\*)?(?: — )?(.+)$/;
 const currentPattern = /^(PL-\d{4}) — (.+)$/;
+// "none ..." records that no task is dependency-ready; nothing is inferred from row order.
+const idlePattern = /^none(?:[\s;,.]|$)/;
+// Claude Code is the sole authorized executor since the 2026-11-10 owner handoff.
+const authorizedActor = /^CLAUDE(?:_[A-Z0-9_]+)?(?=\s|$)/;
 
 export function readField(source, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -15,13 +19,17 @@ export function parseTaskRows(source) {
   const lines = source.split(/\r?\n/);
   const headings = lines.flatMap((line, index) => line === "## Tasks" ? [index] : []);
   if (headings.length !== 1) throw new Error("TASKS.md must contain exactly one canonical ## Tasks ledger.");
-  const tasks = lines.flatMap((line, lineIndex) => {
+  const endOffset = lines.slice(headings[0] + 1).findIndex((line) => line.startsWith("# Execution Rules"));
+  const end = endOffset < 0 ? lines.length : headings[0] + 1 + endOffset;
+  const tasks = lines.slice(0, end).flatMap((line, lineIndex) => {
+    if (lineIndex <= headings[0]) return [];
     const match = line.match(taskPattern);
     if (match) {
       const title = match[3].split(/\s+\*\*Mandatory pre-read:\*\*/i, 1)[0].trim();
       return [{ marker: match[1], id: match[2], title, lineIndex }];
     }
-    if (/^- \[[ x~!]\] (?:\*\*)?PL-\d{4}\b/.test(line)) throw new Error(`Malformed canonical task row: ${line}`);
+    // Any checkbox list item naming a task must be canonical (no indented or odd-marker rows).
+    if (/^\s*[-*]\s*\[/.test(line) && /PL-\d{4}/.test(line)) throw new Error(`Malformed canonical task row: ${line}`);
     return [];
   });
   if (!tasks.length) throw new Error("The canonical task ledger is empty.");
@@ -33,22 +41,32 @@ export function parseTaskState(source) {
   const tasks = parseTaskRows(source);
   const currentValue = readField(source, "Current Task");
   const current = currentValue.match(currentPattern);
-  if (!current) throw new Error("Current Task must identify one PL task ID and exact title.");
+  const idle = !current && idlePattern.test(currentValue) && !/PL-\d{4}/.test(currentValue);
+  if (!current && !idle) throw new Error("Current Task must identify one PL task ID and exact title.");
   const statusValue = readField(source, "Current Task Status");
-  const status = statusValue.split(" / ", 1)[0].trim();
+  const status = idle ? "IDLE" : statusValue.split(" / ", 1)[0].trim();
   const requiredActor = readField(source, "Required Actor");
   const milestone = readField(source, "Current Milestone");
   const sprint = readField(source, "Current Sprint");
   const nextTask = readField(source, "Next Task/Action");
-  if (!/^CODEX\b/.test(requiredActor)) throw new Error("Required Actor must authorize CODEX.");
+  if (!authorizedActor.test(requiredActor) || requiredActor.split(/\s/, 1)[0].includes("CODEX")) {
+    throw new Error("Required Actor must authorize CLAUDE.");
+  }
+  if (readField(source, "Tracking Repository") !== "Sekiph82/PackLab" || readField(source, "Tracking Branch") !== "main") {
+    throw new Error("Queue authority must target Sekiph82/PackLab on main.");
+  }
   if (!milestone || !sprint || !nextTask) throw new Error("Milestone, sprint, and next action must be explicit.");
-  const matches = tasks.filter((task) => task.id === current[1] && task.title === current[2]);
-  if (matches.length !== 1) throw new Error(`Current Task ${current[1]} must match exactly one canonical task row.`);
-  const marker = { READY: " ", IN_PROGRESS: "~", BLOCKED: "!", COMPLETE: "x" }[status];
-  if (marker === undefined) throw new Error(`Unsupported Current Task Status: ${status}.`);
-  if (matches[0].marker !== marker) throw new Error(`Current Task Status ${status} does not match [${matches[0].marker}] for ${current[1]}.`);
   const inProgress = tasks.filter((task) => task.marker === "~");
-  if (inProgress.length > 1 || (status === "IN_PROGRESS" && (inProgress.length !== 1 || inProgress[0].id !== current[1]))) {
+  if (idle) {
+    if (inProgress.length) throw new Error("An idle tracker cannot have an in-progress task row.");
+  } else {
+    const matches = tasks.filter((task) => task.id === current[1] && task.title === current[2]);
+    if (matches.length !== 1) throw new Error(`Current Task ${current[1]} must match exactly one canonical task row.`);
+    const marker = { READY: " ", IN_PROGRESS: "~", BLOCKED: "!", COMPLETE: "x" }[status];
+    if (marker === undefined) throw new Error(`Unsupported Current Task Status: ${status}.`);
+    if (matches[0].marker !== marker) throw new Error(`Current Task Status ${status} does not match [${matches[0].marker}] for ${current[1]}.`);
+  }
+  if (inProgress.length > 1 || (status === "IN_PROGRESS" && (inProgress.length !== 1 || inProgress[0].id !== current?.[1]))) {
     throw new Error("Only the explicit Current Task may be marked in progress.");
   }
   const nextReference = nextTask.match(currentPattern);
@@ -57,15 +75,15 @@ export function parseTaskState(source) {
   }
   const questions = parseQuestions(source, tasks);
   return {
-    currentTask: { id: current[1], title: current[2] },
+    currentTask: current ? { id: current[1], title: current[2] } : null,
     currentTaskStatus: status,
     requiredActor,
     milestone,
     sprint,
     nextTask,
-    nextTaskId: nextReference?.[1] === current[1] ? null : nextReference?.[1] ?? null,
-    nextTaskTitle: nextReference?.[1] === current[1] ? null : nextReference?.[2] ?? null,
-    nextTaskSelectionRequired: status !== "COMPLETE" && (!nextReference || nextReference[1] === current[1]),
+    nextTaskId: nextReference?.[1] === current?.[1] ? null : nextReference?.[1] ?? null,
+    nextTaskTitle: nextReference?.[1] === current?.[1] ? null : nextReference?.[2] ?? null,
+    nextTaskSelectionRequired: status !== "COMPLETE" && (!nextReference || nextReference[1] === current?.[1]),
     tasks,
     questions,
     completedTasks: tasks.filter((task) => task.marker === "x").length,

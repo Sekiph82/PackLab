@@ -826,7 +826,7 @@ def _create_overlay(overlay, root, base_matrix):
         from mathutils import Vector
         verts = [tuple(base_matrix @ Vector(tuple(float(c) for c in point))) for point in corners]
         faces = [(0, 1, 2, 3)]
-        boundary = geometry["placement_boundary_normalized_uv"]
+        boundary = geometry.get("drawn_rect_normalized_uv", geometry["placement_boundary_normalized_uv"])
         uv_coords = [
             (float(boundary[0]), float(boundary[1])),
             (float(boundary[2]), float(boundary[1])),
@@ -841,7 +841,7 @@ def _create_overlay(overlay, root, base_matrix):
         radius = float(geometry["radius_mm_unverified"])
         center = geometry["center_mm_unverified"]
         span = theta1 - theta0
-        boundary = geometry["placement_boundary_normalized_uv"]
+        boundary = geometry.get("drawn_rect_normalized_uv", geometry["placement_boundary_normalized_uv"])
         segments = max(1, min(128, int(__import__("math").ceil(abs(span) / (2.0 * 3.141592653589793) * 64.0))))
         for index in range(segments + 1):
             u = index / segments

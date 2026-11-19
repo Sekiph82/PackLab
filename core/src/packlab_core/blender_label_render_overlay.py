@@ -16,7 +16,9 @@ from .design_model import DesignModelRevision
 from .label_artwork import (
     LabelArtworkAssetRevision,
     LabelArtworkAssignmentRevision,
+    LabelArtworkError,
     LabelArtworkMappingRevision,
+    map_label_artwork_to_zone,
 )
 from .label_metric_surface_binding import (
     LabelMetricSurfaceBinding,
@@ -169,13 +171,52 @@ def create_label_render_overlay_binding(
         raise LabelRenderOverlayError("label_render_overlay_host_resolution_failed") from error
     if verified != metric_binding:
         raise LabelRenderOverlayError("label_render_overlay_metric_binding_stale")
+    # O-1: the zone UV spans the host face in mm; a CONTAIN/COVER fit made in normalized
+    # units would render distorted on a non-square face, so require the exact host size.
+    host_size = (
+        metric_binding.host_width_mm_unverified,
+        metric_binding.host_height_mm_unverified,
+    )
+    if mapping.aspect_basis == "METRIC_ZONE_MM_UNVERIFIED":
+        if mapping.host_size_mm_unverified != host_size:
+            raise LabelRenderOverlayError("label_render_overlay_mapping_host_size_mismatch")
+    elif mapping.fit_mode != "STRETCH":
+        raise LabelRenderOverlayError("label_render_overlay_metric_aspect_mapping_required")
+    # The mapping also sets the rendered quad, so accept only the exact mapping this
+    # module's own fit produces; a hand-built record with a self-computed id is refused.
+    try:
+        expected_mapping = map_label_artwork_to_zone(
+            artwork,
+            placement,
+            fit_mode=mapping.fit_mode,
+            host_size_mm_unverified=mapping.host_size_mm_unverified,
+        )
+    except LabelArtworkError as error:
+        raise LabelRenderOverlayError("label_render_overlay_mapping_not_reproducible") from error
+    if expected_mapping != mapping:
+        raise LabelRenderOverlayError("label_render_overlay_mapping_not_reproducible")
     if cad_shape_geometry_digest(representation.shape_handle) != representation.geometry_sha256:
         raise LabelRenderOverlayError("label_render_overlay_brep_digest_mismatch")
+    # Draw only the artwork's target rect: CONTAIN letterboxes inside the zone, while
+    # COVER/STRETCH fill it exactly (so their geometry and ids are unchanged).
+    bounds = placement.boundary
+    zone_rect = (bounds.u_min, bounds.v_min, bounds.u_max, bounds.v_max)
+    drawn = tuple(float(value) for value in mapping.target_rect_normalized_uv)
+    if (
+        len(drawn) != 4
+        or drawn[0] < zone_rect[0] - 1e-9
+        or drawn[1] < zone_rect[1] - 1e-9
+        or drawn[2] > zone_rect[2] + 1e-9
+        or drawn[3] > zone_rect[3] + 1e-9
+        or drawn[2] <= drawn[0]
+        or drawn[3] <= drawn[1]
+    ):
+        raise LabelRenderOverlayError("label_render_overlay_drawn_rect_outside_zone")
     face = _resolve_face(representation, analysis, metric_binding.analysis_region_id)
     if metric_binding.mapping_mode == "PLANAR_RECTANGULAR":
-        geometry = _planar_geometry(face, placement)
+        geometry = _planar_geometry(face, placement, drawn)
     elif metric_binding.mapping_mode == "CYLINDRICAL_WRAP":
-        geometry = _cylindrical_geometry(face, placement, assignment)
+        geometry = _cylindrical_geometry(face, placement, assignment, drawn)
     else:
         raise LabelRenderOverlayError("label_render_overlay_mapping_unsupported")
     scale = 0.001 if model.coordinate_unit == "mm_unverified" else 1.0
@@ -192,6 +233,8 @@ def create_label_render_overlay_binding(
         placement.boundary.u_max,
         placement.boundary.v_max,
     ]
+    if drawn != zone_rect:
+        geometry["drawn_rect_normalized_uv"] = list(drawn)
     geometry["artwork_media_type"] = artwork.media_type
     geometry["overlay_id"] = (
         "label-render-overlay:"
@@ -293,7 +336,11 @@ def _resolve_face(
     return matches[0]
 
 
-def _planar_geometry(face: Any, placement: LabelZonePlacementRevision) -> dict[str, object]:
+def _planar_geometry(
+    face: Any,
+    placement: LabelZonePlacementRevision,
+    drawn: tuple[float, ...],
+) -> dict[str, object]:
     modules = _ocp_modules()
     surface = modules["adaptor"].BRepAdaptor_Surface(face, True)
     bounds = modules["tools"].BRepTools.UVBounds_s(face)
@@ -320,10 +367,10 @@ def _planar_geometry(face: Any, placement: LabelZonePlacementRevision) -> dict[s
     boundary = placement.boundary
     u_sign = 1.0 if zone.zone_kind.value == "front" else -1.0
     u_origin = min(xs) if u_sign > 0 else max(xs)
-    x0 = u_origin + u_sign * (max(xs) - min(xs)) * boundary.u_min
-    x1 = u_origin + u_sign * (max(xs) - min(xs)) * boundary.u_max
-    z0 = min(zs) + (max(zs) - min(zs)) * boundary.v_min
-    z1 = min(zs) + (max(zs) - min(zs)) * boundary.v_max
+    x0 = u_origin + u_sign * (max(xs) - min(xs)) * drawn[0]
+    x1 = u_origin + u_sign * (max(xs) - min(xs)) * drawn[2]
+    z0 = min(zs) + (max(zs) - min(zs)) * drawn[1]
+    z1 = min(zs) + (max(zs) - min(zs)) * drawn[3]
     y = sum(y_values) / len(y_values) + normal_y * RENDERER_ONLY_OFFSET_MM_UNVERIFIED
     corners = ((x0, y, z0), (x1, y, z0), (x1, y, z1), (x0, y, z1))
     return {
@@ -347,7 +394,10 @@ def _planar_geometry(face: Any, placement: LabelZonePlacementRevision) -> dict[s
 
 
 def _cylindrical_geometry(
-    face: Any, placement: LabelZonePlacementRevision, assignment: LabelArtworkAssignmentRevision
+    face: Any,
+    placement: LabelZonePlacementRevision,
+    assignment: LabelArtworkAssignmentRevision,
+    drawn: tuple[float, ...],
 ) -> dict[str, object]:
     modules = _ocp_modules()
     surface = modules["adaptor"].BRepAdaptor_Surface(face, True)
@@ -372,11 +422,11 @@ def _cylindrical_geometry(
     zone = placement.label_zone
     boundary = placement.boundary
     seam_u = float(assignment.wrap_seam_u_normalized or 0.0)
-    u0 = boundary.u_min - seam_u
-    u1 = boundary.u_max - seam_u
+    u0 = drawn[0] - seam_u
+    u1 = drawn[2] - seam_u
     theta0, theta1 = 2.0 * math.pi * u0, 2.0 * math.pi * u1
-    z0 = z_min + (z_max - z_min) * boundary.v_min
-    z1 = z_min + (z_max - z_min) * boundary.v_max
+    z0 = z_min + (z_max - z_min) * drawn[1]
+    z1 = z_min + (z_max - z_min) * drawn[3]
     return {
         "mode": "CYLINDRICAL_WRAP",
         "center_mm_unverified": [cx, cy, cz],

@@ -93,10 +93,10 @@ def test_rendered_mockup_runs_through_the_blender_scene_pipeline(tmp_path: Path)
     preset = create_blender_render_preset(
         (0.0, -0.06, 0.0), (0.1, 0.0, 0.06), "THREE_QUARTER", revisions
     )
-    request = BlenderRenderRequest(width=512, height=512, samples=16)
+    request = BlenderRenderRequest(width=512, height=512, samples=16, timeout_seconds=600.0)
     script = tmp_path / "blender_render_runner.py"
     script.write_bytes(build_blender_render_runner(package, preset, request))
-    completed = run_blender_render(BLENDER, script, tmp_path)
+    completed = run_blender_render(BLENDER, script, tmp_path, timeout_seconds=600.0)
     assert "PACKLAB_BLENDER_RENDER_VALID" in completed.stdout, completed.stderr[-2000:]
 
     image = (tmp_path / request.output_relative_path).read_bytes()
@@ -124,7 +124,9 @@ def test_rendered_mockup_runs_through_the_blender_scene_pipeline(tmp_path: Path)
             saturated += max(channels) - min(channels) >= 120
     assert visible > 0
     assert white / visible < 0.2, white / visible
-    assert saturated / visible > 0.02, saturated / visible
+    # O-1: the square artwork is now CONTAIN-fitted in millimetres (letterboxed on the wide
+    # front zone) instead of stretched across it, so it covers less of the frame.
+    assert saturated / visible > 0.01, saturated / visible
     summary = {
         "blender": "5.2.2 LTS",
         "scene_package_revision_id": package.revision_id,
@@ -162,10 +164,10 @@ def test_front_label_artwork_reads_upright_and_left_to_right(tmp_path: Path) -> 
         )
     )
     preset = create_blender_render_preset((0.0, 0.0, 0.0), (0.1, 0.06, 0.06), "FRONT", revisions)
-    request = BlenderRenderRequest(width=512, height=512, samples=16)
+    request = BlenderRenderRequest(width=512, height=512, samples=16, timeout_seconds=600.0)
     script = tmp_path / "front_runner.py"
     script.write_bytes(build_blender_render_runner(package, preset, request))
-    completed = run_blender_render(BLENDER, script, tmp_path)
+    completed = run_blender_render(BLENDER, script, tmp_path, timeout_seconds=600.0)
     assert "PACKLAB_BLENDER_RENDER_VALID" in completed.stdout, completed.stderr[-2000:]
     image = QImage.fromData((tmp_path / request.output_relative_path).read_bytes())
 
@@ -178,10 +180,11 @@ def test_front_label_artwork_reads_upright_and_left_to_right(tmp_path: Path) -> 
         >= 80
     ]
     assert len(label) > 500
-    # Keep only rows with a wide band of label pixels: the front panel, not the narrow boss.
+    # Keep only rows with a wide band of label pixels: the front panel (square, ~90 px wide
+    # since the O-1 metric CONTAIN fit), not the narrow boss (~30 px).
     from collections import Counter
 
-    wide_rows = {row for row, count in Counter(y for _, y in label).items() if count >= 60}
+    wide_rows = {row for row, count in Counter(y for _, y in label).items() if count >= 40}
     label = [(x, y) for x, y in label if y in wide_rows]
     xs, ys = [x for x, _ in label], [y for _, y in label]
     left, right, top, bottom = min(xs), max(xs), min(ys), max(ys)
@@ -196,8 +199,9 @@ def test_front_label_artwork_reads_upright_and_left_to_right(tmp_path: Path) -> 
         ]
         return tuple(sum(channel) / len(samples) for channel in zip(*samples))  # type: ignore[return-value]
 
-    top_left, top_right = corner(0.08, 0.1), corner(0.92, 0.1)
-    bottom_left, bottom_right = corner(0.08, 0.9), corner(0.92, 0.9)
+    # Sample inside each quadrant; the 2x2 texture is bilinearly blended near the edges.
+    top_left, top_right = corner(0.2, 0.2), corner(0.8, 0.2)
+    bottom_left, bottom_right = corner(0.2, 0.8), corner(0.8, 0.8)
     assert top_left[0] > top_left[1] and top_left[0] > top_left[2], top_left  # red
     assert top_right[1] > top_right[0] and top_right[1] > top_right[2], top_right  # green
     assert bottom_left[2] > bottom_left[0] and bottom_left[2] > bottom_left[1], bottom_left

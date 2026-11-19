@@ -13,6 +13,11 @@ from .cad_adapter import CadAdapterError, cad_shape_geometry_digest, sample_cad_
 from .cad_brep import CadBrepRepresentationRevision
 from .cad_label_surface_analysis import CadLabelSurfaceAnalysis, analyze_cad_label_surfaces
 from .design_model import DesignModelRevision
+from .label_artwork import (
+    LabelArtworkAssetRevision,
+    LabelArtworkMappingRevision,
+    map_label_artwork_to_zone,
+)
 from .label_zone import LabelZoneKind
 from .label_zone_placement import LabelZonePlacementRevision
 from .reconstruction import ScaleState
@@ -334,6 +339,32 @@ def create_label_metric_surface_binding(
             "No bleed or safe margin is included.",
             "No material shrink or manufacturing compensation is included.",
             "No mold, manufacturing, or regulatory authorization is implied.",
+        ),
+    )
+
+
+def map_label_artwork_to_metric_surface(
+    artwork: LabelArtworkAssetRevision,
+    placement: LabelZonePlacementRevision,
+    binding: LabelMetricSurfaceBinding,
+    *,
+    fit_mode: str = "CONTAIN",
+) -> LabelArtworkMappingRevision:
+    """Fit artwork using the bound host face size so CONTAIN/COVER keep aspect in mm."""
+    if (
+        not isinstance(binding, LabelMetricSurfaceBinding)
+        or not isinstance(placement, LabelZonePlacementRevision)
+        or binding.zone_id != placement.zone_id
+        or binding.placement_revision_id != placement.revision_id
+    ):
+        raise LabelMetricSurfaceBindingError("label_metric_binding_placement_mismatch")
+    return map_label_artwork_to_zone(
+        artwork,
+        placement,
+        fit_mode=fit_mode,
+        host_size_mm_unverified=(
+            binding.host_width_mm_unverified,
+            binding.host_height_mm_unverified,
         ),
     )
 

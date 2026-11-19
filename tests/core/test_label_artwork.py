@@ -462,6 +462,37 @@ def test_metric_mapping_draws_with_equal_millimetre_scale_and_exact_transform(ho
         assert (c1 + c3) / 2 == pytest.approx(artwork.height / 2)
 
 
+def test_metric_mapping_records_its_host_size_and_rejects_an_inconsistent_basis() -> None:
+    from dataclasses import replace
+
+    from packlab_core.label_artwork import LabelArtworkError, map_label_artwork_to_zone
+
+    artwork, placement = _square_artwork_and_wide_placement()
+    first = map_label_artwork_to_zone(
+        artwork, placement, fit_mode="CONTAIN", host_size_mm_unverified=(100.0, 40.0)
+    )
+    other = map_label_artwork_to_zone(
+        artwork, placement, fit_mode="CONTAIN", host_size_mm_unverified=(200.0, 80.0)
+    )
+    # Same normalized geometry, different host: the ids must differ (the size is identity).
+    assert first.target_rect_normalized_uv == pytest.approx(other.target_rect_normalized_uv)
+    assert first.revision_id != other.revision_id
+    assert first.host_size_mm_unverified == (100.0, 40.0)
+    assert first.as_dict()["host_size_mm_unverified"] == [100.0, 40.0]
+    default = map_label_artwork_to_zone(artwork, placement, fit_mode="CONTAIN")
+    assert default.host_size_mm_unverified is None
+    assert "host_size_mm_unverified" not in default.as_dict()
+    for forged in (
+        {"host_size_mm_unverified": None},
+        {"aspect_basis": "NORMALIZED_ZONE_UNITS"},
+        {"host_size_mm_unverified": (100.0, 41.0)},
+    ):
+        with pytest.raises(LabelArtworkError, match="mapping_invalid"):
+            replace(first, **forged)
+    with pytest.raises(LabelArtworkError, match="mapping_invalid"):
+        replace(default, host_size_mm_unverified=(1.0, 1.0))
+
+
 def _square_artwork_and_wide_placement():
     from packlab_core.label_artwork import ingest_label_artwork
 
@@ -470,3 +501,18 @@ def _square_artwork_and_wide_placement():
         b'viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>'
     )
     return ingest_label_artwork(square), _placement()
+
+
+def test_metric_host_size_must_be_a_tuple_of_real_floats() -> None:
+    # Review O-1 V03 P3-3.
+    from dataclasses import replace
+
+    from packlab_core.label_artwork import LabelArtworkError, map_label_artwork_to_zone
+
+    artwork, placement = _square_artwork_and_wide_placement()
+    mapping = map_label_artwork_to_zone(
+        artwork, placement, fit_mode="CONTAIN", host_size_mm_unverified=(100.0, 40.0)
+    )
+    for bad in ((True, True), [100.0, 40.0], ("100", "40"), 7):
+        with pytest.raises(LabelArtworkError, match="mapping_invalid"):
+            replace(mapping, host_size_mm_unverified=bad)

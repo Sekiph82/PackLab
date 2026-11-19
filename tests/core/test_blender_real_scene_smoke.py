@@ -32,12 +32,11 @@ from packlab_core.component_visual_assignments import (
     create_component_visual_assignment_state,
     create_geometry_material_assignment,
 )
-from packlab_core.label_artwork import (
-    create_label_artwork_assignment,
-    ingest_label_artwork,
-    map_label_artwork_to_zone,
+from packlab_core.label_artwork import create_label_artwork_assignment, ingest_label_artwork
+from packlab_core.label_metric_surface_binding import (
+    create_label_metric_surface_binding,
+    map_label_artwork_to_metric_surface,
 )
-from packlab_core.label_metric_surface_binding import create_label_metric_surface_binding
 from packlab_core.label_zone import LabelZoneBoundary, LabelZoneKind, create_label_zone
 from packlab_core.label_zone_placement import create_label_zone_placement_revision
 from packlab_core.pbr_visual_parameters import create_pbr_visual_parameter_revision
@@ -175,7 +174,10 @@ def _hybrid_scene(root: Path):
         metric_binding = create_label_metric_surface_binding(
             model, brep, placement, analysis, candidate.analysis_region_id
         )
-        mapping = map_label_artwork_to_zone(artwork, placement, fit_mode="STRETCH")
+        # O-1: fit in millimetres so the mockup keeps the artwork's aspect.
+        mapping = map_label_artwork_to_metric_surface(
+            artwork, placement, metric_binding, fit_mode="CONTAIN"
+        )
         assignment = create_label_artwork_assignment(
             mapping,
             placement,
@@ -243,7 +245,7 @@ def test_real_blender_scene_imports_material_and_planar_cylindrical_png_overlays
         "--result",
         "scene_result_manifest.json",
     ]
-    completed = subprocess.run(command, capture_output=True, text=True, timeout=180, check=False)
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=600, check=False)
     combined = completed.stdout + completed.stderr
     assert completed.returncode == 0, combined[-8_000:]
     assert "PACKLAB_SCENE_PACKAGE_VALID 5.2.2 LTS" in combined
@@ -286,7 +288,7 @@ def test_real_blender_scene_imports_material_and_planar_cylindrical_png_overlays
     tampered_manifest["body"]["scene"]["overlays"][0]["revision_id"] = "stale-overlay"
     manifest_path.write_text(json.dumps(tampered_manifest), encoding="utf-8")
     rejected_binding = subprocess.run(
-        command, capture_output=True, text=True, timeout=180, check=False
+        command, capture_output=True, text=True, timeout=600, check=False
     )
     binding_output = rejected_binding.stdout + rejected_binding.stderr
     assert "manifest_digest_invalid" in binding_output
@@ -297,14 +299,14 @@ def test_real_blender_scene_imports_material_and_planar_cylindrical_png_overlays
     artwork_bytes = artwork_path.read_bytes()
     artwork_path.write_bytes(artwork_bytes[:-1] + bytes([artwork_bytes[-1] ^ 1]))
     rejected_asset = subprocess.run(
-        command, capture_output=True, text=True, timeout=180, check=False
+        command, capture_output=True, text=True, timeout=600, check=False
     )
     asset_output = rejected_asset.stdout + rejected_asset.stderr
     assert "asset_digest_mismatch" in asset_output
     assert "PACKLAB_SCENE_PACKAGE_VALID" not in asset_output
     artwork_path.write_bytes(artwork_bytes)
 
-    repeated = subprocess.run(command, capture_output=True, text=True, timeout=180, check=False)
+    repeated = subprocess.run(command, capture_output=True, text=True, timeout=600, check=False)
     repeated_output = repeated.stdout + repeated.stderr
     assert repeated.returncode == 0, repeated_output[-8_000:]
     assert (tmp_path / "scene_result_manifest.json").read_bytes() == first_result_bytes

@@ -94,12 +94,30 @@ class LabelArtworkMappingRevision:
     translate_u: float
     translate_v: float
     aspect_basis: str = "NORMALIZED_ZONE_UNITS"
+    host_size_mm_unverified: tuple[float, float] | None = None
     contract: str = LABEL_ARTWORK_MAPPING_CONTRACT
 
     def __post_init__(self) -> None:
         if (
             self.contract != LABEL_ARTWORK_MAPPING_CONTRACT
             or self.aspect_basis not in _ASPECT_BASES
+            or (self.aspect_basis == "METRIC_ZONE_MM_UNVERIFIED")
+            != (self.host_size_mm_unverified is not None)
+            or (
+                self.host_size_mm_unverified is not None
+                and (
+                    not isinstance(self.host_size_mm_unverified, tuple)
+                    or len(self.host_size_mm_unverified) != 2
+                    or any(
+                        isinstance(value, bool) or not isinstance(value, float)
+                        for value in self.host_size_mm_unverified
+                    )
+                    or not all(
+                        math.isfinite(value) and value > 0.0
+                        for value in self.host_size_mm_unverified
+                    )
+                )
+            )
             or not _SHA256.fullmatch(self.source_artwork_sha256)
             or self.fit_mode not in {"CONTAIN", "COVER", "STRETCH"}
             or not self.source_artwork_revision_id
@@ -145,6 +163,11 @@ class LabelArtworkMappingRevision:
             **(
                 {"aspect_basis": self.aspect_basis}
                 if self.aspect_basis != "NORMALIZED_ZONE_UNITS"
+                else {}
+            ),
+            **(
+                {"host_size_mm_unverified": list(self.host_size_mm_unverified)}
+                if self.host_size_mm_unverified is not None
                 else {}
             ),
             "geometry_authority_created": False,
@@ -478,6 +501,7 @@ def map_label_artwork_to_zone(
     }
     if aspect_basis != "NORMALIZED_ZONE_UNITS":
         values["aspect_basis"] = aspect_basis  # default keeps historical revision ids stable
+        values["host_size_mm_unverified"] = [host_width, host_height]
     return LabelArtworkMappingRevision(
         "label-artwork-mapping:" + _digest(values),
         artwork.revision_id,
@@ -492,6 +516,7 @@ def map_label_artwork_to_zone(
         translate_u,
         translate_v,
         aspect_basis,
+        None if aspect_basis == "NORMALIZED_ZONE_UNITS" else (host_width, host_height),
     )
 
 
@@ -700,6 +725,11 @@ def _mapping_digest(mapping: LabelArtworkMappingRevision) -> str:
             **(
                 {"aspect_basis": mapping.aspect_basis}
                 if mapping.aspect_basis != "NORMALIZED_ZONE_UNITS"
+                else {}
+            ),
+            **(
+                {"host_size_mm_unverified": list(mapping.host_size_mm_unverified)}
+                if mapping.host_size_mm_unverified is not None
                 else {}
             ),
         }
