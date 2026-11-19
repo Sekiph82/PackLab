@@ -49,8 +49,8 @@ public protocol ProductionCameraLifecycle: Sendable {
 }
 
 /// MainActor-owned bridge to the real capture session.  QR ownership is not
-/// granted until the production camera has actually stopped and released its
-/// AVCapture/NextLevel session.
+/// granted until the production camera has actually stopped: the shared ARSession
+/// (SharedARSessionOwner) is paused before the QR scanner opens the camera.
 @MainActor
 public final class ProductionCaptureCameraLifecycle: @unchecked Sendable, ProductionCameraLifecycle {
     public static let shared = ProductionCaptureCameraLifecycle()

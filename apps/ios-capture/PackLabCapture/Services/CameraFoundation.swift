@@ -284,8 +284,8 @@ public protocol StillPhotoDriver: AnyObject {
     func cancelPhotoCapture()
 }
 
-/// The exact-once continuation boundary shared by the production NextLevel
-/// adapter and injected driver tests.  The driver is deliberately tiny: the
+/// The exact-once continuation boundary shared by delegate-based still-photo
+/// drivers and injected driver tests.  The driver is deliberately tiny: the
 /// Apple framework remains an outer adapter while this object owns admission,
 /// cancellation, duplicate callbacks and lens identity checks.
 @MainActor
@@ -775,8 +775,8 @@ public enum PhotoMetadataBinding {
     }
 }
 
-public enum CameraRecoveryState: String, Sendable, Codable, Equatable { case idle, starting, running, interrupted, restarting, denied, restricted, unavailable, failed }
-public enum CameraRecoveryEvent: Sendable, Equatable { case requestStart, started, permissionDenied, permissionRestricted, interrupted, interruptionEnded, runtimeError, restartSucceeded, restartFailed, stop }
+public enum CameraRecoveryState: String, Sendable, Codable, Equatable { case idle, starting, running, interrupted, restarting, blocked, denied, restricted, unavailable, failed }
+public enum CameraRecoveryEvent: Sendable, Equatable { case requestStart, started, permissionDenied, permissionRestricted, interrupted, interruptionEnded, interruptionTimedOut, retry, runtimeError, restartSucceeded, restartFailed, stop }
 
 public struct CameraRecoveryMachine: Sendable, Equatable {
     public private(set) var state: CameraRecoveryState = .idle
@@ -790,7 +790,12 @@ public struct CameraRecoveryMachine: Sendable, Equatable {
         case .permissionDenied: state = .denied
         case .permissionRestricted: state = .restricted
         case .interrupted: state = .interrupted
-        case .interruptionEnded: if state == .interrupted { state = .restarting }
+        // A late interruption-ended still recovers a blocked camera (call ended, app returned).
+        case .interruptionEnded: if state == .interrupted || state == .blocked { state = .restarting }
+        // Bounded wait: an interruption or restart that never completes (camera held by another
+        // client) stops showing "Reconnecting" and asks the operator to act.
+        case .interruptionTimedOut: if state == .interrupted || state == .restarting { state = .blocked }
+        case .retry: if state == .blocked || state == .failed { retryCount = 0; state = .restarting }
         case .runtimeError: retryCount += 1; state = retryCount < 3 ? .restarting : .failed
         case .restartFailed: retryCount += 1; state = retryCount < 3 ? .restarting : .failed
         case .stop: state = .idle
@@ -803,14 +808,15 @@ public struct CameraRecoveryMachine: Sendable, Equatable {
         case .denied: return "Camera permission is denied. Enable it in Settings."
         case .restricted: return "Camera access is restricted on this device."
         case .interrupted, .restarting: return "Camera interrupted. Reconnecting…"
-        case .failed: return "Camera could not restart. Return to the capture screen and try again."
+        case .blocked: return "The camera is still in use elsewhere (a call, FaceTime or another camera app). Close it or end the call; PackLab reconnects automatically, or tap Retry camera."
+        case .failed: return "Camera could not restart. Tap Retry camera, or return to the capture screen and try again."
         case .unavailable: return "Camera is unavailable."
         default: return ""
         }
     }
 }
 
-public enum CameraRecoverySignal: Sendable, Equatable { case permission(CameraAuthorizationStatus), interruption, interruptionEnded, runtimeError, started, restartSucceeded, restartFailed, stopped }
+public enum CameraRecoverySignal: Sendable, Equatable { case permission(CameraAuthorizationStatus), interruption, interruptionEnded, interruptionTimedOut, retry, runtimeError, started, restartSucceeded, restartFailed, stopped }
 
 public struct CameraRecoveryIntegrationModel: Sendable, Equatable {
     public private(set) var machine = CameraRecoveryMachine()
@@ -830,6 +836,8 @@ public struct CameraRecoveryIntegrationModel: Sendable, Equatable {
         case .interruption: inFlightCaptureID = nil; _ = machine.apply(.interrupted)
         case .runtimeError: inFlightCaptureID = nil; _ = machine.apply(.runtimeError)
         case .interruptionEnded: _ = machine.apply(.interruptionEnded)
+        case .interruptionTimedOut: _ = machine.apply(.interruptionTimedOut)
+        case .retry: _ = machine.apply(.retry)
         case .permission(.denied): _ = machine.apply(.permissionDenied)
         case .permission(.restricted): _ = machine.apply(.permissionRestricted)
         case .permission: _ = machine.apply(.requestStart)
@@ -854,8 +862,29 @@ public final class CameraRecoveryOwner {
     private var cancelInFlight: (() -> Void)?
     private var restartSession: (() -> Void)?
     public var onStateChange: ((CameraRecoveryState, String) -> Void)?
+    public typealias TimeoutScheduler = (TimeInterval, @escaping @MainActor @Sendable () -> Void) -> Void
+    public let interruptionTimeout: TimeInterval
+    private let scheduleTimeout: TimeoutScheduler
+    private var interruptionToken = 0
+    /// The signal that triggered the most recent `restartSession` call (`.retry` for an
+    /// operator Retry), so the restart can be logged with its real reason.
+    public private(set) var restartTrigger: CameraRecoverySignal?
 
-    public init() {}
+    /// `scheduler` is injected so tests can fire the bounded-interruption timeout
+    /// deterministically; production sleeps on the main actor.
+    public init(interruptionTimeout: TimeInterval, scheduler: @escaping TimeoutScheduler) {
+        self.interruptionTimeout = interruptionTimeout
+        self.scheduleTimeout = scheduler
+    }
+
+    public convenience init() {
+        self.init(interruptionTimeout: 6, scheduler: { seconds, action in
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+                action()
+            }
+        })
+    }
 
     @discardableResult
     public func addStateObserver(_ observer: @escaping (CameraRecoveryState, String) -> Void) -> UUID {
@@ -894,21 +923,44 @@ public final class CameraRecoveryOwner {
         case .permission(.denied): _ = machine.apply(.permissionDenied)
         case .permission(.restricted): _ = machine.apply(.permissionRestricted)
         case .permission: _ = machine.apply(.requestStart)
-        case .interruption: cancelInFlight?(); _ = machine.apply(.interrupted)
+        case .interruption: cancelInFlight?(); _ = machine.apply(.interrupted); scheduleCameraWaitTimeout()
         case .interruptionEnded:
-            if machine.apply(.interruptionEnded) == .restarting { restartSession?() }
+            if machine.apply(.interruptionEnded) == .restarting { restart(trigger: signal) }
+        case .interruptionTimedOut: _ = machine.apply(.interruptionTimedOut)
+        case .retry:
+            if machine.state == .blocked || machine.state == .failed, machine.apply(.retry) == .restarting { restart(trigger: signal) }
         case .runtimeError:
             cancelInFlight?()
-            if machine.apply(.runtimeError) == .restarting { restartSession?() }
+            if machine.apply(.runtimeError) == .restarting { restart(trigger: signal) }
         case .started: _ = machine.apply(.started)
         case .restartSucceeded: _ = machine.apply(.restartSucceeded)
-        case .restartFailed: _ = machine.apply(.restartFailed)
+        case .restartFailed: if machine.apply(.restartFailed) == .restarting { scheduleCameraWaitTimeout() }
         case .stopped: _ = machine.apply(.stop)
         }
         onStateChange?(machine.state, machine.userMessage)
         for observer in stateObservers.values { observer(machine.state, machine.userMessage) }
     }
 
+    /// Operator-initiated restart from `.blocked` or `.failed`; ignored in any other state.
+    public func retry() { handle(.retry) }
+
+    /// Every wait for the camera (an interruption or any restart attempt, including an
+    /// operator Retry) is bounded by the same token-guarded timeout.
+    private func restart(trigger: CameraRecoverySignal) {
+        restartTrigger = trigger
+        scheduleCameraWaitTimeout()
+        restartSession?()
+    }
+
+    private func scheduleCameraWaitTimeout() {
+        interruptionToken += 1
+        let token = interruptionToken
+        scheduleTimeout(interruptionTimeout) { [weak self] in
+            guard let self, self.interruptionToken == token,
+                  self.machine.state == .interrupted || self.machine.state == .restarting else { return }
+            self.handle(.interruptionTimedOut)
+        }
+    }
 }
 #endif
 
@@ -1323,257 +1375,12 @@ public enum AVFoundationWhiteBalanceAdapter {
 }
 #endif
 
-#if canImport(NextLevel) && canImport(UIKit)
-import NextLevel
-import UIKit
+// The production capture camera is owned by the shared ARSession (ARTrackingService.swift):
+// preview, tracking and high-resolution stills all come from that one client. A second
+// AVCaptureSession (the former NextLevel preview/photo path) was removed because iOS grants
+// the rear camera to one client at a time and the loser was interrupted indefinitely.
 #if canImport(AVFoundation)
 import AVFoundation
-#endif
-
-@MainActor
-private final class NextLevelStillPhotoDriver: NSObject, StillPhotoDriver, @preconcurrency NextLevelPhotoDelegate {
-    private let nextLevel: NextLevel
-    weak var delegate: (any StillPhotoDriverDelegate)?
-    var canCapturePhoto: Bool { nextLevel.canCapturePhoto }
-    init(nextLevel: NextLevel) {
-        self.nextLevel = nextLevel
-        super.init()
-    }
-    func capturePhoto() { nextLevel.photoConfiguration.isHighResolutionEnabled = true; nextLevel.photoDelegate = self; nextLevel.capturePhoto() }
-    func cancelPhotoCapture() { if nextLevel.photoDelegate === self { nextLevel.photoDelegate = nil }; nextLevel.stop() }
-
-    public func nextLevel(_ nextLevel: NextLevel, output: AVCapturePhotoOutput, willBeginCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, photoConfiguration: NextLevelPhotoConfiguration) {}
-    public func nextLevel(_ nextLevel: NextLevel, output: AVCapturePhotoOutput, willCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings, photoConfiguration: NextLevelPhotoConfiguration) {}
-    public func nextLevel(_ nextLevel: NextLevel, output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings, photoConfiguration: NextLevelPhotoConfiguration) {}
-
-    public func nextLevel(_ nextLevel: NextLevel, didFinishProcessingPhoto photo: AVCapturePhoto, photoDict: [String: Any], photoConfiguration: NextLevelPhotoConfiguration) {
-        guard let bytes = photo.fileDataRepresentation(), !bytes.isEmpty else {
-            delegate?.stillPhotoDriverDidFinishWithoutData(self)
-            return
-        }
-        let dimensions = photo.resolvedSettings.photoDimensions
-        guard dimensions.width > 0, dimensions.height > 0 else {
-            delegate?.stillPhotoDriverDidFinishWithoutData(self)
-            return
-        }
-        delegate?.stillPhotoDriver(self, didFinish: bytes, dimensions: CaptureDimensions(width: Int(dimensions.width), height: Int(dimensions.height)))
-    }
-
-    public func nextLevelDidCompletePhotoCapture(_ nextLevel: NextLevel) {
-        delegate?.stillPhotoDriverDidFinishWithoutData(self)
-    }
-}
-
-@MainActor
-public final class NextLevelStillCaptureAdapter: NSObject, TimestampedStillPhotoBackend {
-    private let driver: NextLevelStillPhotoDriver
-    private let core: StillPhotoAdapterCore
-    public let selectedLens: CameraLensIdentity
-    public init(nextLevel: NextLevel, selectedLens: CameraLensIdentity, activeLensIdentifier: @escaping () -> String?) {
-        let driver = NextLevelStillPhotoDriver(nextLevel: nextLevel)
-        self.driver = driver
-        self.selectedLens = selectedLens
-        self.core = StillPhotoAdapterCore(driver: driver, selectedLens: selectedLens, activeLensIdentifier: activeLensIdentifier)
-        super.init()
-    }
-    public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { try await core.requestOriginalStill() }
-    public func lastCaptureMonotonicTimestamp() async -> TimeInterval? { await core.lastCaptureMonotonicTimestamp() }
-    public func sessionDidStop() { core.cancel() }
-    #if canImport(AVFoundation)
-    public func bind(to recoveryOwner: CameraRecoveryOwner) { recoveryOwner.setInFlightCancellation { [weak self] in self?.sessionDidStop() } }
-    #endif
-}
-
-@MainActor
-public final class NextLevelStillCaptureComposition {
-    public let selectedLens: CameraLensIdentity
-    public let adapter: NextLevelStillCaptureAdapter
-    public init(nextLevel: NextLevel, candidates: [CameraDeviceDescriptor], activeLensIdentifier: @escaping () -> String?, recoveryOwner: CameraRecoveryOwner) throws {
-        guard case .selected(let lens) = CameraDeviceSelector.selectMainRearWide(from: candidates) else { throw CameraServiceError.unavailable }
-        selectedLens = lens
-        adapter = NextLevelStillCaptureAdapter(nextLevel: nextLevel, selectedLens: lens, activeLensIdentifier: activeLensIdentifier)
-        adapter.bind(to: recoveryOwner)
-    }
-}
-#endif
-
-#if canImport(UIKit) && canImport(AVFoundation) && canImport(NextLevel)
-import AVFoundation
-import NextLevel
-import UIKit
-
-@MainActor
-private final class NextLevelPreviewDriver: PreviewSessionDriver {
-    private let nextLevel: NextLevel
-    var attachHandler: (() -> Void)?
-    var detachHandler: (() -> Void)?
-    private(set) var isAttached = false
-    private(set) var isRunning = false
-
-    init(nextLevel: NextLevel) { self.nextLevel = nextLevel }
-    func attach() throws { attachHandler?(); isAttached = true }
-    func detach() { detachHandler?(); isAttached = false }
-    func start() throws { try nextLevel.start(); isRunning = true }
-    func stop() { nextLevel.stop(); isRunning = false }
-}
-
-/// UIKit owns the actual NextLevel preview layer; SwiftUI only presents it.
-@MainActor
-public final class NextLevelPreviewViewController: UIViewController {
-    private let nextLevel: NextLevel
-    private let statusLabel = UILabel()
-    private let previewDriver: NextLevelPreviewDriver
-    private lazy var bridge = PreviewBridgeController(driver: previewDriver)
-    private var previewLayer: AVCaptureVideoPreviewLayer?
-    private let recoveryOwner: CameraRecoveryOwner
-    private let onReady: ((NextLevel) -> Void)?
-    private var recoveryObserverToken: UUID?
-    private var didNotifyReady = false
-
-    public init(nextLevel: NextLevel = .shared, recoveryOwner: CameraRecoveryOwner, onReady: ((NextLevel) -> Void)? = nil) {
-        self.nextLevel = nextLevel
-        self.recoveryOwner = recoveryOwner
-        self.onReady = onReady
-        self.previewDriver = NextLevelPreviewDriver(nextLevel: nextLevel)
-        super.init(nibName: nil, bundle: nil)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { nil }
-
-    public override func viewDidLoad() {
-        super.viewDidLoad()
-        ProductionCaptureCameraLifecycle.shared.install(stop: { [weak self] in
-            guard let self else { return false }
-            self.nextLevel.stop()
-            self.recoveryOwner.handle(.stopped)
-            return true
-        }, restore: { [weak self] in
-            self?.startAuthorizedPreview()
-        })
-        view.backgroundColor = .black
-        statusLabel.textColor = .white
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.text = "Preparing camera…"
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(statusLabel)
-        NSLayoutConstraint.activate([
-            statusLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            statusLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            statusLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor)
-        ])
-        previewDriver.attachHandler = { [weak self] in self?.attachPreviewIfPossible() }
-        previewDriver.detachHandler = { [weak self] in self?.detachPreview() }
-        bridge.onStateChange = { [weak self] state in self?.show(state) }
-        recoveryObserverToken = recoveryOwner.addStateObserver { [weak self] state, message in
-            guard let self else { return }
-            if message.isEmpty { self.show(state == .running ? .running : .loading) }
-            else { self.show(.error(message)) }
-        }
-    }
-
-    public override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        if let session = previewLayer?.session { recoveryOwner.register(session: session) }
-        recoveryOwner.setSessionRestart { [weak self] in self?.restartAuthorizedPreview() }
-        let authorization = AVCaptureDevice.authorizationStatus(for: .video)
-        switch authorization {
-        case .denied:
-            recoveryOwner.handle(.permission(.denied))
-            bridge.appear(authorization: .denied)
-            return
-        case .restricted:
-            recoveryOwner.handle(.permission(.restricted))
-            bridge.appear(authorization: .restricted)
-            return
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                Task { @MainActor in
-                    guard let self else { return }
-                    if granted { self.recoveryOwner.handle(.permission(.authorized)); self.startAuthorizedPreview() }
-                    else { self.recoveryOwner.handle(.permission(.denied)); self.bridge.appear(authorization: .denied) }
-                }
-            }
-        case .authorized:
-            recoveryOwner.handle(.permission(.authorized))
-            startAuthorizedPreview()
-        @unknown default:
-            show(.unavailable)
-        }
-        if bridge.state == .running { notifyReadyIfNeeded() }
-    }
-
-    public override func viewDidDisappear(_ animated: Bool) {
-        super.viewDidDisappear(animated)
-        bridge.disappear()
-        recoveryOwner.handle(.stopped)
-        recoveryOwner.unregister()
-        ProductionCaptureCameraLifecycle.shared.clear()
-    }
-
-    deinit {
-        if let recoveryObserverToken {
-            let owner = recoveryOwner
-            Task { @MainActor in owner.removeStateObserver(recoveryObserverToken) }
-        }
-        nextLevel.stop()
-    }
-
-    private func attachPreviewIfPossible() {
-        guard previewLayer == nil else { return }
-        let layer = nextLevel.previewLayer
-        layer.videoGravity = .resizeAspectFill
-        layer.frame = view.bounds
-        view.layer.insertSublayer(layer, at: 0)
-        previewLayer = layer
-    }
-
-    private func detachPreview() {
-        previewLayer?.removeFromSuperlayer()
-        previewLayer = nil
-    }
-
-    private func startAuthorizedPreview() {
-        bridge.appear(authorization: .authorized)
-        if bridge.state == .running { if let session = previewLayer?.session { recoveryOwner.register(session: session) }; recoveryOwner.handle(.started); notifyReadyIfNeeded() }
-        else if case .error = bridge.state { recoveryOwner.handle(.runtimeError) }
-    }
-
-    private func notifyReadyIfNeeded() {
-        guard !didNotifyReady else { return }
-        didNotifyReady = true
-        onReady?(nextLevel)
-    }
-
-    private func restartAuthorizedPreview() {
-        let authorization = AVCaptureDevice.authorizationStatus(for: .video) == .authorized ? CameraAuthorizationStatus.authorized : .denied
-        bridge.restart(authorization: authorization)
-        if bridge.state == .running { recoveryOwner.handle(.restartSucceeded) } else { recoveryOwner.handle(.restartFailed) }
-    }
-
-    private func show(_ state: PreviewSurfaceState) {
-        switch state {
-        case .running:
-            statusLabel.isHidden = true
-        case .loading:
-            statusLabel.isHidden = false; statusLabel.text = "Preparing camera…"
-        case .denied: statusLabel.text = "Camera permission is denied. Enable it in Settings."
-        case .restricted: statusLabel.text = "Camera access is restricted on this device."
-        case .unavailable, .simulatorUnavailable: statusLabel.text = "Camera is unavailable on this device."
-        case .error(let message): statusLabel.text = message
-        }
-        if state != .running { statusLabel.isHidden = false }
-    }
-}
-
-public struct NextLevelPreviewBridge: UIViewControllerRepresentable {
-    private let recoveryOwner: CameraRecoveryOwner
-    private let onReady: ((NextLevel) -> Void)?
-    public init(recoveryOwner: CameraRecoveryOwner, onReady: ((NextLevel) -> Void)? = nil) { self.recoveryOwner = recoveryOwner; self.onReady = onReady }
-    public func makeUIViewController(context: Context) -> NextLevelPreviewViewController { NextLevelPreviewViewController(recoveryOwner: recoveryOwner, onReady: onReady) }
-    public func updateUIViewController(_ controller: NextLevelPreviewViewController, context: Context) {}
-}
 
 @available(iOS 17.0, *)
 public enum AVFoundationCameraDiscovery {
@@ -1614,7 +1421,4 @@ public enum AVFoundationCameraDiscovery {
         return CameraDeviceDescriptor(position: position, kind: kind, stableID: device.uniqueID)
     }
 }
-#else
-/// Simulator and non-Apple builds never manufacture image data.
-public struct NextLevelPreviewBridge: Sendable { public init() {} }
 #endif

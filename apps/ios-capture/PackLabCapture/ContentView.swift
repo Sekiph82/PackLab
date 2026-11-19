@@ -1,8 +1,10 @@
 import SwiftUI
 import Foundation
-#if canImport(AVFoundation) && canImport(NextLevel)
+#if canImport(AVFoundation)
 import AVFoundation
-import NextLevel
+#endif
+#if canImport(ARKit) && canImport(UIKit)
+import ARKit
 #endif
 
 @MainActor
@@ -67,6 +69,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var cameraControlComposition: AVFoundationCameraControlComposition?
     #endif
     private var isRunning = false
+    private var controlObservationTick = 0
 
     init() {
         automaticallyPoll = true
@@ -139,6 +142,9 @@ final class CaptureRuntimeViewModel: ObservableObject {
         motion = await motionService.latestRecord()
         epoch = await trackingService.localizationEpoch()
         resetDiagnostics = await trackingService.resetDiagnostics()
+        #if canImport(AVFoundation)
+        observeCameraControlsIfDue()
+        #endif
         await diagnostics.record(category: "tracking", code: raw.quality.rawValue, message: raw.message)
     }
 
@@ -461,7 +467,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         }
         let record = AcceptedCaptureRecord(captureID: captureID, sequence: state.nextSequence, sourceFilename: "\(captureID).heic", metadataFilename: "\(captureID).json")
         let poseReady = evaluation.input.pose?.aligned.status == "available" && evaluation.input.pose?.aligned.sample != nil
-        let cameraReady = captureAdmissionService != nil && cameraRecoveryState != .denied && cameraRecoveryState != .unavailable && cameraRecoveryState != .failed
+        let cameraReady = captureAdmissionService != nil && cameraRecoveryState != .denied && cameraRecoveryState != .unavailable && cameraRecoveryState != .failed && cameraRecoveryState != .blocked
         let result = try? await captureAndPersistManual(captureID: captureID, monotonicTimestamp: monotonicTimestamp, cameraReady: cameraReady, sessionReady: state.sessionID == layout.sessionID, sourceIntegrityReady: evaluation.input.frame.isAvailable, metadataReady: true, poseEvidenceReady: poseReady, record: record, metadata: Data(), state: stateData, store: ScanSessionStore(layout: layout), poses: PoseBuffer(), motion: MotionBuffer())
         return result ?? (manualCaptureDecision ?? ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: ["manual_capture_failed"]), nil)
     }
@@ -565,18 +571,72 @@ final class CaptureRuntimeViewModel: ObservableObject {
         scheduleM04ContextPersistence()
     }
 
-    #if canImport(AVFoundation) && canImport(NextLevel)
-    func bindProductionCamera(nextLevel: NextLevel, activeLensIdentifier: @escaping () -> String?) async throws {
-        let candidates = AVFoundationCameraDiscovery.rearCandidates()
-        guard case .selected(let lens) = CameraDeviceSelector.selectMainRearWide(from: candidates),
-              let device = AVFoundationCameraDiscovery.rearDevice(for: lens) else { throw CameraServiceError.unavailable }
-        let controls = AVFoundationCameraControlComposition(device: device, selectedLens: lens)
-        cameraControlComposition = controls
-        bindCameraControls(controls.controls)
-        let composition = try NextLevelStillCaptureComposition(nextLevel: nextLevel, candidates: candidates, activeLensIdentifier: activeLensIdentifier, recoveryOwner: cameraRecoveryOwner)
-        await bindStillCaptureBackend(composition.adapter)
+    #if canImport(ARKit) && canImport(UIKit) && canImport(AVFoundation)
+    /// Production camera composition: the shared ARSession is the only camera client.
+    /// Preview, tracking, still capture, recovery and pairing hand-off all go through it.
+    func bindProductionARCamera(owner: SharedARSessionOwner = .shared) async {
+        let recovery = cameraRecoveryOwner
+        owner.onCameraSignal = { [weak self] signal in
+            recovery.handle(signal)
+            if signal == .started || signal == .restartSucceeded { self?.configureARCameraControls() }
+        }
+        // An operator Retry is logged as user-requested; other restarts follow a runtime error.
+        recovery.setSessionRestart { [weak owner, weak recovery] in
+            owner?.restartCamera(reason: recovery?.restartTrigger == .retry ? .userRequested : .runtimeError)
+        }
+        // QR pairing opens its own AVCaptureSession, so it must pause the AR session first.
+        ProductionCaptureCameraLifecycle.shared.install(stop: { [weak owner] in
+            guard let owner else { return false }
+            owner.stop()
+            return true
+        }, restore: { [weak owner] in owner?.start() })
+        await bindStillCaptureBackend(ARSessionStillCaptureBackend(source: owner, recordPose: { [weak owner] sample in owner?.recordCapturePose(sample) }))
+    }
+
+    /// Focus/exposure/WB are reported from the AVCaptureDevice ARKit itself drives
+    /// (configurableCaptureDeviceForPrimaryCamera). They stay in continuous auto mode:
+    /// ARKit manages them for tracking, so no lock is applied while AR runs.
+    private func configureARCameraControls() {
+        #if !targetEnvironment(simulator)
+        guard let device = ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera,
+              case .selected(let lens) = CameraDeviceSelector.selectMainRearWide(from: AVFoundationCameraDiscovery.rearCandidates()),
+              lens.identifier == device.uniqueID else {
+            updateControlState(lens: nil, focus: .unavailable, exposure: .unavailable, whiteBalance: .unavailable, message: "ARKit does not expose this camera's controls; focus, exposure and white balance are automatic.")
+            return
+        }
+        if cameraControlComposition == nil {
+            let controls = AVFoundationCameraControlComposition(device: device, selectedLens: lens)
+            cameraControlComposition = controls
+            bindCameraControls(controls.controls)
+        }
+        guard let composition = cameraControlComposition else { return }
+        composition.configureFocus()
+        composition.configureExposure(bias: 0)
+        composition.configureWhiteBalance()
+        composition.controls.setMessage("ARKit-managed auto focus, exposure and white balance (locks not applied during AR tracking)")
+        #endif
     }
     #endif
+
+    #if canImport(AVFoundation)
+    /// Focus readout from the ARKit-driven device, polled about once a second (every 10th
+    /// 100 ms refresh) and published only when it changes. A failed read keeps the last
+    /// state and the ARKit-managed note instead of overwriting them. White balance has no
+    /// settled observable state (the adapter always reports stabilizing), so it is not polled.
+    private func observeCameraControlsIfDue() {
+        controlObservationTick += 1
+        guard controlObservationTick % 10 == 0, let composition = cameraControlComposition,
+              let focus = try? AVFoundationFocusAdapter.observe(driver: composition.coordinator.driver, coordinator: composition.coordinator),
+              focus != composition.controls.state.focus else { return }
+        composition.controls.setFocus(focus)
+    }
+    #endif
+
+    func retryCamera() {
+        #if canImport(AVFoundation)
+        cameraRecoveryOwner.retry()
+        #endif
+    }
 
     func captureAcceptedStill(captureID: String = UUID().uuidString) async -> StillCaptureResult {
         guard let service = captureAdmissionService else { return .rejected("capture_backend_unavailable") }
@@ -667,18 +727,8 @@ struct ContentView: View {
                     Text("No synthetic camera image is shown. Use an iPhone to preview a capture.")
                         .multilineTextAlignment(.center).foregroundStyle(.secondary)
                 }.padding()
-                #else
-                #if canImport(AVFoundation) && canImport(NextLevel)
-                NextLevelPreviewBridge(recoveryOwner: runtime.cameraRecoveryOwner) { nextLevel in
-                    Task {
-                        try? await runtime.bindProductionCamera(nextLevel: nextLevel, activeLensIdentifier: {
-                            AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)?.uniqueID
-                        })
-                    }
-                }.ignoresSafeArea()
-                #else
-                NextLevelPreviewBridge().ignoresSafeArea()
-                #endif
+                #elseif canImport(RealityKit) && canImport(ARKit)
+                SharedARCameraPreview().ignoresSafeArea()
                 #endif
 
                 VStack {
@@ -686,7 +736,19 @@ struct ContentView: View {
                         Text(healthMessage).font(.caption).multilineTextAlignment(.center)
                             .padding(8).background(.black.opacity(0.72), in: Capsule()).foregroundStyle(.white).padding(.top)
                     }
+                    if !runtime.cameraRecoveryMessage.isEmpty {
+                        VStack(spacing: 6) {
+                            Text(runtime.cameraRecoveryMessage).font(.caption).multilineTextAlignment(.center)
+                            if runtime.cameraRecoveryState == .blocked || runtime.cameraRecoveryState == .failed {
+                                Button("Retry camera") { runtime.retryCamera() }.buttonStyle(.borderedProminent)
+                            }
+                        }
+                        .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
+                    }
                     Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
+                    if let controlNote = runtime.controls.state.message {
+                        Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
+                    }
                     if let evaluation = runtime.m04Evaluation {
                         let motion = evaluation.quality.metrics.motionBlur
                         VStack(spacing: 2) {
@@ -775,13 +837,23 @@ struct ContentView: View {
             }
             .navigationTitle("PackLab")
             .toolbar {
+                // Only the primary action stays in the bar; the rest share one menu so the
+                // toolbar fits an iPhone portrait width.
                 ToolbarItem(placement: .topBarLeading) { Button("New Scan") { showNewScan = true } }
-                ToolbarItem(placement: .topBarLeading) { Button("History") { showHistory = true } }
-                ToolbarItem(placement: .topBarTrailing) { Button("Protocol") { showActiveProtocol = true } }
-                if ARPreviewFeatureFlag.isEnabled() {
-                    ToolbarItem(placement: .topBarTrailing) { Button("AR Preview") { showARPreview = true } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("History", systemImage: "clock") { showHistory = true }
+                        Button("Protocol", systemImage: "list.bullet.rectangle") { showActiveProtocol = true }
+                        if ARPreviewFeatureFlag.isEnabled() {
+                            Button("AR Preview", systemImage: "arkit") { showARPreview = true }
+                        }
+                        Button(showPoseDebug ? "Hide Debug" : "Show Debug", systemImage: "ladybug") { showPoseDebug.toggle() }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
+                    .accessibilityLabel("More actions")
+                    .accessibilityHint(ARPreviewFeatureFlag.isEnabled() ? "History, protocol, AR preview and debug overlay" : "History, protocol and debug overlay")
                 }
-                ToolbarItem(placement: .topBarTrailing) { Button(showPoseDebug ? "Hide Debug" : "Show Debug") { showPoseDebug.toggle() } }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission, readiness: runtime.newScanReadiness) { draft in
                 Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
@@ -801,7 +873,11 @@ struct ContentView: View {
                     CaptureProtocolView(preset: runtime.m04ActivePreset) { _ in showActiveProtocol = false }
                 }
             }
-            .task { await runtime.start(); let candidates = await SessionDiscoveryService(root: ContentView.sessionRoot).discover(); showResume = !candidates.isEmpty }
+            .task {
+                #if !targetEnvironment(simulator) && canImport(ARKit) && canImport(UIKit) && canImport(AVFoundation)
+                await runtime.bindProductionARCamera()
+                #endif
+                await runtime.start(); let candidates = await SessionDiscoveryService(root: ContentView.sessionRoot).discover(); showResume = !candidates.isEmpty }
         }
     }
 

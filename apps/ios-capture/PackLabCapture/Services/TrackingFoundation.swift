@@ -90,6 +90,61 @@ public struct PoseCaptureBinding: Codable, Sendable, Equatable {
     public init(captureID: String, captureTimestamp: TimeInterval, aligned: AlignedPose) { self.captureID = captureID; self.captureTimestamp = captureTimestamp; self.aligned = aligned }
 }
 
+/// One high-resolution still delivered by the shared ARSession. Bytes, pose and
+/// intrinsics all come from the same ARFrame: `timestamp` is that frame's ARKit
+/// timestamp (the PoseSample domain), `transform` its row-major camera-to-world
+/// matrix and `intrinsics` its row-major 3x3 matrix for the stored `dimensions`.
+public struct ARCapturedStillFrame: Sendable, Equatable {
+    public let bytes: Data
+    public let dimensions: CaptureDimensions
+    public let timestamp: TimeInterval
+    public let transform: [Double]
+    public let intrinsics: [Double]
+    public let tracking: TrackingQuality
+    public init(bytes: Data, dimensions: CaptureDimensions, timestamp: TimeInterval, transform: [Double], intrinsics: [Double], tracking: TrackingQuality) {
+        self.bytes = bytes; self.dimensions = dimensions; self.timestamp = timestamp; self.transform = transform; self.intrinsics = intrinsics; self.tracking = tracking
+    }
+}
+
+/// The single camera owner's still-capture seam (SharedARSessionOwner in production).
+@MainActor
+public protocol ARHighResolutionFrameSource: AnyObject {
+    func captureHighResolutionStill() async throws -> ARCapturedStillFrame
+}
+
+/// Still backend that never opens a second camera client: stills are requested
+/// from the AR session that already owns the camera for preview and tracking.
+/// The capture frame's own pose is recorded so the accepted still binds to it
+/// exactly (delta 0) instead of to a neighbouring preview frame.
+@MainActor
+public final class ARSessionStillCaptureBackend: TimestampedStillPhotoBackend {
+    private let source: any ARHighResolutionFrameSource
+    private let recordPose: (PoseSample) -> Void
+    private var inFlight = false
+    public private(set) var lastCapture: ARCapturedStillFrame?
+
+    public init(source: any ARHighResolutionFrameSource, recordPose: @escaping (PoseSample) -> Void) {
+        self.source = source
+        self.recordPose = recordPose
+    }
+
+    public func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) {
+        guard !inFlight else { throw CameraServiceError.failed("capture_in_flight") }
+        inFlight = true
+        defer { inFlight = false }
+        lastCapture = nil
+        let frame = try await source.captureHighResolutionStill()
+        guard !frame.bytes.isEmpty, frame.dimensions.width > 0, frame.dimensions.height > 0, frame.timestamp.isFinite else {
+            throw CameraServiceError.failed("photo_data_or_dimensions_missing")
+        }
+        recordPose(PoseSample(timestamp: frame.timestamp, transform: frame.transform, tracking: frame.tracking))
+        lastCapture = frame
+        return (bytes: frame.bytes, dimensions: frame.dimensions)
+    }
+
+    public func lastCaptureMonotonicTimestamp() async -> TimeInterval? { lastCapture?.timestamp }
+}
+
 public struct TimestampDomainBridge: Sendable, Equatable {
     public let wallReference: Date
     public let monotonicReference: TimeInterval

@@ -642,6 +642,68 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(machine.apply(.stop), .idle)
     }
 
+    func testCameraRecoveryBoundsAnUnendedInterruptionAndKeepsLateRecovery() {
+        var machine = CameraRecoveryMachine()
+        machine.apply(.requestStart); machine.apply(.started)
+        XCTAssertEqual(machine.apply(.interruptionTimedOut), .running)
+        XCTAssertEqual(machine.apply(.interrupted), .interrupted)
+        XCTAssertTrue(machine.userMessage.hasPrefix("Camera interrupted"))
+        XCTAssertEqual(machine.apply(.interruptionTimedOut), .blocked)
+        XCTAssertTrue(machine.userMessage.contains("Retry camera"))
+        XCTAssertFalse(machine.userMessage.contains("Reconnecting"))
+        XCTAssertEqual(machine.apply(.interruptionEnded), .restarting)
+        XCTAssertEqual(machine.apply(.restartSucceeded), .running)
+        XCTAssertEqual(machine.apply(.retry), .running)
+        machine.apply(.interrupted); machine.apply(.interruptionTimedOut)
+        XCTAssertEqual(machine.apply(.retry), .restarting)
+        XCTAssertEqual(machine.apply(.runtimeError), .restarting)
+        XCTAssertEqual(machine.apply(.runtimeError), .restarting)
+        XCTAssertEqual(machine.apply(.runtimeError), .failed)
+        XCTAssertEqual(machine.apply(.retry), .restarting)
+        XCTAssertEqual(machine.retryCount, 0)
+        var model = CameraRecoveryIntegrationModel()
+        model.signal(.started); model.signal(.interruption); model.signal(.interruptionTimedOut)
+        XCTAssertEqual(model.machine.state, .blocked)
+        XCTAssertFalse(model.beginCapture(id: "blocked"))
+        model.signal(.retry)
+        XCTAssertEqual(model.machine.state, .restarting)
+    }
+
+    @MainActor
+    func testARSessionStillBackendTakesBytesTimestampAndPoseFromTheSameFrame() async throws {
+        @MainActor final class Source: ARHighResolutionFrameSource {
+            var frames: [Result<ARCapturedStillFrame, Error>] = []
+            var calls = 0
+            func captureHighResolutionStill() async throws -> ARCapturedStillFrame { calls += 1; return try frames.removeFirst().get() }
+        }
+        let transform = CoordinateTransform.translation(x: 0.1, y: 0.2, z: -0.3).values
+        let intrinsics: [Double] = [1500, 0, 960, 0, 1500, 720, 0, 0, 1]
+        let dimensions = CaptureDimensions(width: 1920, height: 1440)
+        let frame = ARCapturedStillFrame(bytes: Data([1, 2, 3]), dimensions: dimensions, timestamp: 42.5, transform: transform, intrinsics: intrinsics, tracking: .normal)
+        let empty = ARCapturedStillFrame(bytes: Data(), dimensions: dimensions, timestamp: 43, transform: transform, intrinsics: intrinsics, tracking: .normal)
+        let source = Source()
+        source.frames = [.success(frame), .failure(CameraServiceError.failed("camera_interrupted")), .success(empty)]
+        var poses = PoseBuffer(capacity: 8)
+        let backend = ARSessionStillCaptureBackend(source: source, recordPose: { poses.append($0) })
+        let service = HighResolutionStillCaptureService(backend: backend)
+        guard case .accepted(let still) = await service.capture(captureID: "c1") else { return XCTFail("expected an accepted still") }
+        XCTAssertEqual(still.sourceBytes, Data([1, 2, 3]))
+        XCTAssertEqual(still.dimensions, dimensions)
+        XCTAssertEqual(still.monotonicTimestamp, 42.5)
+        XCTAssertEqual(backend.lastCapture?.intrinsics, intrinsics)
+        let binding = poses.bind(captureID: "c1", timestamp: 42.5)
+        XCTAssertEqual(binding.aligned.status, "available")
+        XCTAssertEqual(binding.aligned.delta, 0)
+        XCTAssertEqual(binding.aligned.sample?.transform, transform)
+        do { _ = try await backend.requestOriginalStill(); XCTFail("interrupted capture must fail") } catch { XCTAssertEqual(error as? CameraServiceError, .failed("camera_interrupted")) }
+        XCTAssertNil(backend.lastCapture)
+        let missingTimestamp = await backend.lastCaptureMonotonicTimestamp()
+        XCTAssertNil(missingTimestamp)
+        do { _ = try await backend.requestOriginalStill(); XCTFail("empty frame must fail") } catch { XCTAssertEqual(error as? CameraServiceError, .failed("photo_data_or_dimensions_missing")) }
+        XCTAssertEqual(poses.samples.count, 1)
+        XCTAssertEqual(source.calls, 3)
+    }
+
     func testCameraRecoveryCancelsOnlyInFlightAndPreservesAcceptedCaptures() {
         var model = CameraRecoveryIntegrationModel()
         XCTAssertTrue(model.beginCapture(id: "accepted"))
@@ -1628,9 +1690,100 @@ final class PackLabCaptureTests: XCTestCase {
         let driver = Driver(isSupported: true); let owner = SharedARSessionOwner(injectedDriver: driver); owner.start(); owner.start(); XCTAssertEqual(driver.runs.count, 1); owner.stop(); owner.stop(); XCTAssertEqual(driver.pauses, 1)
         owner.start(); owner.applyTrackingEvent(.limited(.insufficientFeatures)); owner.applyTrackingEvent(.limited(.insufficientFeatures)); owner.applyTrackingEvent(.limited(.insufficientFeatures)); XCTAssertEqual(owner.epochCoordinator.lastReason, .trackingDegraded); XCTAssertTrue(owner.resetDiagnostics.contains { $0.reason == .trackingDegraded && $0.state == .relocalizing }); owner.applyTrackingEvent(.normal); XCTAssertEqual(owner.epochCoordinator.state, .recovered); XCTAssertTrue(owner.resetDiagnostics.contains { $0.state == .recovered })
         owner.reset(reason: .userRequested); let resetEpoch = owner.epochCoordinator.epoch; owner.reset(reason: .runtimeError); XCTAssertEqual(owner.epochCoordinator.epoch, resetEpoch + 1); XCTAssertEqual(Array(driver.runs.suffix(2)), [true, true])
-        owner.sessionWasInterrupted(owner.session); XCTAssertEqual(owner.policy.snapshot.quality, .recovering); owner.sessionInterruptionEnded(owner.session); XCTAssertEqual(owner.policy.snapshot.quality, .recovering); owner.session(owner.session, didFailWithError: NSError(domain: "test", code: 1)); XCTAssertEqual(owner.epochCoordinator.state, .failed)
+        owner.sessionWasInterrupted(owner.session); XCTAssertEqual(owner.policy.snapshot.quality, .interrupted); owner.sessionInterruptionEnded(owner.session); XCTAssertEqual(owner.policy.snapshot.quality, .recovering); owner.session(owner.session, didFailWithError: NSError(domain: "test", code: 1)); XCTAssertEqual(owner.epochCoordinator.state, .failed)
         let service = ARKitTrackingService(owner: owner); let state = await service.state(); XCTAssertEqual(state, .limited)
     }
+
+    #if canImport(AVFoundation)
+    @MainActor
+    func testSharedAROwnerIsTheSingleCameraOwnerAndReportsFrameBackedCameraSignals() async {
+        @MainActor final class Driver: ARSessionLifecycleDriver {
+            let session = ARSession(); var runs: [Bool] = []; var pauses = 0
+            var isSupported: Bool { true }
+            func run(resetTracking: Bool) { runs.append(resetTracking) }
+            func pause() { pauses += 1 }
+        }
+        let driver = Driver(); let owner = SharedARSessionOwner(injectedDriver: driver)
+        let recovery = CameraRecoveryOwner(interruptionTimeout: 6, scheduler: { _, _ in })
+        var signals: [CameraRecoverySignal] = []; var restarts = 0
+        owner.onCameraSignal = { signal in signals.append(signal); recovery.handle(signal) }
+        recovery.setSessionRestart { restarts += 1; owner.restartCamera() }
+        owner.start()
+        XCTAssertEqual(signals, [])
+        owner.noteFrameDelivered(); owner.noteFrameDelivered()
+        XCTAssertEqual(signals, [.started]); XCTAssertEqual(recovery.machine.state, .running)
+        owner.sessionWasInterrupted(owner.session)
+        XCTAssertEqual(driver.runs, [false])
+        XCTAssertEqual(owner.policy.snapshot.quality, .interrupted)
+        XCTAssertEqual(recovery.machine.state, .interrupted)
+        owner.sessionInterruptionEnded(owner.session)
+        XCTAssertEqual(driver.runs, [false, false]); XCTAssertEqual(restarts, 1)
+        XCTAssertEqual(recovery.machine.state, .restarting)
+        owner.noteFrameDelivered()
+        XCTAssertEqual(recovery.machine.state, .running)
+        owner.session(owner.session, didFailWithError: NSError(domain: "test", code: 1))
+        XCTAssertEqual(restarts, 2); XCTAssertEqual(driver.runs, [false, false, true])
+        owner.noteFrameDelivered()
+        XCTAssertEqual(signals, [.started, .interruption, .interruptionEnded, .restartSucceeded, .runtimeError, .restartSucceeded])
+        XCTAssertEqual(recovery.machine.state, .running)
+        owner.stop()
+        XCTAssertEqual(driver.pauses, 1); XCTAssertEqual(signals.last, .stopped); XCTAssertEqual(recovery.machine.state, .idle)
+    }
+
+    @MainActor
+    func testSharedAROwnerStillCaptureUsesOneTokenGuardedContinuation() async {
+        @MainActor final class Driver: ARSessionLifecycleDriver {
+            let session = ARSession(); var completions: [@Sendable (ARFrame?, (any Error)?) -> Void] = []
+            var isSupported: Bool { true }
+            func run(resetTracking: Bool) {}
+            func pause() {}
+            func captureHighResolutionFrame(completion: @escaping @Sendable (ARFrame?, (any Error)?) -> Void) { completions.append(completion) }
+        }
+        let driver = Driver(); let owner = SharedARSessionOwner(injectedDriver: driver)
+        do { _ = try await owner.captureHighResolutionStill(); XCTFail("a stopped session must not capture") } catch { XCTAssertEqual(error as? CameraServiceError, .unavailable) }
+        XCTAssertTrue(driver.completions.isEmpty)
+        owner.start()
+        let first = Task { @MainActor in try await owner.captureHighResolutionStill() }
+        for _ in 0..<200 where driver.completions.isEmpty { await Task.yield() }
+        XCTAssertEqual(driver.completions.count, 1)
+        do { _ = try await owner.captureHighResolutionStill(); XCTFail("a second capture must not start") } catch { XCTAssertEqual(error as? CameraServiceError, .failed("capture_in_flight")) }
+        driver.completions[0](nil, NSError(domain: "arkit", code: 7))
+        do { _ = try await first.value; XCTFail("a missing frame must fail") } catch { XCTAssertEqual((error as NSError).code, 7) }
+        let second = Task { @MainActor in try await owner.captureHighResolutionStill() }
+        for _ in 0..<200 where driver.completions.count < 2 { await Task.yield() }
+        owner.sessionWasInterrupted(owner.session)
+        do { _ = try await second.value; XCTFail("an interruption must cancel the capture") } catch { XCTAssertEqual(error as? CameraServiceError, .failed("camera_interrupted")) }
+        owner.sessionInterruptionEnded(owner.session)
+        let third = Task { @MainActor in try await owner.captureHighResolutionStill() }
+        for _ in 0..<200 where driver.completions.count < 3 { await Task.yield() }
+        XCTAssertEqual(driver.completions.count, 3)
+        driver.completions[1](nil, NSError(domain: "arkit", code: 8))
+        for _ in 0..<20 { await Task.yield() }
+        driver.completions[2](nil, NSError(domain: "arkit", code: 9))
+        do { _ = try await third.value; XCTFail("the third capture must get its own completion") } catch { XCTAssertEqual((error as NSError).code, 9) }
+    }
+
+    @MainActor
+    func testSharedAROwnerMapsCameraUnauthorizedToPermissionDenied() {
+        @MainActor final class Driver: ARSessionLifecycleDriver {
+            let session = ARSession()
+            var isSupported: Bool { true }
+            func run(resetTracking: Bool) {}
+            func pause() {}
+        }
+        let owner = SharedARSessionOwner(injectedDriver: Driver())
+        let recovery = CameraRecoveryOwner(interruptionTimeout: 6, scheduler: { _, _ in })
+        var restarts = 0
+        owner.onCameraSignal = { recovery.handle($0) }
+        recovery.setSessionRestart { restarts += 1 }
+        owner.start(); owner.noteFrameDelivered()
+        owner.session(owner.session, didFailWithError: ARError(.cameraUnauthorized))
+        XCTAssertEqual(recovery.machine.state, .denied); XCTAssertEqual(restarts, 0)
+        owner.start(); owner.noteFrameDelivered()
+        owner.session(owner.session, didFailWithError: NSError(domain: "test", code: 1))
+        XCTAssertEqual(recovery.machine.state, .restarting); XCTAssertEqual(restarts, 1)
+    }
+    #endif
     #endif
 
     #if canImport(AVFoundation)
@@ -1640,6 +1793,61 @@ final class PackLabCaptureTests: XCTestCase {
         owner.onStateChange = { state, _ in observed.append(state) }; _ = owner.addStateObserver { state, _ in observed.append(state) }; owner.setInFlightCancellation { cancellations += 1 }; owner.setSessionRestart { restarts += 1 }; owner.register(session: session, notificationCenter: center); owner.register(session: session, notificationCenter: center); XCTAssertEqual(owner.registrationCount, 1)
         owner.handle(.permission(.denied)); XCTAssertEqual(owner.machine.state, .denied); owner.handle(.permission(.authorized)); owner.handle(.started); owner.handle(.interruption); XCTAssertEqual(cancellations, 1); owner.handle(.interruptionEnded); XCTAssertEqual(restarts, 1); owner.handle(.restartSucceeded); owner.handle(.runtimeError); XCTAssertEqual(cancellations, 2); XCTAssertEqual(restarts, 2); XCTAssertTrue(observed.contains(.running)); owner.unregister(notificationCenter: center)
         let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())); vm.cameraRecoveryOwner.handle(.permission(.denied)); XCTAssertEqual(vm.cameraRecoveryState, .denied)
+    }
+
+    @MainActor
+    func testCameraRecoveryOwnerTimesOutAnUnendedInterruptionAndRetriesOnRequest() {
+        var scheduled: [(TimeInterval, @MainActor @Sendable () -> Void)] = []
+        var restarts = 0; var messages: [String] = []
+        let owner = CameraRecoveryOwner(interruptionTimeout: 6, scheduler: { seconds, action in scheduled.append((seconds, action)) })
+        owner.onStateChange = { _, message in messages.append(message) }
+        owner.setSessionRestart { restarts += 1 }
+        owner.handle(.permission(.authorized)); owner.handle(.started)
+        owner.handle(.interruption)
+        XCTAssertEqual(scheduled.count, 1); XCTAssertEqual(scheduled.first?.0, 6)
+        XCTAssertEqual(owner.machine.state, .interrupted)
+        owner.handle(.interruptionEnded); XCTAssertEqual(restarts, 1)
+        XCTAssertEqual(scheduled.count, 2)
+        owner.handle(.restartSucceeded)
+        scheduled.removeFirst().1()
+        scheduled.removeFirst().1()
+        XCTAssertEqual(owner.machine.state, .running)
+        owner.handle(.interruption); owner.handle(.interruption)
+        scheduled.removeFirst().1()
+        XCTAssertEqual(owner.machine.state, .interrupted)
+        scheduled.removeFirst().1()
+        XCTAssertEqual(owner.machine.state, .blocked)
+        XCTAssertEqual(messages.last, owner.machine.userMessage)
+        XCTAssertTrue(owner.machine.userMessage.contains("Retry camera"))
+        owner.retry(); XCTAssertEqual(restarts, 2); XCTAssertEqual(owner.machine.state, .restarting)
+        owner.retry(); XCTAssertEqual(restarts, 2)
+        owner.handle(.restartSucceeded); XCTAssertEqual(owner.machine.state, .running)
+    }
+
+    @MainActor
+    func testCameraRecoveryOwnerBoundsEveryRestartWaitSoRetryCannotHang() {
+        var scheduled: [@MainActor @Sendable () -> Void] = []
+        var triggers: [CameraRecoverySignal] = []
+        let owner = CameraRecoveryOwner(interruptionTimeout: 6, scheduler: { _, action in scheduled.append(action) })
+        owner.setSessionRestart { if let trigger = owner.restartTrigger { triggers.append(trigger) } }
+        owner.handle(.started)
+        owner.handle(.runtimeError)
+        XCTAssertEqual(owner.machine.state, .restarting); XCTAssertEqual(scheduled.count, 1)
+        scheduled.removeFirst()()
+        XCTAssertEqual(owner.machine.state, .blocked)
+        owner.retry()
+        XCTAssertEqual(owner.machine.state, .restarting); XCTAssertEqual(scheduled.count, 1)
+        scheduled.removeFirst()()
+        XCTAssertEqual(owner.machine.state, .blocked)
+        XCTAssertTrue(owner.machine.userMessage.contains("Retry camera"))
+        owner.retry(); owner.handle(.restartSucceeded)
+        scheduled.removeFirst()()
+        XCTAssertEqual(owner.machine.state, .running)
+        XCTAssertEqual(triggers, [.runtimeError, .retry, .retry])
+        owner.handle(.restartFailed)
+        XCTAssertEqual(owner.machine.state, .restarting); XCTAssertEqual(scheduled.count, 1)
+        scheduled.removeFirst()()
+        XCTAssertEqual(owner.machine.state, .blocked)
     }
 
     @MainActor

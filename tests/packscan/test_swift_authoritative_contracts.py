@@ -14,19 +14,25 @@ def _read(path: Path) -> str:
 
 
 def test_swift_photo_wire_constants_follow_authoritative_schema(repo_root: Path) -> None:
-    schema = json.loads((repo_root / "schemas/packscan/photo-metadata.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads(
+        (repo_root / "schemas/packscan/photo-metadata.schema.json").read_text(encoding="utf-8")
+    )
     swift = _read(repo_root / "apps/ios-capture/PackLabCapture/Services/CameraFoundation.swift")
     assert re.search(r'case available, unavailable, notRecorded = "not_recorded", estimated', swift)
-    assert 'public init(photos: [PackScanPhotoMetadataWire]) { self.schemaVersion = "1.0.0"' in swift
+    assert (
+        'public init(photos: [PackScanPhotoMetadataWire]) { self.schemaVersion = "1.0.0"' in swift
+    )
     statuses = schema["$defs"]["source_status"]["enum"]
     for status in statuses:
         assert status in swift
-    assert 'case iso' in swift or '"iso"' in swift
-    assert 'metadata.iso.status == .available || metadata.iso.status == .estimated' in swift
+    assert "case iso" in swift or '"iso"' in swift
+    assert "metadata.iso.status == .available || metadata.iso.status == .estimated" in swift
 
 
 def test_swift_pose_constants_are_derived_from_live_pose_schema(repo_root: Path) -> None:
-    schema = json.loads((repo_root / "schemas/packscan/pose.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads(
+        (repo_root / "schemas/packscan/pose.schema.json").read_text(encoding="utf-8")
+    )
     properties = schema["properties"]
     swift = _read(repo_root / "apps/ios-capture/PackLabCapture/Services/TrackingFoundation.swift")
     for key in ("coordinate_convention", "basis_conversion", "translation_unit"):
@@ -35,11 +41,17 @@ def test_swift_pose_constants_are_derived_from_live_pose_schema(repo_root: Path)
     assert "arkit_to_packscan_identity_shared_right_handed_basis_v1" in swift
 
 
-def test_encoded_photo_wire_json_matches_authoritative_schema_and_rejects_forbidden_values(repo_root: Path) -> None:
-    schema = json.loads((repo_root / "schemas/packscan/photo-metadata.schema.json").read_text(encoding="utf-8"))
+def test_encoded_photo_wire_json_matches_authoritative_schema_and_rejects_forbidden_values(
+    repo_root: Path,
+) -> None:
+    schema = json.loads(
+        (repo_root / "schemas/packscan/photo-metadata.schema.json").read_text(encoding="utf-8")
+    )
     validator = Draft202012Validator(schema)
 
-    def measurement(status: str, value: float | int | None, unit: str | None, source: str | None) -> dict:
+    def measurement(
+        status: str, value: float | int | None, unit: str | None, source: str | None
+    ) -> dict:
         result = {"status": status}
         if value is not None:
             result["value"] = value
@@ -49,21 +61,32 @@ def test_encoded_photo_wire_json_matches_authoritative_schema_and_rejects_forbid
             result["source"] = source
         return result
 
-    def encoded(status: str, value: float | int | None, unit: str | None, source: str | None) -> dict:
+    def encoded(
+        status: str, value: float | int | None, unit: str | None, source: str | None
+    ) -> dict:
         return {
             "schema_version": "1.0.0",
-            "photos": [{
-                "photo_id": "p0",
-                "image_path": "images/p0.heic",
-                "sequence": 0,
-                "original_filename": "p0.heic",
-                "pixel_dimensions": {"width": 2, "height": 3},
-                "orientation": {"value": "landscape", "source": "unknown"},
-                "focal_length_mm": measurement(status, value, unit, source),
-                "exposure": measurement(status, value, "s", source),
-                "iso": measurement(status, int(value) if value is not None else None, "iso" if value is not None else None, source),
-                "white_balance_kelvin": measurement(status, (1000 if value is not None else None), "K", source),
-            }],
+            "photos": [
+                {
+                    "photo_id": "p0",
+                    "image_path": "images/p0.heic",
+                    "sequence": 0,
+                    "original_filename": "p0.heic",
+                    "pixel_dimensions": {"width": 2, "height": 3},
+                    "orientation": {"value": "landscape", "source": "unknown"},
+                    "focal_length_mm": measurement(status, value, unit, source),
+                    "exposure": measurement(status, value, "s", source),
+                    "iso": measurement(
+                        status,
+                        int(value) if value is not None else None,
+                        "iso" if value is not None else None,
+                        source,
+                    ),
+                    "white_balance_kelvin": measurement(
+                        status, (1000 if value is not None else None), "K", source
+                    ),
+                }
+            ],
         }
 
     for status, value, unit, source in (
@@ -91,15 +114,43 @@ def test_encoded_photo_wire_json_matches_authoritative_schema_and_rejects_forbid
     assert list(validator.iter_errors({"schema_version": "1.0.0", "photos": [app_only]}))
 
 
-def test_camera_controls_and_recovery_share_the_production_runtime_composition(repo_root: Path) -> None:
+def test_camera_controls_and_recovery_share_the_production_runtime_composition(
+    repo_root: Path,
+) -> None:
     content = _read(repo_root / "apps/ios-capture/PackLabCapture/ContentView.swift")
     camera = _read(repo_root / "apps/ios-capture/PackLabCapture/Services/CameraFoundation.swift")
-    assert "let controls = AVFoundationCameraControlComposition(device: device, selectedLens: lens)" in content
+    assert (
+        "let controls = AVFoundationCameraControlComposition(device: device, selectedLens: lens)"
+        in content
+    )
     assert "bindCameraControls(controls.controls)" in content
     assert "captureAndPersistAcceptedPhoto" in content
-    assert "NextLevelPreviewBridge(recoveryOwner: runtime.cameraRecoveryOwner)" in content
-    assert "recoveryOwner: cameraRecoveryOwner" in content
-    assert "recoveryOwner.addStateObserver" in camera
+    # Single camera owner: the shared ARSession drives preview, tracking and stills.
+    tracking = _read(repo_root / "apps/ios-capture/PackLabCapture/Services/ARTrackingService.swift")
+    assert "SharedARCameraPreview()" in content
+    assert "await runtime.bindProductionARCamera()" in content
+    assert "let recovery = cameraRecoveryOwner" in content
+    assert "recovery.handle(signal)" in content
+    assert "recovery.setSessionRestart" in content
+    assert "ARSessionStillCaptureBackend(source: owner" in content
+    assert "session.captureHighResolutionFrame" in tracking
+    assert "recommendedVideoFormatForHighResolutionFrameCapturing" in tracking
+    # No second camera client anywhere in the app; only the QR pairing scanner (which
+    # pauses the shared ARSession first) may open its own AVCaptureSession.
+    app_root = repo_root / "apps/ios-capture/PackLabCapture"
+    swift_files = sorted(app_root.rglob("*.swift"))
+    assert swift_files
+    for path in swift_files:
+        if path.name == "PairingProtocol.swift":
+            continue
+        source = _read(path)
+        assert "import NextLevel" not in source, path
+        assert "AVCaptureSession(" not in source, path
+    restart_timeout = (
+        "case .interruptionTimedOut: if state == .interrupted || state == .restarting "
+        "{ state = .blocked }"
+    )
+    assert restart_timeout in camera
     assert "public protocol CameraDeviceControlDriver" in camera
     assert "public init(driver: any CameraDeviceControlDriver" in camera
     assert "AVFoundationCameraDeviceControlDriver(device: device)" in camera
