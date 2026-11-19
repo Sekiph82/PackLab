@@ -69,6 +69,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var cameraControlComposition: AVFoundationCameraControlComposition?
     #endif
     private var isRunning = false
+    private var controlObservationTick = 0
 
     init() {
         automaticallyPoll = true
@@ -142,8 +143,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         epoch = await trackingService.localizationEpoch()
         resetDiagnostics = await trackingService.resetDiagnostics()
         #if canImport(AVFoundation)
-        cameraControlComposition?.observeFocus()
-        cameraControlComposition?.observeWhiteBalance()
+        observeCameraControlsIfDue()
         #endif
         await diagnostics.record(category: "tracking", code: raw.quality.rawValue, message: raw.message)
     }
@@ -580,7 +580,10 @@ final class CaptureRuntimeViewModel: ObservableObject {
             recovery.handle(signal)
             if signal == .started || signal == .restartSucceeded { self?.configureARCameraControls() }
         }
-        recovery.setSessionRestart { [weak owner] in owner?.restartCamera() }
+        // An operator Retry is logged as user-requested; other restarts follow a runtime error.
+        recovery.setSessionRestart { [weak owner, weak recovery] in
+            owner?.restartCamera(reason: recovery?.restartTrigger == .retry ? .userRequested : .runtimeError)
+        }
         // QR pairing opens its own AVCaptureSession, so it must pause the AR session first.
         ProductionCaptureCameraLifecycle.shared.install(stop: { [weak owner] in
             guard let owner else { return false }
@@ -612,6 +615,20 @@ final class CaptureRuntimeViewModel: ObservableObject {
         composition.configureWhiteBalance()
         composition.controls.setMessage("ARKit-managed auto focus, exposure and white balance (locks not applied during AR tracking)")
         #endif
+    }
+    #endif
+
+    #if canImport(AVFoundation)
+    /// Focus readout from the ARKit-driven device, polled about once a second (every 10th
+    /// 100 ms refresh) and published only when it changes. A failed read keeps the last
+    /// state and the ARKit-managed note instead of overwriting them. White balance has no
+    /// settled observable state (the adapter always reports stabilizing), so it is not polled.
+    private func observeCameraControlsIfDue() {
+        controlObservationTick += 1
+        guard controlObservationTick % 10 == 0, let composition = cameraControlComposition,
+              let focus = try? AVFoundationFocusAdapter.observe(driver: composition.coordinator.driver, coordinator: composition.coordinator),
+              focus != composition.controls.state.focus else { return }
+        composition.controls.setFocus(focus)
     }
     #endif
 
@@ -835,7 +852,7 @@ struct ContentView: View {
                         Label("More", systemImage: "ellipsis.circle")
                     }
                     .accessibilityLabel("More actions")
-                    .accessibilityHint("History, protocol, AR preview and debug overlay")
+                    .accessibilityHint(ARPreviewFeatureFlag.isEnabled() ? "History, protocol, AR preview and debug overlay" : "History, protocol and debug overlay")
                 }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission, readiness: runtime.newScanReadiness) { draft in

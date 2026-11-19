@@ -20,7 +20,14 @@ The shared `ARSession` (`SharedARSessionOwner`) is now the only camera client on
 - Tracking: the same session.
 - Stills: `ARSession.captureHighResolutionFrame`, using `recommendedVideoFormatForHighResolutionFrameCapturing`.
 
-Each still is the frame's `capturedImage` encoded as HEIC by the app. The image keeps stored sensor orientation (EXIF orientation 1) and carries ARKit's `exifData`. The still's timestamp, camera-to-world pose and intrinsics come from that same `ARFrame`.
+Each still is the frame's `capturedImage`, encoded as HEIC by the app on a background queue. The image keeps stored sensor orientation (EXIF orientation 1) and carries ARKit's `exifData`.
+
+The still's monotonic timestamp comes from that same `ARFrame`. The app also reads the frame's camera-to-world pose and intrinsics, but holds them only in memory:
+
+- The pose is added to the in-memory pose buffer.
+- The intrinsics stay on the still backend.
+
+Neither is persisted yet. No `.packscan` field, schema or authority changed, and persisted capture records do not yet carry a frame-exact pose or intrinsics. The manual capture path still binds pose as it did before.
 
 Focus, exposure and white-balance readings still use `source: device_api`. They now come from `ARWorldTrackingConfiguration.configurableCaptureDeviceForPrimaryCamera`, which is the device ARKit drives. Those controls stay in continuous auto mode during AR tracking, and the app labels them as ARKit-managed.
 

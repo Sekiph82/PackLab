@@ -27,7 +27,7 @@ public protocol CameraService: Sendable {
     func state() async -> CameraServiceState
 }
 
-/// Foundation-only seam for a future device or NextLevel-backed camera adapter.
+/// Foundation-only seam; the device camera is owned by the shared ARSession (SharedARSessionOwner).
 public actor FoundationCameraService: CameraService {
     private var currentState: CameraServiceState = .idle
     private let authorization: CameraAuthorizationStatus

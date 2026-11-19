@@ -792,9 +792,9 @@ public struct CameraRecoveryMachine: Sendable, Equatable {
         case .interrupted: state = .interrupted
         // A late interruption-ended still recovers a blocked camera (call ended, app returned).
         case .interruptionEnded: if state == .interrupted || state == .blocked { state = .restarting }
-        // Bounded wait: an interruption that never ends (camera held by another client) stops
-        // showing "Reconnecting" and asks the operator to act.
-        case .interruptionTimedOut: if state == .interrupted { state = .blocked }
+        // Bounded wait: an interruption or restart that never completes (camera held by another
+        // client) stops showing "Reconnecting" and asks the operator to act.
+        case .interruptionTimedOut: if state == .interrupted || state == .restarting { state = .blocked }
         case .retry: if state == .blocked || state == .failed { retryCount = 0; state = .restarting }
         case .runtimeError: retryCount += 1; state = retryCount < 3 ? .restarting : .failed
         case .restartFailed: retryCount += 1; state = retryCount < 3 ? .restarting : .failed
@@ -866,6 +866,9 @@ public final class CameraRecoveryOwner {
     public let interruptionTimeout: TimeInterval
     private let scheduleTimeout: TimeoutScheduler
     private var interruptionToken = 0
+    /// The signal that triggered the most recent `restartSession` call (`.retry` for an
+    /// operator Retry), so the restart can be logged with its real reason.
+    public private(set) var restartTrigger: CameraRecoverySignal?
 
     /// `scheduler` is injected so tests can fire the bounded-interruption timeout
     /// deterministically; production sleeps on the main actor.
@@ -920,18 +923,18 @@ public final class CameraRecoveryOwner {
         case .permission(.denied): _ = machine.apply(.permissionDenied)
         case .permission(.restricted): _ = machine.apply(.permissionRestricted)
         case .permission: _ = machine.apply(.requestStart)
-        case .interruption: cancelInFlight?(); _ = machine.apply(.interrupted); scheduleInterruptionTimeout()
+        case .interruption: cancelInFlight?(); _ = machine.apply(.interrupted); scheduleCameraWaitTimeout()
         case .interruptionEnded:
-            if machine.apply(.interruptionEnded) == .restarting { restartSession?() }
+            if machine.apply(.interruptionEnded) == .restarting { restart(trigger: signal) }
         case .interruptionTimedOut: _ = machine.apply(.interruptionTimedOut)
         case .retry:
-            if machine.state == .blocked || machine.state == .failed, machine.apply(.retry) == .restarting { restartSession?() }
+            if machine.state == .blocked || machine.state == .failed, machine.apply(.retry) == .restarting { restart(trigger: signal) }
         case .runtimeError:
             cancelInFlight?()
-            if machine.apply(.runtimeError) == .restarting { restartSession?() }
+            if machine.apply(.runtimeError) == .restarting { restart(trigger: signal) }
         case .started: _ = machine.apply(.started)
         case .restartSucceeded: _ = machine.apply(.restartSucceeded)
-        case .restartFailed: _ = machine.apply(.restartFailed)
+        case .restartFailed: if machine.apply(.restartFailed) == .restarting { scheduleCameraWaitTimeout() }
         case .stopped: _ = machine.apply(.stop)
         }
         onStateChange?(machine.state, machine.userMessage)
@@ -941,11 +944,20 @@ public final class CameraRecoveryOwner {
     /// Operator-initiated restart from `.blocked` or `.failed`; ignored in any other state.
     public func retry() { handle(.retry) }
 
-    private func scheduleInterruptionTimeout() {
+    /// Every wait for the camera (an interruption or any restart attempt, including an
+    /// operator Retry) is bounded by the same token-guarded timeout.
+    private func restart(trigger: CameraRecoverySignal) {
+        restartTrigger = trigger
+        scheduleCameraWaitTimeout()
+        restartSession?()
+    }
+
+    private func scheduleCameraWaitTimeout() {
         interruptionToken += 1
         let token = interruptionToken
         scheduleTimeout(interruptionTimeout) { [weak self] in
-            guard let self, self.interruptionToken == token, self.machine.state == .interrupted else { return }
+            guard let self, self.interruptionToken == token,
+                  self.machine.state == .interrupted || self.machine.state == .restarting else { return }
             self.handle(.interruptionTimedOut)
         }
     }

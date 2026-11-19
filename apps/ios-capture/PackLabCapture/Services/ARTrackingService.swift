@@ -73,6 +73,19 @@ public protocol ARSessionLifecycleDriver: AnyObject {
     var isSupported: Bool { get }
     func run(resetTracking: Bool)
     func pause()
+    /// Still-capture seam. The default asks the real session; injected drivers override it
+    /// to deliver ARKit's completion deterministically in tests.
+    func captureHighResolutionFrame(completion: @escaping @Sendable (ARFrame?, (any Error)?) -> Void)
+}
+
+public extension ARSessionLifecycleDriver {
+    func captureHighResolutionFrame(completion: @escaping @Sendable (ARFrame?, (any Error)?) -> Void) {
+        #if targetEnvironment(simulator)
+        completion(nil, CameraServiceError.unavailable)
+        #else
+        session.captureHighResolutionFrame(completion: completion)
+        #endif
+    }
 }
 
 @MainActor
@@ -227,21 +240,18 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
     public func captureHighResolutionStill() async throws -> ARCapturedStillFrame {
         guard isStarted else { throw CameraServiceError.unavailable }
         guard stillContinuation == nil else { throw CameraServiceError.failed("capture_in_flight") }
-        #if targetEnvironment(simulator)
-        throw CameraServiceError.unavailable
-        #else
         stillToken += 1
         let token = stillToken
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ARCapturedStillFrame, Error>) in
             stillContinuation = continuation
-            session.captureHighResolutionFrame { @Sendable frame, error in
-                // ponytail: HEIC encode runs on ARKit's completion queue (main by default);
-                // move it to a background queue if the device run shows a visible UI hitch.
-                let result = SharedARSessionOwner.encodeStill(frame: frame, error: error)
-                Task { @MainActor [weak self] in self?.finishStill(token: token, result) }
+            driver.captureHighResolutionFrame { frame, error in
+                // The encode runs on a private serial queue, never on ARKit's completion
+                // (main) queue; only the Sendable result hops back to the main actor.
+                SharedARSessionOwner.encodeStill(frame: frame, error: error) { result in
+                    Task { @MainActor [weak self] in self?.finishStill(token: token, result) }
+                }
             }
         }
-        #endif
     }
 
     public func cancelStillCapture(reason: String) {
@@ -254,17 +264,51 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
         continuation.resume(with: result)
     }
 
-    #if !targetEnvironment(simulator)
-    /// Encodes the frame's captured image as HEIC in stored sensor orientation (EXIF
-    /// orientation 1, no rotation claim) with ARKit's EXIF dictionary, and copies the
-    /// pose and intrinsics of that same frame. Nothing is synthesized.
-    nonisolated static func encodeStill(frame: ARFrame?, error: Error?) -> Result<ARCapturedStillFrame, Error> {
-        guard let frame else { return .failure(error ?? CameraServiceError.failed("high_resolution_frame_missing")) }
+    /// A missing frame fails with ARKit's error; a delivered frame is encoded off the main
+    /// thread by `ARStillEncoder`.
+    nonisolated static func encodeStill(frame: ARFrame?, error: (any Error)?, completion: @escaping @Sendable (Result<ARCapturedStillFrame, any Error>) -> Void) {
+        guard let frame else {
+            completion(.failure(error ?? CameraServiceError.failed("high_resolution_frame_missing")))
+            return
+        }
+        #if targetEnvironment(simulator)
+        _ = frame
+        completion(.failure(CameraServiceError.unavailable))
+        #else
+        ARStillEncoder.shared.encode(frame, completion: completion)
+        #endif
+    }
+
+    nonisolated static func rowMajor(_ m: simd_float4x4) -> [Double] {
+        [m.columns.0.x, m.columns.1.x, m.columns.2.x, m.columns.3.x, m.columns.0.y, m.columns.1.y, m.columns.2.y, m.columns.3.y, m.columns.0.z, m.columns.1.z, m.columns.2.z, m.columns.3.z, m.columns.0.w, m.columns.1.w, m.columns.2.w, m.columns.3.w].map { Double($0) }
+    }
+}
+
+#if !targetEnvironment(simulator)
+/// Encodes high-resolution stills on a private serial queue with one reused CIContext.
+/// `@unchecked Sendable`: both members are immutable, CIContext is documented as
+/// thread-safe, and every encode runs serially on `queue`.
+private final class ARStillEncoder: @unchecked Sendable {
+    static let shared = ARStillEncoder()
+    private let context = CIContext()
+    private let queue = DispatchQueue(label: "com.packlab.capture.ar-still-encode", qos: .userInitiated)
+
+    /// ARFrame is an immutable snapshot that is only read on the encode queue.
+    private struct FrameBox: @unchecked Sendable { let frame: ARFrame }
+
+    func encode(_ frame: ARFrame, completion: @escaping @Sendable (Result<ARCapturedStillFrame, any Error>) -> Void) {
+        let box = FrameBox(frame: frame)
+        queue.async { completion(self.encodeNow(box.frame)) }
+    }
+
+    /// HEIC in stored sensor orientation (EXIF orientation 1, no rotation claim) with
+    /// ARKit's EXIF dictionary, plus the pose and intrinsics of that same frame.
+    private func encodeNow(_ frame: ARFrame) -> Result<ARCapturedStillFrame, any Error> {
         let buffer = frame.capturedImage
         let dimensions = CaptureDimensions(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer))
         let image = CIImage(cvPixelBuffer: buffer)
         let output = NSMutableData()
-        guard let cgImage = CIContext().createCGImage(image, from: image.extent),
+        guard let cgImage = context.createCGImage(image, from: image.extent),
               let destination = CGImageDestinationCreateWithData(output as CFMutableData, "public.heic" as CFString, 1, nil) else {
             return .failure(CameraServiceError.failed("still_encoding_failed"))
         }
@@ -280,14 +324,10 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
         case .limited: tracking = .limited
         case .notAvailable: tracking = .unavailable
         }
-        return .success(ARCapturedStillFrame(bytes: output as Data, dimensions: dimensions, timestamp: frame.timestamp, transform: rowMajor(frame.camera.transform), intrinsics: intrinsics, tracking: tracking))
-    }
-    #endif
-
-    nonisolated static func rowMajor(_ m: simd_float4x4) -> [Double] {
-        [m.columns.0.x, m.columns.1.x, m.columns.2.x, m.columns.3.x, m.columns.0.y, m.columns.1.y, m.columns.2.y, m.columns.3.y, m.columns.0.z, m.columns.1.z, m.columns.2.z, m.columns.3.z, m.columns.0.w, m.columns.1.w, m.columns.2.w, m.columns.3.w].map { Double($0) }
+        return .success(ARCapturedStillFrame(bytes: output as Data, dimensions: dimensions, timestamp: frame.timestamp, transform: SharedARSessionOwner.rowMajor(frame.camera.transform), intrinsics: intrinsics, tracking: tracking))
     }
 }
+#endif
 
 @MainActor
 public final class ARKitTrackingService: ARTrackingService {

@@ -130,13 +130,27 @@ def test_camera_controls_and_recovery_share_the_production_runtime_composition(
     assert "SharedARCameraPreview()" in content
     assert "await runtime.bindProductionARCamera()" in content
     assert "let recovery = cameraRecoveryOwner" in content
+    assert "recovery.handle(signal)" in content
+    assert "recovery.setSessionRestart" in content
     assert "ARSessionStillCaptureBackend(source: owner" in content
     assert "session.captureHighResolutionFrame" in tracking
     assert "recommendedVideoFormatForHighResolutionFrameCapturing" in tracking
-    for source in (content, camera):
-        assert "import NextLevel" not in source
-        assert "AVCaptureSession()" not in source
-    assert "case .interruptionTimedOut: if state == .interrupted { state = .blocked }" in camera
+    # No second camera client anywhere in the app; only the QR pairing scanner (which
+    # pauses the shared ARSession first) may open its own AVCaptureSession.
+    app_root = repo_root / "apps/ios-capture/PackLabCapture"
+    swift_files = sorted(app_root.rglob("*.swift"))
+    assert swift_files
+    for path in swift_files:
+        if path.name == "PairingProtocol.swift":
+            continue
+        source = _read(path)
+        assert "import NextLevel" not in source, path
+        assert "AVCaptureSession(" not in source, path
+    restart_timeout = (
+        "case .interruptionTimedOut: if state == .interrupted || state == .restarting "
+        "{ state = .blocked }"
+    )
+    assert restart_timeout in camera
     assert "public protocol CameraDeviceControlDriver" in camera
     assert "public init(driver: any CameraDeviceControlDriver" in camera
     assert "AVFoundationCameraDeviceControlDriver(device: device)" in camera
