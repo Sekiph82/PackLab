@@ -97,9 +97,18 @@ def test_camera_controls_and_recovery_share_the_production_runtime_composition(r
     assert "let controls = AVFoundationCameraControlComposition(device: device, selectedLens: lens)" in content
     assert "bindCameraControls(controls.controls)" in content
     assert "captureAndPersistAcceptedPhoto" in content
-    assert "NextLevelPreviewBridge(recoveryOwner: runtime.cameraRecoveryOwner)" in content
-    assert "recoveryOwner: cameraRecoveryOwner" in content
-    assert "recoveryOwner.addStateObserver" in camera
+    # Single camera owner: the shared ARSession drives preview, tracking and stills.
+    tracking = _read(repo_root / "apps/ios-capture/PackLabCapture/Services/ARTrackingService.swift")
+    assert "SharedARCameraPreview()" in content
+    assert "await runtime.bindProductionARCamera()" in content
+    assert "let recovery = cameraRecoveryOwner" in content
+    assert "ARSessionStillCaptureBackend(source: owner" in content
+    assert "session.captureHighResolutionFrame" in tracking
+    assert "recommendedVideoFormatForHighResolutionFrameCapturing" in tracking
+    for source in (content, camera):
+        assert "import NextLevel" not in source
+        assert "AVCaptureSession()" not in source
+    assert "case .interruptionTimedOut: if state == .interrupted { state = .blocked }" in camera
     assert "public protocol CameraDeviceControlDriver" in camera
     assert "public init(driver: any CameraDeviceControlDriver" in camera
     assert "AVFoundationCameraDeviceControlDriver(device: device)" in camera

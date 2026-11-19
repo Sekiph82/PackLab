@@ -57,6 +57,8 @@ public actor FoundationARTrackingService: ARTrackingService {
 
 #if canImport(ARKit) && canImport(UIKit)
 import ARKit
+import CoreImage
+import ImageIO
 import UIKit
 
 public enum ARSessionTrackingEvent: Sendable, Equatable {
@@ -79,13 +81,24 @@ private final class DeviceARSessionDriver: ARSessionLifecycleDriver {
     var isSupported: Bool { ARWorldTrackingConfiguration.isSupported }
     func run(resetTracking: Bool) {
         let configuration = ARWorldTrackingConfiguration()
+        #if !targetEnvironment(simulator)
+        // The AR session is the app's only camera client, so its video format must also
+        // serve high-resolution stills (ARSession.captureHighResolutionFrame).
+        if let format = ARWorldTrackingConfiguration.recommendedVideoFormatForHighResolutionFrameCapturing {
+            configuration.videoFormat = format
+        }
+        #endif
         session.run(configuration, options: resetTracking ? [.resetTracking, .removeExistingAnchors] : [])
     }
     func pause() { session.pause() }
 }
 
+/// The single owner of the rear camera. Preview (SharedARCameraPreview), world
+/// tracking and high-resolution stills all use this one ARSession; nothing else
+/// may open an AVCaptureSession on the capture screen. Camera availability is
+/// reported to the recovery state machine through `onCameraSignal`.
 @MainActor
-public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDelegate {
+public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDelegate, ARHighResolutionFrameSource {
     public static let shared = SharedARSessionOwner()
     public let session: ARSession
     private let driver: any ARSessionLifecycleDriver
@@ -93,8 +106,15 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
     public private(set) var poseBuffer = PoseBuffer(capacity: 256)
     public private(set) var epochCoordinator = SessionEpochCoordinator()
     public private(set) var resetDiagnostics: [ResetDiagnosticEvent] = []
+    /// Camera lifecycle signals for CameraRecoveryOwner (started, interruption, errors, stop).
+    public var onCameraSignal: ((CameraRecoverySignal) -> Void)?
     private var degradedFrames = 0
     private var isStarted = false
+    /// Signal to emit when the next camera frame proves the session is delivering again.
+    private var pendingFrameSignal: CameraRecoverySignal?
+    private var isEmittingInterruptionEnded = false
+    private var stillContinuation: CheckedContinuation<ARCapturedStillFrame, Error>?
+    private var stillToken = 0
     private init(driver: any ARSessionLifecycleDriver) { self.driver = driver; session = driver.session; super.init(); session.delegate = self }
     private override convenience init() { self.init(driver: DeviceARSessionDriver()) }
     public convenience init(injectedDriver: any ARSessionLifecycleDriver) { self.init(driver: injectedDriver) }
@@ -104,9 +124,17 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
         guard !isStarted else { return }
         isStarted = true
         policy.started()
+        pendingFrameSignal = .started
         driver.run(resetTracking: false)
     }
-    public func stop() { guard isStarted else { return }; isStarted = false; driver.pause() }
+    public func stop() {
+        guard isStarted else { return }
+        isStarted = false
+        pendingFrameSignal = nil
+        cancelStillCapture(reason: "session_stopped")
+        driver.pause()
+        onCameraSignal?(.stopped)
+    }
     public func reset(reason: ResetReason = .userRequested, options: ARSession.RunOptions = [.resetTracking, .removeExistingAnchors]) {
         guard driver.isSupported else { policy.limited(.cameraUnavailable); return }
         isStarted = true
@@ -115,6 +143,27 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
         policy.reset()
         driver.run(resetTracking: options.contains(.resetTracking))
     }
+
+    /// Recovery restart (runtime error, or operator Retry after a blocked interruption).
+    /// Skipped while the interruption-ended handler is itself resuming the session, so
+    /// one recovery never runs the session twice.
+    public func restartCamera(reason: ResetReason = .runtimeError) {
+        guard !isEmittingInterruptionEnded else { return }
+        pendingFrameSignal = .restartSucceeded
+        reset(reason: reason)
+    }
+
+    /// Called for every delivered camera frame; the first frame after start/restart
+    /// is the evidence that the camera is really running.
+    public func noteFrameDelivered() {
+        guard let signal = pendingFrameSignal else { return }
+        pendingFrameSignal = nil
+        onCameraSignal?(signal)
+    }
+
+    /// Adds the exact pose of a captured still's frame to the shared buffer.
+    public func recordCapturePose(_ sample: PoseSample) { poseBuffer.append(sample) }
+
     public func session(_ session: ARSession, cameraDidChangeTrackingState camera: ARCamera) {
         switch camera.trackingState {
         case .normal:
@@ -127,14 +176,36 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
         }
     }
     public func session(_ session: ARSession, didUpdate frame: ARFrame) {
-        let m = frame.camera.transform
-        let values: [Double] = [Double(m.columns.0.x), Double(m.columns.1.x), Double(m.columns.2.x), Double(m.columns.3.x), Double(m.columns.0.y), Double(m.columns.1.y), Double(m.columns.2.y), Double(m.columns.3.y), Double(m.columns.0.z), Double(m.columns.1.z), Double(m.columns.2.z), Double(m.columns.3.z), Double(m.columns.0.w), Double(m.columns.1.w), Double(m.columns.2.w), Double(m.columns.3.w)]
         let tracking: TrackingQuality = policy.snapshot.quality == .normal ? .normal : policy.snapshot.quality
-        poseBuffer.append(PoseSample(timestamp: frame.timestamp, transform: values, tracking: tracking))
+        poseBuffer.append(PoseSample(timestamp: frame.timestamp, transform: Self.rowMajor(frame.camera.transform), tracking: tracking))
+        noteFrameDelivered()
     }
-    public func sessionWasInterrupted(_ session: ARSession) { policy.interrupted(); reset(reason: .interruption, options: []) }
-    public func sessionInterruptionEnded(_ session: ARSession) { if isStarted { driver.run(resetTracking: false) }; policy.reset() }
-    public func session(_ session: ARSession, didFailWithError error: Error) { isStarted = false; epochCoordinator.failed(); resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: .runtimeError, state: epochCoordinator.state)) }
+    /// Interruption (camera taken by another client, call, background): pose continuity
+    /// is lost, so the epoch is invalidated, but the session is NOT re-run while the
+    /// camera is held elsewhere. ARKit resumes it and calls sessionInterruptionEnded.
+    public func sessionWasInterrupted(_ session: ARSession) {
+        pendingFrameSignal = nil
+        cancelStillCapture(reason: "camera_interrupted")
+        epochCoordinator.reset(reason: .interruption)
+        resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: .interruption, state: epochCoordinator.state))
+        policy.interrupted()
+        onCameraSignal?(.interruption)
+    }
+    public func sessionInterruptionEnded(_ session: ARSession) {
+        if isStarted { driver.run(resetTracking: false); pendingFrameSignal = .restartSucceeded }
+        policy.reset()
+        isEmittingInterruptionEnded = true
+        onCameraSignal?(.interruptionEnded)
+        isEmittingInterruptionEnded = false
+    }
+    public func session(_ session: ARSession, didFailWithError error: Error) {
+        isStarted = false
+        pendingFrameSignal = nil
+        cancelStillCapture(reason: "session_failed")
+        epochCoordinator.failed()
+        resetDiagnostics.append(ResetDiagnosticEvent(epoch: epochCoordinator.epoch, reason: .runtimeError, state: epochCoordinator.state))
+        onCameraSignal?((error as? ARError)?.code == .cameraUnauthorized ? .permission(.denied) : .runtimeError)
+    }
 
     public func applyTrackingEvent(_ event: ARSessionTrackingEvent) {
         switch event {
@@ -149,6 +220,72 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
         case .unavailable:
             policy.limited(.cameraUnavailable)
         }
+    }
+
+    // MARK: High-resolution stills from the same session
+
+    public func captureHighResolutionStill() async throws -> ARCapturedStillFrame {
+        guard isStarted else { throw CameraServiceError.unavailable }
+        guard stillContinuation == nil else { throw CameraServiceError.failed("capture_in_flight") }
+        #if targetEnvironment(simulator)
+        throw CameraServiceError.unavailable
+        #else
+        stillToken += 1
+        let token = stillToken
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<ARCapturedStillFrame, Error>) in
+            stillContinuation = continuation
+            session.captureHighResolutionFrame { @Sendable frame, error in
+                // ponytail: HEIC encode runs on ARKit's completion queue (main by default);
+                // move it to a background queue if the device run shows a visible UI hitch.
+                let result = SharedARSessionOwner.encodeStill(frame: frame, error: error)
+                Task { @MainActor [weak self] in self?.finishStill(token: token, result) }
+            }
+        }
+        #endif
+    }
+
+    public func cancelStillCapture(reason: String) {
+        finishStill(token: stillToken, .failure(CameraServiceError.failed(reason)))
+    }
+
+    private func finishStill(token: Int, _ result: Result<ARCapturedStillFrame, Error>) {
+        guard token == stillToken, let continuation = stillContinuation else { return }
+        stillContinuation = nil
+        continuation.resume(with: result)
+    }
+
+    #if !targetEnvironment(simulator)
+    /// Encodes the frame's captured image as HEIC in stored sensor orientation (EXIF
+    /// orientation 1, no rotation claim) with ARKit's EXIF dictionary, and copies the
+    /// pose and intrinsics of that same frame. Nothing is synthesized.
+    nonisolated static func encodeStill(frame: ARFrame?, error: Error?) -> Result<ARCapturedStillFrame, Error> {
+        guard let frame else { return .failure(error ?? CameraServiceError.failed("high_resolution_frame_missing")) }
+        let buffer = frame.capturedImage
+        let dimensions = CaptureDimensions(width: CVPixelBufferGetWidth(buffer), height: CVPixelBufferGetHeight(buffer))
+        let image = CIImage(cvPixelBuffer: buffer)
+        let output = NSMutableData()
+        guard let cgImage = CIContext().createCGImage(image, from: image.extent),
+              let destination = CGImageDestinationCreateWithData(output as CFMutableData, "public.heic" as CFString, 1, nil) else {
+            return .failure(CameraServiceError.failed("still_encoding_failed"))
+        }
+        var properties: [CFString: Any] = [kCGImagePropertyOrientation: 1]
+        properties[kCGImagePropertyExifDictionary] = frame.exifData
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return .failure(CameraServiceError.failed("still_encoding_failed")) }
+        let k = frame.camera.intrinsics
+        let intrinsics: [Double] = [k.columns.0.x, k.columns.1.x, k.columns.2.x, k.columns.0.y, k.columns.1.y, k.columns.2.y, k.columns.0.z, k.columns.1.z, k.columns.2.z].map { Double($0) }
+        let tracking: TrackingQuality
+        switch frame.camera.trackingState {
+        case .normal: tracking = .normal
+        case .limited: tracking = .limited
+        case .notAvailable: tracking = .unavailable
+        }
+        return .success(ARCapturedStillFrame(bytes: output as Data, dimensions: dimensions, timestamp: frame.timestamp, transform: rowMajor(frame.camera.transform), intrinsics: intrinsics, tracking: tracking))
+    }
+    #endif
+
+    nonisolated static func rowMajor(_ m: simd_float4x4) -> [Double] {
+        [m.columns.0.x, m.columns.1.x, m.columns.2.x, m.columns.3.x, m.columns.0.y, m.columns.1.y, m.columns.2.y, m.columns.3.y, m.columns.0.z, m.columns.1.z, m.columns.2.z, m.columns.3.z, m.columns.0.w, m.columns.1.w, m.columns.2.w, m.columns.3.w].map { Double($0) }
     }
 }
 
@@ -168,5 +305,22 @@ public final class ARKitTrackingService: ARTrackingService {
     public func localizationEpoch() async -> Int { owner.epochCoordinator.epoch }
     public func resetDiagnostics() async -> [ResetDiagnosticEvent] { owner.resetDiagnostics }
     public func reset() async { owner.reset(reason: .userRequested) }
+}
+#endif
+
+#if canImport(RealityKit) && canImport(ARKit) && canImport(UIKit) && !targetEnvironment(simulator)
+import RealityKit
+import SwiftUI
+
+/// Capture-screen camera preview rendered from the shared ARSession, so preview,
+/// tracking and stills never compete for the camera with a second client.
+struct SharedARCameraPreview: UIViewRepresentable {
+    func makeUIView(context: Context) -> ARView {
+        let view = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
+        view.session = SharedARSessionOwner.shared.session
+        return view
+    }
+
+    func updateUIView(_ uiView: ARView, context: Context) {}
 }
 #endif
