@@ -631,7 +631,8 @@ def _cylindrical_wrap(face: Any) -> tuple[float, float, tuple[tuple[str, float |
         or not math.isfinite(radius)
         or abs(ax) > _TOLERANCE
         or abs(ay) > _TOLERANCE
-        or abs(az - 1.0) > _TOLERANCE
+        # A PackLab revolve parametrises its bands along -Z; the line is the same.
+        or abs(abs(az) - 1.0) > _TOLERANCE
     ):
         raise LabelMetricSurfaceBindingError("label_metric_cylinder_axis_incompatible")
     u0, u1, v0, v1 = (float(value) for value in modules["tools"].BRepTools.UVBounds_s(face))
@@ -658,15 +659,8 @@ def _cylindrical_wrap(face: Any) -> tuple[float, float, tuple[tuple[str, float |
         or edge_types.count("GeomAbs_Line") != 2
     ):
         raise LabelMetricSurfaceBindingError("label_metric_cylinder_trim_unsupported")
-    position = cylinder.Position()
-    x_direction, y_direction = position.XDirection(), position.YDirection()
-    if (
-        abs(float(x_direction.X()) - 1.0) > _TOLERANCE
-        or abs(float(x_direction.Y())) > _TOLERANCE
-        or abs(float(y_direction.X())) > _TOLERANCE
-        or abs(float(y_direction.Y()) - 1.0) > _TOLERANCE
-    ):
-        raise LabelMetricSurfaceBindingError("label_metric_cylinder_seam_incompatible")
+    # The face is a full 2*pi band, so the wrap frame below (seam +Y, azimuth +Y to +X) is
+    # PackLab's canonical frame; it does not depend on how the kernel parametrised the face.
     return (
         2.0 * math.pi * radius,
         height,

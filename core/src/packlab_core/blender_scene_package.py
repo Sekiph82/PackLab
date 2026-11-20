@@ -843,11 +843,14 @@ def _create_overlay(overlay, root, base_matrix):
         span = theta1 - theta0
         boundary = geometry.get("drawn_rect_normalized_uv", geometry["placement_boundary_normalized_uv"])
         segments = max(1, min(128, int(__import__("math").ceil(abs(span) / (2.0 * 3.141592653589793) * 64.0))))
+        # Circumscribe the true cylinder: chord midpoints touch it, so the inscribed body
+        # tessellation never pokes through the label (z-fighting stripes on large radii).
+        overlay_radius = radius / __import__("math").cos(abs(span) / segments / 2.0) + float(overlay["renderer_only_offset_mm_unverified"])
         for index in range(segments + 1):
             u = index / segments
             theta = theta0 + span * u
-            x = float(center[0]) + (radius + float(overlay["renderer_only_offset_mm_unverified"])) * __import__("math").sin(theta)
-            y = float(center[1]) + (radius + float(overlay["renderer_only_offset_mm_unverified"])) * __import__("math").cos(theta)
+            x = float(center[0]) + overlay_radius * __import__("math").sin(theta)
+            y = float(center[1]) + overlay_radius * __import__("math").cos(theta)
             from mathutils import Vector
             verts.extend((
                 tuple(base_matrix @ Vector((x, y, z0))),

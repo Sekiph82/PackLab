@@ -37,6 +37,7 @@ class Route(StrEnum):
     EXPORTS = "exports"
     SETTINGS = "settings"
     MODEL_VIEWER = "model-viewer"
+    LABELS = "labels"
 
 
 class NavigationError(ValueError):

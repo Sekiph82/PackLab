@@ -16,6 +16,7 @@ from .capture_inbox import CaptureInboxView
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .engineering_export import DesignModelExportSource, DestinationProvider
 from .jobs import JobManager
+from .labels_view import install_design_workbench
 from .navigation import (
     NavigationController,
     NavigationPanel,
@@ -151,6 +152,7 @@ class StudioMainWindow(QMainWindow):
         splitter.addWidget(self.route_stack)
         splitter.setStretchFactor(1, 1)
         self.setCentralWidget(splitter)
+        self.design_workbench = install_design_workbench(self)
         self.workspace = WorkspaceManager(self, job_manager=self.job_manager)
         self.navigation.set_project_context(self.project_manager)
         self._sync_project_state()

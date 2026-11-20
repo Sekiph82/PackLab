@@ -405,18 +405,18 @@ def _cylindrical_geometry(
     position = cylinder.Position()
     center = position.Location()
     axis = position.Direction()
-    seam = position.YDirection()
     ax, ay, az = float(axis.X()), float(axis.Y()), float(axis.Z())
     radius = float(cylinder.Radius())
+    # Only the axis line matters: the overlay below always uses PackLab's canonical wrap frame
+    # (+Z axis, seam +Y), whatever direction/seam the kernel parametrised the full band with.
     if (
         abs(ax) > _TOLERANCE
         or abs(ay) > _TOLERANCE
-        or abs(az - 1.0) > _TOLERANCE
-        or abs(float(seam.X())) > _TOLERANCE
-        or abs(float(seam.Y()) - 1.0) > _TOLERANCE
+        or abs(abs(az) - 1.0) > _TOLERANCE
         or radius <= _TOLERANCE
     ):
         raise LabelRenderOverlayError("label_render_overlay_cylinder_frame_invalid")
+    az = 1.0
     cx, cy, cz = float(center.X()), float(center.Y()), float(center.Z())
     _, _, z_min, _, _, z_max = _bounds(face)
     zone = placement.label_zone
