@@ -78,6 +78,9 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         let center = app.buttons["setObjectCenterButton"]
         XCTAssertTrue(center.waitForExistence(timeout: 20), "scan did not start")
         shot("\(name)-started")
+        // Aim the crosshair at the package base first (the replay camera may still be at
+        // the previous scan's last orbit position).
+        tap(app.buttons["replayNextPoseButton"], "aim at package base")
         tap(center, "Set object center")
         XCTAssertTrue(app.staticTexts["Object center set"].waitForExistence(timeout: 10), "object center was not set")
         shot("\(name)-center-set")

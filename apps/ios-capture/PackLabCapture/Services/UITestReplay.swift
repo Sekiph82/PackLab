@@ -25,7 +25,8 @@ public final class UITestReplaySource: ObservableObject, ARTrackingService, Time
     public let worldIdentity = "uitest-replay-world"
     @Published public private(set) var preview: CGImage?
     public private(set) var poseBuffer = PoseBuffer()
-    private var cameraPosition: [Double] = [0, 0.35, 0]
+    static let startPosition: [Double] = [0, 0.35, 0]
+    private var cameraPosition: [Double] = UITestReplaySource.startPosition
     private var lookAt: [Double] = ReplayScene.base
     private var lastStillTimestamp: TimeInterval?
 
@@ -63,8 +64,16 @@ public final class UITestReplaySource: ObservableObject, ARTrackingService, Time
 
     /// The harness acts as the operator: it walks to the wedge the app's guidance targets
     /// (middle of the wedge and of its elevation ring) and looks at the object center.
+    /// Without an object center it returns to the start pose, aiming the crosshair at the
+    /// package base (what an operator does before Set object center).
     public func move(to target: CoverageSector?, center: [Double]?, configuration: OrbitCoverageConfiguration) {
-        guard let target, let center, center.count == 3, let ring = configuration.rings.first(where: { $0.id == target.ringID }) else { return }
+        guard let center, center.count == 3 else {
+            cameraPosition = Self.startPosition
+            lookAt = ReplayScene.base
+            renderPreview()
+            return
+        }
+        guard let target, let ring = configuration.rings.first(where: { $0.id == target.ringID }) else { return }
         let azimuth = OrbitGuidance.wedgeCenter(azimuthIndex: target.azimuthIndex, configuration: configuration) * Double.pi / 180
         let elevation = (ring.minimumElevation + ring.maximumElevation) / 2 * Double.pi / 180
         let radius = Self.orbitRadius
