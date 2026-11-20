@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QByteArray, QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -55,6 +56,7 @@ class LabelsView(QWidget):
         *,
         job_manager: JobManager | None = None,
         project_root: Callable[[], Path | None] = lambda: None,
+        project_manager: Any = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -62,11 +64,12 @@ class LabelsView(QWidget):
         self.workbench = workbench
         self.job_manager = job_manager
         self.project_root = project_root
+        self.project_manager = project_manager
         self.suggestion: LabelZoneSuggestion | None = None
         self.last_mockup: dict[str, object] | None = None
         self._render_thread: threading.Thread | None = None
         self._mockup_job: MockupJob | None = None
-        self._auto_project_root: Path | None = None
+        self._loaded_project_key: str | None = None
         # Injectable choosers keep every action drivable offscreen.
         self.choose_design_model_path: Callable[[], str] = lambda: QFileDialog.getOpenFileName(
             self,
@@ -237,22 +240,50 @@ class LabelsView(QWidget):
             return
         self._run(lambda: f"Opened {self.workbench.open_document(path).part_name}.")
 
-    def use_project_model(self, *, automatic: bool = False) -> None:
-        """Open the newest Design Model revision Measure & Design saved in the project."""
+    def _project_design_model(self) -> tuple[str, bytes | Path] | None:
+        """(key, source) of the project's current Design Model.
+
+        Project authority (``selected_design_model``, moved by save/undo/redo) wins; the
+        newest ``derived/design_model`` file is used only for projects without any
+        Design Model authority record (saved before the authority existed).
+        """
+        manager = self.project_manager
         root = self.project_root()
-        if automatic:  # project listener: act once per opened project, not per autosave
-            if root == self._auto_project_root:
-                return
-            self._auto_project_root = root
-        latest = latest_project_design_model(root) if root is not None else None
-        if latest is None:
+        if root is None:
+            return None
+        if manager is not None and callable(getattr(manager, "selected_design_model", None)):
+            selected = manager.selected_design_model()
+            if selected is not None:
+                record, document = selected
+                return str(record["revision_id"]), json.dumps(document).encode("utf-8")
+            if manager.has_design_model_authority():
+                return None
+        latest = latest_project_design_model(root)
+        return (str(latest), latest) if latest is not None else None
+
+    def use_project_model(self, *, automatic: bool = False) -> None:
+        """Open the project's current Design Model (automatic: only when it changed)."""
+        try:
+            current = self._project_design_model()
+        except Exception as error:  # tampered/missing authority file is shown, not hidden
+            self.status.setText(f"Project Design Model unavailable: {_text_error(error)}")
+            return
+        if current is None:
             if not automatic:
                 self.status.setText(
                     "No Design Model saved in this project yet (Measure & Design > Save)."
                 )
             return
+        key, source = current
+        if automatic and key == self._loaded_project_key:
+            return  # autosave/revision bump of the same selection: keep the labels
+        self._loaded_project_key = key
+        part = key.removeprefix("design-model:")[:16] if isinstance(source, bytes) else ""
         self._run(
-            lambda: f"Opened project Design Model {self.workbench.open_document(latest).part_name}."
+            lambda: (
+                "Opened project Design Model "
+                f"{self.workbench.open_document(source, part_name=part).part_name}."
+            )
         )
 
     def suggest_zone(self) -> None:
@@ -494,11 +525,6 @@ def install_design_workbench(window: StudioMainWindow) -> None:
     labels = stack.views[Route.LABELS]
     if isinstance(labels, LabelsView):
         manager.add_listener(lambda _metadata: labels.use_project_model(automatic=True))
-        measure = stack.views.get(Route.MEASURE_DESIGN)
-        save = getattr(measure, "save_button", None)
-        if isinstance(save, QPushButton):
-            # Measure & Design > Save writes a new revision: make it the active Design Model.
-            save.clicked.connect(lambda _checked=False: labels.use_project_model())
     library = stack.views[Route.LIBRARY]
     service = window.packaging_library_service
     if isinstance(library, PackagingLibraryBrowserView) and isinstance(

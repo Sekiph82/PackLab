@@ -332,6 +332,7 @@ ROUTE_FACTORIES: dict[Route, RouteFactory] = {
         s.get("design_workbench") or DesignWorkbench(),
         job_manager=s.get("job_manager"),
         project_root=partial(_project_root, s.get("project_manager")),
+        project_manager=s.get("project_manager"),
     ),
 }
 

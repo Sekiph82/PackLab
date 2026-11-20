@@ -430,3 +430,43 @@ def test_real_measure_design_record_takes_a_wrap_label(app, tmp_path) -> None:
     assert entry.metric_binding.host_height_mm_unverified > 10.0
     path, _export = workbench.export_dieline_svg(entry, tmp_path)
     assert path.is_file()
+
+
+class _AuthorityProject:
+    """Stand-in for ProjectManager's Design Model authority (PR #16 API)."""
+
+    def __init__(self) -> None:
+        self.selected = None
+        self.records = False
+
+    def selected_design_model(self):
+        return self.selected
+
+    def has_design_model_authority(self) -> bool:
+        return self.records
+
+
+def test_labels_follow_project_design_model_authority(app, jar_file, tmp_path) -> None:
+    folder = tmp_path / "derived" / "design_model"
+    folder.mkdir(parents=True)
+    (folder / "newest-file.json").write_text(
+        json.dumps(_studio_revision_record(jar_file, height=70.0)), encoding="utf-8"
+    )
+    project = _AuthorityProject()
+    view = LabelsView(DesignWorkbench(), project_root=lambda: tmp_path, project_manager=project)
+    view.use_project_model(automatic=True)  # no authority records: newest-file fallback
+    assert "height 70.0 mm" in view.workbench.summary()
+
+    record = _studio_revision_record(jar_file, height=60.0)
+    project.records = True
+    project.selected = ({"revision_id": record["design_model_revision_id"]}, record)
+    view.use_project_model(automatic=True)  # authority wins over the newer file
+    assert "height 60.0 mm" in view.workbench.summary()
+    view.workbench.add_label_zone(view.workbench.suggest_label_zone(LabelZoneKind.WRAP))
+    view.use_project_model(automatic=True)  # same selection (autosave): labels kept
+    assert len(view.workbench.labels) == 1
+
+    project.selected = None  # e.g. undo past the first save: nothing selected
+    view.use_project_model()
+    assert "No Design Model saved" in view.status.text()
+    assert "height 60.0 mm" in view.workbench.summary()

@@ -605,6 +605,14 @@ class ProjectManager:
         self._record_selection("active_design_model_revision_id", previous, revision_id)
         return record
 
+    def has_design_model_authority(self) -> bool:
+        """True once any Design Model revision was persisted through project authority."""
+
+        if self.layout is None or self.metadata is None:
+            return False
+        _, state = self._read_authority(self.layout)
+        return bool(state.get("design_model_revisions"))
+
     def selected_design_model(self) -> tuple[dict[str, Any], dict[str, Any]] | None:
         """Return (authority record, verified document) of the project's current Design Model."""
 
