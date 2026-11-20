@@ -294,6 +294,16 @@ def test_failure_report_emits_only_a_count(tmp_path: Path) -> None:
         assert leaked not in output
 
 
+def test_ios_platform_is_ensured_before_archive() -> None:
+    names = [step["name"] for step in _job()["steps"]]
+    ensure = names.index("Ensure iOS 18.0 platform is installed")
+    assert names.index("Select Xcode and record signing toolchain") < ensure
+    assert ensure < names.index("Archive and export signed PackLabCapture IPA")
+    run = _job()["steps"][ensure]["run"]
+    assert "xcodebuild -downloadPlatform iOS" in run and "xcodebuild -importPlatform" in run
+    assert run.rstrip().endswith("has_runtime")
+
+
 def test_keychain_is_deleted_before_uploads_and_cleanup_covers_outputs() -> None:
     names = [step["name"] for step in _job()["steps"]]
     early = names.index("Delete temporary keychain once signing is verified")
