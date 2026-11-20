@@ -41,6 +41,7 @@ class ReceiverError(RuntimeError):
 # An unauthenticated LAN peer may send at most this much JSON; chunks are capped too.
 MAX_JSON_BODY_BYTES = 64 * 1024
 MAX_CHUNK_BYTES = 8 * 1024 * 1024
+MAX_DRAIN_BYTES = 1024 * 1024
 CONNECTION_TIMEOUT_SECONDS = 30
 
 
@@ -198,9 +199,21 @@ class PackLabReceiver:
                     },
                 )
 
+            def _reject_oversized(self, length: int) -> None:
+                # Drain a bounded amount so the 400 reaches the client instead of a TCP
+                # reset (Windows resets on close with unread data), then close.
+                self.close_connection = True
+                remaining = min(max(length, 0), MAX_DRAIN_BYTES)
+                while remaining > 0:
+                    data = self.rfile.read(min(remaining, 64 * 1024))
+                    if not data:
+                        break
+                    remaining -= len(data)
+
             def _body(self) -> dict[str, object]:
                 length = int(self.headers.get("Content-Length", "0"))
                 if length < 0 or length > MAX_JSON_BODY_BYTES:
+                    self._reject_oversized(length)
                     raise TransferProtocolError("bad_request", "request body is too large")
                 value = json.loads(self.rfile.read(length).decode("utf-8"))
                 if not isinstance(value, dict):
@@ -244,6 +257,7 @@ class PackLabReceiver:
                             digest = self.headers["X-PackLab-Chunk-SHA256"]
                             length = int(self.headers.get("Content-Length", "0"))
                             if length < 0 or length > MAX_CHUNK_BYTES:
+                                self._reject_oversized(length)
                                 raise TransferProtocolError("bad_request", "chunk is too large")
                             self._json(
                                 HTTPStatus.OK,
