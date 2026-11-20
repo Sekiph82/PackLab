@@ -127,17 +127,23 @@ class ScanMasterEditorView(QWidget):
 
 
 def _probe_runner(executable: Path, arguments: Sequence[str]) -> tuple[int, str, str]:
-    # OpenMVS writes a log file into its working directory; keep that out of the user's cwd.
-    completed = subprocess.run(
-        [str(executable), *arguments],
-        capture_output=True,
-        text=True,
-        check=False,
-        shell=False,
-        timeout=5.0,
-        cwd=tempfile.gettempdir(),
-    )
-    return completed.returncode, (completed.stdout or "")[:4096], (completed.stderr or "")[:4096]
+    # OpenMVS prints its banner only to a log file in its working directory when not on a
+    # console: run it in a scratch folder and read that log back.
+    with tempfile.TemporaryDirectory(prefix="packlab-probe-") as scratch:
+        completed = subprocess.run(
+            [str(executable), *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+            timeout=5.0,
+            cwd=scratch,
+        )
+        stdout = completed.stdout or "".join(
+            log.read_text(encoding="utf-8", errors="replace")
+            for log in sorted(Path(scratch).glob("*.log"))
+        )
+    return completed.returncode, stdout[:4096], (completed.stderr or "")[:4096]
 
 
 def engine_rows(*, probe: bool = False) -> list[str]:
