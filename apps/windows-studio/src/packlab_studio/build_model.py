@@ -866,8 +866,8 @@ class BuildModelView(QWidget):
         self.next_steps.setVisible(False)
         steps = QHBoxLayout()
         for text, route in (
-            ("Object-only cleanup", "mask-correction"),
-            ("Design Model / Scan Master", "editor"),
+            ("Object-only, scale and measure", "measure-design"),
+            ("Design Model / Scan Master", "measure-design"),
             ("Export", "exports"),
         ):
             button = QPushButton(text, self)

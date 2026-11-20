@@ -18,6 +18,7 @@ from .capture_inbox import CaptureInboxView
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .engineering_export import DesignModelExportSource, DestinationProvider
 from .jobs import JobManager
+from .measure_view import MeasureDesignView
 from .model_viewer import ModelViewerView
 from .navigation import (
     NavigationController,
@@ -155,6 +156,10 @@ class StudioMainWindow(QMainWindow):
             self.job_manager, self.project_manager, backend=build_backend
         )
         self._wire_build_model()
+        measure = self.route_stack.views[Route.MEASURE_DESIGN]
+        if self.scan_master_request_provider is None and isinstance(measure, MeasureDesignView):
+            # Editor > Promote uses the cleaned object selection from Measure & Design.
+            self.scan_master_request_provider = measure.promotion_request
         editor = self.route_stack.views[Route.EDITOR]
         if isinstance(editor, ScanMasterEditorView):
             editor.promotion_requested.connect(self._promote_scan_master_from_editor)
@@ -303,6 +308,18 @@ class StudioMainWindow(QMainWindow):
         self.build_model.build_finished.connect(self._on_build_finished)
         builds.open_model_requested.connect(self._open_in_viewer)
         builds.route_requested.connect(self.navigation.navigate)
+        measure = self.route_stack.views[Route.MEASURE_DESIGN]
+        if isinstance(measure, MeasureDesignView):
+            # Next-step buttons hand the just-built model to Measure & Design.
+            builds.route_requested.connect(
+                lambda value: (
+                    measure.use_latest_build(
+                        None if builds.result is None else builds.result.model_path
+                    )
+                    if value == Route.MEASURE_DESIGN.value
+                    else None
+                )
+            )
 
     def ensure_project(self):
         """Open (or create on first run) the per-user default project; no dialog needed."""

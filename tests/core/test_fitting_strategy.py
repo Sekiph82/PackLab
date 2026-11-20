@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import replace
 
@@ -10,6 +11,7 @@ from packlab_core.fitting_strategy import (
     FittingStrategy,
     FittingStrategyError,
     FittingStrategyPolicy,
+    PrincipalAxis,
     recommend_fitting_strategy,
 )
 from packlab_core.geometry_adapter import TriangleMeshData
@@ -280,3 +282,32 @@ def test_strategy_thresholds_and_geometry_work_bounds_are_validated() -> None:
         FittingStrategyPolicy(maximum_bilateral_reflection_error=1.1)
     with pytest.raises(FittingStrategyError, match="scan_master_geometry_work_bound_exceeded"):
         _recommend(_scan_master(), FittingStrategyPolicy(maximum_vertices=8))
+
+
+def test_upright_axis_lets_squat_round_jar_revolve_and_is_recorded() -> None:
+    ring = _ring_mesh(profile="circle")
+    squat = TriangleMeshData(
+        tuple((x * 4.0, y * 4.0, z * 0.3) for x, y, z in ring.vertices), ring.triangles
+    )
+    base = _scan_master()
+    scan = ScanMasterRevision(
+        base.revision_id,
+        PROJECT,
+        squat,
+        {**json.loads(base.manifest_bytes()), "output_geometry_sha256": mesh_sha256(squat)},
+    )
+    guessed = _recommend(scan)
+    assert guessed.strategy is FittingStrategy.REVIEW_REQUIRED
+    assert guessed.principal_axis is not PrincipalAxis.Z  # longest extent is horizontal
+    arguments = {
+        "expected_scan_master_revision_id": scan.revision_id,
+        "actor_id": "operator-1",
+        "reason": "Evaluate parametric fit strategy.",
+        "created_at_utc": "2026-10-03T14:00:00Z",
+    }
+    upright = recommend_fitting_strategy(scan, upright_axis=PrincipalAxis.Z, **arguments)
+    assert upright.strategy is FittingStrategy.AXISYMMETRIC_REVOLVE
+    assert upright.principal_axis is PrincipalAxis.Z and upright.axis_elongation_ratio < 1
+    assert upright.uncertainty_codes == ("principal_axis_from_normalized_upright_frame",)
+    with pytest.raises(FittingStrategyError, match="upright_axis_invalid"):
+        recommend_fitting_strategy(scan, upright_axis="z", **arguments)  # type: ignore[arg-type]

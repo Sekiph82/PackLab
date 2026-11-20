@@ -520,3 +520,42 @@ def test_generated_runtime_json_must_match_build_revision_and_version(
     )
     assert output[0]["unresolved_count"] == 0
     assert not any(item.startswith("toc:") for item in output[0]["unresolved_items"])
+
+
+def test_opencv_wheel_is_registered_but_native_redistribution_stays_blocked(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    registry = json.loads(
+        (project_root / "tools/packaging/windows_component_license_registry.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    record = registry["supplemental_evidence"]["opencv-python-headless"]
+    assert record["license_identifier"] == "Apache-2.0"
+    assert record["source_evidence"][0]["sha256"] == (
+        "2fd11ce2e88feb28869ad5762a31546ce0062e7c55c130c425ccd3918a19e4fa"
+    )
+    assert "LGPL" in record["native_unresolved_reason"]
+    lock = (project_root / "uv.lock").read_text(encoding="utf-8")
+    assert record["source_evidence"][0]["sha256"] in lock
+    license_text = tmp_path / "LICENSE.txt"
+    license_text.write_text("Apache License 2.0 from the exact wheel\n", encoding="utf-8")
+
+    class Distribution:
+        version = "5.1.0.95"
+        metadata = {"Name": "opencv-python-headless", "License": "Apache 2.0"}
+        files = [Path("cv2/LICENSE.txt")]
+
+        @staticmethod
+        def locate_file(_path: Path) -> Path:
+            return license_text
+
+    components, _notices, unresolved = inventory.license_rows(
+        {"opencv-python-headless"},
+        {"opencv-python-headless": Distribution()},
+        registry,
+        tmp_path / "evidence",
+    )
+    assert "component:opencv-python-headless" in unresolved
+    assert components[0]["license_status"] == "UNRESOLVED"

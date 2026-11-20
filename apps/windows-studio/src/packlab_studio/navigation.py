@@ -38,6 +38,7 @@ from .capture_inbox import CaptureInboxView
 from .engine_config import discover_engines
 from .engineering_export import EngineeringExportView
 from .mask_correction import MaskCorrectionView
+from .measure_view import MeasureDesignView
 from .model_viewer import ModelViewerView
 from .packaging_library_browser import PackagingLibraryBrowserView
 from .version import AboutView
@@ -52,6 +53,7 @@ class Route(StrEnum):
     EXPORTS = "exports"
     SETTINGS = "settings"
     MODEL_VIEWER = "model-viewer"
+    MEASURE_DESIGN = "measure-design"
 
 
 class NavigationError(ValueError):
@@ -315,6 +317,7 @@ ROUTE_FACTORIES: dict[Route, RouteFactory] = {
     ),
     Route.SETTINGS: lambda s: SettingsView(),
     Route.MODEL_VIEWER: lambda s: ModelViewerView(),
+    Route.MEASURE_DESIGN: lambda s: MeasureDesignView(s.get("project_manager")),
 }
 
 

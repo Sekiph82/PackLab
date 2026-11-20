@@ -194,8 +194,17 @@ def recommend_fitting_strategy(
     policy: FittingStrategyPolicy = FittingStrategyPolicy(),
     vertical_profiles: tuple[VerticalProfile, ...] = (),
     cross_section_measurements: tuple[CrossSectionMeasurement, ...] = (),
+    upright_axis: PrincipalAxis | None = None,
 ) -> FittingStrategyRecommendation:
-    """Recommend revolve, symmetric loft, or review from exact selected captured geometry."""
+    """Recommend revolve, symmetric loft, or review from exact selected captured geometry.
+
+    ``upright_axis`` names the axis already established by base-plane normalization (the
+    Scan Master frame is z-up). It replaces the longest-extent guess, so squat jars that are
+    wider than tall can still be judged by their cross-section symmetry; the override is
+    recorded as an uncertainty code in the recommendation identity.
+    """
+    if upright_axis is not None and not isinstance(upright_axis, PrincipalAxis):
+        raise FittingStrategyError("upright_axis_invalid")
     if not isinstance(scan_master, ScanMasterRevision):
         raise FittingStrategyError("scan_master_revision_required")
     if not isinstance(policy, FittingStrategyPolicy):
@@ -236,7 +245,11 @@ def recommend_fitting_strategy(
     )
     stats = _geometry_statistics(scan_master, scale_state, scale_provenance_id, policy)
     extent = stats.bounds_extent
-    axis_index = max(range(3), key=lambda index: (extent[index], index))
+    axis_index = (
+        max(range(3), key=lambda index: (extent[index], index))
+        if upright_axis is None
+        else (PrincipalAxis.X, PrincipalAxis.Y, PrincipalAxis.Z).index(upright_axis)
+    )
     other_extents = tuple(extent[index] for index in range(3) if index != axis_index)
     minor_extent = max(other_extents)
     elongation = extent[axis_index] / minor_extent if minor_extent > 0 else 0.0
@@ -254,8 +267,15 @@ def recommend_fitting_strategy(
         is not None
     )
     strategy, uncertainty = _choose_strategy(
-        elongation, section_evidence, policy, axis_index, cross_section_measurements
+        elongation,
+        section_evidence,
+        policy,
+        axis_index,
+        cross_section_measurements,
+        axis_established=upright_axis is not None,
     )
+    if upright_axis is not None:
+        uncertainty = (*uncertainty, "principal_axis_from_normalized_upright_frame")
     body = {
         "contract": STRATEGY_CONTRACT,
         "strategy": strategy.value,
@@ -428,10 +448,12 @@ def _choose_strategy(
     policy: FittingStrategyPolicy,
     axis_index: int,
     cross_section_measurements: tuple[CrossSectionMeasurement, ...],
+    *,
+    axis_established: bool = False,
 ) -> tuple[FittingStrategy, tuple[str, ...]]:
     if len(sections) < policy.minimum_sections:
         return FittingStrategy.REVIEW_REQUIRED, ("insufficient_cross_section_evidence",)
-    if elongation < policy.minimum_axis_elongation_ratio:
+    if not axis_established and elongation < policy.minimum_axis_elongation_ratio:
         return FittingStrategy.REVIEW_REQUIRED, ("principal_axis_not_distinct",)
     if any(item.angular_coverage < policy.minimum_angular_coverage for item in sections):
         return FittingStrategy.REVIEW_REQUIRED, ("cross_section_coverage_insufficient",)
