@@ -6,16 +6,13 @@ import XCTest
 /// code typed into the manual pairing form, the second is delivered automatically after
 /// Finalize with no pairing step. The receiver-side check (validate_packscan, import report
 /// image counts, exactly one paired device) runs in the CI step after this test.
+@MainActor
 final class PackLabCaptureE2EUITests: XCTestCase {
-    private var app: XCUIApplication!
+    private var app = XCUIApplication()
     private var step = 0
 
-    override func setUp() {
-        continueAfterFailure = false
-    }
-
     func testTwoGuidedScansPairOnceThenSyncAutomatically() throws {
-        app = XCUIApplication()
+        continueAfterFailure = false
         app.launchArguments = ["-PackLabUITestReplay", "-PackLabUITestReset"]
         app.launch()
         shot("launch")
