@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 from .branding import application_icon, set_windows_app_user_model_id
 from .frozen_runtime import safe_exception_summary
+from .preferences import PreferencesStore
 from .shell import StudioMainWindow
 
 ORGANIZATION_NAME = "PackLab"
@@ -84,6 +85,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             window = StudioMainWindow(
                 default_project_root=data_root / "projects" / "default",
                 settings_path=data_root / "studio-settings.ini",
+                preferences=PreferencesStore(data_root / "window-preferences.json"),
             )
         window.show()
         if build_smoke:

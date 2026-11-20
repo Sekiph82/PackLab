@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict, replace
+from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QStandardPaths, Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication
-from PySide6.QtWidgets import QMainWindow, QSplitter
+from PySide6.QtWidgets import QFileDialog, QMainWindow, QSplitter
 
 from .autosave import AutosaveService
 from .branding import application_icon
@@ -174,8 +175,104 @@ class StudioMainWindow(QMainWindow):
         self.navigation.set_project_context(self.project_manager)
         self._sync_project_state()
         self._restore_preferences()
+        self._build_menus()
         if self._default_project_root is not None:
             self.ensure_project()
+
+    # ------------------------------------------------------------- menus (PL-0454/0455)
+
+    MAX_RECENT_PROJECTS = 8
+
+    def _build_menus(self) -> None:
+        # Injectable choosers keep the menu actions testable offscreen.
+        self.choose_new_project_path: Callable[[], str] = lambda: QFileDialog.getSaveFileName(
+            self, "New project folder", str(Path.home()), "PackLab project folder (*)"
+        )[0]
+        self.choose_open_project_path: Callable[[], str] = lambda: QFileDialog.getExistingDirectory(
+            self, "Open PackLab project"
+        )
+        file_menu = self.menuBar().addMenu("&File")
+        file_menu.setObjectName("packlab.menu.file")
+        self.new_project_action = file_menu.addAction("&New Project…", self._new_project_from_menu)
+        self.open_project_action = file_menu.addAction(
+            "&Open Project…", self._open_project_from_menu
+        )
+        self.recent_menu = file_menu.addMenu("Open &Recent")
+        self.close_project_action = file_menu.addAction(
+            "&Close Project", self._close_project_from_menu
+        )
+        file_menu.addSeparator()
+        file_menu.addAction("E&xit", self.close)
+        help_menu = self.menuBar().addMenu("&Help")
+        help_menu.setObjectName("packlab.menu.help")
+        self.diagnostic_bundle_action = help_menu.addAction(
+            "Create &diagnostic bundle", self._diagnostic_bundle_from_menu
+        )
+        self.project_manager.add_listener(lambda _metadata: self._refresh_project_menu())
+        self._refresh_project_menu()
+
+    def recent_projects(self) -> list[str]:
+        if self._settings is None:
+            return []
+        value = self._settings.value("projects/recent", [])
+        items: list[object] = (
+            [value] if isinstance(value, str) else list(value) if isinstance(value, list) else []
+        )
+        return [str(item) for item in items if item][: self.MAX_RECENT_PROJECTS]
+
+    def _refresh_project_menu(self) -> None:
+        layout = self.project_manager.layout
+        if layout is not None and self._settings is not None:
+            root = str(layout.root)
+            recent = [root, *[item for item in self.recent_projects() if item != root]]
+            self._settings.setValue("projects/recent", recent[: self.MAX_RECENT_PROJECTS])
+        self.close_project_action.setEnabled(layout is not None)
+        self.recent_menu.clear()
+        for item in self.recent_projects():
+            action = self.recent_menu.addAction(item)
+            action.triggered.connect(partial(self._open_project_path, item))
+        self.recent_menu.setEnabled(not self.recent_menu.isEmpty())
+        name = None if self.project_manager.current is None else self.project_manager.current.name
+        self.setWindowTitle(f"PackLab Studio — {name}" if name else "PackLab Studio")
+
+    def _menu_status(self, text: str) -> None:
+        self.statusBar().showMessage(text, 15000)
+
+    def _new_project_from_menu(self) -> None:
+        chosen = self.choose_new_project_path()
+        if not chosen:
+            return
+        try:
+            self.new_project(chosen, Path(chosen).name)
+            self._menu_status(f"Created project {chosen}")
+        except Exception as error:
+            self._menu_status(f"New project failed: {error}")
+
+    def _open_project_from_menu(self) -> None:
+        chosen = self.choose_open_project_path()
+        if chosen:
+            self._open_project_path(chosen)
+
+    def _open_project_path(self, path: str) -> None:
+        try:
+            self.open_project(path)
+            self._menu_status(f"Opened project {path}")
+        except Exception as error:
+            self._menu_status(f"Open project failed: {error}")
+
+    def _close_project_from_menu(self) -> None:
+        try:
+            self.close_project()
+            self._menu_status("Project closed")
+        except Exception as error:  # e.g. a build is still running
+            self._menu_status(f"Close project failed: {error}")
+
+    def _diagnostic_bundle_from_menu(self) -> None:
+        try:
+            bundle = self.create_diagnostic_bundle()
+            self._menu_status(f"Diagnostic bundle written: {bundle.path}")
+        except Exception as error:
+            self._menu_status(f"Diagnostic bundle failed: {error}")
 
     # ------------------------------------------------------------- build model (PL-0443/0453)
 
