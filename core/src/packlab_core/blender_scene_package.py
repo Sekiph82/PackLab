@@ -819,6 +819,7 @@ def _create_overlay(overlay, root, base_matrix):
     verts = []
     faces = []
     uv_coords = []
+    actual_radial_offset = None
     if mode == "PLANAR_RECTANGULAR":
         corners = geometry.get("zone_corners_mm_unverified")
         if not isinstance(corners, list) or len(corners) != 4:
@@ -846,6 +847,7 @@ def _create_overlay(overlay, root, base_matrix):
         # Circumscribe the true cylinder: chord midpoints touch it, so the inscribed body
         # tessellation never pokes through the label (z-fighting stripes on large radii).
         overlay_radius = radius / __import__("math").cos(abs(span) / segments / 2.0) + float(overlay["renderer_only_offset_mm_unverified"])
+        actual_radial_offset = overlay_radius - radius
         for index in range(segments + 1):
             u = index / segments
             theta = theta0 + span * u
@@ -879,6 +881,8 @@ def _create_overlay(overlay, root, base_matrix):
     bpy.context.scene.collection.objects.link(obj)
     obj["packlab_overlay_binding_revision_id"] = overlay["revision_id"]
     obj["packlab_presentation_only"] = True
+    if actual_radial_offset is not None:
+        obj["packlab_actual_radial_offset_mm_unverified"] = actual_radial_offset
     asset_path = safe_relative(overlay["asset_project_relative_path"])
     image_path = root.joinpath(*asset_path.parts).resolve(strict=True)
     if not image_path.is_relative_to(root):
@@ -994,6 +998,12 @@ def _build_scene(root, body, assets, scene, result_relative, package_revision_id
             ],
             "image_size": [int(image.size[0]), int(image.size[1])],
             "image_loaded": True,
+            # Vertex radius minus true radius (circumscribed polygon + declared offset).
+            "actual_radial_offset_mm_unverified": (
+                float(obj["packlab_actual_radial_offset_mm_unverified"])
+                if "packlab_actual_radial_offset_mm_unverified" in obj
+                else None
+            ),
         })
     if not overlay_facts:
         raise ValueError("scene_exact_overlay_required")

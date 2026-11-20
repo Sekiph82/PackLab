@@ -65,6 +65,7 @@ class LabelsView(QWidget):
         self.suggestion: LabelZoneSuggestion | None = None
         self.last_mockup: dict[str, object] | None = None
         self._render_thread: threading.Thread | None = None
+        self._mockup_job: MockupJob | None = None
         # Injectable choosers keep every action drivable offscreen.
         self.choose_design_model_path: Callable[[], str] = lambda: QFileDialog.getOpenFileName(
             self,
@@ -166,7 +167,12 @@ class LabelsView(QWidget):
         render_box = QGroupBox("Material and mockup (visual reference only)", self)
         render_form = QFormLayout(render_box)
         render_form.addRow("Material", self.material)
+        self.cancel_render_button = self._button(
+            "Cancel render", "cancel-render", self.cancel_render
+        )
+        self.cancel_render_button.setEnabled(False)
         render_form.addRow(self.render_button)
+        render_form.addRow(self.cancel_render_button)
         render_form.addRow(self.mockup_preview)
 
         self.status = QLabel("Open a Design Model to place labels.", self)
@@ -196,6 +202,7 @@ class LabelsView(QWidget):
         layout.addWidget(disclaimer)
 
         self.material.currentIndexChanged.connect(self._material_changed)
+        self.kind.currentIndexChanged.connect(self._kind_changed)
         self.zones.currentRowChanged.connect(lambda _row: self._show_artwork())
         self.mockup_finished.connect(self._mockup_done)
         workbench.changed.connect(self.refresh)
@@ -328,8 +335,10 @@ class LabelsView(QWidget):
         except Exception as error:
             self.status.setText(f"Not done: {_text_error(error)}")
             return
-        job_id = self._job_start()
+        self._mockup_job = job
+        job_id = self._job_start(job)
         self.render_button.setEnabled(False)
+        self.cancel_render_button.setEnabled(True)
         self.status.setText(f"Rendering FRONT, THREE_QUARTER, BACK with {job.executable.name}…")
 
         def work() -> None:
@@ -342,16 +351,30 @@ class LabelsView(QWidget):
         self._render_thread = threading.Thread(target=work, name="packlab-mockup", daemon=True)
         self._render_thread.start()
 
+    def cancel_render(self) -> None:
+        job = self._mockup_job
+        if job is None or self._render_thread is None or not self._render_thread.is_alive():
+            return
+        job.cancel()
+        self.status.setText("Cancelling the mockup render (Blender is stopped)…")
+
     def wait_for_render(self, timeout: float | None = None) -> None:
         if self._render_thread is not None:
             self._render_thread.join(timeout)
 
     # ------------------------------------------------------------------ state
-    def _job_start(self) -> str | None:
+    def _job_start(self, mockup: MockupJob) -> str | None:
         manager = self.job_manager
         if manager is None:
             return None
-        job = manager.create("Render label mockup", "blender-mockup", cancellable=False)
+        job = manager.create("Render label mockup", "blender-mockup", cancellable=True)
+        # Jobs-panel cancel and window shutdown both kill Blender; the worker then reports.
+
+        def cancel_hook() -> bool:
+            mockup.cancel()
+            return False  # CANCELLING until the worker reports back
+
+        manager.register_cancel_hook(job.job_id, cancel_hook)
         manager.start(job.job_id)
         return job.job_id
 
@@ -361,7 +384,14 @@ class LabelsView(QWidget):
         job: MockupJob = payload[1]
         error: Exception | None = payload[2]
         self.render_button.setEnabled(True)
+        self.cancel_render_button.setEnabled(False)
+        self._mockup_job = None
         manager = self.job_manager
+        if error is not None and job.cancelled:
+            if manager is not None and job_id is not None:
+                manager.finish_cancel(job_id)
+            self.status.setText("Mockup render cancelled; partial views were removed.")
+            return
         if error is not None:
             if manager is not None and job_id is not None:
                 manager.fail(job_id, _text_error(error))
@@ -381,6 +411,12 @@ class LabelsView(QWidget):
                 )
             )
         self.status.setText(f"Mockup rendered: {job.root / 'renders' / 'standard_views'}")
+
+    def _kind_changed(self, _index: int) -> None:
+        self.suggestion = None
+        self.status.setText(
+            f"{self.kind.currentText()} label: Suggest zone, adjust the placement, then Add."
+        )
 
     def _material_changed(self, _index: int) -> None:
         value = self.material.currentData()

@@ -306,10 +306,17 @@ def build_revolved_shape(
     operation: DesignOperation,
     *,
     profile_sample_count: int = 257,
+    straight_run_tolerance: float | None = None,
 ) -> CadShapeBuild:
     """Build and register a validated single-solid revolve behind an opaque handle."""
     _validate_revolve_inputs(model, profile, operation, profile_sample_count)
-    polygon = _closed_profile_polygon(profile, profile_sample_count)
+    if straight_run_tolerance is not None and (
+        isinstance(straight_run_tolerance, bool)
+        or not isinstance(straight_run_tolerance, (int, float))
+        or not 0.0 <= float(straight_run_tolerance) <= 10.0
+    ):
+        raise CadAdapterError("revolve_straight_run_tolerance_invalid")
+    polygon = _closed_profile_polygon(profile, profile_sample_count, straight_run_tolerance)
     module_gp = importlib.import_module("OCP.gp")
     module_builder = importlib.import_module("OCP.BRepBuilderAPI")
     module_primitive = importlib.import_module("OCP.BRepPrimAPI")
@@ -1403,8 +1410,32 @@ def _validate_revolve_inputs(
         raise CadAdapterError("revolve_axis_direction_must_be_unit_length")
 
 
+def _snap_straight_runs(
+    points: list[tuple[float, float]], tolerance: float
+) -> list[tuple[float, float]]:
+    """Replace each run of >= 3 samples with radius spread <= 2*tolerance by its two ends
+    at the mid-range radius, so the run revolves into one exact cylinder face."""
+    snapped: list[tuple[float, float]] = []
+    start = 0
+    while start < len(points):
+        end, low, high = start, points[start][1], points[start][1]
+        while end + 1 < len(points):
+            radius = points[end + 1][1]
+            if max(high, radius) - min(low, radius) > 2.0 * tolerance:
+                break
+            end, low, high = end + 1, min(low, radius), max(high, radius)
+        if end - start >= 2 and low > 0.0:
+            middle = (low + high) / 2.0
+            snapped.extend(((points[start][0], middle), (points[end][0], middle)))
+            start = end + 1
+        else:
+            snapped.append(points[start])
+            start += 1
+    return snapped
+
+
 def _closed_profile_polygon(
-    profile: DesignProfile, sample_count: int
+    profile: DesignProfile, sample_count: int, straight_run_tolerance: float | None = None
 ) -> tuple[tuple[float, float], ...]:
     samples = profile.sample(sample_count)
     if any(not math.isfinite(item.axial) or not math.isfinite(item.radius) for item in samples):
@@ -1414,6 +1445,8 @@ def _closed_profile_polygon(
     if any(item.radius == 0.0 for item in samples[1:-1]):
         raise CadAdapterError("revolve_profile_must_not_touch_axis_interior")
     boundary = [(item.axial, item.radius) for item in samples]
+    if straight_run_tolerance is not None:
+        boundary = _snap_straight_runs(boundary, float(straight_run_tolerance))
     boundary.extend(((samples[-1].axial, 0.0), (samples[0].axial, 0.0)))
     polygon: list[tuple[float, float]] = []
     for point in boundary:

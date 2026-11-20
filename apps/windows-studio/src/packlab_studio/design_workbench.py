@@ -12,8 +12,10 @@ import json
 import math
 import re
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -24,7 +26,7 @@ from packlab_core.blender_capability import (
     _select_executable,
     discover_blender,
 )
-from packlab_core.blender_render import render_standard_views
+from packlab_core.blender_render import render_standard_views, run_blender_render
 from packlab_core.blender_scene_package import (
     BlenderArtworkBinding,
     BlenderScenePackage,
@@ -113,6 +115,12 @@ PROJECT_DESIGN_MODEL_DIR = Path("derived") / "design_model"
 STUDIO_REVISION_CONTRACT = "packlab.studio-design-model-revision.v1"
 # Labels are refused on regions curving tighter than this (|k| <= 0.05/mm, radius >= 20 mm).
 LABEL_MAXIMUM_ABSOLUTE_CURVATURE_PER_MM = 0.05
+# Exports: only numerically identical radii are merged into one face (no shape change).
+EXPORT_STRAIGHT_RUN_TOLERANCE = 1e-6
+# Label host: a body band whose radius stays within +/- 0.5 mm is revolved as one exact
+# cylinder at its mid-range radius (scan-fitted profiles are never exactly straight). The
+# exported CAD keeps the unsnapped profile; the tolerance is recorded in the label BREP.
+LABEL_BAND_TOLERANCE_MM = 0.5
 _DEFAULT_PROFILE_SAMPLES = 257
 _TARGET_NORMAL = {
     LabelZoneKind.FRONT: (0.0, 1.0, 0.0),
@@ -150,6 +158,12 @@ class DesignModelSession:
     preview: CadPreviewMeshRevision
     document_sha256: str
     part_name: str
+    label_representation: CadBrepRepresentationRevision
+    label_preview: CadPreviewMeshRevision
+
+    @property
+    def label_band_snapped(self) -> bool:
+        return self.label_representation.geometry_sha256 != self.representation.geometry_sha256
 
     @property
     def bounds_mm(self) -> tuple[float, float, float, float, float, float]:
@@ -254,10 +268,26 @@ def load_design_model_session(
     if profile is None:
         raise DesignWorkbenchError("The Design Model revolve has no profile.")
     model = document.model
+    samples = _exact_profile_sample_count(profile)
     representation = revolve_design_model_to_brep(
-        model, profile, operation, profile_sample_count=_exact_profile_sample_count(profile)
+        model,
+        profile,
+        operation,
+        profile_sample_count=samples,
+        straight_run_tolerance=EXPORT_STRAIGHT_RUN_TOLERANCE,
     )
     preview = tessellate_brep_preview(model, representation)
+    label_representation = revolve_design_model_to_brep(
+        model,
+        profile,
+        operation,
+        profile_sample_count=samples,
+        straight_run_tolerance=LABEL_BAND_TOLERANCE_MM,
+    )
+    if label_representation.geometry_sha256 == representation.geometry_sha256:
+        label_representation, label_preview = representation, preview
+    else:
+        label_preview = tessellate_brep_preview(model, label_representation)
     name = re.sub(r"[^A-Za-z0-9 ._-]+", "_", part_name).strip() or "design-model"
     return DesignModelSession(
         model,
@@ -267,6 +297,8 @@ def load_design_model_session(
         preview,
         hashlib.sha256(data).hexdigest(),
         name[:80],
+        label_representation,
+        label_preview,
     )
 
 
@@ -316,6 +348,11 @@ def _document_from_studio_revision(data: bytes) -> bytes:
     }
     envelope = {"body": body, "content_sha256": hashlib.sha256(_canonical_json(body)).hexdigest()}
     model = deserialize_design_model(_canonical_json(envelope)).model
+    history = record.get("revision_history")
+    if record.get("design_model_revision_id") != model.revision_id or (
+        isinstance(history, list) and history and history[-1] != model.revision_id
+    ):
+        raise DesignWorkbenchError("The project Design Model revision record is inconsistent.")
     profile_feature, axis_feature = operation_dict["parent_feature_ids"]
     operation = create_revolve_operation(
         model,
@@ -454,6 +491,41 @@ class MockupJob:
     revisions: tuple[tuple[str, str], ...]
     commit: str
     result: dict[str, object] = field(default_factory=dict)
+    _cancelled: threading.Event = field(default_factory=threading.Event)
+    _process: subprocess.Popen[str] | None = None
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled.is_set()
+
+    def cancel(self) -> None:
+        """Stop the render: no new Blender view starts and a running one is killed."""
+        self._cancelled.set()
+        process = self._process
+        if process is not None and process.poll() is None:
+            process.kill()
+
+    def _runner(
+        self, command: list[str], *, timeout: float, **_options: object
+    ) -> subprocess.CompletedProcess[str]:
+        # Same contract as subprocess.run for run_blender_render, but killable.
+        if self.cancelled:
+            raise DesignWorkbenchError("Mockup render cancelled.")
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False
+        )
+        self._process = process
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise
+        finally:
+            self._process = None
+        if self.cancelled:
+            raise DesignWorkbenchError("Mockup render cancelled.")
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
     def run(self) -> dict[str, object]:
         self.result = render_standard_views(
@@ -469,6 +541,7 @@ class MockupJob:
             timeout_seconds=300.0,
             packlab_commit=self.commit,
             packlab_version=current_build_info().studio_version,
+            render_executor=partial(run_blender_render, runner=self._runner),
         )
         return self.result
 
@@ -518,6 +591,12 @@ class DesignWorkbench(QObject):
             f"height {z1 - z0:.1f} mm, width {x1 - x0:.1f} mm, depth {y1 - y0:.1f} mm "
             f"({session.model.coordinate_unit}); revision {session.model.revision_id}; "
             "physical validation DEFERRED_OWNER_VALIDATION."
+            + (
+                f" Label host: body bands within +/-{LABEL_BAND_TOLERANCE_MM:g} mm are treated "
+                "as exact cylinders (exports keep the fitted profile)."
+                if session.label_band_snapped
+                else ""
+            )
         )
 
     # ------------------------------------------------------------------ labels
@@ -529,7 +608,7 @@ class DesignWorkbench(QObject):
         policy = CadLabelSurfacePolicy(
             _TARGET_NORMAL[kind], slope, LABEL_MAXIMUM_ABSOLUTE_CURVATURE_PER_MM
         )
-        analysis = analyze_cad_label_surfaces(session.model, session.representation, policy)
+        analysis = analyze_cad_label_surfaces(session.model, session.label_representation, policy)
         surface = _HOST_SURFACE[kind]
         candidates = [
             item
@@ -549,11 +628,15 @@ class DesignWorkbench(QObject):
                 f"No flat {kind.value} panel facing {'+Y' if kind is LabelZoneKind.FRONT else '-Y'}"
                 " on this Design Model; a round jar or bottle takes a wrap label."
             )
-        # Prefer regions away from face trims, then the lowest band (the body, not a lid).
-        candidate = min(
-            candidates,
-            key=lambda item: (len(item.rejection_reasons), round(item.center[2], 6)),
-        )
+
+        # Wrap: the tallest band (regions split a face into equal rows, so a region's
+        # z-span is proportional to its face height). Then fewer trims, then the lowest.
+        def rank(item: CadLabelSurfaceCandidate) -> tuple[float, int, float]:
+            heights = [point[2] for point in item.support_points]
+            span = max(heights) - min(heights) if kind is LabelZoneKind.WRAP else 0.0
+            return (-round(span, 6), len(item.rejection_reasons), round(item.center[2], 6))
+
+        candidate = min(candidates, key=rank)
         return LabelZoneSuggestion(kind, analysis, candidate, _DEFAULT_BOUNDARY[kind])
 
     def add_label_zone(
@@ -570,7 +653,7 @@ class DesignWorkbench(QObject):
         chosen = boundary or suggestion.boundary
         zone = create_label_zone(
             session.model,
-            session.representation,
+            session.label_representation,
             zone_kind=suggestion.kind,
             component_id=session.component_id,
             feature_id=session.profile_feature_id,
@@ -585,7 +668,7 @@ class DesignWorkbench(QObject):
         )
         binding = create_label_metric_surface_binding(
             session.model,
-            session.representation,
+            session.label_representation,
             placement,
             suggestion.analysis,
             suggestion.candidate.analysis_region_id,
@@ -632,8 +715,19 @@ class DesignWorkbench(QObject):
         export = export_label_dieline_svg(intent, entry.placement)
         target = _new_file(Path(destination), f"{self._stem()}-{entry.variant_id}-dieline.svg")
         target.write_bytes(export.svg_bytes)
+        session = self.require_session()
+        host = session.label_representation
+        record = export.as_dict() | {
+            "label_host": {
+                "brep_revision_id": host.revision_id,
+                "straight_run_tolerance_mm_unverified": host.straight_run_tolerance,
+                "band_approximated_by_cylinder": session.label_band_snapped,
+                "host_height_mm_unverified": entry.metric_binding.host_height_mm_unverified,
+                "host_circumference_mm_unverified": (entry.metric_binding.host_width_mm_unverified),
+            }
+        }
         target.with_suffix(".json").write_text(
-            json.dumps(export.as_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         return target, export
 
@@ -689,9 +783,9 @@ class DesignWorkbench(QObject):
         root = _new_directory(Path(destination), f"{self._stem()}-mockup")
         assets = root / "assets"
         assets.mkdir()
-        model, brep = session.model, session.representation
+        model, brep = session.model, session.label_representation
         cad_export = export_design_model_obj_glb(
-            model, brep, session.preview, assets / "model.obj", assets / "model.glb"
+            model, brep, session.label_preview, assets / "model.obj", assets / "model.glb"
         )
         library = self.catalog.library
         preset = self.material

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import zipfile
 from pathlib import Path
@@ -73,16 +74,17 @@ def _click(widget, name: str) -> None:
     button.click()
 
 
-def test_nominal_jar_round_trips_and_keeps_one_exact_cylinder_band_per_segment(jar_file) -> None:
+def test_nominal_jar_is_one_exact_cylinder_face_over_the_full_body(jar_file) -> None:
     session = load_design_model_session(jar_file)
     x0, y0, z0, x1, y1, z1 = session.bounds_mm
     assert (z1 - z0, x1 - x0, y1 - y0) == pytest.approx((50.0, 85.0, 85.0))
     assert session.model.coordinate_unit == "mm_unverified"
+    assert not session.label_band_snapped  # straight jar: label host == export geometry
     analysis = analyze_cad_label_surfaces(
         session.model, session.representation, CadLabelSurfacePolicy((0.0, 1.0, 0.0), 90.0, 1.0)
     )
     cylinders = {item.center[2] for item in analysis.candidates if "Cylinder" in item.surface_type}
-    assert len(cylinders) == 6  # two 25 mm bands x three sampled rows, not 256 slivers
+    assert len(cylinders) == 3  # one 50 mm face sampled in three rows (was two 25 mm bands)
 
 
 def test_wrap_label_dieline_and_artwork_on_revolved_jar(app, jar_file, tmp_path) -> None:
@@ -92,15 +94,19 @@ def test_wrap_label_dieline_and_artwork_on_revolved_jar(app, jar_file, tmp_path)
     assert entry.metric_binding.mapping_mode == "CYLINDRICAL_WRAP"
     assert entry.metric_binding.host_width_mm_unverified == pytest.approx(85.0 * 3.141592653589793)
     width, height = entry.size_mm
-    assert (width, height) == pytest.approx((267.035, 20.0), abs=1e-3)
+    assert entry.metric_binding.host_height_mm_unverified == pytest.approx(50.0)  # full body
+    assert (width, height) == pytest.approx((267.035, 40.0), abs=1e-3)
     workbench.import_artwork(entry, SVG)
     path, export = workbench.export_dieline_svg(entry, tmp_path)
     text = path.read_text("utf-8")
     assert 'data-coordinate-unit="mm_unverified"' in text
     assert "known-10mm-scale-mark" in text
     assert re.search(r'width="([0-9.]+)mm"', text).group(1).startswith("274.03")  # + bleed/margin
-    assert export.height_mm_unverified == pytest.approx(34.0)
-    assert json.loads(path.with_suffix(".json").read_text("utf-8"))["print_ready"] is False
+    assert export.height_mm_unverified == pytest.approx(54.0)
+    record = json.loads(path.with_suffix(".json").read_text("utf-8"))
+    assert record["print_ready"] is False
+    assert record["label_host"]["host_height_mm_unverified"] == pytest.approx(50.0)
+    assert record["label_host"]["band_approximated_by_cylinder"] is False
     references = workbench.sku_artwork_references()
     assert len(references) == 1 and references[0].variant_id == "wrap"
     with pytest.raises(DesignWorkbenchError, match="wrap label"):
@@ -117,7 +123,8 @@ def test_mockup_without_blender_shows_clear_message(app, jar_file, tmp_path, mon
     assert "Blender 5.x was not found" in view.status.text()
 
 
-def test_mockup_scene_package_is_built_from_the_label_chain(app, jar_file, tmp_path) -> None:
+def _prepared_mockup(jar_file, tmp_path, monkeypatch):
+    monkeypatch.setenv("PACKLAB_BUILD_REVISION", "a" * 40)  # provenance must not be refused
     fake_blender = tmp_path / "blender.exe"
     fake_blender.write_bytes(b"not run")
     workbench = DesignWorkbench()
@@ -125,15 +132,74 @@ def test_mockup_scene_package_is_built_from_the_label_chain(app, jar_file, tmp_p
     entry = workbench.add_label_zone(workbench.suggest_label_zone(LabelZoneKind.WRAP))
     workbench.import_artwork(entry, SVG)
     workbench.set_material("material-pet-clear-visual")
-    try:
-        job = workbench.prepare_mockup(tmp_path, executable=fake_blender)
-    except DesignWorkbenchError as error:  # no git and no build revision: provenance refused
-        assert "build revision" in str(error)
-        return
+    out = tmp_path / "out"
+    out.mkdir()
+    return workbench.prepare_mockup(out, executable=fake_blender)
+
+
+def test_mockup_scene_package_is_built_from_the_label_chain(
+    app, jar_file, tmp_path, monkeypatch
+) -> None:
+    job = _prepared_mockup(jar_file, tmp_path, monkeypatch)
+    assert job.commit == "a" * 40
     overlays = job.package.manifest()["body"]["scene"]["overlays"]
     assert [item["mapping_mode"] for item in overlays] == ["CYLINDRICAL_WRAP"]
+    geometry = overlays[0]["geometry"]
+    assert geometry["axial_end_mm_unverified"] - geometry["axial_start_mm_unverified"] == (
+        pytest.approx(40.0)  # label band 0.1..0.9 of the full 50 mm body, centred
+    )
     assert (job.root / "assets" / "label-0.png").read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
     assert job.bounds_max[2] == pytest.approx(0.05)
+
+
+class _FakeBlender:
+    """Stands in for subprocess.Popen: exits 0 without the render marker, or hangs."""
+
+    instances: list[_FakeBlender] = []
+
+    def __init__(self, command, **_options) -> None:
+        self.command, self.returncode, self.killed = command, None, False
+        _FakeBlender.instances.append(self)
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed, self.returncode = True, -9
+
+    def communicate(self, timeout=None):
+        if self.returncode is None:
+            self.returncode = 0
+        return ("blender output without marker", "")
+
+
+def test_mockup_run_drives_blender_and_reports_invalid_output(
+    app, jar_file, tmp_path, monkeypatch
+) -> None:
+    job = _prepared_mockup(jar_file, tmp_path, monkeypatch)
+    _FakeBlender.instances.clear()
+    monkeypatch.setattr(design_workbench.subprocess, "Popen", _FakeBlender)
+    with pytest.raises(Exception, match="blender_render_semantic_validation_failed"):
+        job.run()
+    assert _FakeBlender.instances and "--background" in _FakeBlender.instances[0].command
+    assert not list((job.root / "renders" / "standard_views").glob("*.png"))
+
+
+def test_mockup_cancel_kills_blender_and_stops_the_batch(app, jar_file, tmp_path, monkeypatch):
+    job = _prepared_mockup(jar_file, tmp_path, monkeypatch)
+    _FakeBlender.instances.clear()
+
+    class Hanging(_FakeBlender):
+        def communicate(self, timeout=None):
+            job.cancel()  # user pressed Cancel while Blender was rendering
+            assert self.killed
+            return ("", "")
+
+    monkeypatch.setattr(design_workbench.subprocess, "Popen", Hanging)
+    with pytest.raises(DesignWorkbenchError, match="cancelled"):
+        job.run()
+    assert len(_FakeBlender.instances) == 1  # no further view was started
+    assert job.cancelled
 
 
 def test_labels_tab_buttons_drive_the_workbench(window, jar_file, tmp_path) -> None:
@@ -151,7 +217,7 @@ def test_labels_tab_buttons_drive_the_workbench(window, jar_file, tmp_path) -> N
     _click(labels, "packlab.labels.suggest")
     assert "cylinder region" in labels.status.text()
     _click(labels, "packlab.labels.add-zone")
-    assert "Added wrap label: 267.0 x 20.0" in labels.status.text()
+    assert "Added wrap label: 267.0 x 40.0" in labels.status.text()
     _click(labels, "packlab.labels.import-artwork")
     assert "Placed art.svg" in labels.status.text()
     _click(labels, "packlab.labels.export-dieline")
@@ -159,6 +225,8 @@ def test_labels_tab_buttons_drive_the_workbench(window, jar_file, tmp_path) -> N
     labels.kind.setCurrentIndex(labels.kind.findData("front"))
     _click(labels, "packlab.labels.add-zone")
     assert labels.status.text().startswith("Not done: No flat front panel")
+    labels.kind.setCurrentIndex(labels.kind.findData("wrap"))
+    assert "Not done" not in labels.status.text()  # stale refusal cleared
 
 
 def test_exports_page_gets_design_model_and_dimension_sheet(window, jar_file, tmp_path) -> None:
@@ -304,3 +372,57 @@ def test_project_revision_is_opened_automatically_when_a_project_opens(app, jar_
     assert second.design_workbench.export_source() is not None
     second.close()
     app.processEvents()
+
+
+def _scan_like_record(jar_file: Path) -> dict:
+    """Measure & Design record shape with a 16-point noisy scan-fitted profile (synthetic)."""
+    import random
+
+    rng = random.Random(333)
+    record = _studio_revision_record(jar_file, height=37.5)
+    record["fitted_from_scan"] = {"height": 37.5, "diameter": 72.0}
+    record["overall_dimensions_mm_unverified"] = {"height": 37.5, "diameter": 72.0}
+    points = []
+    for index in range(16):
+        axial = 2.5 * index
+        body = 36.0 + rng.uniform(-0.4, 0.4)  # +/- 0.4 mm scan noise on a straight body
+        radius = body if axial <= 25.0 else 37.5 + rng.uniform(-1.0, 1.0)  # lid zone
+        points.append({"axial": axial, "radius": radius, "tangent": None})
+    record["revolved_fit"]["profile"]["control_points"] = points
+    return record
+
+
+def test_scan_fitted_profile_gets_a_full_body_wrap_host(app, jar_file, tmp_path) -> None:
+    path = tmp_path / "scan.json"
+    path.write_text(json.dumps(_scan_like_record(jar_file)), encoding="utf-8")
+    workbench = DesignWorkbench()
+    session = workbench.open_document(path)
+    assert session.representation.profile_sample_count == 257
+    assert session.label_band_snapped
+    assert session.label_representation.straight_run_tolerance == 0.5
+    entry = workbench.add_label_zone(workbench.suggest_label_zone(LabelZoneKind.WRAP))
+    assert entry.metric_binding.host_height_mm_unverified > 20.0  # the body band, not a sliver
+    assert "within +/-0.5 mm" in workbench.summary()
+
+
+def test_inconsistent_project_revision_record_is_refused(app, jar_file, tmp_path) -> None:
+    record = _studio_revision_record(jar_file, height=50.0)
+    record["design_model_revision_id"] = "design-model:" + "0" * 64
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(DesignWorkbenchError, match="inconsistent"):
+        DesignWorkbench().open_document(path)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("PACKLAB_MEASURE_DESIGN_RECORD"),
+    reason="set PACKLAB_MEASURE_DESIGN_RECORD to a real saved Measure & Design record",
+)
+def test_real_measure_design_record_takes_a_wrap_label(app, tmp_path) -> None:
+    workbench = DesignWorkbench()
+    session = workbench.open_document(os.environ["PACKLAB_MEASURE_DESIGN_RECORD"])
+    assert session.model.parent_kind.value == "CAPTURED_SCAN_MASTER"
+    entry = workbench.add_label_zone(workbench.suggest_label_zone(LabelZoneKind.WRAP))
+    assert entry.metric_binding.host_height_mm_unverified > 10.0
+    path, _export = workbench.export_dieline_svg(entry, tmp_path)
+    assert path.is_file()
