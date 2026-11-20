@@ -43,6 +43,7 @@ from .labels_view import LabelsView
 from .mask_correction import MaskCorrectionView
 from .measure_view import MeasureDesignView
 from .model_viewer import ModelViewerView
+from .package_families_view import PackageFamiliesView
 from .packaging_library_browser import PackagingLibraryBrowserView
 from .version import AboutView
 
@@ -58,6 +59,7 @@ class Route(StrEnum):
     MODEL_VIEWER = "model-viewer"
     MEASURE_DESIGN = "measure-design"
     LABELS = "labels"
+    PACKAGE_FAMILIES = "package-families"
 
 
 class NavigationError(ValueError):
@@ -254,7 +256,13 @@ class SettingsView(QWidget):
 
 # Routes that need an open project. Navigation and view gating both read this set.
 PROJECT_ROUTES = frozenset(
-    {Route.RECONSTRUCTION, Route.EDITOR, Route.MASK_CORRECTION, Route.EXPORTS}
+    {
+        Route.RECONSTRUCTION,
+        Route.EDITOR,
+        Route.MASK_CORRECTION,
+        Route.EXPORTS,
+        Route.PACKAGE_FAMILIES,
+    }
 )
 
 
@@ -334,6 +342,7 @@ ROUTE_FACTORIES: dict[Route, RouteFactory] = {
         project_root=partial(_project_root, s.get("project_manager")),
         project_manager=s.get("project_manager"),
     ),
+    Route.PACKAGE_FAMILIES: lambda s: PackageFamiliesView(s.get("project_manager")),
 }
 
 

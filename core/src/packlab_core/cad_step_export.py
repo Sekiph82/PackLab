@@ -230,7 +230,9 @@ def export_design_model_step(
                     raise CadStepExportError("cad_step_file_timestamp_missing")
                 step_label = part_name.replace("'", "''").encode("ascii")
                 contents, product_replacements = re.subn(
-                    rb"(?m)^(\s*#\d+\s*=\s*PRODUCT\(')[^']*','[^']*'",
+                    # OCC wraps long PRODUCT records after the first name; accept the
+                    # line break and write both names back on one line.
+                    rb"(?m)^(\s*#\d+\s*=\s*PRODUCT\(')[^']*',\s*'[^']*'",
                     lambda match: _replace_step_product_label(match, step_label),
                     contents,
                     count=1,

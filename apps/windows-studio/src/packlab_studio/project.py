@@ -500,7 +500,9 @@ class ProjectManager:
         """Write a create-only Design Model document and select it in project authority.
 
         The file stays at ``derived/design_model/<id>.json`` (studio contract v1); the
-        authority record adds its digest and the lineage to a persisted Scan Master.
+        authority record adds its digest and the lineage to a persisted Scan Master, or, for
+        model-only package families (ADR-0005), to the STANDALONE_DESIGN_GEOMETRY root of the
+        core design document embedded in the revision.
         """
 
         if self.layout is None or self.metadata is None:
@@ -508,6 +510,13 @@ class ProjectManager:
         revision_id = document.get("design_model_revision_id")
         model = document.get("model")
         parent = model.get("parent") if isinstance(model, dict) else None
+        standalone_root = (
+            self._standalone_root_id(document)
+            if isinstance(model, dict) and parent is None
+            else None
+        )
+        if standalone_root is not None:
+            parent = {"scan_master_revision_id": None, "scan_master_geometry_sha256": None}
         if (
             document.get("contract") != DESIGN_MODEL_DOCUMENT_CONTRACT
             or not isinstance(revision_id, str)
@@ -540,8 +549,9 @@ class ProjectManager:
             if isinstance(scan_masters, list)
             else []
         )
-        if len(lineage) != 1 or lineage[0].get("mesh_sha256") != parent.get(
-            "scan_master_geometry_sha256"
+        if standalone_root is None and (
+            len(lineage) != 1
+            or lineage[0].get("mesh_sha256") != parent.get("scan_master_geometry_sha256")
         ):
             raise ProjectError(
                 "design model must be fitted to a Scan Master persisted in this project"
@@ -566,6 +576,13 @@ class ProjectManager:
             "file_sha256": hashlib.sha256(payload).hexdigest(),
             "scan_master_revision_id": scan_master_id,
             "scan_master_geometry_sha256": parent.get("scan_master_geometry_sha256"),
+            "parent_kind": (
+                "STANDALONE_DESIGN_GEOMETRY"
+                if standalone_root is not None
+                else "CAPTURED_SCAN_MASTER"
+            ),
+            "standalone_root_revision_id": standalone_root,
+            "package_family": model.get("package_family"),
             "previous_design_model_revision_id": model.get("previous_revision_id"),
             "overall_dimensions_mm_unverified": document.get("overall_dimensions_mm_unverified"),
             "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
@@ -612,6 +629,34 @@ class ProjectManager:
             return False
         _, state = self._read_authority(self.layout)
         return bool(state.get("design_model_revisions"))
+
+    def _standalone_root_id(self, document: dict[str, Any]) -> str | None:
+        """Verified ADR-0005 root id of a model-only revision, else ``None``.
+
+        The embedded core design document is parsed strictly (digest, units, authority) and
+        must carry exactly the recorded model; its root must belong to this project.
+        """
+
+        from packlab_core.design_serialization import deserialize_design_model
+
+        assert self.metadata is not None
+        model = document.get("model")
+        if not isinstance(model, dict) or model.get("contract") != "packlab.design-model.v2":
+            return None
+        try:
+            core = deserialize_design_model(str(document.get("design_document", "")))
+        except ValueError as error:
+            raise ProjectError(f"standalone design document is invalid: {error}") from error
+        root = core.model.standalone_root
+        if (
+            root is None
+            or core.model.as_dict() != model
+            or root.project_id != self.metadata.project_id
+            or root.mold_use_authorized is not False
+            or root.captured_ancestry_exists is not False
+        ):
+            raise ProjectError("standalone design document does not match this project")
+        return root.revision_id
 
     def selected_design_model(self) -> tuple[dict[str, Any], dict[str, Any]] | None:
         """Return (authority record, verified document) of the project's current Design Model."""

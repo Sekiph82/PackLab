@@ -29,7 +29,12 @@ from .build_model import BuildBackend, BuildModelController, BuildModelView, Bui
 from .capture_inbox import CaptureInboxView
 from .design_workbench import DesignWorkbench
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
-from .engineering_export import DesignModelExportSource, DestinationProvider
+from .engineering_export import (
+    DesignModelExportSource,
+    DestinationProvider,
+    EngineeringExportView,
+    ExportSourceKind,
+)
 from .history import Operation
 from .jobs import JobManager
 from .labels_view import install_design_workbench
@@ -43,6 +48,7 @@ from .navigation import (
     ScanMasterEditorView,
     SettingsView,
 )
+from .package_families_view import PackageFamiliesView
 from .packaging_library_audit import PackagingLibraryAuditStore
 from .packaging_library_browser import (
     LibraryRelatedRecord,
@@ -213,6 +219,7 @@ class StudioMainWindow(QMainWindow):
         self.design_workbench = DesignWorkbench()
         if design_model_export_source_provider is None:
             design_model_export_source_provider = self.design_workbench.export_source
+        self._fallback_design_export = design_model_export_source_provider
         self.route_stack = RouteStack(
             design_workbench=self.design_workbench,
             ingest_controller=ingest_controller,
@@ -220,7 +227,7 @@ class StudioMainWindow(QMainWindow):
             receiver_session_factory=receiver_session_factory,
             project_manager=self.project_manager,
             packaging_library_service=packaging_library_service,
-            design_model_export_source_provider=design_model_export_source_provider,
+            design_model_export_source_provider=self._design_export_source,
             export_destination_provider=export_destination_provider,
             job_manager=self.job_manager,
         )
@@ -245,6 +252,11 @@ class StudioMainWindow(QMainWindow):
         editor = self.route_stack.views[Route.EDITOR]
         if isinstance(editor, ScanMasterEditorView):
             editor.promotion_requested.connect(self._promote_scan_master_from_editor)
+        families = self.route_stack.views[Route.PACKAGE_FAMILIES]
+        if isinstance(families, PackageFamiliesView):
+            families.export_requested.connect(self._export_family_part)
+            # A Design Model opened for Labels takes the Exports page back from the family.
+            self.design_workbench.changed.connect(families.yield_export)
         self.navigation_panel.route_requested.connect(self.navigation.navigate)
         self.navigation.route_changed.connect(
             lambda value: self.route_stack.show_route(Route(value))
@@ -597,6 +609,25 @@ class StudioMainWindow(QMainWindow):
         right = max(rect.right() for rect in geometries)
         bottom = max(rect.bottom() for rect in geometries)
         return left, top, right - left + 1, bottom - top + 1
+
+    def _design_export_source(self) -> DesignModelExportSource | None:
+        """Exports page Design Model: the active package-family part, else the fallback."""
+
+        families = self.route_stack.views.get(Route.PACKAGE_FAMILIES)
+        if isinstance(families, PackageFamiliesView):
+            source = families.export_source()
+            if source is not None:
+                return source
+        fallback = self._fallback_design_export
+        return None if fallback is None else fallback()
+
+    def _export_family_part(self) -> None:
+        export_view = self.route_stack.views[Route.EXPORTS]
+        self.navigation.navigate(Route.EXPORTS)
+        if isinstance(export_view, EngineeringExportView):
+            index = export_view.source_selector.findData(ExportSourceKind.DESIGN_MODEL.value)
+            export_view.source_selector.setCurrentIndex(index)
+            export_view.refresh_source()
 
     def _on_project_changed(self, _metadata: object) -> None:
         self._sync_project_state()

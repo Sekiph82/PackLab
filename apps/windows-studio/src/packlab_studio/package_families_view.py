@@ -1,0 +1,560 @@
+"""Package families route: caps/closures, jerrycan, trigger/pump, tube and sachet/pouch.
+
+Every button calls ``package_families`` (which calls core); this widget only collects
+parameters, shows the result and hands the selected part to the Exports page.
+"""
+
+from __future__ import annotations
+
+import os
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+
+import numpy as np
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QGuiApplication, QPixmap
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
+from packlab_core.closure_workflow import ClosureWorkflowHistory
+from packlab_core.design_model import FeatureKind
+
+from . import package_families as pf
+from .closure_workflow import ClosureWorkflowController
+from .engineering_export import DesignModelExportSource
+from .measure_view import _display
+from .model_viewer import ModelViewerView
+from .viewport import MeshGeometry, SceneObjectKind, ViewportService
+
+CAPTURED = "captured"
+STANDALONE = "standalone"
+
+
+class PackageFamiliesView(QWidget):
+    """Family selector, key-dimension editor, closure workflow and export hand-off."""
+
+    export_requested = Signal()  # owner asked to export the selected part (Exports page)
+    design_changed = Signal()
+
+    def __init__(
+        self,
+        project_manager: Any = None,
+        *,
+        artwork_chooser: Callable[[QWidget], str] | None = None,
+    ) -> None:
+        super().__init__()
+        self.setObjectName("packlab.view.package-families")
+        self.project_manager = project_manager
+        self._choose_artwork = artwork_chooser or (
+            lambda parent: QFileDialog.getOpenFileName(
+                parent, "Artwork (SVG or PNG)", "", "Artwork (*.svg *.png)"
+            )[0]
+        )
+        self.design: pf.FamilyDesign | None = None
+        self.closure_history: ClosureWorkflowHistory | None = None
+        self.export_active = False
+        self.spins: dict[str, QDoubleSpinBox] = {}
+
+        self.viewer = ModelViewerView()
+        self.viewer.open_button.hide()
+        self.closure_controller = ClosureWorkflowController(self.viewer.service)
+
+        def button(text: str, name: str, slot: Callable[[], object]) -> QPushButton:
+            widget = QPushButton(text)
+            widget.setObjectName(f"packlab.families.{name}")
+            widget.clicked.connect(slot)
+            return widget
+
+        self.family = QComboBox()
+        self.family.setObjectName("packlab.families.family")
+        for key, label in pf.FAMILIES.items():
+            self.family.addItem(label, key)
+        self.source = QComboBox()
+        self.source.setObjectName("packlab.families.source")
+        self.preset = QComboBox()
+        self.preset.setObjectName("packlab.families.preset")
+        self.actor = QLineEdit(os.environ.get("USERNAME") or os.environ.get("USER") or "owner")
+        self.parameters_box = QGroupBox("Key dimensions (mm_unverified)")
+        self.parameters_form = QFormLayout(self.parameters_box)
+        self.create_button = button("Create Design Model", "create", self.create_design)
+        self.apply_button = button(
+            "Apply dimensions (new revision)", "apply", self.apply_dimensions
+        )
+        self.save_button = button("Save revision to project", "save", self.save_design)
+        self.open_button = button(
+            "Open the project's current Design Model", "open-current", self.open_current
+        )
+        self.show_closure = QCheckBox("Show closure / head")
+        self.show_closure.setObjectName("packlab.families.show-closure")
+        self.show_closure.setChecked(True)
+        self.show_closure.toggled.connect(self.set_closure_visible)
+        self.replace_button = button(
+            "Replace closure with the dimensions above", "replace-closure", self.replace_closure
+        )
+        self.undo_button = button("Undo closure replacement", "undo-closure", self.undo_closure)
+        self.redo_button = button("Redo closure replacement", "redo-closure", self.redo_closure)
+        self.artwork_button = button("Place artwork on the front…", "artwork", self.place_artwork)
+        self.artwork_preview = QLabel("")
+        self.artwork_preview.setObjectName("packlab.families.artwork-preview")
+        self.part = QComboBox()
+        self.part.setObjectName("packlab.families.export-part")
+        self.part.currentIndexChanged.connect(lambda _index: self.design_changed.emit())
+        self.export_button = button("Export selected part…", "export", self.request_export)
+        self.details = QLabel("Choose a package family.")
+        self.details.setObjectName("packlab.families.details")
+        self.details.setWordWrap(True)
+        self.details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.status = QLabel("")
+        self.status.setObjectName("packlab.families.status")
+        self.status.setWordWrap(True)
+
+        family_box = QGroupBox("Package family")
+        family_form = QFormLayout(family_box)
+        family_form.addRow("Family", self.family)
+        family_form.addRow("Start from", self.source)
+        family_form.addRow("Preset", self.preset)
+        family_form.addRow("Actor", self.actor)
+        closure_box = QGroupBox("Closure workflow")
+        closure_form = QFormLayout(closure_box)
+        closure_form.addRow(self.show_closure)
+        closure_form.addRow(self.replace_button)
+        closure_form.addRow(self.undo_button)
+        closure_form.addRow(self.redo_button)
+        output_box = QGroupBox("Save and export")
+        output_form = QFormLayout(output_box)
+        output_form.addRow(self.save_button)
+        output_form.addRow("Part", self.part)
+        output_form.addRow(self.export_button)
+        output_form.addRow(self.artwork_button)
+        output_form.addRow(self.artwork_preview)
+
+        controls = QWidget()
+        column = QVBoxLayout(controls)
+        for widget in (
+            family_box,
+            self.parameters_box,
+            self.create_button,
+            self.apply_button,
+            self.open_button,
+            closure_box,
+            output_box,
+        ):
+            column.addWidget(widget)
+        column.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidget(controls)
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumWidth(400)
+        layout = QHBoxLayout(self)
+        layout.addWidget(scroll)
+        right = QVBoxLayout()
+        right.addWidget(self.status)
+        right.addWidget(self.viewer, 1)
+        right.addWidget(self.details)
+        layout.addLayout(right, 1)
+
+        self.family.currentIndexChanged.connect(self._family_changed)
+        self.preset.currentIndexChanged.connect(self._preset_changed)
+        self.source.currentIndexChanged.connect(lambda _index: self._preset_changed())
+        self._project_seen: str | None = None
+        self._family_changed()
+        if hasattr(project_manager, "add_listener"):
+            project_manager.add_listener(lambda _metadata: self._project_changed())
+
+    def _project_changed(self) -> None:
+        """Reset on project switch; refill container-derived defaults until a design exists."""
+
+        current = getattr(self.project_manager, "current", None)
+        project_id = None if current is None else current.project_id
+        if project_id != self._project_seen:
+            self._project_seen = project_id
+            self.design, self.closure_history, self.export_active = None, None, False
+            self.part.clear()
+            self.viewer.service = ViewportService(self.viewer.service.adapter)
+            self.viewer.redraw()
+            self.details.setText("Choose a package family.")
+        if self.design is None and current is not None:
+            self._preset_changed()
+
+    # ------------------------------------------------------------------ helpers
+
+    @property
+    def family_key(self) -> str:
+        return str(self.family.currentData())
+
+    @property
+    def captured(self) -> bool:
+        return self.source.currentData() == CAPTURED
+
+    def _actor(self) -> str:
+        return self.actor.text().strip() or "owner"
+
+    def values(self) -> dict[str, float]:
+        return {name: spin.value() for name, spin in self.spins.items()}
+
+    def _manager(self) -> Any:
+        manager = self.project_manager
+        if manager is None or getattr(manager, "current", None) is None:
+            raise pf.PackageFamilyError("open a project first (File > New/Open project)")
+        return manager
+
+    def _run(self, label: str, action: Callable[[], str]) -> bool:
+        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            self.status.setText(f"{label}: {action()}")
+            return True
+        except Exception as error:  # owner-facing: core refusals are shown, not raised
+            self.status.setText(f"{label} failed: {error}")
+            return False
+        finally:
+            QGuiApplication.restoreOverrideCursor()
+            self._sync()
+
+    def _container_document(self) -> dict[str, Any]:
+        selected = self._manager().selected_design_model()
+        if selected is None:
+            raise pf.PackageFamilyError(
+                "no project Design Model yet: fit and save the container in Measure & Design"
+            )
+        return selected[1]
+
+    def _family_changed(self, *_args: object) -> None:
+        family = self.family_key
+        self.source.blockSignals(True)
+        self.source.clear()
+        if family not in pf.STANDALONE_ONLY:
+            self.source.addItem("Selected Scan Master / Design Model (captured)", CAPTURED)
+        if family not in pf.CAPTURED_ONLY:
+            self.source.addItem("Preset / parameters (standalone, no scan)", STANDALONE)
+        self.source.setCurrentIndex(self.source.count() - 1 if family != "closure" else 0)
+        self.source.blockSignals(False)
+        self.preset.blockSignals(True)
+        self.preset.clear()
+        self.preset.addItems(list(pf.PRESETS[family]))
+        self.preset.blockSignals(False)
+        while self.parameters_form.rowCount():
+            self.parameters_form.removeRow(0)
+        self.spins = {}
+        for name, label in pf.PARAMETERS[family]:
+            spin = QDoubleSpinBox()
+            spin.setObjectName(f"packlab.families.param.{name}")
+            spin.setRange(0.0 if name == "thread_starts" else 0.1, 2000.0)
+            spin.setDecimals(0 if name == "thread_starts" else 2)
+            spin.setSuffix("" if name == "thread_starts" else " mm")
+            self.spins[name] = spin
+            self.parameters_form.addRow(label, spin)
+        self._preset_changed()
+
+    def _preset_changed(self, *_args: object) -> None:
+        family = self.family_key
+        values: dict[str, Any] = pf.default_parameters(family, self.preset.currentText())
+        if family == "closure":
+            try:
+                _model, context = pf.container_context(self._container_document())
+                values = pf.closure_defaults(context, self.preset.currentText())
+            except Exception as error:
+                self.status.setText(f"Closure: {error}")
+        for name, spin in self.spins.items():
+            if name in values:
+                spin.setValue(float(values[name]))
+        self._sync()
+
+    def _sync(self) -> None:
+        design = self.design
+        closure = design is not None and design.family == "closure"
+        self.apply_button.setEnabled(design is not None and design.family == self.family_key)
+        self.save_button.setEnabled(design is not None)
+        self.export_button.setEnabled(design is not None and bool(design.parts))
+        self.replace_button.setEnabled(closure)
+        history = self.closure_history
+        self.undo_button.setEnabled(closure and history is not None and history.can_undo)
+        self.redo_button.setEnabled(closure and history is not None and history.can_redo)
+        self.artwork_button.setEnabled(design is not None and design.family == "pouch")
+        for spin in self.spins.values():
+            spin.setEnabled(not (self.family_key == "jerrycan" and self.captured))
+
+    # ------------------------------------------------------------------ display
+
+    def _show(self, design: pf.FamilyDesign) -> None:
+        service = ViewportService(self.viewer.service.adapter)
+        if design.parts:
+            for part in design.parts:
+                mesh = part.preview.mesh
+                service.add_geometry(
+                    part.name,
+                    SceneObjectKind.CAP if part.is_cap else SceneObjectKind.DESIGN_MODEL,
+                    MeshGeometry(_display(np.asarray(mesh.vertices)), mesh.triangles),
+                )
+            caps = [part.name for part in design.parts if part.is_cap]
+            service.select(caps[0] if caps else design.parts[0].name)
+        elif design.proxy_mesh is not None:
+            mesh = design.proxy_mesh
+            service.add_geometry(
+                "pouch",
+                SceneObjectKind.DESIGN_MODEL,
+                MeshGeometry(_display(np.asarray(mesh.vertices)), mesh.triangles),
+            )
+        self.viewer.service = service
+        self.closure_controller = ClosureWorkflowController(service)
+        self.viewer.fit()
+        self.viewer.status.setText(
+            "Drag to orbit, right-drag to pan, wheel to zoom. Yellow = closure/head, "
+            "cyan = container/body. Units: mm_unverified."
+        )
+        if not self.show_closure.isChecked():
+            self.set_closure_visible(False)
+
+    def _adopt(self, design: pf.FamilyDesign, *, reset_history: bool = True) -> None:
+        self.design = design
+        self.export_active = True
+        if design.family == "closure" and (reset_history or self.closure_history is None):
+            self.closure_history = ClosureWorkflowHistory(design.model)
+        elif design.family != "closure":
+            self.closure_history = None
+        self.part.blockSignals(True)
+        self.part.clear()
+        for part in design.parts:
+            self.part.addItem(part.name, part.name)
+        self.part.blockSignals(False)
+        index = self.family.findData(design.family)
+        if index >= 0 and index != self.family.currentIndex():
+            self.family.blockSignals(True)
+            self.family.setCurrentIndex(index)
+            self.family.blockSignals(False)
+            self._family_changed()
+        for name, spin in self.spins.items():
+            value = design.parameters.get(name)
+            if isinstance(value, (int, float)):
+                spin.setValue(float(value))
+        self._show(design)
+        self.details.setText(
+            pf.describe(design) + " Limits: " + "; ".join(pf.LIMITATIONS[design.family]) + "."
+        )
+        self.design_changed.emit()
+        self._sync()
+
+    def yield_export(self) -> None:
+        self.export_active = False
+
+    def export_source(self) -> DesignModelExportSource | None:
+        design = self.design
+        if design is None or not self.export_active:
+            return None
+        return design.export_source(str(self.part.currentData()))
+
+    # ------------------------------------------------------------------ actions
+
+    def create_design(self) -> None:
+        def action() -> str:
+            family, preset, actor = self.family_key, self.preset.currentText(), self._actor()
+            manager = self._manager()
+            if family == "closure":
+                design = pf.create_closure(
+                    self._container_document(), self.values(), preset=preset, actor_id=actor
+                )
+            elif self.captured:
+                scan_master = manager.selected_scan_master_revision()
+                if scan_master is None:
+                    raise pf.PackageFamilyError("no selected Scan Master in this project")
+                if family == "jerrycan":
+                    design = pf.fit_jerrycan_on_scan_master(scan_master, actor_id=actor)
+                else:
+                    design = pf.create_tube_on_scan_master(
+                        scan_master, self.values(), preset=preset, actor_id=actor
+                    )
+            else:
+                design = pf.create_standalone(
+                    family,
+                    self.values(),
+                    project_id=manager.current.project_id,
+                    preset=preset,
+                    actor_id=actor,
+                )
+            self._adopt(design)
+            return f"created {design.model.revision_id[:34]}… ({design.provenance}); not saved yet"
+
+        self._run("Create", action)
+
+    def apply_dimensions(self) -> None:
+        design = self.design
+        if design is None:
+            return
+
+        def action() -> str:
+            updated = pf.edit(design, self.values(), actor_id=self._actor())
+            self._adopt(updated)
+            return (
+                f"revision {updated.model.revision_id[:34]}… "
+                f"(previous {str(updated.model.previous_revision_id)[:30]}…); not saved yet"
+            )
+
+        self._run("Apply dimensions", action)
+
+    def save_design(self) -> None:
+        design = self.design
+        if design is None:
+            return
+
+        def action() -> str:
+            manager = self._manager()
+            record = manager.persist_design_model_revision(
+                design.as_dict(), expected_revision=manager.current.revision
+            )
+            return (
+                f"saved {record['artifact_path']} as the project's current Design Model "
+                f"({record.get('parent_kind')})"
+            )
+
+        self._run("Save", action)
+
+    def open_current(self) -> None:
+        def action() -> str:
+            document = self._container_document()
+            if "package_family_workflow" not in document:
+                index = self.family.findData("closure")
+                self.family.setCurrentIndex(index)
+                self._preset_changed()
+                return (
+                    "the current Design Model is a fitted container; closure dimensions were "
+                    "filled from it — press Create to add a cap"
+                )
+            design = pf.load_family_document(document)
+            self._adopt(design)
+            return f"opened {design.model.revision_id[:34]}… ({design.family})"
+
+        self._run("Open", action)
+
+    def set_closure_visible(self, visible: bool) -> None:
+        design = self.design
+        if design is None:
+            return
+        for part in design.parts:
+            if part.is_cap:
+                # ClosureWorkflowController refuses anything that is not a CAP scene object.
+                self.closure_controller.set_visible(part.name, visible)
+        self.viewer.redraw()
+
+    def replace_closure(self) -> None:
+        design = self.design
+        history = self.closure_history
+        if design is None or design.family != "closure" or history is None:
+            return
+
+        def action() -> str:
+            scan_master = self._manager().selected_scan_master_revision()
+            if scan_master is None:
+                raise pf.PackageFamilyError("no selected Scan Master in this project")
+            actor = self._actor()
+            cap_id, cap_parameter, _values = pf.current_cap(design)
+            base, new_cap, new_parameter = pf.replacement_base(
+                design, self.values(), actor_id=actor
+            )
+            neck = next(
+                item.feature_id for item in base.features if item.feature_kind is FeatureKind.NECK
+            )
+            mating = pf.closure_mating_references(
+                scan_master,
+                base,
+                neck,
+                new_cap,
+                float(self.spins["closure_line"].value()),
+                actor_id=actor,
+            )
+            result = self.closure_controller.replace(
+                scan_master,
+                history,
+                base,
+                mating,
+                current_closure_feature_id=cap_id,
+                replacement_closure_feature_id=new_cap,
+                current_closure_parameter_ids=(cap_parameter,),
+                replacement_closure_parameter_ids=(new_parameter,),
+                expected_scan_master_revision_id=scan_master.revision_id,
+                expected_current_model_revision_id=design.model.revision_id,
+                expected_replacement_base_revision_id=base.revision_id,
+                actor_id=actor,
+                reason="Replace the closure from the Package families page.",
+                created_at_utc=_now(),
+            )
+            self.closure_history = result.history
+            self._adopt(
+                pf.adopt_model(
+                    design, result.model, extra={"closure_replacement": result.as_dict()}
+                ),
+                reset_history=False,
+            )
+            return f"closure replaced; revision {result.model.revision_id[:34]}…"
+
+        self._run("Replace closure", action)
+
+    def _closure_step(self, label: str, step: Callable[..., ClosureWorkflowHistory]) -> None:
+        design = self.design
+        history = self.closure_history
+        if design is None or history is None:
+            return
+
+        def action() -> str:
+            updated = step(history, actor_id=self._actor(), created_at_utc=_now())
+            self.closure_history = updated
+            self._adopt(pf.adopt_model(design, updated.current_revision), reset_history=False)
+            return f"revision {updated.current_revision.revision_id[:34]}…"
+
+        self._run(label, action)
+
+    def undo_closure(self) -> None:
+        self._closure_step("Undo closure replacement", self.closure_controller.undo)
+
+    def redo_closure(self) -> None:
+        self._closure_step("Redo closure replacement", self.closure_controller.redo)
+
+    def place_artwork(self) -> None:
+        design = self.design
+        if design is None:
+            return
+        chosen = self._choose_artwork(self)
+        if not chosen:
+            return
+
+        def action() -> str:
+            updated = pf.attach_pouch_artwork(design, chosen, actor_id=self._actor())
+            self._adopt(updated)
+            pixmap = QPixmap(chosen)
+            if not pixmap.isNull():
+                self.artwork_preview.setPixmap(pixmap.scaledToWidth(220))
+            asset = updated.extra["artwork"]["asset"]
+            return (
+                f"artwork {str(asset.get('content_sha256', ''))[:12]}… pinned to the front panel "
+                f"centre; revision {updated.model.revision_id[:30]}…"
+            )
+
+        self._run("Artwork", action)
+
+    def request_export(self) -> None:
+        if self.export_source() is None:
+            self.status.setText(
+                "Export: create or open a family Design Model with a BREP part first."
+            )
+            return
+        self.export_active = True
+        self.export_requested.emit()
+
+
+def _now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+__all__ = ["PackageFamiliesView"]
