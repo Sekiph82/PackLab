@@ -751,7 +751,8 @@ jobs:
           mkdir -p "$root"
           nohup python tools/ci/ios_e2e_receiver.py serve --root "$root" --offer-file "$RUNNER_TEMP/packlab-e2e-offer.json" --port 8443 > "$RUNNER_TEMP/packlab-e2e-receiver.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/packlab-e2e-receiver.pid"
-          for _ in $(seq 1 30); do test -s "$RUNNER_TEMP/packlab-e2e-offer.json" && break; sleep 1; done
+          # First import of fresh native wheels on macOS runners can take tens of seconds.
+          for _ in $(seq 1 180); do test -s "$RUNNER_TEMP/packlab-e2e-offer.json" && break; sleep 1; done
           test -s "$RUNNER_TEMP/packlab-e2e-offer.json"
           cat "$RUNNER_TEMP/packlab-e2e-receiver.log"
 
