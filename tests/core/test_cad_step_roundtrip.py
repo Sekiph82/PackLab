@@ -84,7 +84,7 @@ def test_part_name_mismatch_and_bounds_drift_fail_closed(tmp_path, monkeypatch) 
 
     import packlab_core.cad_step_roundtrip as roundtrip
 
-    source_bounds = roundtrip.cad_shape_bounds(representation.shape_handle)
+    source_bounds = roundtrip.cad_shape_precise_bounds(representation.shape_handle)
     calls = 0
 
     def drifted_bounds(_handle):
@@ -94,7 +94,7 @@ def test_part_name_mismatch_and_bounds_drift_fail_closed(tmp_path, monkeypatch) 
             return source_bounds
         return (source_bounds[0], source_bounds[1] + 1.0, *source_bounds[2:])
 
-    monkeypatch.setattr(roundtrip, "cad_shape_bounds", drifted_bounds)
+    monkeypatch.setattr(roundtrip, "cad_shape_precise_bounds", drifted_bounds)
     with pytest.raises(CadStepRoundTripError, match="cad_step_roundtrip_bounds_drift_exceeded"):
         validate_step_export_round_trip(
             tmp_path / "bottle.step",
