@@ -121,6 +121,11 @@ private func makeJPEGFixture(width: Int, height: Int) -> Data? {
     return CGImageDestinationFinalize(destination) ? data as Data : nil
 }
 
+/// Hot device, low storage and low battery at once: the longest health warning capsule.
+private struct WarningDeviceHealthProvider: DeviceHealthProvider {
+    func snapshot() -> DeviceHealthSnapshot { DeviceHealthSnapshot(thermal: .serious, availableStorageBytes: 600 * 1024 * 1024, batteryLevel: 0.05, batteryStateAvailable: true) }
+}
+
 /// Receives named element frames reported by the hosted ContentView.
 @MainActor
 private final class LayoutFrameRecorder {
@@ -1064,6 +1069,98 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testPackScanWriterCentralDirectoryFollowsZipSpecLayout() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let metadata = Data("{}".utf8)
+        let image = Data([1, 2, 3])
+        let manifest = try JSONSerialization.data(withJSONObject: [
+            "schema_version": "1.0.0",
+            "capture_id": "zip-layout",
+            "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization],
+            "payloads": [
+                ["path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": metadata.count, "sha256": SourceIntegrity.digest(metadata)],
+                ["path": "images/p.heic", "kind": "image", "required": true, "authority": "source", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)],
+            ],
+        ])
+        let destination = root.appendingPathComponent("layout.packscan")
+        try PackScanWriter().write(manifestJSON: manifest, payloads: ["metadata/photos.json": metadata, "images/p.heic": image], to: destination)
+        let zip = [UInt8](try Data(contentsOf: destination))
+        func u16(_ at: Int) -> Int { Int(zip[at]) | Int(zip[at + 1]) << 8 }
+        func u32(_ at: Int) -> Int { u16(at) | u16(at + 2) << 16 }
+
+        let eocd = zip.count - 22
+        XCTAssertEqual(u32(eocd), 0x06054b50)
+        let count = u16(eocd + 10)
+        var cursor = u32(eocd + 16)
+        var names: [String] = []
+        for _ in 0..<count {
+            XCTAssertEqual(u32(cursor), 0x02014b50)
+            let nameLength = u16(cursor + 28), extraLength = u16(cursor + 30), commentLength = u16(cursor + 32)
+            let localOffset = u32(cursor + 42)
+            let name = String(decoding: zip[(cursor + 46)..<(cursor + 46 + nameLength)], as: UTF8.self)
+            names.append(name)
+            XCTAssertEqual(u32(localOffset), 0x04034b50, name)
+            let localNameLength = u16(localOffset + 26)
+            XCTAssertEqual(String(decoding: zip[(localOffset + 30)..<(localOffset + 30 + localNameLength)], as: UTF8.self), name)
+            cursor += 46 + nameLength + extraLength + commentLength
+        }
+        XCTAssertEqual(cursor, eocd)
+        XCTAssertEqual(Set(names), ["manifest.json", "metadata/photos.json", "checksums.json", "images/p.heic"])
+    }
+
+    func testCanonicalSessionManifestMatchesPackScanManifestSchema() throws {
+        // Mirrors schemas/packscan/manifest.schema.json (validated by packlab_core.packscan on Windows).
+        let required: Set<String> = ["schema_version", "capture_id", "created_at", "device", "capture_mode", "payloads", "source_evidence", "checksums"]
+        let allowed = required.union(["started_at", "ended_at", "calibration_profile_ref"])
+        let kinds: Set<String> = ["image", "photo_metadata", "mask", "preview", "thumbnail", "diagnostics", "calibration", "other"]
+        let payloads = ["metadata/photos.json": Data("{}".utf8), "images/p.heic": Data([1]), "metadata/accepted-records/p.json": Data("{}".utf8)]
+        func matches(_ value: Any?, _ pattern: String) -> Bool { (value as? String)?.range(of: pattern, options: .regularExpression) != nil }
+        for mode in CaptureModeID.allCases {
+            let draft = NewScanDraft(sessionID: "6F9619FF-8B86-D011-B42D-00C04FC964FF", packageName: "Bottle", packageType: .bottle, captureMode: mode, createdAt: Date(timeIntervalSince1970: 1_790_000_000.25))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: SessionGalleryStore.packScanManifest(draft: draft, payloads: payloads)) as? [String: Any])
+            XCTAssertTrue(required.isSubset(of: object.keys), "\(mode)")
+            XCTAssertTrue(Set(object.keys).isSubset(of: allowed), "\(mode)")
+            XCTAssertEqual(object["schema_version"] as? String, "1.0.0")
+            XCTAssertTrue(matches(object["capture_id"], "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"))
+            XCTAssertTrue(matches(object["created_at"], "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"), "\(String(describing: object["created_at"]))")
+            let device = try XCTUnwrap(object["device"] as? [String: Any])
+            XCTAssertEqual(device["platform"] as? String, "iOS")
+            XCTAssertTrue(matches(device["model"], "^.{1,128}$"))
+            XCTAssertTrue(matches(device["os_version"], "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$"), "\(String(describing: device["os_version"]))")
+            XCTAssertTrue(Set(device.keys).isSubset(of: ["platform", "model", "os_version", "device_identifier", "lens"]))
+            let captureMode = try XCTUnwrap(object["capture_mode"] as? [String: Any])
+            XCTAssertEqual(captureMode["version"] as? Int, 1)
+            switch captureMode["mode"] as? String {
+            case "freehand":
+                XCTAssertNotEqual(mode, .guidedOrbit)
+                XCTAssertTrue(Set(captureMode.keys).isSubset(of: ["mode", "version", "parameters"]))
+            case "guided_orbit":
+                let parameters = try XCTUnwrap(captureMode["parameters"] as? [String: Any])
+                XCTAssertEqual(parameters["orbit_axis"] as? String, "subject_vertical")
+                let coverage = try XCTUnwrap(parameters["coverage"] as? [String: Any])
+                let sector = try XCTUnwrap(coverage["target_sector_deg"] as? Double)
+                XCTAssertTrue(sector > 0 && sector < 360)
+                let minimumViews = try XCTUnwrap(coverage["minimum_view_count"] as? Int)
+                XCTAssertGreaterThanOrEqual(minimumViews, 1)
+            default:
+                XCTFail("capture_mode \(String(describing: captureMode["mode"])) is not schema-valid for a multi-photo session")
+            }
+            let evidence = try XCTUnwrap(object["source_evidence"] as? [String: Any])
+            XCTAssertEqual(evidence["immutable"] as? Bool, true)
+            XCTAssertEqual(evidence["authority"] as? String, "original_capture")
+            let declared = try XCTUnwrap(object["payloads"] as? [[String: Any]])
+            XCTAssertEqual(Set(declared.compactMap { $0["path"] as? String }), Set(payloads.keys))
+            for item in declared {
+                XCTAssertTrue(kinds.contains(item["kind"] as? String ?? ""), "\(item)")
+                XCTAssertEqual(Set(item.keys), ["path", "kind", "required", "authority", "size_bytes", "sha256"])
+                XCTAssertTrue(matches(item["sha256"], "^[0-9a-f]{64}$"))
+            }
+            let checksums = try XCTUnwrap(object["checksums"] as? [String: Any])
+            XCTAssertEqual(checksums["canonicalization"] as? String, PackScanWriter.checksumCanonicalization)
+        }
+    }
+
     func testPL0119CanonicalWorkflowRequiresAuthoritativeRecordsAndUsesSourceEntryPoint() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -1154,9 +1251,16 @@ final class PackLabCaptureTests: XCTestCase {
         try FileManager.default.createDirectory(at: layout.sessionRoot, withIntermediateDirectories: true)
         let candidate = SessionResumeCandidate(id: "s1", draft: nil, disposition: .resumable, state: nil)
         let plan = SessionDeletionPlan(root: root, candidate: candidate)
-        let report = try await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true)
+        // The Files/USB pickup copy of the finalized package is deleted with the session.
+        let pickup = root.appendingPathComponent("pickup", isDirectory: true)
+        try FileManager.default.createDirectory(at: pickup, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: pickup.appendingPathComponent("s1.packscan"))
+        try Data([4]).write(to: pickup.appendingPathComponent("other.packscan"))
+        let report = try await SafeSessionDeleter(pickupDirectory: pickup).deleteDetailed(plan: plan, confirmed: true)
         XCTAssertEqual(report.sessionID, "s1")
         XCTAssertFalse(FileManager.default.fileExists(atPath: layout.sessionRoot.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pickup.appendingPathComponent("s1.packscan").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pickup.appendingPathComponent("other.packscan").path), "only this session's copy is removed")
         let traversal = SessionDeletionPlan(root: root, session: root.appendingPathComponent("../escape"))
         XCTAssertThrowsError(try traversal.validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .outsideRoot) }
     }
@@ -3239,9 +3343,12 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "middle", azimuthIndex: 4)])
 
         let destination = root.appendingPathComponent("exports/e2e-manual.packscan")
-        let finalization = try await ProductionScanFinalizeAction(root: root).finalize(sessionID: draft.sessionID, destination: destination)
+        let pickup = root.appendingPathComponent("documents-pickup", isDirectory: true)
+        let finalization = try await ProductionScanFinalizeAction(root: root, sharedCopyDirectory: pickup).finalize(sessionID: draft.sessionID, destination: destination)
         XCTAssertEqual(finalization.state, .exported)
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        // The PC/Files-app pickup copy is byte-identical to the committed package.
+        XCTAssertEqual(try Data(contentsOf: pickup.appendingPathComponent("e2e-manual.packscan")), try Data(contentsOf: destination))
         let history = await LocalScanHistoryStore(root: root).load()
         XCTAssertEqual(history.first { $0.id == draft.sessionID }?.exportState, "exported")
 
@@ -3367,10 +3474,62 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertLessThan(dial.maxY, frame.minY, "the dial sits above the capture button")
         XCTAssertEqual(vm.m04LiveObservation?.sector, CoverageSector(ringID: "middle", azimuthIndex: 6))
         XCTAssertNotEqual(vm.m04Instruction, .setObjectCenter)
+        // The crosshair (full-screen centre) must stay visible: no panel may cover it.
+        let crosshairZone = CGRect(x: window.bounds.midX - 30, y: window.bounds.midY - 30, width: 60, height: 60)
+        let top = try XCTUnwrap(recorder.frames["topOverlay"], "Top overlay was never laid out")
+        let bottom = try XCTUnwrap(recorder.frames["bottomControls"], "Bottom controls were never laid out")
+        XCTAssertGreaterThan(top.height, 100)
+        XCTAssertGreaterThan(bottom.height, 100)
+        XCTAssertFalse(top.intersects(crosshairZone), "top overlay \(top) covers the crosshair \(crosshairZone)")
+        XCTAssertFalse(bottom.intersects(crosshairZone), "bottom controls \(bottom) cover the crosshair \(crosshairZone)")
+        XCTAssertTrue(top.insetBy(dx: -1, dy: -1).contains(dial), "guidance panel \(dial) is not fully visible in the top overlay \(top)")
+        XCTAssertTrue(bottom.insetBy(dx: -1, dy: -1).contains(frame), "Manual Capture \(frame) is not inside the bottom controls \(bottom)")
         attachSnapshot(of: window, named: "main-screen-coverage-active")
         window.isHidden = true
         window.rootViewController = nil
         await vm.stop()
+
+        // Device worst case before the center is set (iPhone report): the long set-center
+        // instruction, the longest rejection message and a three-line health warning
+        // (hot device, low storage, low battery) must not cover the crosshair either.
+        let unsetVM = CaptureRuntimeViewModel(trackingService: SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal)]), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: WarningDeviceHealthProvider()), automaticallyPoll: false)
+        unsetVM.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
+        unsetVM.bindObjectCenterSources(center: { nil }, worldIdentity: { "layout-world" })
+        let unsetResult = await unsetVM.setObjectCenterFromScreenCenter()
+        XCTAssertFalse(unsetResult)
+        XCTAssertTrue(unsetVM.objectCenterMessage?.hasPrefix("No table surface found") ?? false)
+        _ = await unsetVM.analyzeM04Candidate(sessionID: "layout-proof", captureID: "layout-unset", sequence: 0, monotonicTimestamp: ProcessInfo.processInfo.systemUptime, frame: frame64)
+        _ = await unsetVM.requestManualCapture()
+        XCTAssertTrue(unsetVM.manualCaptureDecision?.blockingReasons.contains("object_center_unset") ?? false)
+        await unsetVM.start()
+        XCTAssertNotNil(unsetVM.healthMessage, "the worst case needs the health warning on screen")
+        let unsetRecorder = LayoutFrameRecorder()
+        let unsetWindow = UIWindow(windowScene: scene)
+        unsetWindow.rootViewController = UIHostingController(rootView: ContentView(runtime: unsetVM, onLayoutFrame: { key, frame in unsetRecorder.frames[key] = frame }))
+        unsetWindow.makeKeyAndVisible()
+        unsetWindow.layoutIfNeeded()
+        for _ in 0..<40 where unsetRecorder.frames["bottomControls"] == nil || unsetRecorder.frames["guidanceDial"] == nil || unsetRecorder.frames["topOverlay"] == nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        unsetWindow.layoutIfNeeded()
+        XCTAssertEqual(unsetVM.m04Instruction, .setObjectCenter)
+        let unsetDial = try XCTUnwrap(unsetRecorder.frames["guidanceDial"])
+        let unsetBottom = try XCTUnwrap(unsetRecorder.frames["bottomControls"])
+        let unsetTop = try XCTUnwrap(unsetRecorder.frames["topOverlay"])
+        let unsetSafe = unsetWindow.bounds.inset(by: unsetWindow.safeAreaInsets)
+        XCTAssertFalse(unsetTop.intersects(crosshairZone), "unset: top overlay \(unsetTop) covers the crosshair \(crosshairZone)")
+        XCTAssertTrue(unsetTop.insetBy(dx: -1, dy: -1).contains(unsetDial), "unset: guidance panel \(unsetDial) is not fully visible in the top overlay \(unsetTop)")
+        XCTAssertFalse(unsetBottom.intersects(crosshairZone), "unset: bottom controls \(unsetBottom) cover the crosshair \(crosshairZone)")
+        XCTAssertTrue(unsetSafe.contains(unsetDial), "unset: guidance panel \(unsetDial) outside safe area \(unsetSafe)")
+        XCTAssertTrue(unsetSafe.contains(unsetBottom), "unset: bottom controls \(unsetBottom) outside safe area \(unsetSafe)")
+        // The hot/low-storage/low-battery warning must be on screen, not scrolled away.
+        let health = try XCTUnwrap(unsetRecorder.frames["healthMessage"], "health warning was never laid out")
+        XCTAssertGreaterThan(health.height, 0)
+        XCTAssertTrue(unsetBottom.insetBy(dx: -1, dy: -1).contains(health), "health warning \(health) is not fully visible in the bottom band \(unsetBottom)")
+        XCTAssertFalse(health.intersects(crosshairZone))
+        attachSnapshot(of: unsetWindow, named: "main-screen-center-unset")
+        unsetWindow.isHidden = true
+        unsetWindow.rootViewController = nil
+        await unsetVM.stop()
 
         for (name, view) in [("new-scan-wizard", AnyView(NavigationStack { NewScanWizard(onStart: { _ in }) })), ("scan-history", AnyView(NavigationStack { LocalScanHistoryView(root: root) }))] {
             let sheetWindow = UIWindow(windowScene: scene)
@@ -3467,6 +3626,29 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertNotEqual(fallback?.ringID, "middle")
         XCTAssertEqual(fallback?.azimuthIndex, 2)
         XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: []), current: nil), sector("lower", 0))
+        // Tabletop: the lower ring (camera below the package) is optional. The model never
+        // lists its wedges as missing, so guidance never targets them and completion ignores them.
+        var tabletop = OrbitCoverageModel()
+        let empty = tabletop.snapshot()
+        XCTAssertEqual(empty.missingSectors.count, 16)
+        XCTAssertFalse(empty.missingSectors.contains { $0.ringID == "lower" })
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: empty, current: nil), sector("middle", 0))
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: empty, current: at(100, -20))?.ringID, "middle")
+        _ = tabletop.observe(captureID: "low", poseBinding: acceptedPoseBinding(captureID: "low", pose: orbitPose(0, -tan(20 * Double.pi / 180), 1)))
+        let lowOnly = tabletop.snapshot()
+        XCTAssertEqual(lowOnly.capturedSectors.map(\.ringID), ["lower"], "an optional-ring photo is still kept as evidence")
+        XCTAssertEqual(lowOnly.completionFraction, 0)
+        XCTAssertFalse(lowOnly.isComplete)
+        // The package must be in view: angle between the camera axis (-Z) and the object center.
+        let facing = orbitPose(0, 0, 1)
+        XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [0, 0, 0]) ?? -1, 0, accuracy: 1e-9)
+        XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [1, 0, 1]) ?? -1, 90, accuracy: 1e-9)
+        XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [0, 0, 2]) ?? -1, 180, accuracy: 1e-9)
+        XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [tan(20 * Double.pi / 180), 0, 0]) ?? -1, 20, accuracy: 1e-9)
+        XCTAssertNil(OrbitGuidance.viewAngleToCenter(pose: nil, center: [0, 0, 0]))
+        XCTAssertEqual(OrbitGuidance.instruction(current: at(100, 0), target: sector("middle", 2), configuration: configuration, centerSet: true, viewAngle: 40), .pointAtPackage)
+        XCTAssertEqual(OrbitGuidance.instruction(current: at(100, 0), target: sector("middle", 2), configuration: configuration, centerSet: true, viewAngle: 10), .holdAndCapture)
+        XCTAssertEqual(OrbitGuidanceInstruction.pointAtPackage.text, "Point the camera at the package — keep it in the middle of the screen")
         // Protocol explains the method in plain words.
         let method = CaptureProtocolViewModel(preset: PackagingPresetCatalog.matteHDPE).sections.first
         XCTAssertEqual(method?.title, "How to take the photos")

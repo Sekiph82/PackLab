@@ -307,18 +307,47 @@ public actor SessionGalleryStore {
         }
         let expectedImages = Set(records.map { "images/\($0.sourceFilename)" })
         guard Set(document.photos.map(\.imagePath)) == expectedImages else { throw FinalizationError.invalidMetadataBinding }
+        guard let draftData = try? Data(contentsOf: layout.metadata),
+              let draft = try? JSONDecoder().decode(NewScanDraft.self, from: draftData),
+              draft.sessionID == layout.sessionID else { throw FinalizationError.invalidManifest }
+        let manifest = try Self.packScanManifest(draft: draft, payloads: payloads)
+        try CanonicalSessionFinalizationWorkflow(finalizer: finalizer).finalize(layout: layout, records: records, immutableSourceBytes: immutable, manifest: manifest, payloads: payloads, destination: destination)
+    }
+
+    /// Manifest conforming to schemas/packscan/manifest.schema.json, the contract
+    /// packlab_core.packscan.validate_packscan enforces on the Windows side.
+    static func packScanManifest(draft: NewScanDraft, payloads: [String: Data], device: [String: String] = PackScanDeviceInfo.current) throws -> Data {
         let declarations: [[String: Any]] = payloads.keys.sorted().map { path in
             let bytes = payloads[path] ?? Data()
-            let kind = path == "metadata/photos.json" ? "photo_metadata" : (path.hasPrefix("images/") ? "image" : "accepted_record")
+            // Accepted capture records have no dedicated schema kind; "other" is the canonical bucket.
+            let kind = path == "metadata/photos.json" ? "photo_metadata" : (path.hasPrefix("images/") ? "image" : "other")
             return ["path": path, "kind": kind, "required": true, "authority": "source", "size_bytes": bytes.count, "sha256": SourceIntegrity.digest(bytes)]
         }
-        let manifest = try JSONSerialization.data(withJSONObject: [
+        var provenance = "packlab_ios_capture"
+        let captureMode: [String: Any]
+        switch draft.captureMode {
+        case .freehand:
+            captureMode = ["mode": "freehand", "version": 1]
+        case .guidedOrbit:
+            let bins = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE).coverage.orbit.azimuthBinCount
+            captureMode = ["mode": "guided_orbit", "version": 1, "parameters": ["orbit_axis": "subject_vertical", "coverage": ["target_sector_deg": 360.0 / Double(max(2, bins)), "minimum_view_count": bins]]]
+        case .turntable:
+            // ponytail: the schema's turntable mode describes ONE frame per manifest; a multi-photo
+            // session keeps per-photo angles in its accepted records and declares freehand, flagged
+            // in provenance, until the schema gains a session-level turntable mode.
+            captureMode = ["mode": "freehand", "version": 1]
+            provenance = "packlab_ios_capture_turntable_session"
+        }
+        return try JSONSerialization.data(withJSONObject: [
             "schema_version": PackScanWriter.schemaVersion,
-            "capture_id": layout.sessionID,
-            "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization],
+            "capture_id": draft.sessionID,
+            "created_at": ISO8601DateFormatter().string(from: draft.createdAt),
+            "device": device,
+            "capture_mode": captureMode,
             "payloads": declarations,
+            "source_evidence": ["immutable": true, "authority": "original_capture", "provenance": provenance],
+            "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization],
         ])
-        try CanonicalSessionFinalizationWorkflow(finalizer: finalizer).finalize(layout: layout, records: records, immutableSourceBytes: immutable, manifest: manifest, payloads: payloads, destination: destination)
     }
 
     private func canonicalRecords() throws -> [AcceptedCaptureRecord] {
@@ -702,7 +731,9 @@ public struct DeletionReport: Sendable, Equatable { public let sessionID: String
 public actor SafeSessionDeleter {
     private let fileManager: FileManager
     private let failureInjector: (@Sendable (String) -> Bool)?
-    public init(fileManager: FileManager = .default, failureInjector: (@Sendable (String) -> Bool)? = nil) { self.fileManager = fileManager; self.failureInjector = failureInjector }
+    /// Pickup folder holding `<sessionID>.packscan` copies (see ProductionScanFinalizeAction).
+    private let pickupDirectory: URL?
+    public init(fileManager: FileManager = .default, failureInjector: (@Sendable (String) -> Bool)? = nil, pickupDirectory: URL? = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first) { self.fileManager = fileManager; self.failureInjector = failureInjector; self.pickupDirectory = pickupDirectory }
     public func delete(plan: SessionDeletionPlan, confirmed: Bool) throws {
         let report = try deleteDetailed(plan: plan, confirmed: confirmed)
         if !report.failures.isEmpty { throw DeletionError.partialFailure }
@@ -713,6 +744,10 @@ public actor SafeSessionDeleter {
         var removed: [String] = []; var failures: [String] = []
         if failureInjector?(plan.session.path) == true { failures.append(plan.session.path) }
         else { do { try fileManager.removeItem(at: plan.session); removed.append(plan.session.path) } catch { failures.append(plan.session.path) } }
+        // The Files/USB pickup copy holds every scan photo: it goes with the session.
+        if let pickup = pickupDirectory?.appendingPathComponent("\(plan.sessionID).packscan"), fileManager.fileExists(atPath: pickup.path) {
+            do { try fileManager.removeItem(at: pickup); removed.append(pickup.path) } catch { failures.append(pickup.path) }
+        }
         let historyURL = historyIndex ?? plan.root.appendingPathComponent("history.json")
         if fileManager.fileExists(atPath: historyURL.path) {
             do {
@@ -1050,7 +1085,11 @@ public struct FinalizedTransferSelection: Identifiable {
 /// the persisted record only after the canonical package is committed.
 public struct ProductionScanFinalizeAction: Sendable {
     private let root: URL
-    public init(root: URL) { self.root = root }
+    /// Where a copy of each finalized package is placed for pickup: the app's Documents
+    /// folder, which UIFileSharingEnabled exposes in the Files app ("On My iPhone") and over
+    /// USB to a PC (Apple Devices file sharing / AFC). Nil disables the copy.
+    private let sharedCopyDirectory: URL?
+    public init(root: URL, sharedCopyDirectory: URL? = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first) { self.root = root; self.sharedCopyDirectory = sharedCopyDirectory }
     public func finalize(sessionID: String, destination: URL? = nil) async throws -> SessionFinalizationRecord {
         let layout = SessionStorageLayout(root: root, sessionID: sessionID)
         let packageURL = destination ?? root.appendingPathComponent("exports", isDirectory: true).appendingPathComponent("\(sessionID).packscan")
@@ -1060,6 +1099,15 @@ public struct ProductionScanFinalizeAction: Sendable {
               record.sessionID == sessionID,
               record.state == .exported,
               record.packagePath == packageURL.path else { throw FinalizationError.packagingFailed }
+        // ponytail: best-effort pickup copy; the committed package and record above stay the
+        // authority, so a failed copy is retried by finalizing again, not surfaced as an error.
+        if let shared = sharedCopyDirectory {
+            let copy = shared.appendingPathComponent(packageURL.lastPathComponent)
+            try? FileManager.default.createDirectory(at: shared, withIntermediateDirectories: true)
+            try? FileManager.default.removeItem(at: copy)
+            try? FileManager.default.copyItem(at: packageURL, to: copy)
+            try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: copy.path)
+        }
         return record
     }
 }
@@ -1082,3 +1130,15 @@ public struct SessionDeletionView: View {
     }
 }
 #endif
+
+/// Device block for the PackScan manifest: hardware identifier (e.g. "iPhone17,3") and OS version.
+enum PackScanDeviceInfo {
+    static var current: [String: String] {
+        var info = utsname()
+        _ = uname(&info)
+        let machine = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        let model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? machine
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return ["platform": "iOS", "model": model.isEmpty ? "unknown" : String(model.prefix(128)), "os_version": "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"]
+    }
+}
