@@ -57,7 +57,11 @@ class LODPolicy:
 
 
 def geometry_count(geometry: Geometry) -> int:
-    return len(geometry.points) if isinstance(geometry, PointCloudGeometry) else len(geometry.triangles)
+    return (
+        len(geometry.points)
+        if isinstance(geometry, PointCloudGeometry)
+        else len(geometry.triangles)
+    )
 
 
 def display_geometry(geometry: Geometry, policy: LODPolicy) -> tuple[Geometry, LODPlan]:
@@ -68,13 +72,16 @@ def display_geometry(geometry: Geometry, policy: LODPolicy) -> tuple[Geometry, L
     if plan.stride == 1:
         return geometry, plan
     if isinstance(geometry, PointCloudGeometry):
-        return PointCloudGeometry(geometry.points[:: plan.stride]), plan
+        return (
+            PointCloudGeometry(geometry.points[:: plan.stride], geometry.colors[:: plan.stride]),
+            plan,
+        )
     triangles = geometry.triangles[:: plan.stride]
     used = sorted({index for triangle in triangles for index in triangle})
     remap = {old: new for new, old in enumerate(used)}
     vertices = tuple(geometry.vertices[index] for index in used)
     mapped: tuple[tuple[int, int, int], ...] = tuple(
-        tuple(remap[index] for index in triangle) for triangle in triangles  # type: ignore[misc]
+        (remap[a], remap[b], remap[c]) for a, b, c in triangles
     )
     normals = tuple(geometry.normals[index] for index in used) if geometry.normals else ()
     return MeshGeometry(vertices, mapped, normals), plan

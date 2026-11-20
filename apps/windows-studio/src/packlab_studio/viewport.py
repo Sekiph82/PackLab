@@ -9,6 +9,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Self
 
+import numpy as np
 from PySide6.QtCore import QPointF, QSize
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPolygonF
 
@@ -30,6 +31,7 @@ class ViewportLoadError(ValueError):
 
 Point3 = tuple[float, float, float]
 Triangle = tuple[int, int, int]
+Color = tuple[int, int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +66,7 @@ class MeshGeometry:
 @dataclass(frozen=True, slots=True)
 class PointCloudGeometry:
     points: tuple[Point3, ...]
+    colors: tuple[Color, ...] = ()  # optional per-point sRGB, same length as points
 
     @property
     def bounds(self) -> Bounds:
@@ -101,6 +104,11 @@ def load_geometry(path: str | Path) -> Geometry:
     if not source.is_file():
         raise ViewportLoadError(ViewportErrorCode.MISSING, "geometry file is missing")
     suffix = source.suffix.lower()
+    if suffix == ".ply":
+        try:
+            return _load_ply(source.read_bytes())
+        except OSError as error:
+            raise ViewportLoadError(ViewportErrorCode.CORRUPT, "PLY cannot be read") from error
     try:
         lines = source.read_text(encoding="utf-8").splitlines()
     except (OSError, UnicodeError) as error:
@@ -109,8 +117,6 @@ def load_geometry(path: str | Path) -> Geometry:
         ) from error
     if suffix == ".obj":
         return _load_obj(lines)
-    if suffix == ".ply":
-        return _load_ascii_ply(lines)
     if suffix in {".xyz", ".pts", ".pcd"}:
         return _load_points(lines, pcd=suffix == ".pcd")
     raise ViewportLoadError(ViewportErrorCode.UNSUPPORTED, f"unsupported geometry format: {suffix}")
@@ -147,47 +153,197 @@ def _load_obj(lines: list[str]) -> MeshGeometry:
     return MeshGeometry(tuple(vertices), tuple(triangles))
 
 
-def _load_ascii_ply(lines: list[str]) -> MeshGeometry:
-    if not lines or lines[0].strip() != "ply":
-        raise ViewportLoadError(ViewportErrorCode.CORRUPT, "PLY header is missing")
-    vertex_count = face_count = None
-    end_header = None
-    for index, line in enumerate(lines[1:], 1):
-        parts = line.split()
-        if parts[:2] == ["format", "ascii"]:
-            continue
-        if parts[:2] == ["element", "vertex"]:
-            vertex_count = int(parts[2])
-        elif parts[:2] == ["element", "face"]:
-            face_count = int(parts[2])
-        elif line.strip() == "end_header":
-            end_header = index + 1
-            break
-    if vertex_count is None or face_count is None or end_header is None:
-        raise ViewportLoadError(ViewportErrorCode.CORRUPT, "PLY ASCII header is incomplete")
-    if len(lines) < end_header + vertex_count + face_count:
-        raise ViewportLoadError(ViewportErrorCode.CORRUPT, "PLY payload is truncated")
-    vertices = tuple(
-        _parse_float_triplet(lines[end_header + index].split(), end_header + index + 1)
-        for index in range(vertex_count)
-    )
-    triangles: list[Triangle] = []
-    for index in range(face_count):
-        parts = lines[end_header + vertex_count + index].split()
+_PLY_TYPES = {
+    "char": "i1", "int8": "i1", "uchar": "u1", "uint8": "u1",
+    "short": "i2", "int16": "i2", "ushort": "u2", "uint16": "u2",
+    "int": "i4", "int32": "i4", "uint": "u4", "uint32": "u4",
+    "float": "f4", "float32": "f4", "double": "f8", "float64": "f8",
+}  # fmt: skip
+
+# (element name, count, [(property name, scalar dtype or (list count dtype, item dtype))])
+PlyProperty = tuple[str, str | tuple[str, str]]
+PlyElement = tuple[str, int, list[PlyProperty]]
+
+
+def _ply_corrupt(message: str) -> ViewportLoadError:
+    return ViewportLoadError(ViewportErrorCode.CORRUPT, message)
+
+
+def _load_ply(data: bytes) -> Geometry:
+    """Load ASCII or binary little-endian PLY meshes and (colored) point clouds."""
+
+    marker = data.find(b"end_header")
+    if not data.startswith(b"ply") or marker < 0:
+        raise _ply_corrupt("PLY header is missing")
+    newline = data.find(b"\n", marker)
+    body_start = newline + 1 if newline >= 0 else len(data)
+    fmt = ""
+    elements: list[PlyElement] = []
+    for raw in data[:marker].decode("ascii", "replace").splitlines()[1:]:
+        parts = raw.split()
         try:
-            count = int(parts[0])
-            values = [int(value) for value in parts[1 : count + 1]]
-        except (ValueError, IndexError) as error:
-            raise ViewportLoadError(ViewportErrorCode.CORRUPT, "PLY face is malformed") from error
-        if len(values) < 3:
-            raise ViewportLoadError(
-                ViewportErrorCode.CORRUPT, "PLY face has fewer than three indices"
+            if parts[:1] == ["format"]:
+                fmt = parts[1]
+            elif parts[:1] == ["element"]:
+                elements.append((parts[1], int(parts[2]), []))
+            elif parts[:2] == ["property", "list"]:
+                elements[-1][2].append((parts[4], (_PLY_TYPES[parts[2]], _PLY_TYPES[parts[3]])))
+            elif parts[:1] == ["property"]:
+                elements[-1][2].append((parts[2], _PLY_TYPES[parts[1]]))
+        except (IndexError, KeyError, ValueError) as error:
+            raise _ply_corrupt("PLY header is malformed") from error
+    if fmt not in {"ascii", "binary_little_endian"}:
+        raise ViewportLoadError(ViewportErrorCode.UNSUPPORTED, f"PLY format {fmt!r} is unsupported")
+    columns: dict[str, np.ndarray] = {}
+    faces: list[list[int]] | np.ndarray
+    if fmt == "ascii":
+        faces = _read_ascii_ply(data[body_start:], elements, columns)
+    else:
+        faces = _read_binary_ply(data, body_start, elements, columns)
+    if not all(axis in columns for axis in "xyz"):
+        raise _ply_corrupt("PLY vertex positions are missing")
+    xyz = np.stack([columns[axis] for axis in "xyz"], axis=1).astype(np.float64)
+    if not len(xyz):
+        raise ViewportLoadError(ViewportErrorCode.EMPTY, "PLY has no vertices")
+    if not np.isfinite(xyz).all():
+        raise _ply_corrupt("PLY vertex positions are not finite")
+    vertices: tuple[Point3, ...] = tuple(map(tuple, xyz.tolist()))
+    if len(faces):
+        triangles: list[Triangle] = []
+        for face in faces:
+            indices = [int(value) for value in face]
+            if len(indices) < 3:
+                raise _ply_corrupt("PLY face has fewer than three indices")
+            triangles.extend(
+                (indices[0], indices[item], indices[item + 1])
+                for item in range(1, len(indices) - 1)
             )
-        triangles.extend(
-            (values[0], values[item], values[item + 1]) for item in range(1, len(values) - 1)
-        )
-    _validate_triangles(list(vertices), triangles)
-    return MeshGeometry(vertices, tuple(triangles))
+        _validate_triangles(list(vertices), triangles)
+        return MeshGeometry(vertices, tuple(triangles))
+    colors: tuple[Color, ...] = ()
+    for names in (("red", "green", "blue"), ("r", "g", "b")):
+        if all(name in columns for name in names):
+            rgb = np.stack([columns[name] for name in names], axis=1).astype(np.float64)
+            if columns[names[0]].dtype.kind == "f" and rgb.max(initial=0.0) <= 1.0:
+                rgb = rgb * 255.0  # some writers store 0..1 floats
+            clipped = np.clip(rgb, 0, 255).astype(np.uint8)
+            colors = tuple(map(tuple, clipped.tolist()))
+            break
+    return PointCloudGeometry(vertices, colors)
+
+
+def _read_ascii_ply(
+    body: bytes, elements: list[PlyElement], columns: dict[str, np.ndarray]
+) -> list[list[int]]:
+    tokens = body.split()
+    position = 0
+    faces: list[list[int]] = []
+    for name, count, properties in elements:
+        if not any(isinstance(kind, tuple) for _, kind in properties):
+            width = len(properties)
+            chunk = tokens[position : position + count * width]
+            if len(chunk) < count * width:
+                raise _ply_corrupt("PLY payload is truncated")
+            try:
+                table = np.array(chunk, dtype=np.float64).reshape(count, width)
+            except ValueError as error:
+                raise _ply_corrupt("PLY value is malformed") from error
+            position += count * width
+            if name == "vertex":
+                for column, (prop, _kind) in enumerate(properties):
+                    columns[prop] = table[:, column]
+            continue
+        if name == "vertex":
+            raise ViewportLoadError(
+                ViewportErrorCode.UNSUPPORTED, "ASCII PLY vertex list properties are unsupported"
+            )
+        for _ in range(count):
+            for prop, kind in properties:
+                try:
+                    if isinstance(kind, tuple):
+                        length = int(tokens[position])
+                        chunk = tokens[position + 1 : position + 1 + length]
+                        if len(chunk) != length:
+                            raise IndexError
+                        position += 1 + length
+                        if name == "face" and prop in {"vertex_indices", "vertex_index"}:
+                            faces.append([int(item) for item in chunk])
+                    else:
+                        float(tokens[position])
+                        position += 1
+                except (IndexError, ValueError) as error:
+                    raise _ply_corrupt("PLY payload is truncated or malformed") from error
+    return faces
+
+
+def _read_binary_ply(
+    data: bytes, offset: int, elements: list[PlyElement], columns: dict[str, np.ndarray]
+) -> list[list[int]] | np.ndarray:
+    raw = np.frombuffer(data, dtype=np.uint8)
+    faces: list[list[int]] | np.ndarray = []
+    for name, count, properties in elements:
+        # Fixed-layout scalar prefix up to the first list property.
+        prefix: list[tuple[str, str]] = []
+        for prop, kind in properties:
+            if isinstance(kind, tuple):
+                break
+            prefix.append((prop, "<" + kind))
+        lists: list[tuple[str, tuple[str, str]]] = []
+        for prop, kind in properties[len(prefix) :]:
+            if not isinstance(kind, tuple):
+                raise ViewportLoadError(
+                    ViewportErrorCode.UNSUPPORTED,
+                    "PLY scalars after list properties are unsupported",
+                )
+            lists.append((prop, kind))
+        prefix_dtype = np.dtype(prefix) if prefix else None
+        prefix_size = prefix_dtype.itemsize if prefix_dtype is not None else 0
+        if not lists:
+            size = prefix_size * count
+            if offset + size > len(data):
+                raise _ply_corrupt("PLY payload is truncated")
+            if name == "vertex" and prefix_dtype is not None:
+                table = np.frombuffer(data, dtype=prefix_dtype, count=count, offset=offset)
+                for prop, _ in prefix:
+                    columns[prop] = table[prop]
+            offset += size
+            continue
+        if name == "face" and not prefix and len(lists) == 1 and count:
+            count_type, item_type = lists[0][1]
+            fixed = np.dtype([("n", "<" + count_type), ("v", "<" + item_type, (3,))])
+            if offset + fixed.itemsize * count <= len(data):
+                table = np.frombuffer(data, dtype=fixed, count=count, offset=offset)
+                if (table["n"] == 3).all():
+                    faces = table["v"].astype(np.int64)
+                    offset += fixed.itemsize * count
+                    continue
+        # ponytail: Python walk over variable-length lists (OpenMVS view_indices),
+        # about 1 s per 200k records; vectorize if larger dense clouds become common.
+        starts = np.empty(count, dtype=np.int64)
+        face_rows: list[list[int]] = []
+        for record in range(count):
+            starts[record] = offset
+            offset += prefix_size
+            for prop, (count_type, item_type) in lists:
+                count_size = np.dtype(count_type).itemsize
+                if offset + count_size > len(data):
+                    raise _ply_corrupt("PLY payload is truncated")
+                length = int(np.frombuffer(data, "<" + count_type, 1, offset)[0])
+                offset += count_size
+                item_size = np.dtype(item_type).itemsize * length
+                if offset + item_size > len(data):
+                    raise _ply_corrupt("PLY payload is truncated")
+                if name == "face" and prop in {"vertex_indices", "vertex_index"}:
+                    face_rows.append(np.frombuffer(data, "<" + item_type, length, offset).tolist())
+                offset += item_size
+        if name == "face":
+            faces = face_rows
+        if name == "vertex" and prefix_dtype is not None:
+            gathered = raw[starts[:, None] + np.arange(prefix_size)]
+            table = np.ascontiguousarray(gathered).view(prefix_dtype).reshape(count)
+            for prop, _ in prefix:
+                columns[prop] = table[prop]
+    return faces
 
 
 def _load_points(lines: list[str], *, pcd: bool) -> PointCloudGeometry:
@@ -497,9 +653,16 @@ def _geometry_points(geometry: Geometry) -> tuple[Point3, ...]:
     return geometry.vertices if isinstance(geometry, MeshGeometry) else geometry.points
 
 
+_SPLAT_THRESHOLD = 20_000  # uncolored clouds above this use the vectorized splat path
+
+
 class QtRasterViewportAdapter:
     backend_name = "qt-raster-qimage"
     backend_version = "PySide6/Qt QImage-QPainter"
+
+    def __init__(self) -> None:
+        # Last splatted cloud's numpy arrays (cloud kept alive so id() stays valid).
+        self._arrays: dict[int, tuple[PointCloudGeometry, np.ndarray, np.ndarray]] = {}
 
     def load(self, path: str | Path) -> Geometry:
         return load_geometry(path)
@@ -561,6 +724,11 @@ class QtRasterViewportAdapter:
         assert item.geometry is not None
         selected = item.object_id == state.selected_object_id
         color = QColor("#ffd166") if selected else QColor("#4cc9f0")
+        if isinstance(item.geometry, PointCloudGeometry) and (
+            item.geometry.colors or len(item.geometry.points) > _SPLAT_THRESHOLD
+        ):
+            self._splat_points(painter, item.geometry, state, size, color)
+            return
         if (
             isinstance(item.geometry, PointCloudGeometry)
             or state.render_mode is ViewportRenderMode.POINT_CLOUD
@@ -587,6 +755,58 @@ class QtRasterViewportAdapter:
                 painter.drawPolygon(polygon)
         if state.render_mode is ViewportRenderMode.NORMALS:
             self._draw_normals(painter, item.geometry, state.camera, size, color)
+
+    def _splat_points(
+        self,
+        painter: QPainter,
+        cloud: PointCloudGeometry,
+        state: ViewportState,
+        size: QSize,
+        color: QColor,
+    ) -> None:
+        """Vectorized far-to-near square splats; same projection as ``_project``."""
+
+        cached = self._arrays.get(id(cloud))
+        if cached is None or cached[0] is not cloud:
+            points = np.asarray(cloud.points, dtype=np.float64).reshape(-1, 3)
+            if cloud.colors and len(cloud.colors) == len(cloud.points):
+                rgb = np.asarray(cloud.colors, dtype=np.uint32).reshape(-1, 3)
+                packed = 0xFF000000 | (rgb[:, 0] << 16) | (rgb[:, 1] << 8) | rgb[:, 2]
+            else:
+                packed = np.full(len(points), color.rgba(), dtype=np.uint32)
+            self._arrays = {id(cloud): (cloud, points, packed.astype(np.uint32))}
+            cached = self._arrays[id(cloud)]
+        _, points, packed = cached
+        camera = state.camera
+        width, height = size.width(), size.height()
+        x, y, z = (points - np.asarray(camera.target)).T
+        yaw = math.radians(camera.yaw_degrees)
+        pitch = math.radians(camera.pitch_degrees)
+        x1 = math.cos(yaw) * x + math.sin(yaw) * z
+        z1 = -math.sin(yaw) * x + math.cos(yaw) * z
+        y1 = math.cos(pitch) * y - math.sin(pitch) * z1
+        z2 = math.sin(pitch) * y + math.cos(pitch) * z1 + camera.distance
+        visible = z2 > 0.001
+        scale = min(width, height) * 0.8
+        with np.errstate(divide="ignore", invalid="ignore"):
+            sx = width / 2 + (x1 + camera.pan_x) * scale / z2
+            sy = height / 2 - (y1 + camera.pan_y) * scale / z2
+        visible &= np.isfinite(sx) & np.isfinite(sy)
+        visible &= (sx > -2) & (sx < width + 2) & (sy > -2) & (sy < height + 2)
+        order = np.nonzero(visible)[0]
+        order = order[np.argsort(-z2[order], kind="stable")]  # far first, near wins
+        px = np.round(sx[order]).astype(np.int64)
+        py = np.round(sy[order]).astype(np.int64)
+        values = packed[order]
+        buffer = np.zeros((height, width), dtype=np.uint32)
+        half = max(1, state.point_size) // 2
+        for dy in range(-half, max(1, state.point_size) - half):
+            for dx in range(-half, max(1, state.point_size) - half):
+                cx, cy = px + dx, py + dy
+                inside = (cx >= 0) & (cx < width) & (cy >= 0) & (cy < height)
+                buffer[cy[inside], cx[inside]] = values[inside]
+        image = QImage(buffer.data, width, height, width * 4, QImage.Format.Format_ARGB32)
+        painter.drawImage(0, 0, image)
 
     def _draw_normals(
         self,
