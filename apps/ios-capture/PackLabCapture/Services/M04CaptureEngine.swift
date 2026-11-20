@@ -656,7 +656,10 @@ public struct CoveragePoseObservation: Codable, Sendable, Equatable {
     public let azimuthDegrees: Double?
     public let elevationDegrees: Double?
     public let status: String
-    public init(captureID: String, sector: CoverageSector?, azimuthDegrees: Double?, elevationDegrees: Double?, status: String) { self.captureID = captureID; self.sector = sector; self.azimuthDegrees = azimuthDegrees; self.elevationDegrees = elevationDegrees; self.status = status }
+    /// AR world identity of the object center this observation was measured around; nil
+    /// for world-origin (pre-center) observations.
+    public let frameID: String?
+    public init(captureID: String, sector: CoverageSector?, azimuthDegrees: Double?, elevationDegrees: Double?, status: String, frameID: String? = nil) { self.captureID = captureID; self.sector = sector; self.azimuthDegrees = azimuthDegrees; self.elevationDegrees = elevationDegrees; self.status = status; self.frameID = frameID }
 }
 
 public struct OrbitCoverageSnapshot: Codable, Sendable, Equatable {
@@ -682,8 +685,78 @@ public struct ObjectCenter: Codable, Sendable, Equatable {
     public let method: String
     public let worldIdentity: String
     public let setAt: Date
-    public init(position: [Double], method: String, worldIdentity: String, setAt: Date = Date()) { self.position = position; self.method = method; self.worldIdentity = worldIdentity; self.setAt = setAt }
+    /// Where the package touches the table (raycast hit); the center is this point raised by
+    /// half the package height. Nil for centers not derived from a base point.
+    public let basePosition: [Double]?
+    public let packageHeightMeters: Double?
+    /// "operator_entered" or "package_type_default".
+    public let heightSource: String?
+    public init(position: [Double], method: String, worldIdentity: String, setAt: Date = Date(), basePosition: [Double]? = nil, packageHeightMeters: Double? = nil, heightSource: String? = nil) { self.position = position; self.method = method; self.worldIdentity = worldIdentity; self.setAt = setAt; self.basePosition = basePosition; self.packageHeightMeters = packageHeightMeters; self.heightSource = heightSource }
     public var isValid: Bool { position.count == 3 && position.allSatisfy(\.isFinite) }
+}
+
+/// A horizontal-surface raycast hit at the crosshair, with the camera position at that time.
+public struct BasePlaneHit: Sendable, Equatable {
+    public let position: [Double]
+    public let normal: [Double]
+    public let cameraPosition: [Double]
+    public let method: String
+    public let worldIdentity: String
+    public init(position: [Double], normal: [Double], cameraPosition: [Double], method: String, worldIdentity: String) { self.position = position; self.normal = normal; self.cameraPosition = cameraPosition; self.method = method; self.worldIdentity = worldIdentity }
+}
+
+public enum ObjectCenterRejection: String, Error, Sendable, Equatable {
+    case tooFar = "base_point_too_far"
+    case tooNear = "base_point_too_near"
+    case notHorizontal = "base_point_not_horizontal"
+    case invalidHeight = "package_height_invalid"
+    case invalidHit = "base_point_invalid"
+
+    public var message: String {
+        switch self {
+        case .tooFar: return "Aim at where the package touches the table — that point is more than 1.5 m away; step closer"
+        case .tooNear: return "Aim at where the package touches the table — that point is closer than 10 cm; step back"
+        case .notHorizontal: return "Aim at where the package touches the table — the crosshair is not on a flat, level surface"
+        case .invalidHeight: return "Set the package height first"
+        case .invalidHit: return "Aim at where the package touches the table and try again"
+        }
+    }
+}
+
+/// Conservative standing heights (metres) used until the operator enters the real one.
+public enum PackageHeightDefaults {
+    public static func meters(for type: PackageType) -> Double {
+        switch type {
+        case .bottle: return 0.20
+        case .jar: return 0.12
+        case .jerrycan: return 0.30
+        case .tube: return 0.15
+        case .sachet: return 0.10
+        case .other: return 0.15
+        }
+    }
+    public static let range: ClosedRange<Double> = 0.02...1.0
+}
+
+public enum ObjectCenterBuilder {
+    public static let maximumDistance = 1.5
+    public static let minimumDistance = 0.1
+    /// cos(15 deg): the surface normal must be within 15 deg of world up.
+    public static let minimumUpComponent = 0.966
+
+    /// Center = base point + up x (height / 2) in the gravity-aligned ARKit world (y up).
+    /// Rejects hits that are too far/near the camera or not on a level surface.
+    public static func center(from hit: BasePlaneHit, packageHeight: Double, heightSource: String, at date: Date = Date()) -> Result<ObjectCenter, ObjectCenterRejection> {
+        guard hit.position.count == 3, hit.cameraPosition.count == 3, hit.normal.count == 3, (hit.position + hit.cameraPosition + hit.normal).allSatisfy(\.isFinite) else { return .failure(.invalidHit) }
+        guard packageHeight.isFinite, PackageHeightDefaults.range.contains(packageHeight) else { return .failure(.invalidHeight) }
+        let distance = sqrt(zip(hit.position, hit.cameraPosition).reduce(0.0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) })
+        if distance > maximumDistance { return .failure(.tooFar) }
+        if distance < minimumDistance { return .failure(.tooNear) }
+        let length = sqrt(hit.normal.reduce(0.0) { $0 + $1 * $1 })
+        guard length > 1e-9, hit.normal[1] / length >= minimumUpComponent else { return .failure(.notHorizontal) }
+        let position = [hit.position[0], hit.position[1] + packageHeight / 2, hit.position[2]]
+        return .success(ObjectCenter(position: position, method: hit.method, worldIdentity: hit.worldIdentity, setAt: date, basePosition: hit.position, packageHeightMeters: packageHeight, heightSource: heightSource))
+    }
 }
 
 public enum CoveragePoseMapper {
@@ -725,7 +798,7 @@ public struct OrbitCoverageModel: Sendable, Equatable {
     }
     /// Coverage is admitted only from the accepted-capture pose binding. Raw
     /// preview poses cannot create coverage evidence.
-    public mutating func observe(captureID: String, poseBinding: PoseCaptureBinding?, center: [Double]? = nil) -> CoveragePoseObservation {
+    public mutating func observe(captureID: String, poseBinding: PoseCaptureBinding?, center: [Double]? = nil, frameID: String? = nil) -> CoveragePoseObservation {
         let observation: CoveragePoseObservation
         guard let poseBinding, poseBinding.captureID == captureID else {
             observation = CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: poseBinding == nil ? "pose_unavailable" : "pose_capture_mismatch")
@@ -735,7 +808,8 @@ public struct OrbitCoverageModel: Sendable, Equatable {
             observation = CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: "pose_\(poseBinding.aligned.status)")
             recordedObservations.append(observation); invalidIDs.append(captureID); return observation
         }
-        observation = CoveragePoseMapper.map(captureID: captureID, pose: pose, configuration: configuration, center: center)
+        let mapped = CoveragePoseMapper.map(captureID: captureID, pose: pose, configuration: configuration, center: center)
+        observation = CoveragePoseObservation(captureID: mapped.captureID, sector: mapped.sector, azimuthDegrees: mapped.azimuthDegrees, elevationDegrees: mapped.elevationDegrees, status: mapped.status, frameID: frameID)
         recordedObservations.append(observation)
         guard let sector = observation.sector, observation.status == "available" else { invalidIDs.append(captureID); return observation }
         if captured.contains(sector) { duplicateIDs.append(captureID) } else { captured.insert(sector) }
@@ -1252,7 +1326,10 @@ public struct M04ScanContext: Codable, Sendable, Equatable {
     public let detailPasses: [M04DetailPassResumeState]?
     /// Optional (absent in older contexts). Restored only inside the same AR world.
     public let objectCenter: ObjectCenter?
-    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil, asymmetricCoverage: AsymmetricCoverageEvaluation? = nil, turntableCoverage: TurntableCoverageSnapshot? = nil, orbitCoverage: OrbitCoverageSnapshot? = nil, detailPasses: [M04DetailPassResumeState]? = nil, objectCenter: ObjectCenter? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance; self.asymmetricCoverage = asymmetricCoverage; self.turntableCoverage = turntableCoverage; self.orbitCoverage = orbitCoverage; self.detailPasses = detailPasses; self.objectCenter = objectCenter }
+    /// Coverage measured in an earlier AR world (tracking reset, relaunch); kept for the record
+    /// but never counted toward completion.
+    public let previousWorldCoverage: OrbitCoverageSnapshot?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil, asymmetricCoverage: AsymmetricCoverageEvaluation? = nil, turntableCoverage: TurntableCoverageSnapshot? = nil, orbitCoverage: OrbitCoverageSnapshot? = nil, detailPasses: [M04DetailPassResumeState]? = nil, objectCenter: ObjectCenter? = nil, previousWorldCoverage: OrbitCoverageSnapshot? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance; self.asymmetricCoverage = asymmetricCoverage; self.turntableCoverage = turntableCoverage; self.orbitCoverage = orbitCoverage; self.detailPasses = detailPasses; self.objectCenter = objectCenter; self.previousWorldCoverage = previousWorldCoverage }
 }
 
 public extension SessionStorageLayout {
@@ -1361,9 +1438,10 @@ public struct CaptureProtocolViewModel: Sendable {
         let heights = orbit.rings.map { OrbitGuidance.heightName(ringID: $0.id) }.joined(separator: ", ")
         return [
             "Put the package on the A4 mat in the middle of a table, with room to walk all the way around it.",
-            "After Start, aim the crosshair at the middle of the package and tap Set object center.",
+            "After Start, aim the crosshair where the package touches the mat, check the package height, and tap Set object center.",
             "Walk around the package at \(orbit.rings.count == 1 ? "one height" : "\(orbit.rings.count) heights") (\(heights)), keeping the whole package in view.",
             "Take \(orbit.azimuthBinCount) photos per height: go to the blue wedge on the dial, follow the instruction line, then tap Manual Capture.",
+            "For the low height, hold the phone at table level (lens just above the table surface), or place the package near the table edge.",
         ]
     }
 
@@ -1386,12 +1464,12 @@ public enum OrbitGuidanceInstruction: Sendable, Equatable {
 
     public var text: String {
         switch self {
-        case .setObjectCenter: return "Aim the crosshair at the middle of the package and tap Set object center"
+        case .setObjectCenter: return "Aim the crosshair where the package touches the table, check its height, then tap Set object center"
         case .waitForTracking: return "Hold the phone steady until tracking is ready"
         case .complete: return "All positions covered — finish the scan in History"
         case .walk(let direction, let degrees): return "Walk \(direction.rawValue) ~\(degrees)° around the package"
         case .raise(let ring): return ring == OrbitGuidance.highestRingHint ? "Raise the phone and look down at the package" : "Raise the phone to \(OrbitGuidance.heightName(ringID: ring))"
-        case .lower(let ring): return ring == "lower" ? "Lower the phone to package-base height" : "Lower the phone to \(OrbitGuidance.heightName(ringID: ring))"
+        case .lower(let ring): return ring == "lower" ? "Hold the phone at table level (lens just above the table surface), or place the package near the table edge" : "Lower the phone to \(OrbitGuidance.heightName(ringID: ring))"
         case .holdAndCapture: return "Hold here — tap Manual Capture"
         }
     }
@@ -1405,7 +1483,7 @@ public enum OrbitGuidance {
 
     public static func heightName(ringID: String) -> String {
         switch ringID {
-        case "lower": return "low (package-base height)"
+        case "lower": return "low (table level)"
         case "middle": return "middle (package height)"
         case "upper": return "high (above, looking down)"
         default: return ringID
@@ -1486,9 +1564,10 @@ public struct CaptureToastMessage: Sendable, Equatable {
 
 /// Text of the 2 s confirmation shown after a manual capture attempt.
 public enum CaptureToast {
-    public static func text(decision: ManualCaptureDecision, saved: Bool, observation: CoveragePoseObservation?, newlyCovered: Bool, capturedCount: Int, totalCount: Int, blockHint: String? = nil) -> String {
+    public static func text(decision: ManualCaptureDecision, saved: Bool, observation: CoveragePoseObservation?, newlyCovered: Bool, capturedCount: Int, totalCount: Int, blockHint: String? = nil, orbit: Bool = true) -> String {
         guard decision.allowed else { return "Not saved: \(blockHint ?? decision.blockingReasons.first ?? "capture_failed")" }
         guard saved else { return "Not saved: the camera did not return a photo — try again" }
+        guard orbit else { return "Saved — record the turntable angle for this photo" }
         guard let sector = observation?.sector, observation?.status == "available" else {
             return "Saved, but the position is unknown (\(observation?.status ?? "pose_unavailable")) — set the object center and keep tracking steady"
         }

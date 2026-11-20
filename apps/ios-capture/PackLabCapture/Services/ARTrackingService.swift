@@ -94,6 +94,8 @@ private final class DeviceARSessionDriver: ARSessionLifecycleDriver {
     var isSupported: Bool { ARWorldTrackingConfiguration.isSupported }
     func run(resetTracking: Bool) {
         let configuration = ARWorldTrackingConfiguration()
+        // Horizontal planes give the table/mat the object-center step raycasts onto.
+        configuration.planeDetection = [.horizontal]
         #if !targetEnvironment(simulator)
         // The AR session is the app's only camera client, so its video format must also
         // serve high-resolution stills (ARSession.captureHighResolutionFrame).
@@ -187,22 +189,25 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
     /// within one identity.
     public var worldIdentity: String { "\(session.identifier.uuidString)#\(epochCoordinator.epoch)" }
 
-    /// Raycasts from the image centre (the on-screen crosshair) and returns the hit as the
-    /// object center: estimated plane first, then detected plane geometry, then an infinite
-    /// horizontal plane. Nil when nothing is hit.
-    public func raycastObjectCenter() -> ObjectCenter? {
+    /// Raycasts from the image centre (the on-screen crosshair, aimed where the package
+    /// touches the table) onto a horizontal surface: a detected plane's geometry, then that
+    /// plane extended, then an estimated horizontal plane as the last resort. Returns the hit,
+    /// its surface normal and the camera position; nil when nothing horizontal is hit.
+    public func raycastBasePlane() -> BasePlaneHit? {
         guard isStarted, let frame = session.currentFrame else { return nil }
         let crosshair = CGPoint(x: 0.5, y: 0.5)
-        let attempts: [(target: ARRaycastQuery.Target, alignment: ARRaycastQuery.TargetAlignment, method: String)] = [
-            (.estimatedPlane, .any, "raycast_estimated_plane"),
-            (.existingPlaneGeometry, .any, "raycast_existing_plane"),
-            (.existingPlaneInfinite, .horizontal, "raycast_infinite_horizontal_plane"),
+        let attempts: [(target: ARRaycastQuery.Target, method: String)] = [
+            (.existingPlaneGeometry, "base_plane_raycast"),
+            (.existingPlaneInfinite, "base_plane_infinite_raycast"),
+            (.estimatedPlane, "base_estimated_plane_raycast"),
         ]
+        let camera = frame.camera.transform.columns.3
         for attempt in attempts {
-            let query = frame.raycastQuery(from: crosshair, allowing: attempt.target, alignment: attempt.alignment)
+            let query = frame.raycastQuery(from: crosshair, allowing: attempt.target, alignment: .horizontal)
             if let hit = session.raycast(query).first {
                 let t = hit.worldTransform.columns.3
-                return ObjectCenter(position: [Double(t.x), Double(t.y), Double(t.z)], method: attempt.method, worldIdentity: worldIdentity)
+                let up = hit.worldTransform.columns.1
+                return BasePlaneHit(position: [Double(t.x), Double(t.y), Double(t.z)], normal: [Double(up.x), Double(up.y), Double(up.z)], cameraPosition: [Double(camera.x), Double(camera.y), Double(camera.z)], method: attempt.method, worldIdentity: worldIdentity)
             }
         }
         return nil

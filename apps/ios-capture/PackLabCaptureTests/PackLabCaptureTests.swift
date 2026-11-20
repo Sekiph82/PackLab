@@ -3341,13 +3341,18 @@ final class PackLabCaptureTests: XCTestCase {
         _ = await vm.requestManualCapture()
         XCTAssertNotNil(vm.m04Evaluation)
         XCTAssertFalse(vm.manualCaptureDecision?.blockingReasons.isEmpty ?? true)
+        // Before the first tracking refresh the live observation exists but is unplaced
+        // (pose_unavailable); start the runtime (as ContentView's .task does; start is
+        // idempotent) so the injected pose is mapped before the layout is measured.
+        await vm.start()
+        XCTAssertEqual(vm.m04LiveObservation?.sector, CoverageSector(ringID: "middle", azimuthIndex: 6))
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let recorder = LayoutFrameRecorder()
         let window = UIWindow(windowScene: scene)
         window.rootViewController = UIHostingController(rootView: ContentView(runtime: vm, onLayoutFrame: { key, frame in recorder.frames[key] = frame }))
         window.makeKeyAndVisible()
         window.layoutIfNeeded()
-        for _ in 0..<40 where recorder.frames["manualCapture"] == nil || recorder.frames["guidanceDial"] == nil || vm.m04LiveObservation == nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        for _ in 0..<40 where recorder.frames["manualCapture"] == nil || recorder.frames["guidanceDial"] == nil || vm.m04LiveObservation?.sector == nil { try await Task.sleep(nanoseconds: 50_000_000) }
         try await Task.sleep(nanoseconds: 300_000_000)
         window.layoutIfNeeded()
         let frame = try XCTUnwrap(recorder.frames["manualCapture"], "Manual Capture button was never laid out")
@@ -3448,7 +3453,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(instruction(at(100, 20), sector("middle", 2)), .lower(toRingID: "middle"))
         XCTAssertEqual(instruction(at(100, 60), sector("middle", 2)), .lower(toRingID: "middle"))
         XCTAssertEqual(instruction(at(300, 0), sector("upper", 2)).text, "Raise the phone and look down at the package")
-        XCTAssertEqual(instruction(at(300, 0), sector("lower", 2)).text, "Lower the phone to package-base height")
+        XCTAssertEqual(instruction(at(300, 0), sector("lower", 2)).text, "Hold the phone at table level (lens just above the table surface), or place the package near the table edge")
         // Next target: nearest missing wedge on the current ring, then the nearest ring.
         let all = configuration.rings.flatMap { ring in (0..<8).map { sector(ring.id, $0) } }
         func snapshot(captured: [CoverageSector]) -> OrbitCoverageSnapshot {
@@ -3469,6 +3474,8 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(text.contains("A4 mat"))
         XCTAssertTrue(text.contains("Set object center"))
         XCTAssertTrue(text.contains("8 photos per height"))
+        XCTAssertTrue(text.contains("where the package touches the mat"))
+        XCTAssertTrue(text.contains("table level"))
     }
 
     func testOrbitDialIsEgocentricAndMatchesWalkInstructions() {
@@ -3493,6 +3500,96 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testObjectCenterFromBasePlaneHitHeightAndPlausibility() {
+        func hit(_ position: [Double], camera: [Double] = [0, 0.3, 0], normal: [Double] = [0, 1, 0]) -> BasePlaneHit {
+            BasePlaneHit(position: position, normal: normal, cameraPosition: camera, method: "base_plane_raycast", worldIdentity: "w")
+        }
+        func rejection(_ result: Result<ObjectCenter, ObjectCenterRejection>) -> ObjectCenterRejection? {
+            if case .failure(let reason) = result { return reason }
+            return nil
+        }
+        let date = Date(timeIntervalSince1970: 100)
+        guard case .success(let center) = ObjectCenterBuilder.center(from: hit([0.1, -0.05, -0.4]), packageHeight: 0.20, heightSource: "operator_entered", at: date) else { return XCTFail("plausible base point rejected") }
+        XCTAssertEqual(center.position[0], 0.1, accuracy: 1e-12)
+        XCTAssertEqual(center.position[1], 0.05, accuracy: 1e-12)
+        XCTAssertEqual(center.position[2], -0.4, accuracy: 1e-12)
+        XCTAssertEqual(center.basePosition, [0.1, -0.05, -0.4])
+        XCTAssertEqual(center.packageHeightMeters, 0.20)
+        XCTAssertEqual(center.heightSource, "operator_entered")
+        XCTAssertEqual(center.method, "base_plane_raycast")
+        XCTAssertEqual(center.setAt, date)
+        // Plausibility: 0.1 m ... 1.5 m from the camera, level surface, real height.
+        XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, -0.5, -2.0]), packageHeight: 0.2, heightSource: "x")), .tooFar)
+        XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, 0.25, -0.03]), packageHeight: 0.2, heightSource: "x")), .tooNear)
+        XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, 0, -0.4], normal: [0, 0, 1]), packageHeight: 0.2, heightSource: "x")), .notHorizontal)
+        XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, 0, -0.4], normal: [sin(20 * Double.pi / 180), cos(20 * Double.pi / 180), 0]), packageHeight: 0.2, heightSource: "x")), .notHorizontal)
+        XCTAssertNil(rejection(ObjectCenterBuilder.center(from: hit([0, 0, -0.4], normal: [sin(10 * Double.pi / 180), cos(10 * Double.pi / 180), 0]), packageHeight: 0.2, heightSource: "x")))
+        XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, 0, -0.4]), packageHeight: 0, heightSource: "x")), .invalidHeight)
+        XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, 0, -0.4]), packageHeight: Double.nan, heightSource: "x")), .invalidHeight)
+        XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([Double.nan, 0, -0.4]), packageHeight: 0.2, heightSource: "x")), .invalidHit)
+        XCTAssertTrue(ObjectCenterRejection.notHorizontal.message.contains("where the package touches the table"))
+        XCTAssertEqual(PackageHeightDefaults.meters(for: .bottle), 0.20)
+        XCTAssertEqual(PackageHeightDefaults.meters(for: .jar), 0.12)
+        XCTAssertEqual(PackageHeightDefaults.meters(for: .other), 0.15)
+    }
+
+    @MainActor
+    func testARWorldChangeRestartsCoverageAndResumeKeepsPreviousWorldUncounted() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "world-change")
+        try await ScanSessionStore(layout: layout).create(NewScanDraft(sessionID: "world-change", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: PackagingPresetCatalog.matteHDPE))
+        func makeRuntime() -> CaptureRuntimeViewModel {
+            let runtime = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()), automaticallyPoll: false)
+            runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
+            return runtime
+        }
+        let world = TestARWorld()
+        let vm = makeRuntime()
+        vm.bindObjectCenterSources(center: nil, worldIdentity: { world.identity })
+        let centerSet = await vm.setObjectCenter(ObjectCenter(position: [0, 0, 0], method: "test_injected", worldIdentity: "world-1"))
+        XCTAssertTrue(centerSet)
+        let record = AcceptedCaptureRecord(captureID: "p1", sequence: 0, sourceFilename: "p1.heic", metadataFilename: "p1.json", poseBinding: acceptedPoseBinding(captureID: "p1", pose: orbitPose(0, 0, 0.5)))
+        let observation = vm.recordAcceptedCaptureCoverage(record)
+        XCTAssertEqual(observation.frameID, "world-1")
+        XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "middle", azimuthIndex: 4)])
+
+        // Tracking reset: the center is dropped, live coverage restarts, the old wedges are kept apart.
+        world.identity = "world-2"
+        let refused = await vm.requestManualCapture()
+        XCTAssertEqual(refused.decision.blockingReasons, ["object_center_unset"])
+        XCTAssertEqual(vm.captureToast?.text, CaptureRuntimeViewModel.worldResetMessage)
+        XCTAssertNil(vm.m04ObjectCenter)
+        XCTAssertTrue(vm.m04Coverage.capturedSectors.isEmpty)
+        XCTAssertEqual(vm.m04PreviousWorldCoverage?.capturedSectors.count, 1)
+        XCTAssertTrue(vm.m04RingCoverage.statuses.allSatisfy { $0.capturedSectorCount == 0 })
+        await vm.waitForM04ContextPersistence()
+        let persisted = try await M04SessionContextStore(layout: layout).load()
+        XCTAssertEqual(persisted.previousWorldCoverage?.capturedSectors.count, 1)
+        XCTAssertEqual(persisted.orbitCoverage?.capturedSectors.count, 0)
+
+        // Resume after relaunch (new AR world): restored coverage is flagged, not counted.
+        var oldModel = OrbitCoverageModel()
+        _ = oldModel.observe(captureID: "p1", poseBinding: acceptedPoseBinding(captureID: "p1", pose: orbitPose(0, 0, 0.5)), center: [0, 0, 0], frameID: "world-1")
+        let resumed = makeRuntime()
+        resumed.bindObjectCenterSources(center: nil, worldIdentity: { "world-3" })
+        XCTAssertTrue(resumed.restoreM04OrbitCoverage(oldModel.snapshot()))
+        XCTAssertEqual(resumed.m04Coverage.capturedSectors.count, 1)
+        resumed.restoreObjectCenter(ObjectCenter(position: [0, 0, 0], method: "test_injected", worldIdentity: "world-1"))
+        XCTAssertNil(resumed.m04ObjectCenter)
+        XCTAssertTrue(resumed.m04Coverage.capturedSectors.isEmpty)
+        XCTAssertEqual(resumed.m04PreviousWorldCoverage?.observations.first?.frameID, "world-1")
+        XCTAssertTrue(resumed.m04RingCoverage.statuses.allSatisfy { $0.capturedSectorCount == 0 })
+        XCTAssertFalse(resumed.m04Completion.mandatoryMissingAreas.isEmpty)
+        // Legacy coverage (no stored center, world-origin sectors) is not counted either.
+        let legacy = makeRuntime()
+        XCTAssertTrue(legacy.restoreM04OrbitCoverage(oldModel.snapshot()))
+        legacy.restoreObjectCenter(nil)
+        XCTAssertTrue(legacy.m04Coverage.capturedSectors.isEmpty)
+        XCTAssertEqual(legacy.m04PreviousWorldCoverage?.capturedSectors.count, 1)
+    }
+
     func testCaptureToastExplainsEachOutcome() {
         let allowed = ManualCaptureDecision(allowed: true, warnings: [], blockingReasons: [])
         let placed = CoveragePoseObservation(captureID: "p", sector: CoverageSector(ringID: "upper", azimuthIndex: 2), azimuthDegrees: 100, elevationDegrees: 20, status: "available")
@@ -3504,6 +3601,8 @@ final class PackLabCaptureTests: XCTestCase {
         let blocked = ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: ["object_center_unset"])
         XCTAssertEqual(CaptureToast.text(decision: blocked, saved: false, observation: nil, newlyCovered: false, capturedCount: 0, totalCount: 24, blockHint: "set it"), "Not saved: set it")
         XCTAssertEqual(CaptureToast.text(decision: blocked, saved: false, observation: nil, newlyCovered: false, capturedCount: 0, totalCount: 24), "Not saved: object_center_unset")
+        // Turntable photos have no orbit wedges and no object center.
+        XCTAssertEqual(CaptureToast.text(decision: allowed, saved: true, observation: unplaced, newlyCovered: false, capturedCount: 0, totalCount: 24, orbit: false), "Saved — record the turntable angle for this photo")
     }
 
     @MainActor
@@ -3518,18 +3617,28 @@ final class PackLabCaptureTests: XCTestCase {
         let frame = QualityImageFrame(width: 64, height: 48, luminance: Array(repeating: 0.5, count: 64 * 48))
         _ = await vm.analyzeM04Candidate(sessionID: "center-gate", captureID: "candidate", sequence: 0, monotonicTimestamp: ProcessInfo.processInfo.systemUptime, frame: frame)
 
-        let unset = await vm.requestManualCapture()
+        let unset = await vm.requestManualCapture(captureID: "refused-unset")
         XCTAssertEqual(unset.decision.blockingReasons, ["object_center_unset"])
+        // The refusal is audited like coordinator decisions.
+        let audit = try await QualityCandidateLogStore(layout: layout).snapshot()
+        XCTAssertTrue(audit.contains { $0.captureID == "refused-unset" && $0.manualAudit?.blockingReasons == ["object_center_unset"] })
         XCTAssertEqual(vm.m04Instruction, .setObjectCenter)
         XCTAssertTrue(vm.captureToast?.text.contains("Set object center") == true)
         let noCamera = await vm.setObjectCenterFromScreenCenter()
         XCTAssertFalse(noCamera)
 
         let world = TestARWorld()
-        vm.bindObjectCenterSources(center: { ObjectCenter(position: [0.1, 0, -0.4], method: "test_raycast", worldIdentity: world.identity) }, worldIdentity: { world.identity })
+        vm.bindObjectCenterSources(center: { BasePlaneHit(position: [0.1, 0, -0.4], normal: [0, 1, 0], cameraPosition: [0, 0.3, 0], method: "test_raycast", worldIdentity: world.identity) }, worldIdentity: { world.identity })
         let set = await vm.setObjectCenterFromScreenCenter()
         XCTAssertTrue(set)
         XCTAssertEqual(vm.m04ObjectCenter?.method, "test_raycast")
+        // Base point lifted by half the (type-default) package height; source recorded honestly.
+        XCTAssertEqual(vm.m04ObjectCenter?.position[1] ?? -1, PackageHeightDefaults.meters(for: .other) / 2, accuracy: 1e-12)
+        XCTAssertEqual(vm.m04ObjectCenter?.heightSource, "package_type_default")
+        vm.adjustPackageHeight(byCentimeters: 5)
+        XCTAssertEqual(vm.packageHeightSource, "operator_entered")
+        XCTAssertEqual(vm.m04ObjectCenter?.position[1] ?? -1, 0.10, accuracy: 1e-9)
+        XCTAssertEqual(vm.m04ObjectCenter?.heightSource, "operator_entered")
         await vm.waitForM04ContextPersistence()
         let stored = try await M04SessionContextStore(layout: layout).load()
         XCTAssertEqual(stored.objectCenter, vm.m04ObjectCenter)
