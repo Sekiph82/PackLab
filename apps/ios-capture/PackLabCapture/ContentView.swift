@@ -910,10 +910,38 @@ struct ContentView: View {
                     }
                     if runtime.m04CoverageActive {
                         // Coverage detail can exceed the screen height; keep it in a bounded scroll
-                        // area so the Manual Capture button below stays visible on an iPhone.
+                        // area so the Manual Capture button below stays visible on an iPhone. The grid
+                        // the operator walks by comes first; diagnostic readouts follow.
                         ScrollView {
                         VStack(spacing: 4) {
-                        // Live quality readout shares the bounded scroll area so it cannot push Manual Capture off-screen.
+                        CoverageGridView(model: CoverageViewModel(snapshot: runtime.m04Coverage, targeted: runtime.m04CoverageTarget))
+                            .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+                            .padding(.horizontal, 8)
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(runtime.m04RingCoverage.statuses) { status in
+                                Text("\(status.ringID): \(status.capturedSectorCount)/\(status.minimumSectorCount)\(status.missing ? " · missing" : " · ready")")
+                            }
+                            ForEach(runtime.m04RingCoverage.guidance, id: \.self) { Text($0) }
+                            ForEach(runtime.m04DetailGuidance, id: \.self) { Text($0) }
+                            Text("Base: \(runtime.m04BasePass.status)")
+                            ForEach(runtime.m04BasePass.guidance, id: \.self) { Text($0) }
+                            if let asymmetric = runtime.m04AsymmetricCoverage {
+                                Text("Asymmetric: \(asymmetric.isComplete ? "complete" : "missing")")
+                                ForEach(asymmetric.guidance, id: \.self) { Text($0) }
+                            }
+                            Text("Completion: \(Int(runtime.m04Completion.score * 100))% · \(runtime.m04Completion.status.rawValue)")
+                            ForEach(runtime.m04Completion.mandatoryMissingAreas, id: \.self) { Text("Missing: \($0)") }
+                            ForEach(runtime.m04Completion.optionalUnavailableAreas, id: \.self) { Text("Optional unavailable: \($0)") }
+                            ForEach(runtime.m04Completion.guidance, id: \.self) { Text($0) }
+                        }
+                        .font(.caption2.monospaced()).foregroundStyle(.white)
+                            .padding(.horizontal, 12)
+                        if let manual = runtime.manualCaptureDecision, !manual.warnings.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(manual.warnings, id: \.self) { Text("Manual warning: \($0)") }
+                            }
+                            .font(.caption2.monospaced()).foregroundStyle(.white).padding(.horizontal, 12)
+                        }
                     if let evaluation = runtime.m04Evaluation {
                         let motion = evaluation.quality.metrics.motionBlur
                         VStack(spacing: 2) {
@@ -947,28 +975,6 @@ struct ContentView: View {
                             }
                             ForEach(turntable.missingSectorIndices, id: \.self) { Text("Missing turntable sector \($0)") }
                         }
-                        CoverageGridView(model: CoverageViewModel(snapshot: runtime.m04Coverage, targeted: runtime.m04CoverageTarget))
-                            .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
-                            .padding(.horizontal, 8)
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(runtime.m04RingCoverage.statuses) { status in
-                                Text("\(status.ringID): \(status.capturedSectorCount)/\(status.minimumSectorCount)\(status.missing ? " · missing" : " · ready")")
-                            }
-                            ForEach(runtime.m04RingCoverage.guidance, id: \.self) { Text($0) }
-                            ForEach(runtime.m04DetailGuidance, id: \.self) { Text($0) }
-                            Text("Base: \(runtime.m04BasePass.status)")
-                            ForEach(runtime.m04BasePass.guidance, id: \.self) { Text($0) }
-                            if let asymmetric = runtime.m04AsymmetricCoverage {
-                                Text("Asymmetric: \(asymmetric.isComplete ? "complete" : "missing")")
-                                ForEach(asymmetric.guidance, id: \.self) { Text($0) }
-                            }
-                            Text("Completion: \(Int(runtime.m04Completion.score * 100))% · \(runtime.m04Completion.status.rawValue)")
-                            ForEach(runtime.m04Completion.mandatoryMissingAreas, id: \.self) { Text("Missing: \($0)") }
-                            ForEach(runtime.m04Completion.optionalUnavailableAreas, id: \.self) { Text("Optional unavailable: \($0)") }
-                            ForEach(runtime.m04Completion.guidance, id: \.self) { Text($0) }
-                        }
-                        .font(.caption2.monospaced()).foregroundStyle(.white)
-                            .padding(.horizontal, 12)
                         }
                         }
                         .frame(maxHeight: 320)
@@ -983,9 +989,13 @@ struct ContentView: View {
                                 .onAppear { onManualCaptureFrame?(proxy.frame(in: .global)) }
                                 .onChange(of: proxy.frame(in: .global)) { _, frame in onManualCaptureFrame?(frame) }
                         })
-                        if let manual = runtime.manualCaptureDecision {
-                            ForEach(manual.warnings, id: \.self) { Text("Manual warning: \($0)") }
-                            ForEach(manual.blockingReasons, id: \.self) { Text("Manual blocked: \(ContentView.manualBlockHint($0))") }
+                        // Only blocking reasons stay under the button, on a dark plate readable over the camera.
+                        if let manual = runtime.manualCaptureDecision, !manual.blockingReasons.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(manual.blockingReasons, id: \.self) { Text("Manual blocked: \(ContentView.manualBlockHint($0))") }
+                            }
+                            .font(.caption).foregroundStyle(.white)
+                            .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).padding(.horizontal)
                         }
                     }
                     Spacer()
