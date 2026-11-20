@@ -569,9 +569,12 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let coveredBefore = m04Coverage.capturedSectors.count
         let outcome = await performManualCapture(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
         let coveredAfter = m04Coverage.capturedSectors.count
+        // The count shows required-ring wedges only, matching missingSectors (optional rings excluded).
+        let requiredRings = Set(m04Coverage.configuration.rings.filter(\.required).map(\.id))
+        let requiredCovered = m04Coverage.capturedSectors.filter { requiredRings.contains($0.ringID) }.count
         let observation = m04Coverage.observations.last { $0.captureID == captureID }
         let hint = outcome.decision.blockingReasons.first.map { ContentView.manualBlockHint($0) }
-        showCaptureToast(CaptureToast.text(decision: outcome.decision, saved: outcome.still != nil, observation: observation, newlyCovered: coveredAfter > coveredBefore, capturedCount: coveredAfter, totalCount: coveredAfter + m04Coverage.missingSectors.count, blockHint: hint, orbit: m04ActivePreset.id != .turntable))
+        showCaptureToast(CaptureToast.text(decision: outcome.decision, saved: outcome.still != nil, observation: observation, newlyCovered: coveredAfter > coveredBefore, capturedCount: requiredCovered, totalCount: requiredCovered + m04Coverage.missingSectors.count, blockHint: hint, orbit: m04ActivePreset.id != .turntable))
         return outcome
     }
 
@@ -590,6 +593,16 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let evidenceAge = monotonicTimestamp - evaluation.input.monotonicTimestamp
         guard evidenceAge.isFinite, evidenceAge <= CaptureRuntimeViewModel.maximumLiveEvidenceAge else {
             return (await refuseManual(["live_frame_stale"], captureID: captureID, monotonicTimestamp: monotonicTimestamp), nil)
+        }
+        // Orbit photos must show the package: refuse when the camera points away from the
+        // object center or sits below the table surface (the table would hide the package).
+        if m04ActivePreset.id != .turntable, let center = m04ObjectCenter, let livePose = evaluation.input.pose?.aligned.sample {
+            if let angle = OrbitGuidance.viewAngleToCenter(pose: livePose, center: center.position), angle > OrbitGuidance.maximumViewAngleDegrees {
+                return (await refuseManual(["object_not_in_view"], captureID: captureID, monotonicTimestamp: monotonicTimestamp), nil)
+            }
+            if let base = center.basePosition, base.count == 3, livePose.transform.count == 16, livePose.transform[7] < base[1] - 0.01 {
+                return (await refuseManual(["camera_below_table"], captureID: captureID, monotonicTimestamp: monotonicTimestamp), nil)
+            }
         }
         let record = AcceptedCaptureRecord(captureID: captureID, sequence: state.nextSequence, sourceFilename: "\(captureID).heic", metadataFilename: "\(captureID).json")
         // The committed state advances with the accepted capture (same transaction).
@@ -737,7 +750,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
             let target = OrbitGuidance.nextTarget(snapshot: m04Coverage, current: live)
             if target != m04CoverageTarget { m04CoverageTarget = target }
         }
-        let instruction = OrbitGuidance.instruction(current: live, target: m04CoverageTarget, configuration: configuration, centerSet: m04ObjectCenter != nil)
+        let viewAngle = m04ObjectCenter.flatMap { OrbitGuidance.viewAngleToCenter(pose: pose, center: $0.position) }
+        let instruction = OrbitGuidance.instruction(current: live, target: m04CoverageTarget, configuration: configuration, centerSet: m04ObjectCenter != nil, viewAngle: viewAngle)
         if instruction != m04Instruction { m04Instruction = instruction }
     }
 
@@ -1055,6 +1069,8 @@ struct ContentView: View {
     @State private var showHistory = false
     @State private var showARPreview = false
     @State private var turntableAngleText = "0"
+    /// Global midY of the full window (crosshair / raycast point), measured outside the safe area.
+    @State private var windowMidY: CGFloat = 0
     @StateObject private var runtime: CaptureRuntimeViewModel
     /// Layout-test seam: receives named element frames ("manualCapture", "guidanceDial") in
     /// window coordinates.
@@ -1102,10 +1118,56 @@ struct ContentView: View {
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
 
-                VStack {
+                // The crosshair sits at the full-screen centre (raycast point). The top and bottom
+                // overlays are each limited to their half of the screen minus a clear band, so no
+                // health warning, long message or coverage readout can ever cover the crosshair.
+                GeometryReader { geo in
+                    let clearBand: CGFloat = 40
+                    let frame = geo.frame(in: .global)
+                    // Crosshair position in this safe-area-bounded reader's local coordinates.
+                    let crosshairY = (windowMidY > 0 ? windowMidY : frame.midY) - frame.minY
+                    VStack(spacing: 0) {
+                        ScrollView {
+                        VStack(spacing: 6) {
+                    if orbitGuidanceActive {
+                        // Primary guidance: where to stand and what to do next.
+                        VStack(spacing: 6) {
+                            OrbitGuidanceDial(snapshot: runtime.m04Coverage, target: runtime.m04CoverageTarget, current: runtime.m04LiveObservation)
+                            Text(runtime.m04Instruction.text).font(.callout.weight(.semibold)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                            HStack(spacing: 8) {
+                                Button("−") { runtime.adjustPackageHeight(byCentimeters: -1) }.buttonStyle(.bordered).tint(.white)
+                                Text("Package height \(Int((runtime.packageHeightMeters * 100).rounded())) cm\(runtime.packageHeightSource == "operator_entered" ? "" : " (type default)")").font(.caption.monospacedDigit())
+                                Button("+") { runtime.adjustPackageHeight(byCentimeters: 1) }.buttonStyle(.bordered).tint(.white)
+                            }
+                            if let previous = runtime.m04PreviousWorldCoverage {
+                                Text("Earlier AR session: \(previous.capturedSectors.count) wedges (not counted)").font(.caption2)
+                            }
+                            if let message = runtime.objectCenterMessage { Text(message).font(.caption2).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true) }
+                        }
+                        .foregroundStyle(.white)
+                        .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
+                        .background(frameReporter("guidanceDial"))
+                    }
+                    if showPoseDebug || !orbitGuidanceActive {
+                    Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
+                    }
+                    if showPoseDebug || !orbitGuidanceActive, let controlNote = runtime.controls.state.message {
+                        Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
+                    }
+                        }
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .frame(height: max(0, crosshairY - clearBand), alignment: .top)
+                        .background(frameReporter("topOverlay"))
+                        Spacer(minLength: 2 * clearBand)
+                        VStack(spacing: 6) {
+                    // Health, start-error and camera-recovery messages are pinned first in the bottom band
+                    // (outside every ScrollView) so they can never be scrolled out of view; the top band
+                    // is fully used by the guidance panel on a 6.1" iPhone.
                     if let healthMessage = runtime.healthMessage {
                         Text(healthMessage).font(.caption).multilineTextAlignment(.center)
-                            .padding(8).background(.black.opacity(0.72), in: Capsule()).foregroundStyle(.white).padding(.top)
+                            .padding(8).background(.black.opacity(0.72), in: Capsule()).foregroundStyle(.white)
+                            .background(frameReporter("healthMessage"))
                     }
                     if let scanStartError {
                         Text(scanStartError).font(.caption).multilineTextAlignment(.center)
@@ -1122,36 +1184,12 @@ struct ContentView: View {
                         }
                         .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
                     }
-                    Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
-                    if let controlNote = runtime.controls.state.message {
-                        Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
-                    }
-                    if orbitGuidanceActive {
-                        // Primary guidance: where to stand and what to do next.
-                        VStack(spacing: 6) {
-                            OrbitGuidanceDial(snapshot: runtime.m04Coverage, target: runtime.m04CoverageTarget, current: runtime.m04LiveObservation)
-                            Text(runtime.m04Instruction.text).font(.callout.weight(.semibold)).multilineTextAlignment(.center)
-                            HStack(spacing: 8) {
-                                Button("−") { runtime.adjustPackageHeight(byCentimeters: -1) }.buttonStyle(.bordered).tint(.white)
-                                Text("Package height \(Int((runtime.packageHeightMeters * 100).rounded())) cm\(runtime.packageHeightSource == "operator_entered" ? "" : " (type default)")").font(.caption.monospacedDigit())
-                                Button("+") { runtime.adjustPackageHeight(byCentimeters: 1) }.buttonStyle(.bordered).tint(.white)
-                            }
-                            if let previous = runtime.m04PreviousWorldCoverage {
-                                Text("Earlier AR session: \(previous.capturedSectors.count) wedges (not counted)").font(.caption2)
-                            }
-                            if let message = runtime.objectCenterMessage { Text(message).font(.caption2).multilineTextAlignment(.center) }
-                        }
-                        .foregroundStyle(.white)
-                        .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
-                        .background(frameReporter("guidanceDial"))
-                    }
                     if runtime.m04CoverageActive {
-                        // Coverage detail can exceed the screen height; keep it in a bounded scroll
-                        // area so the Manual Capture button below stays visible on an iPhone. The grid
-                        // the operator walks by comes first; diagnostic readouts follow.
+                        // Coverage detail scrolls inside whatever room is left above the buttons.
                         ScrollView {
                         VStack(spacing: 4) {
                         CoverageGridView(model: CoverageViewModel(snapshot: runtime.m04Coverage, targeted: runtime.m04CoverageTarget))
+                            .foregroundStyle(.white)
                             .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
                             .padding(.horizontal, 8)
                         VStack(alignment: .leading, spacing: 2) {
@@ -1214,7 +1252,14 @@ struct ContentView: View {
                         }
                         }
                         }
-                        .frame(maxHeight: 160)
+                        .scrollBounceBehavior(.basedOnSize)
+                        if let manual = runtime.manualCaptureDecision, !manual.blockingReasons.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(manual.blockingReasons, id: \.self) { Text("Manual blocked: \(ContentView.manualBlockHint($0))") }
+                            }
+                            .font(.caption).foregroundStyle(.white)
+                            .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).padding(.horizontal)
+                        }
                         HStack(spacing: 12) {
                             if orbitGuidanceActive {
                                 Button(runtime.m04ObjectCenter == nil ? "Set object center" : "Reset center") {
@@ -1232,29 +1277,32 @@ struct ContentView: View {
                             .accessibilityIdentifier("manualCaptureButton")
                             .background(frameReporter("manualCapture"))
                         }
-                        // Only blocking reasons stay under the button, on a dark plate readable over the camera.
-                        if let manual = runtime.manualCaptureDecision, !manual.blockingReasons.isEmpty {
-                            VStack(alignment: .leading, spacing: 2) {
-                                ForEach(manual.blockingReasons, id: \.self) { Text("Manual blocked: \(ContentView.manualBlockHint($0))") }
-                            }
-                            .font(.caption).foregroundStyle(.white)
-                            .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).padding(.horizontal)
-                        }
                         if let toast = runtime.captureToast {
                             Text(toast.text).font(.callout).foregroundStyle(.white).multilineTextAlignment(.center)
                                 .padding(10).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
                                 .accessibilityIdentifier("captureToast")
                         }
                     }
-                    Spacer()
                     if runtime.tracking.poseEvidenceEligible == false {
                         Text(runtime.tracking.message).font(.caption)
                             .padding(8).background(.black.opacity(0.65), in: Capsule()).foregroundStyle(.white).padding()
-                    } else {
-                        Text(runtime.m04CoverageActive ? "Use Manual Capture to take photos" : "Tap New Scan to start a scan").font(.headline)
+                    } else if !runtime.m04CoverageActive {
+                        Text("Tap New Scan to start a scan").font(.headline)
                             .padding(8).background(.black.opacity(0.65), in: Capsule()).foregroundStyle(.white).padding()
                     }
+                        }
+                        .frame(height: max(0, geo.size.height - crosshairY - clearBand), alignment: .bottom)
+                        // Overflow (e.g. keyboard up) is cut at the band top, never drawn over the crosshair;
+                        // bottom alignment keeps the capture buttons visible.
+                        .clipped()
+                        .background(frameReporter("bottomControls"))
+                    }
                 }
+                .background(GeometryReader { window in
+                    Color.clear
+                        .onAppear { windowMidY = window.frame(in: .global).midY }
+                        .onChange(of: window.frame(in: .global).midY) { _, midY in windowMidY = midY }
+                }.ignoresSafeArea())
 
                 if showPoseDebug {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1323,6 +1371,8 @@ struct ContentView: View {
         case "health_hard_stop": return "device health stop (thermal/battery/storage) (health_hard_stop)"
         case "capture_persist_failed": return "photo could not be saved to the scan (capture_persist_failed)"
         case "live_frame_stale": return "camera evidence is out of date — keep the camera on the package for a moment and try again (live_frame_stale)"
+        case "object_not_in_view": return "the package is not in the middle of the picture — point the camera at the package (object_not_in_view)"
+        case "camera_below_table": return "the phone is below the table surface, so the table hides the package — raise the phone above the table (camera_below_table)"
         case "object_center_unset": return "aim the crosshair where the package touches the table and tap Set object center (object_center_unset)"
         case "capture_in_flight": return "previous photo is still being saved — wait for it to finish (capture_in_flight)"
         default: return reason

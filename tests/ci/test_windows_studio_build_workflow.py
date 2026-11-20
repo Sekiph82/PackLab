@@ -183,6 +183,7 @@ def test_windows_workflow_python_modules_resolve_from_checkout_root() -> None:
         "tools.packaging.build_controlled_ocp_from_generated_sources",
         "tools.packaging.build_controlled_ocp_runtime",
         "tools.packaging.controlled_ocp_runtime_bundle",
+        "tools.packaging.engine_bundle",
         "tools.packaging.fetch_verify_windows_native_sources",
         "tools.packaging.inspect_retained_occt_sdk",
         "tools.packaging.normalize_numpy_msvc_runtime",

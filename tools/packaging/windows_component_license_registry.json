@@ -457,6 +457,44 @@
         "path": "tools/packaging/windows_licenses/RELINKING_AND_SOURCE_GUIDE.txt",
         "sha256": "cfd6e4dd233cd779a119b0ab01962b438ad392db7a3d47a597cd4da52db588bf"
       }
+    },
+    "colmap-4.2.1": {
+      "version": "4.2.1",
+      "license_identifier": "BSD-3-Clause",
+      "license_file": "tools/packaging/windows_licenses/COLMAP-4.2.1/COPYING.txt",
+      "license_sha256": "ab30dabb4f0a6731f980108f57aa160cc8f5cebae6984e01a5d109df99669233",
+      "upstream_reference": "https://github.com/colmap/colmap/tree/4.2.1",
+      "source_evidence": {
+        "url": "https://github.com/colmap/colmap/tree/4.2.1"
+      },
+      "license_mapping_evidence": "pinned engine_bundle_manifest.json archive sha256 plus per-file staged sha256 record",
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "native_unresolved_reason": "PL-0444: pinned upstream binary staged unmodified as a separate process in engines/. Its archive also carries third-party DLLs (Qt, Boost, OpenCV, CGAL, OpenEXR and others) without per-file license texts, and OpenMVS COPYRIGHT.md lists a research-only component (ibfs). Redistribution stays blocked pending the PackLab legal/licensing review."
+    },
+    "openmvs-2.4.0": {
+      "version": "2.4.0",
+      "license_identifier": "AGPL-3.0-only",
+      "license_file": "tools/packaging/windows_licenses/OpenMVS-2.4.0/LICENSE.txt",
+      "license_sha256": "0f072d4a0ef59e7f6864bb45629c37417ccef63025b58f4073109d1c830bc55f",
+      "additional_license_files": [
+        {
+          "path": "tools/packaging/windows_licenses/OpenMVS-2.4.0/COPYRIGHT.md",
+          "sha256": "87663661db85017fad4773f3744cba9ef315a18c01b400785990addc47ab2123",
+          "upstream_reference": "https://github.com/cdcseacave/openMVS/blob/v2.4.0/COPYRIGHT.md"
+        },
+        {
+          "path": "tools/packaging/windows_licenses/OpenMVS-2.4.0/SOURCE_OFFER.txt",
+          "sha256": "6211603559a59cc28c0aa314a1d5d94e881de68c21a6c52220914266bc5fff58",
+          "upstream_reference": "https://github.com/cdcseacave/openMVS/tree/v2.4.0"
+        }
+      ],
+      "upstream_reference": "https://github.com/cdcseacave/openMVS/tree/v2.4.0",
+      "source_evidence": {
+        "url": "https://github.com/cdcseacave/openMVS/archive/refs/tags/v2.4.0.tar.gz"
+      },
+      "license_mapping_evidence": "pinned engine_bundle_manifest.json archive sha256 plus per-file staged sha256 record",
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "native_unresolved_reason": "PL-0444: pinned upstream binary staged unmodified as a separate process in engines/. Its archive also carries third-party DLLs (Qt, Boost, OpenCV, CGAL, OpenEXR and others) without per-file license texts, and OpenMVS COPYRIGHT.md lists a research-only component (ibfs). Redistribution stays blocked pending the PackLab legal/licensing review."
     }
   },
   "native_review": {
