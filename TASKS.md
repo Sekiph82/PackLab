@@ -4,11 +4,11 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 
 ## Project Status
 
-- Current Milestone: M17 (CLAUDE exclusive autonomous ownership, dependency-safe work across M02–M19)
+- Current Milestone: M20 (owner directive 2026-11-20: make the end-to-end owner flow work in the real PackLab window; top priority over all other open tasks)
 - Current Sprint: CLAUDE_FULL_BACKLOG_HANDOFF / M17-S01 golden datasets plus all independent open sprints
 - Current Task: none dependency-ready; all remaining tasks externally gated (physical, device, Apple signing, legal, owner decisions)
 - Current Task Status: CLAUDE_SOLE_EXECUTOR / 2026-11-19: 49 tasks CLAUDE_PEER_AUDITED_PASS (PL-0358, PL-0438 rescoped, PL-0369, PL-0371..0374, PL-0379..0384, PL-0396..0400, PL-0402, PL-0413, PL-0378, PL-0415..0417, PL-0375, PL-0394, PL-0414, PL-0420, PL-0376, PL-0395, PL-0418, PL-0421, PL-0422, PL-0424, PL-0427, PL-0432, PL-0433, PL-0423, PL-0428, PL-0431, PL-0435, PL-0434, PL-0436, PL-0390, PL-0391, PL-0392, PL-0426, PL-0377, PL-0430) / PL-0370 synthetic proxy passed, real Kenya data EXTERNAL_PENDING / 29 permanent tasks remain open (software halves complete, physical pending: PL-0222, PL-0223, PL-0221, PL-0224, PL-0401, PL-0411, PL-0412, PL-0425, PL-0429, PL-0437)
-- Next Task/Action: CLAUDE: await owner's first real capture on iPhone 16 (PL-0385) and a correctly scaled reprint of the A4 mat (first print measured 98 mm bar, ~2% shrink) for PL-0223/PL-0068 ruler records; remaining open tasks need physical, Kenya, legal or owner evidence.
+- Next Task/Action: CLAUDE: M20 in order — PL-0439/PL-0440 (PR #9 review, signed build, owner device test), PL-0441/PL-0442 (Studio receive-from-iPhone + model viewer, in progress), PL-0443/PL-0444 (Build model button, bundled engines), then PL-0445..0450. Acceptance requires real PackLab.exe window screenshots per step.
 - Required Actor: CLAUDE_CODE_SOLE_ORCHESTRATOR_AND_IMPLEMENTER_WITH_CLAUDE_TEST_REVIEW_SECURITY_DATASET_SUBAGENTS / OWNER only for genuinely unavailable real-world decisions and credentials
 - Latest Milestone Audit: https://github.com/Sekiph82/PackLab/blob/main/coordination/sessions/M16-C001/PL0354_MAIN_LOCAL_CAPABILITY_AND_TEMP52_CHATGPT_AUDIT_V01.md — AUDITED_PASS narrowly scoped TEMP52 cleanup and Windows local XCTest feasibility on Codex evidence: 52 screened, 5 removed/47 protected, +71,462,912 reported C: free T0-T1. ChatGPT independently verified 205 named Swift test methods in source, NOT 205 executed XCTest. PL0354 full suite blocked, M17/legal/factory rollout held.
 - Latest M08 Owner Decision: https://github.com/Sekiph82/PackLab/blob/main/docs/architecture/adr/ADR-0004-sam2.1-segmentation-backend.md — ACCEPTED on 2026-10-01; V1 segmentation backend is Meta SAM 2.1 Hiera Base+, local PyTorch only, official checkpoint source only, no runtime auto-download, checkpoint SHA-256 required before acceptance.
@@ -158,6 +158,7 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 | M17 | Validation, Benchmarking & Reliability | Measured accuracy, regression datasets and recovery | [ ] |
 | M18 | Kenya Production Onboarding | Real packaging digitization workflow in daily use | [ ] |
 | M19 | Advanced Automation Backlog | Optional AI/automation enhancements after stable V1 | [ ] |
+| M20 | Owner End-to-End Product | Owner flow works in the real PackLab window: iPhone -> pairing -> model -> scale/measure -> Design Model -> labels -> factory export (TOP PRIORITY 2026-11-20) | [ ] |
 
 ---
 
@@ -857,6 +858,32 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 ## Sprint M16-C002 — PackLab autonomous task queue
 
 - [x] **PL-0438** Integrate an autonomous task queue into PackLab. **Status: CLAUDE_PEER_AUDITED_PASS (rescoped) 2026-11-19 (934d2d35).** Accepted scope: the read-only TASKS.md validators (`tools/codex/task_queue.py`, `scripts/codex/task-state.mjs`) now validate the Claude-owned tracker incl. the idle state with strict actor/idle/repo/branch/row checks. The Codex write-side queue (TASKS.md writer, owner-answer inbox, dashboard, App Server client) was retired and removed; the original autonomous Codex queue is NOT accepted. Reviews `coordination/sessions/M16-C002/CLAUDE_PEER_REVIEW_PL0438_V01.md` FAIL → V02 PASS_WITH_NOTES; hosted run 44506910624 SUCCESS. OWNER ACTION: disable the external Codex heartbeat automation `packlab-autonomous-task-queue` (outside the repo, unverified). History: CODEX_LOCAL_CLAIM_NOT_ACCEPTED. Added by Codex outside the 437-task plan and self-checked in an uncommitted stash; code published in 260beb49 (tests pass) but never independently reviewed. Codex queue tooling is superseded by Claude ownership.
+
+# M20 - Owner End-to-End Product (owner directive 2026-11-20, TOP PRIORITY)
+
+**Owner directive (2026-11-20, verbatim intent):** PackLab exists so the owner has *his own program*, not a stack of disconnected parts. First real iPhone 16 use exposed that accepted components were never connected end to end: the iPhone wrote an invalid .packscan (ZIP central directory field order, schema-invalid manifest), Studio had no pairing/QR screen, no receiver start, no import button, no model window, and the viewport loader could not read a point cloud. Owner rejected adding RealityScan: reconstruction engines must be invisible parts of PackLab, not separate installs. A rotatable viewer alone is NOT the goal.
+
+**New acceptance rule for every M20 task (replaces "unit tests green = done"):** Claude launches the real `PackLab.exe` (and the installed iPhone build where relevant), performs the owner's flow by clicking in the actual window, and attaches screenshots of each step plus the produced files. No screenshot of the real window = not done. Independent reviewer inspects source, tests AND the screenshots. Unit/CI tests remain mandatory but are not sufficient.
+
+**Target flow (one window, no external program visible to the owner):** iPhone guided capture -> Send to PackLab (QR pairing over Wi-Fi) -> Studio Capture Inbox -> Build model (progress shown) -> object-only model (table/mat/room removed) -> real-world scale from the A4 mat -> measurements in mm (height, diameter, lid/neck) -> editable Design Model (change a dimension, model updates) -> labels (label zone, artwork placement, mm dieline) -> factory export (STEP/STL + dimension sheet) and rendered mockup.
+
+## Sprint M20-S01 - Make the existing chain actually work
+
+- [ ] **PL-0439** iPhone writes a .packscan that `packlab_core.packscan.validate_packscan` accepts without manual repair (ZIP central directory order, schema-valid manifest: created_at/device/capture_mode/source_evidence, payload kinds in enum). Evidence: a fresh real-device export validated on Windows. Status: code + XCTests in PR #9 (CI 44797874882 233/233); real-device export pending. Owner file Test-333 (2026-11-20) was repaired by hand outside Git to prove the rest of the chain.
+- [ ] **PL-0440** iPhone capture guidance usable on a real tabletop: crosshair never covered; lower ring (camera below package mid-height) optional because it is physically unreachable on a table; refuse photos when the package is off-centre (>25 deg) or the phone is below the table surface; finalized .packscan also copied to Documents (Files app / USB pickup). Status: PR #9 under independent review; owner device test pending.
+- [ ] **PL-0441** Studio "Receive from iPhone": receiver started from the UI, QR + pairing code shown, production TLS identity without openssl, LAN address, received scans listed; "Import .packscan file" for files sent by WhatsApp/email. Evidence: owner phone pairs by QR and a scan arrives in the real window.
+- [ ] **PL-0442** Studio model viewer pane: open OBJ/PLY (ASCII and binary, coloured points and meshes) produced by reconstruction; orbit/zoom/fit. Evidence: Test-333 model visible in the real PackLab window.
+- [ ] **PL-0443** "Build model" button on an imported scan: runs reconstruction through the existing backend-neutral contract with progress and cancel, result opened in the viewer. Evidence: Test-333 built from the window (CPU-only laptop, no NVIDIA).
+- [ ] **PL-0444** Bundle COLMAP and OpenMVS inside the PackLab Windows build (no separate install, no env vars), with license notices; OpenMVS AGPL handled as a separate unmodified executable with source offer, subject to the pending legal review before any public distribution.
+
+## Sprint M20-S02 - Owner-visible product outcomes
+
+- [ ] **PL-0445** Object-only model: remove table, mat and room using existing M08 segmentation/visibility code; show only the package. Evidence: Test-333 jar isolated in the window.
+- [ ] **PL-0446** Real scale from the printed A4 mat markers and on-screen measurements in mm (height, body diameter, lid diameter, neck where present) with uncertainty; blocked for physical acceptance until the owner reprints the mat at 100% (first print ~2% small), software path testable before that.
+- [ ] **PL-0447** Editable Design Model from the measured scan (existing M11 parametric jar/bottle): change a dimension in the window and the model updates; Scan Master kept as reference.
+- [ ] **PL-0448** Labels in the window: label zone on the Design Model, import SVG/PNG artwork, front/back/wrap, mm dieline SVG export, rendered mockup (existing M14 code wired to UI).
+- [ ] **PL-0449** Factory export from the window: STEP/STL + dimension sheet (existing M13 code wired to UI).
+- [ ] **PL-0450** Real-window audit of every accepted Studio feature (M06-M15): click each in PackLab.exe, record works / broken / not reachable with screenshots; every "not reachable" becomes a wiring task before any new feature work.
 
 ---
 
