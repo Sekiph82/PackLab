@@ -893,6 +893,20 @@ This root TASKS.md is the only authoritative project-status tracker consumed by 
 - [ ] **PL-0452** Pair once, then automatic sync: long-lived device pairing (paired phone remembered on both sides, revocable in Studio), phone auto-sends each finalized scan when the paired PackLab is reachable (queued + retried otherwise, progress visible on the phone), Studio auto-imports with no clicks. Evidence: PL-0451 harness run with two consecutive scans and no re-pairing.
 - [ ] **PL-0453** Automatic pipeline in Studio: each imported scan becomes a project item and automatically starts "Build model" (background job with progress/cancel), then opens the result in the viewer and offers the next steps (object-only, scale/measure, Design Model, labels, export). Evidence: real PackLab window screenshots from import to model.
 
+## Sprint M20-S04 - Wire every accepted Studio feature into the window (from PL-0450 audit V01: 4 work, 21 not reachable, 5 need state the UI cannot create)
+
+Audit: coordination/sessions/M18-C001/PL-0450_STUDIO_REAL_WINDOW_AUDIT_V01.md (origin/main ee760a96). Same acceptance rule as M20: real window evidence.
+
+- [ ] **PL-0454** File menu: New/Open/Close project (ProjectManager), recent projects, default workspace on first run; enables all project-gated routes; fix Mask Correction route gating inconsistency.
+- [ ] **PL-0455** Window preferences persisted (PreferencesStore wired in app.run) and Help > Create diagnostic bundle (create_diagnostic_bundle).
+- [ ] **PL-0456** Autosave, undo/redo history, recovery prompt on start and portability report reachable from the window.
+- [ ] **PL-0457** Settings > Engines panel showing discover_engines diagnostics (source bundled/env/PATH, versions) with a re-check button.
+- [ ] **PL-0458** Segmentation + cleanup chain in the window feeding Scan Master promotion (object-only lifting, mask correction session opened from a built model; mesh processing steps) — overlaps PL-0445.
+- [ ] **PL-0459** Package-family workflows reachable: caps/closures, jerrycan, trigger/pump, tube/sachet (ClosureWorkflowController and family modules) from the Design route.
+- [ ] **PL-0460** Library: create asset from a Scan Master / Design Model, link scan/artwork, create SKU (unblocks the existing Create SKU dialog).
+- [ ] **PL-0461** Library backup/restore and contact-sheet export in the window.
+
+
 
 ---
 
