@@ -122,6 +122,13 @@ class ReceiverSession:
         index = self.receiver.ingest.index
         return index.records() if index is not None else []
 
+    def package_path(self, package_sha256: str) -> Path | None:
+        """Location of an imported package in this inbox's immutable raw store."""
+        for record in self.index_records():
+            if record.package_sha256 == package_sha256:
+                return self.data_root / record.raw_location
+        return None
+
     def entries(self) -> list[InboxEntry]:
         return [self._entry(record) for record in self.index_records()]
 
