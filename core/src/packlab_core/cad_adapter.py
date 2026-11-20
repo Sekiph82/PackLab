@@ -364,9 +364,17 @@ def build_lofted_shape(
     model: DesignModelRevision,
     sections: tuple[LoftSectionInput, ...],
     operation: DesignOperation,
+    *,
+    ruled: bool = False,
 ) -> CadShapeBuild:
-    """Build a loft from exact ordered section wires without reordering or gap healing."""
+    """Build a loft from exact ordered section wires without reordering or gap healing.
+
+    ``ruled=True`` joins consecutive sections with straight rulings (no smoothing
+    overshoot between unevenly spaced sections); the default keeps the smooth loft.
+    """
     _validate_loft_inputs(model, sections, operation)
+    if not isinstance(ruled, bool):
+        raise CadAdapterError("loft_ruled_flag_invalid")
     gp = importlib.import_module("OCP.gp")
     builder = importlib.import_module("OCP.BRepBuilderAPI")
     loft_module = importlib.import_module("OCP.BRepOffsetAPI")
@@ -374,7 +382,7 @@ def build_lofted_shape(
     top_exp = importlib.import_module("OCP.TopExp")
     top_abs = importlib.import_module("OCP.TopAbs")
     brep_tool = importlib.import_module("OCP.BRep")
-    loft = loft_module.BRepOffsetAPI_ThruSections(True, False, 1e-6)
+    loft = loft_module.BRepOffsetAPI_ThruSections(True, ruled, 1e-6)
     loft.CheckCompatibility(False)
 
     for section_input in sections:

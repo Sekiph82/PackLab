@@ -252,8 +252,12 @@ class MeasureDesignView(QWidget):
         self.project_design.setText(
             f"Project Design Model (current): {record['revision_id'][:34]}… "
             f"H {float(size.get('height', 0)):.2f} × Ø {float(size.get('diameter', 0)):.2f} "
-            f"mm_unverified; fitted to {str(record.get('scan_master_revision_id'))[:24]}…; "
-            f"saved at project revision {record.get('project_revision')}"
+            + (
+                f"mm_unverified; fitted to {str(record.get('scan_master_revision_id'))[:24]}…; "
+                if record.get("scan_master_revision_id")
+                else "mm_unverified; standalone design geometry (no Scan Master); "
+            )
+            + f"saved at project revision {record.get('project_revision')}"
         )
 
     def draft(self) -> dict[str, object] | None:

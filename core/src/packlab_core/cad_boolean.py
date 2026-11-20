@@ -17,6 +17,7 @@ from .cad_brep import (
     _representation_from_lineage,
 )
 from .design_model import (
+    DesignModelParentKind,
     DesignModelRevision,
     FeatureKind,
 )
@@ -162,7 +163,30 @@ def cut_design_model_feature(
         extent_policy = "explicit_depth_from_brep_surface"
     else:
         raise CadBooleanError("cad_boolean_feature_kind_unsupported")
+    return _cut(
+        model,
+        parent_brep,
+        feature_id,
+        bodies,
+        operation_type,
+        profile,
+        extrusion,
+        provenance_values,
+        extent_policy,
+    )
 
+
+def _cut(
+    model: DesignModelRevision,
+    parent_brep: CadBrepRepresentationRevision,
+    feature_id: str,
+    bodies: tuple[str, ...],
+    operation_type: str,
+    profile: tuple[tuple[float, float, float], ...],
+    extrusion: tuple[float, float, float],
+    provenance_values: object,
+    extent_policy: str,
+) -> CadBooleanFeatureResult:
     input_ids = (parent_brep.revision_id, feature_id, *bodies)
     operation_id = _operation_id(
         model.revision_id,
@@ -223,13 +247,88 @@ def cut_design_model_feature(
     )
 
 
+PARAMETRIC_HANDLE_OPENING_PREFIX = "parametric_handle_opening:"
+
+
+def cut_parametric_handle_opening(
+    model: DesignModelRevision,
+    parent_brep: CadBrepRepresentationRevision,
+    feature_id: str,
+) -> CadBooleanFeatureResult:
+    """Cut a user-authored nominal handle opening from a STANDALONE Design Model body.
+
+    Captured jerrycans must use the evidence chain (handle-void candidate ->
+    ``create_jerrycan_handle_opening`` -> ``cut_design_model_feature``); this path is refused
+    for them so nominal parameters never stand in for scan evidence. The opening is cut
+    through the body BREP along +y; ``profile_xz`` is the opening outline in the x/z plane.
+    """
+    if not isinstance(model, DesignModelRevision):
+        raise CadBooleanError("design_model_revision_required")
+    if model.parent_kind is not DesignModelParentKind.STANDALONE_DESIGN_GEOMETRY:
+        raise CadBooleanError("parametric_handle_opening_requires_standalone_design_geometry")
+    if not isinstance(parent_brep, CadBrepRepresentationRevision) or (
+        parent_brep.source_design_model_revision_id != model.revision_id
+        or parent_brep.parent_kind is not model.parent_kind
+        or model.standalone_root is None
+        or parent_brep.parent_authority_revision_id != model.standalone_root.revision_id
+        or parent_brep.mold_use_authorized
+    ):
+        raise CadBooleanError("cad_brep_model_or_authority_mismatch")
+    feature = next((item for item in model.features if item.feature_id == feature_id), None)
+    if feature is None or feature.feature_kind is not FeatureKind.HANDLE_OPENING:
+        raise CadBooleanError("parametric_handle_opening_feature_missing_or_invalid")
+    value = _parameter_value(model, PARAMETRIC_HANDLE_OPENING_PREFIX + feature_id)
+    body = value.get("body_feature_id") if isinstance(value, dict) else None
+    points = value.get("profile_xz") if isinstance(value, dict) else None
+    if (
+        not isinstance(body, str)
+        or body not in {item.feature_id for item in model.features}
+        or not isinstance(points, list)
+        or len(points) < 3
+        or any(
+            not isinstance(point, list)
+            or len(point) != 2
+            or any(
+                isinstance(item, bool)
+                or not isinstance(item, (int, float))
+                or not math.isfinite(item)
+                for item in point
+            )
+            for point in points
+        )
+    ):
+        raise CadBooleanError("parametric_handle_opening_parameters_invalid")
+    profile_xz = tuple((float(point[0]), float(point[1])) for point in points)
+    # _opening_tool maps a y-axis profile as (z, x) pairs.
+    opening = _ToolOpening("y", tuple((z, x) for x, z in profile_xz))
+    profile, extrusion = _opening_tool(opening, parent_brep)
+    return _cut(
+        model,
+        parent_brep,
+        feature_id,
+        (body,),
+        "CUT_PARAMETRIC_HANDLE_OPENING_THROUGH_BODY",
+        profile,
+        extrusion,
+        {"profile_xz": [list(point) for point in profile_xz], "plane_axis": "y"},
+        "through_body_brep_bounds",
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ToolOpening:
+    plane_axis: str
+    profile: tuple[tuple[float, float], ...]
+
+
 def _opening_tool(
     opening: object, parent_brep: CadBrepRepresentationRevision
 ) -> tuple[tuple[tuple[float, float, float], ...], tuple[float, float, float]]:
     axis = getattr(opening, "plane_axis")
+    # Bnd_Box order: grouped minima then grouped maxima (see cad_preview).
     bounds = cad_shape_bounds(parent_brep.shape_handle)
-    lows = (bounds[0], bounds[2], bounds[4])
-    highs = (bounds[1], bounds[3], bounds[5])
+    lows = (bounds[0], bounds[1], bounds[2])
+    highs = (bounds[3], bounds[4], bounds[5])
     directions = {"x": (1.0, 0.0, 0.0), "y": (0.0, 1.0, 0.0), "z": (0.0, 0.0, 1.0)}
     if axis not in directions:
         raise CadBooleanError("handle_opening_plane_axis_invalid")
@@ -303,4 +402,10 @@ def _operation_id(
     return f"cad-cut:{digest}"
 
 
-__all__ = ["CadBooleanError", "CadBooleanFeatureResult", "cut_design_model_feature"]
+__all__ = [
+    "PARAMETRIC_HANDLE_OPENING_PREFIX",
+    "CadBooleanError",
+    "CadBooleanFeatureResult",
+    "cut_design_model_feature",
+    "cut_parametric_handle_opening",
+]

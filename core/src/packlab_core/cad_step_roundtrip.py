@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .cad_adapter import (
     _registered_shape_build,
-    cad_shape_bounds,
+    cad_shape_precise_bounds,
     inspect_shape_topology,
     probe_cad_runtime,
 )
@@ -196,8 +196,10 @@ def validate_step_export_round_trip(
         )
         if expected_part_name not in product_names:
             raise CadStepRoundTripError("cad_step_roundtrip_part_name_mismatch")
-        source_bounds = _interleaved_bounds(cad_shape_bounds(representation.shape_handle))
-        reopened_bounds = _interleaved_bounds(cad_shape_bounds(shape_build.shape_handle))
+        # Tight geometric bounds: STEP carries no per-edge kernel tolerances, so the
+        # tolerance-enlarged boxes of boolean results would differ after re-reading.
+        source_bounds = _interleaved_bounds(cad_shape_precise_bounds(representation.shape_handle))
+        reopened_bounds = _interleaved_bounds(cad_shape_precise_bounds(shape_build.shape_handle))
     except CadStepRoundTripError:
         raise
     except Exception as error:

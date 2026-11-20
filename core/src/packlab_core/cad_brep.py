@@ -171,14 +171,20 @@ def loft_design_model_to_brep(
     model: DesignModelRevision,
     sections: tuple[LoftSectionInput, ...],
     operation: DesignOperation,
+    *,
+    ruled: bool = False,
 ) -> CadBrepRepresentationRevision:
-    """Derive a solid loft from exact ordered cross-section and operation inputs."""
+    """Derive a solid loft from exact ordered cross-section and operation inputs.
+
+    ``ruled`` selects straight rulings between sections (see ``build_lofted_shape``); the
+    resulting geometry digest, and so the representation revision id, differs per mode.
+    """
     if not isinstance(model, DesignModelRevision):
         raise CadBrepError("design_model_revision_required")
     if not isinstance(operation, DesignOperation):
         raise CadBrepError("design_model_loft_operation_required")
     try:
-        shape_build = build_lofted_shape(model, sections, operation)
+        shape_build = build_lofted_shape(model, sections, operation, ruled=ruled)
     except CadAdapterError as error:
         raise CadBrepError(str(error)) from error
     except Exception as error:

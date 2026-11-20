@@ -173,9 +173,13 @@ class EngineeringExportView(QWidget):
 
         self.source_summary.setText(summary)
         self.available_formats.setText(", ".join(label for label, _value in formats) or "None")
+        # Refreshing (also done right before each export) must keep the user's chosen format.
+        chosen = self.format_selector.currentData(Qt.ItemDataRole.UserRole)
         self.format_selector.clear()
         for label, value in formats:
             self.format_selector.addItem(label, value)
+        if self.format_selector.findData(chosen) >= 0:
+            self.format_selector.setCurrentIndex(self.format_selector.findData(chosen))
         self.export_button.setEnabled(source_available and bool(formats))
 
     def cancel_export(self) -> None:
