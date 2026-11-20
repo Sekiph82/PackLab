@@ -908,6 +908,12 @@ struct ContentView: View {
                     if let controlNote = runtime.controls.state.message {
                         Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
                     }
+                    if runtime.m04CoverageActive {
+                        // Coverage detail can exceed the screen height; keep it in a bounded scroll
+                        // area so the Manual Capture button below stays visible on an iPhone.
+                        ScrollView {
+                        VStack(spacing: 4) {
+                        // Live quality readout shares the bounded scroll area so it cannot push Manual Capture off-screen.
                     if let evaluation = runtime.m04Evaluation {
                         let motion = evaluation.quality.metrics.motionBlur
                         VStack(spacing: 2) {
@@ -928,11 +934,6 @@ struct ContentView: View {
                         .font(.caption2.monospaced()).foregroundStyle(.white)
                         .padding(6).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
                     }
-                    if runtime.m04CoverageActive {
-                        // Coverage detail can exceed the screen height; keep it in a bounded scroll
-                        // area so the Manual Capture button below stays visible on an iPhone.
-                        ScrollView {
-                        VStack(spacing: 4) {
                         Text("Preset: \(runtime.m04ActivePreset.displayName) v\(runtime.m04ActivePreset.version)")
                             .font(.caption2.monospaced()).foregroundStyle(.white)
                         ForEach(runtime.m04ReflectionGuidance, id: \.self) { Text($0) }

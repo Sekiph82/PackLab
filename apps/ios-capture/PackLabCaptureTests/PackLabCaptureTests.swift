@@ -3311,6 +3311,12 @@ final class PackLabCaptureTests: XCTestCase {
         try await ScanSessionStore(layout: layout).create(NewScanDraft(sessionID: "layout-proof", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
         let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()), automaticallyPoll: false)
         vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
+        // Device worst case: a live quality readout and manual blocking reasons are both on screen.
+        let frame64 = QualityImageFrame(width: 64, height: 48, luminance: Array(repeating: 0.5, count: 64 * 48))
+        _ = await vm.analyzeM04Candidate(sessionID: "layout-proof", captureID: "layout-candidate", sequence: 0, monotonicTimestamp: ProcessInfo.processInfo.systemUptime, frame: frame64)
+        _ = await vm.requestManualCapture()
+        XCTAssertNotNil(vm.m04Evaluation)
+        XCTAssertFalse(vm.manualCaptureDecision?.blockingReasons.isEmpty ?? true)
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let recorder = ButtonFrameRecorder()
         let window = UIWindow(windowScene: scene)
