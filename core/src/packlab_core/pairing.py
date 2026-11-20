@@ -11,6 +11,7 @@ import string
 import tempfile
 import threading
 import time
+import unicodedata
 import uuid
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
@@ -193,6 +194,7 @@ class PairingStore:
 #: Device-session requests must carry a timestamp within this many seconds of
 #: the receiver clock; their nonce is remembered for twice this window.
 DEVICE_REQUEST_SKEW_SECONDS = 300
+LAST_SEEN_PERSIST_SECONDS = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,7 +244,7 @@ class DeviceRegistry:
                 ) from error
 
     def register(self, device_name: str) -> tuple[PairedDevice, str]:
-        name = (device_name.strip() or "iPhone")[:64]
+        name = _clean_device_name(device_name)
         secret = secrets.token_urlsafe(32)
         device = PairedDevice(uuid.uuid4().hex, name, _secret_digest(secret), self._clock())
         with self._lock:
@@ -278,9 +280,13 @@ class DeviceRegistry:
                     TransferErrorCode.REPLAYED_REQUEST, "device request was already used"
                 )
             self._nonces[key] = now + 2 * DEVICE_REQUEST_SKEW_SECONDS
-            device = replace(device, last_seen_at=now)
-            self._devices[device_id] = device
-            self._persist()
+            # last_seen has coarse granularity so a session per request does not
+            # rewrite the registry file every time.
+            seen = device.last_seen_at
+            if seen is None or now - seen >= LAST_SEEN_PERSIST_SECONDS:
+                device = replace(device, last_seen_at=now)
+                self._devices[device_id] = device
+                self._persist()
             return device
 
     def is_active(self, device_id: str) -> bool:
@@ -320,6 +326,16 @@ class DeviceRegistry:
         except BaseException:
             Path(temporary).unlink(missing_ok=True)
             raise
+
+
+def _clean_device_name(device_name: str) -> str:
+    """Phone-supplied display name: drop control/format characters, cap length."""
+    printable = "".join(
+        " " if ch.isspace() else ch
+        for ch in device_name
+        if ch.isspace() or unicodedata.category(ch)[0] != "C"
+    )
+    return " ".join(printable.split())[:64].strip() or "iPhone"
 
 
 def _secret_digest(secret: str) -> str:

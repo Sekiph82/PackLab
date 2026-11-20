@@ -23,13 +23,20 @@ public protocol ProductionTransferClient: Sendable {
     func status(transferID: String) async throws -> TransferStatusMessage
 }
 
-public enum URLSessionTransferError: Error, Sendable, Equatable { case invalidSource, sourceDigestMismatch, invalidResponse, server(String), notVerified, cancelled }
+public enum URLSessionTransferError: Error, Sendable, Equatable {
+    case invalidSource, sourceDigestMismatch, invalidResponse, server(String), notVerified, cancelled
+    /// `replayed_request` from `/v1/session` because the phone clock is off; seconds the phone
+    /// is ahead (+) / behind (-) the receiver, from its HTTP `Date` header when available.
+    case clockSkew(seconds: Int?)
+}
 
 public final class URLSessionTransferClient: NSObject, ProductionTransferClient, @unchecked Sendable {
     private let identity: ReceiverReconnectIdentity
     private let session: URLSession
     private let sessionToken: String?
     private var activeToken: String?
+    /// Receiver clock from the last response's HTTP `Date` header (second resolution).
+    private var lastServerDate: Date?
     public init(identity: ReceiverReconnectIdentity, sessionToken: String? = nil, session: URLSession? = nil) {
         self.identity = identity; self.sessionToken = sessionToken; self.activeToken = sessionToken
         if let session { self.session = session }
@@ -87,15 +94,35 @@ public final class URLSessionTransferClient: NSObject, ProductionTransferClient,
     public func openDeviceSession(_ credential: DeviceCredential, now: Date = Date()) async throws {
         guard credential.receiver == identity else { throw URLSessionTransferError.invalidResponse }
         let value: [String: Any] = ["message": "device_session", "protocol": PackLabTransferProtocol.name, "protocol_version": PackLabTransferProtocol.version, "receiver_instance_id": identity.receiverInstanceID, "device_id": credential.deviceID, "device_secret": credential.deviceSecret, "nonce": UUID().uuidString, "timestamp": now.timeIntervalSince1970]
-        let response = try await send(path: "/v1/session", method: "POST", body: try JSONSerialization.data(withJSONObject: value), token: nil)
+        let response: Data
+        do {
+            response = try await send(path: "/v1/session", method: "POST", body: try JSONSerialization.data(withJSONObject: value), token: nil)
+        } catch URLSessionTransferError.server("replayed_request") {
+            // The nonce is a fresh UUID, so a rejection here means the timestamp is outside the
+            // receiver's window. Report it as clock skew unless the receiver's clock agrees.
+            let skew = lastServerDate.map { Int(now.timeIntervalSince($0).rounded()) }
+            if let skew, abs(skew) < Self.clockSkewThresholdSeconds { throw URLSessionTransferError.server("replayed_request") }
+            throw URLSessionTransferError.clockSkew(seconds: skew)
+        }
         guard let object = try JSONSerialization.jsonObject(with: response) as? [String: Any], let token = object["session_token"] as? String, object["receiver_instance_id"] as? String == identity.receiverInstanceID else { throw URLSessionTransferError.invalidResponse }
         activeToken = token
+    }
+    /// Below the receiver's 300 s window, leaving slack for the Date header's 1 s resolution and latency.
+    static let clockSkewThresholdSeconds = 240
+    private static func httpDate(_ value: String?) -> Date? {
+        guard let value else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: value)
     }
     private func send(path: String, method: String, body: Data?, token: String?, headers: [String: String] = [:]) async throws -> Data {
         let url = URL(string: "https://\(identity.host):\(identity.port)\(path)")!
         var request = URLRequest(url: url); request.httpMethod = method; request.httpBody = body; request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }; headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
         let (data, response) = try await session.data(for: request); guard let http = response as? HTTPURLResponse else { throw URLSessionTransferError.invalidResponse }
+        lastServerDate = Self.httpDate(http.value(forHTTPHeaderField: "Date"))
         guard (200..<300).contains(http.statusCode) else { let code = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["error_code"] as? String ?? "server_error"; throw URLSessionTransferError.server(code) }
         return data
     }

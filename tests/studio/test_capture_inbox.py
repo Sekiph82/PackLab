@@ -178,6 +178,8 @@ def test_paired_devices_are_listed_and_revoke_unpairs(monkeypatch, tmp_path) -> 
         view.devices_list.setCurrentRow(0)
         view.revoke_button.click()
         assert view.devices_list.count() == 0 and "Revoked iPhone17,3" in view.status_label.text()
+        # Phone-supplied names must never be rendered as rich text.
+        assert view.status_label.textFormat() == Qt.TextFormat.PlainText
         session = view.session
         assert session is not None
         assert not session.receiver.devices.is_active(str(paired["device_id"]))

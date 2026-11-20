@@ -186,11 +186,13 @@ private final class FakeProductionTransferClient: @unchecked Sendable, Productio
 
 private final class StubTransferURLProtocol: URLProtocol {
     nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (Int, Data))?
+    /// Extra response headers (e.g. the receiver's HTTP `Date`).
+    nonisolated(unsafe) static var headers: [String: String] = [:]
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         guard let result = Self.handler?(request), let client else { return }
-        let response = HTTPURLResponse(url: request.url!, statusCode: result.0, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        let response = HTTPURLResponse(url: request.url!, statusCode: result.0, httpVersion: nil, headerFields: ["Content-Type": "application/json"].merging(Self.headers) { $1 })!
         client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client.urlProtocol(self, didLoad: result.1)
         client.urlProtocolDidFinishLoading(self)
@@ -4314,6 +4316,36 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(item.isPending)
         XCTAssertEqual(item.statusText, "Failed: PackLab not reachable")
         XCTAssertEqual([1, 2, 3, 7, 50].map { SyncQueueItem.retryDelay(afterAttempts: $0) }, [5, 10, 20, 300, 300])
+    }
+
+    /// Security review LOW-5: a session rejected as `replayed_request` because the phone clock
+    /// is off is reported as clock skew (measured from the receiver's `Date` header), not as
+    /// "PackLab not reachable"; a receiver clock that agrees keeps the plain server error.
+    @MainActor
+    func testPL0452ClockSkewIsReportedFromReceiverDateHeader() async throws {
+        let receiver = ReceiverReconnectIdentity(receiverInstanceID: "r", host: "127.0.0.1", port: 8443, tlsCertificateFingerprint: String(repeating: "b", count: 64))
+        let credential = DeviceCredential(receiver: receiver, deviceID: "d", deviceSecret: "s")
+        let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [StubTransferURLProtocol.self]
+        StubTransferURLProtocol.handler = { _ in (400, Data(#"{"error_code":"replayed_request"}"#.utf8)) }
+        defer { StubTransferURLProtocol.handler = nil; StubTransferURLProtocol.headers = [:] }
+        StubTransferURLProtocol.headers = ["Date": "Fri, 15 Jan 2027 08:00:00 GMT"]
+        func outcome(_ now: Date) async -> URLSessionTransferError? {
+            let client = URLSessionTransferClient(identity: receiver, session: URLSession(configuration: configuration))
+            do { try await client.openDeviceSession(credential, now: now); return nil } catch { return error as? URLSessionTransferError }
+        }
+        let header = Date(timeIntervalSince1970: 1_800_000_000) // Fri, 15 Jan 2027 08:00:00 GMT
+        let ahead = await outcome(header.addingTimeInterval(3600))
+        XCTAssertEqual(ahead, .clockSkew(seconds: 3600))
+        let behind = await outcome(header.addingTimeInterval(-600))
+        XCTAssertEqual(behind, .clockSkew(seconds: -600))
+        let inSync = await outcome(header.addingTimeInterval(2))
+        XCTAssertEqual(inSync, .server("replayed_request"))
+        StubTransferURLProtocol.headers = [:]
+        let unknown = await outcome(Date())
+        XCTAssertEqual(unknown, .clockSkew(seconds: nil))
+        XCTAssertEqual(PairedSyncService.clockSkewReason(3600), "phone clock is 60 min ahead of PackLab — set Settings > General > Date & Time to Set Automatically")
+        XCTAssertEqual(PairedSyncService.clockSkewReason(-600), "phone clock is 10 min behind PackLab — set Settings > General > Date & Time to Set Automatically")
+        XCTAssertEqual(PairedSyncService.clockSkewReason(nil), "phone clock is off — set Settings > General > Date & Time to Set Automatically")
     }
 
 }
