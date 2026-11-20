@@ -945,6 +945,8 @@ public struct SessionResumeView: View {
 }
 
 public struct LocalScanHistoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var sync = PairedSyncService.shared
     @State private var entries: [ScanHistoryEntry] = []
     @State private var showShare = false
     @State private var transferSelection: FinalizedTransferSelection?
@@ -959,19 +961,33 @@ public struct LocalScanHistoryView: View {
             HStack {
                 if let path = entry.previewPath, let image = UIImage(contentsOfFile: path) { Image(uiImage: image).resizable().scaledToFit().frame(width: 64, height: 64) }
                 else { Image(systemName: "exclamationmark.triangle").frame(width: 64, height: 64) }
-                VStack(alignment: .leading) { Text(entry.packageName); Text(entry.exportState).font(.caption); if let reason = entry.degradedReason { Text(reason).foregroundStyle(.orange).font(.caption2) } }
+                VStack(alignment: .leading) {
+                    Text(entry.packageName); Text(entry.exportState).font(.caption)
+                    if let reason = entry.degradedReason { Text(reason).foregroundStyle(.orange).font(.caption2) }
+                    // PL-0452 delivery status: queued / sending x% / delivered / failed + reason.
+                    if let item = sync.items[entry.id] {
+                        Text(item.statusText).font(.caption2).foregroundStyle(item.state == .failed ? Color.red : Color.secondary)
+                            .accessibilityIdentifier("syncStatus.\(entry.packageName)")
+                    }
+                }
                 // Read-only view of the accepted photos kept in the app's session folder.
                 Button("View photos") { photoSession = PhotoSessionSelection(id: entry.id) }.buttonStyle(.borderless)
                 if entry.exportState == SessionFinalizationState.exported.rawValue {
                     // Borderless so each button in this List row handles only its own tap.
                     Button("Share") { presentShare(for: entry) }.buttonStyle(.borderless)
-                    Button("Send to PackLab") { presentTransfer(for: entry) }.buttonStyle(.borderless)
+                    // Paired once: queue for automatic delivery; otherwise pair first.
+                    Button("Send to PackLab") {
+                        if let record = finalizationRecord(for: entry), sync.enqueue(record) { return }
+                        presentTransfer(for: entry)
+                    }.buttonStyle(.borderless)
                 } else if entry.exportState == SessionFinalizationState.inProgress.rawValue {
                     Button("Finalize") {
                         Task {
                             do {
-                                _ = try await ProductionScanFinalizeAction(root: store.rootURL).finalize(sessionID: entry.id)
+                                let record = try await ProductionScanFinalizeAction(root: store.rootURL).finalize(sessionID: entry.id)
                                 onFinalized?(entry.id)
+                                // Paired phones deliver every finalized scan without further taps.
+                                sync.enqueue(record)
                                 entries = await store.load()
                             } catch FinalizationError.invalidManifest {
                                 finalizationMessage = "Finalize failed: no accepted photos yet. Take photos with Manual Capture first."
@@ -991,6 +1007,12 @@ public struct LocalScanHistoryView: View {
                 }
             }
             .navigationTitle("Scan History")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+    }
+    private func finalizationRecord(for entry: ScanHistoryEntry) -> SessionFinalizationRecord? {
+        let layout = SessionStorageLayout(root: store.rootURL, sessionID: entry.id)
+        guard let data = try? Data(contentsOf: layout.finalization) else { return nil }
+        return try? JSONDecoder().decode(SessionFinalizationRecord.self, from: data)
     }
     private func presentShare(for entry: ScanHistoryEntry) {
         let layout = SessionStorageLayout(root: store.rootURL, sessionID: entry.id)

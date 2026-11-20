@@ -150,12 +150,12 @@ public struct PairingView: View {
     public var body: some View {
         Form {
             Section("Pair PackLab receiver") {
-                TextField("Receiver host", text: $host).textInputAutocapitalization(.never)
-                TextField("Receiver port", text: $port).keyboardType(.numberPad)
-                TextField("Receiver instance ID", text: $receiverID).textInputAutocapitalization(.never)
-                TextField("Pairing ID", text: $pairingID).textInputAutocapitalization(.never)
-                TextField("TLS fingerprint", text: $fingerprint).textInputAutocapitalization(.never)
-                TextField("Pairing code", text: $code).textInputAutocapitalization(.characters)
+                TextField("Receiver host", text: $host).textInputAutocapitalization(.never).accessibilityIdentifier("pairing.host")
+                TextField("Receiver port", text: $port).keyboardType(.numberPad).accessibilityIdentifier("pairing.port")
+                TextField("Receiver instance ID", text: $receiverID).textInputAutocapitalization(.never).accessibilityIdentifier("pairing.receiverID")
+                TextField("Pairing ID", text: $pairingID).textInputAutocapitalization(.never).accessibilityIdentifier("pairing.pairingID")
+                TextField("TLS fingerprint", text: $fingerprint).textInputAutocapitalization(.never).accessibilityIdentifier("pairing.fingerprint")
+                TextField("Pairing code", text: $code).textInputAutocapitalization(.characters).accessibilityIdentifier("pairing.code")
                 Button("Pair manually") {
                     do {
                         if let offer { _ = try coordinator.accept(offer: offer, receiverInstanceID: offer.receiverInstanceID, manualCode: code) }

@@ -1,14 +1,20 @@
-"""Short-lived PackLab receiver pairing offers and minimum reconnect identity."""
+"""PackLab receiver pairing: one-time offers and long-lived, revocable device credentials."""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
+import os
 import secrets
 import string
+import tempfile
+import threading
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
+from pathlib import Path
 
 from .transfer_protocol import (
     PROTOCOL_NAME,
@@ -124,3 +130,119 @@ class PairingStore:
     def revoke(self, pairing_id: str) -> None:
         self._offers.pop(pairing_id, None)
         self._used.add(pairing_id)
+
+
+#: Device-session requests must carry a timestamp within this many seconds of
+#: the receiver clock; their nonce is remembered for twice this window.
+DEVICE_REQUEST_SKEW_SECONDS = 300
+
+
+@dataclass(frozen=True, slots=True)
+class PairedDevice:
+    """A phone that completed one-time pairing. Only the secret's SHA-256 is kept."""
+
+    device_id: str
+    device_name: str
+    secret_sha256: str
+    paired_at: float
+    last_seen_at: float | None = None
+    revoked_at: float | None = None
+
+    @property
+    def active(self) -> bool:
+        return self.revoked_at is None
+
+
+class DeviceRegistry:
+    """Long-lived paired-device credentials, persisted outside the repository.
+
+    Pairing once (one-time offer + code) registers a device and returns its
+    secret exactly once. Later connections present ``device_id`` + secret over
+    the pinned TLS channel together with a fresh nonce and timestamp; the
+    registry stores only ``sha256(secret)``, rejects stale timestamps and
+    reused nonces, and a revoked device can never open a session again.
+    ``path=None`` keeps the registry in memory (tests, ephemeral receivers).
+    """
+
+    def __init__(self, path: str | Path | None = None, *, clock: Callable[[], float] = time.time) -> None:
+        self._path = Path(path) if path is not None else None
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._devices: dict[str, PairedDevice] = {}
+        self._nonces: dict[str, float] = {}
+        if self._path is not None and self._path.is_file():
+            try:
+                stored = json.loads(self._path.read_text(encoding="utf-8"))
+                devices = stored["devices"] if stored.get("version") == 1 else []
+                self._devices = {item["device_id"]: PairedDevice(**item) for item in devices}
+            except (OSError, ValueError, TypeError, KeyError) as error:
+                # Fail closed: an unreadable registry must not silently drop revocations.
+                raise TransferProtocolError(TransferErrorCode.INTERNAL_ERROR, "paired-device registry is unreadable") from error
+
+    def register(self, device_name: str) -> tuple[PairedDevice, str]:
+        name = (device_name.strip() or "iPhone")[:64]
+        secret = secrets.token_urlsafe(32)
+        device = PairedDevice(uuid.uuid4().hex, name, _secret_digest(secret), self._clock())
+        with self._lock:
+            self._devices[device.device_id] = device
+            self._persist()
+        return device, secret
+
+    def authenticate(self, device_id: str, device_secret: str, *, nonce: str, timestamp: float) -> PairedDevice:
+        now = self._clock()
+        with self._lock:
+            device = self._devices.get(device_id)
+            # Unknown id and wrong secret are indistinguishable to the caller.
+            if device is None or not hmac.compare_digest(device.secret_sha256, _secret_digest(device_secret)):
+                raise TransferProtocolError(TransferErrorCode.UNPAIRED, "device credential is unknown")
+            if not device.active:
+                raise TransferProtocolError(TransferErrorCode.DEVICE_REVOKED, "this device was unpaired in PackLab Studio")
+            if not 16 <= len(nonce) <= 128 or abs(now - timestamp) > DEVICE_REQUEST_SKEW_SECONDS:
+                raise TransferProtocolError(TransferErrorCode.REPLAYED_REQUEST, "device request is stale or malformed")
+            self._nonces = {key: expiry for key, expiry in self._nonces.items() if expiry > now}
+            key = f"{device_id}:{nonce}"
+            if key in self._nonces:
+                raise TransferProtocolError(TransferErrorCode.REPLAYED_REQUEST, "device request was already used")
+            self._nonces[key] = now + 2 * DEVICE_REQUEST_SKEW_SECONDS
+            device = replace(device, last_seen_at=now)
+            self._devices[device_id] = device
+            self._persist()
+            return device
+
+    def is_active(self, device_id: str) -> bool:
+        device = self._devices.get(device_id)
+        return device is not None and device.active
+
+    def revoke(self, device_id: str) -> bool:
+        with self._lock:
+            device = self._devices.get(device_id)
+            if device is None or not device.active:
+                return False
+            self._devices[device_id] = replace(device, revoked_at=self._clock())
+            self._persist()
+            return True
+
+    def devices(self) -> list[PairedDevice]:
+        return sorted(self._devices.values(), key=lambda device: device.paired_at)
+
+    def _persist(self) -> None:
+        if self._path is None:
+            return
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        body = json.dumps({"version": 1, "devices": [asdict(device) for device in self.devices()]}, indent=2, sort_keys=True)
+        descriptor, temporary = tempfile.mkstemp(dir=self._path.parent, prefix=".paired-devices-")
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(body)
+            try:
+                os.chmod(temporary, 0o600)
+            except OSError:
+                pass
+            os.replace(temporary, self._path)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
+
+
+def _secret_digest(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()

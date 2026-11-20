@@ -47,7 +47,7 @@ public final class URLSessionTransferClient: NSObject, ProductionTransferClient,
         let digest = SourceIntegrity.digest(data)
         if let declared = request.finalization?.packageSHA256, declared != digest { throw URLSessionTransferError.sourceDigestMismatch }
         let transferID = request.transferID ?? UUID().uuidString
-        var token = sessionToken
+        var token = activeToken
         if let offer = request.pairingOffer, let code = request.pairingCode { token = try await pair(offer: offer, code: code); activeToken = token }
         let create = TransferCreateMessage(receiverID: request.receiver.receiverInstanceID, transferID: transferID, captureID: request.source.deletingPathExtension().lastPathComponent, packageName: request.source.lastPathComponent, totalBytes: data.count, packageSHA256: digest)
         _ = try await send(path: "/v1/transfers", method: "POST", body: try JSONEncoder().encode(create), token: token)
@@ -71,10 +71,25 @@ public final class URLSessionTransferClient: NSObject, ProductionTransferClient,
     public func status(transferID: String) async throws -> TransferStatusMessage { try await status(transferID: transferID, token: activeToken) }
     private func status(transferID: String, token: String?) async throws -> TransferStatusMessage { let data = try await send(path: "/v1/transfers/\(transferID)", method: "GET", body: nil, token: token); return try JSONDecoder().decode(TransferStatusMessage.self, from: data) }
     private func pair(offer: PairingOffer, code: String) async throws -> String {
-        let value: [String: Any] = ["offer": try JSONSerialization.jsonObject(with: offer.payloadData()), "pairing_code": code, "tls_certificate_fingerprint": offer.tlsCertificateFingerprint]
+        let value: [String: Any] = ["offer": try JSONSerialization.jsonObject(with: offer.payloadData()), "pairing_code": code, "tls_certificate_fingerprint": offer.tlsCertificateFingerprint, "device_name": PackScanDeviceInfo.current["model"] ?? "iPhone"]
         let response = try await send(path: "/v1/pair", method: "POST", body: try JSONSerialization.data(withJSONObject: value), token: nil)
         guard let object = try JSONSerialization.jsonObject(with: response) as? [String: Any], let token = object["session_token"] as? String else { throw URLSessionTransferError.invalidResponse }
+        // PL-0452: pairing once also yields a long-lived device credential for later scans.
+        if let deviceID = object["device_id"] as? String, let deviceSecret = object["device_secret"] as? String, !deviceID.isEmpty, !deviceSecret.isEmpty {
+            DeviceCredentialStore.save(DeviceCredential(receiver: identity, deviceID: deviceID, deviceSecret: deviceSecret))
+        }
         return token
+    }
+
+    /// Opens a fresh short-lived session with the stored device credential (no pairing code).
+    /// The secret only travels inside the pinned TLS channel; the nonce and timestamp let the
+    /// receiver refuse a replayed request.
+    public func openDeviceSession(_ credential: DeviceCredential, now: Date = Date()) async throws {
+        guard credential.receiver == identity else { throw URLSessionTransferError.invalidResponse }
+        let value: [String: Any] = ["message": "device_session", "protocol": PackLabTransferProtocol.name, "protocol_version": PackLabTransferProtocol.version, "receiver_instance_id": identity.receiverInstanceID, "device_id": credential.deviceID, "device_secret": credential.deviceSecret, "nonce": UUID().uuidString, "timestamp": now.timeIntervalSince1970]
+        let response = try await send(path: "/v1/session", method: "POST", body: try JSONSerialization.data(withJSONObject: value), token: nil)
+        guard let object = try JSONSerialization.jsonObject(with: response) as? [String: Any], let token = object["session_token"] as? String, object["receiver_instance_id"] as? String == identity.receiverInstanceID else { throw URLSessionTransferError.invalidResponse }
+        activeToken = token
     }
     private func send(path: String, method: String, body: Data?, token: String?, headers: [String: String] = [:]) async throws -> Data {
         let url = URL(string: "https://\(identity.host):\(identity.port)\(path)")!

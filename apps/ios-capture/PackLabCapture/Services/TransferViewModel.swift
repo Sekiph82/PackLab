@@ -229,6 +229,7 @@ public struct TransferScreen: View {
 public struct FinalizedTransferWorkflowView: View {
     public let share: FinalizedPackScanShare
     public let finalization: SessionFinalizationRecord
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var pairing = PairingCoordinator()
     @StateObject private var model = TransferViewModel()
     @State private var started = false
@@ -236,11 +237,21 @@ public struct FinalizedTransferWorkflowView: View {
     public var body: some View {
         Group {
             if case .paired(let identity) = pairing.state {
-                TransferScreen(model: model).onAppear {
+                VStack(alignment: .leading, spacing: 12) {
+                    TransferScreen(model: model)
+                    if model.state?.phase == .completed {
+                        // PL-0452: the pairing is kept, so later scans send themselves.
+                        Text(DeviceCredentialStore.load() != nil ? "This phone stays paired: next scans are sent automatically." : "This pairing could not be remembered (Keychain status \(DeviceCredentialStore.lastSaveStatus)); the next scan will ask to pair again.")
+                            .font(.caption).padding(.horizontal).accessibilityIdentifier("pairingRemembered")
+                    }
+                    Spacer()
+                }.onAppear {
                     guard !started else { return }; started = true; model.bind(client: URLSessionTransferClient(identity: identity)); Task { await model.startNetworkTransfer(TransferRequest(source: share.packageURL, receiver: identity, pairingOffer: pairing.pairedOffer, pairingCode: pairing.pairedOffer?.pairingCode, finalization: finalization)) }
                 }
+                .onChange(of: model.state?.phase) { _, phase in if phase == .completed { PairedSyncService.shared.markDelivered(finalization) } }
             } else { PairingView(coordinator: pairing) }
         }.navigationTitle("Send to PackLab")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
     }
 }
 #endif
