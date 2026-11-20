@@ -748,10 +748,14 @@ public struct NewScanWizard: View {
             Button("Review Capture Protocol") { showProtocol = true }
             TextField("Notes (optional)", text: $notes, axis: .vertical)
             if let validationMessage { Text(validationMessage).foregroundStyle(.red).accessibilityAddTraits(.isStaticText) }
+            // Borderless: in a Form row the default style fires every button in the row on a
+            // single tap, so "Start" also ran "Cancel" and dismissed the wizard (device run).
             HStack {
                 Button("Cancel") { NewScanActionCoordinator.cancel(workflow: &workflow); dismiss() }
+                    .buttonStyle(.borderless)
                 Spacer()
                 Button("Start") { showProtocol = true }
+                    .buttonStyle(.borderless)
             }
         }.navigationTitle("New Scan")
         .sheet(isPresented: $showProtocol) {
@@ -802,7 +806,9 @@ public struct AcceptedFrameGalleryView: View {
                         } catch { message = "Retake failed; no state was accepted." }
                     }
                 }
-                Button("Delete", role: .destructive) { deleteTarget = entry }
+                .buttonStyle(.borderless)
+                // Borderless: otherwise a tap on Retake also opens the Delete confirmation.
+                Button("Delete", role: .destructive) { deleteTarget = entry }.buttonStyle(.borderless)
             }
         }.overlay { if let message { Text(message).foregroundStyle(.red) } }.confirmationDialog("Delete this accepted frame?", isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }), titleVisibility: .visible, presenting: deleteTarget) { entry in
             Button("Delete \(entry.id)", role: .destructive) { Task { do { try await store.delete(id: entry.id, confirmed: true); entries = try await store.load() } catch { message = "Delete failed; no state was accepted." } } }
@@ -858,8 +864,9 @@ public struct LocalScanHistoryView: View {
                 else { Image(systemName: "exclamationmark.triangle").frame(width: 64, height: 64) }
                 VStack(alignment: .leading) { Text(entry.packageName); Text(entry.exportState).font(.caption); if let reason = entry.degradedReason { Text(reason).foregroundStyle(.orange).font(.caption2) } }
                 if entry.exportState == SessionFinalizationState.exported.rawValue {
-                    Button("Share") { presentShare(for: entry) }
-                    Button("Send to PackLab") { presentTransfer(for: entry) }
+                    // Borderless so each button in this List row handles only its own tap.
+                    Button("Share") { presentShare(for: entry) }.buttonStyle(.borderless)
+                    Button("Send to PackLab") { presentTransfer(for: entry) }.buttonStyle(.borderless)
                 } else if entry.exportState == SessionFinalizationState.inProgress.rawValue {
                     Button("Finalize") {
                         Task {
@@ -869,6 +876,7 @@ public struct LocalScanHistoryView: View {
                             } catch { finalizationMessage = "Finalize failed: \(error)" }
                         }
                     }
+                    .buttonStyle(.borderless)
                 }
             }
         }.task { entries = await store.load() }
