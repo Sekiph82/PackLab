@@ -640,7 +640,11 @@ public struct OrbitCoverageConfiguration: Codable, Sendable, Equatable {
     public let azimuthBinCount: Int
     public let rings: [CoverageRingDefinition]
     public init(azimuthBinCount: Int = 8, rings: [CoverageRingDefinition] = OrbitCoverageConfiguration.standardRings) { self.azimuthBinCount = max(1, azimuthBinCount); self.rings = rings }
-    public static let standardRings = [CoverageRingDefinition(id: "lower", minimumElevation: -35, maximumElevation: -10), CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15), CoverageRingDefinition(id: "upper", minimumElevation: 15, maximumElevation: 40)]
+    /// The lower ring looks up at the package from below its mid-height. On a tabletop that
+    /// is physically unreachable for short packages (the lens would be under the table, which
+    /// hides the package), so it is optional: captured lower wedges still count as evidence,
+    /// but guidance never targets them and completion does not wait for them.
+    public static let standardRings = [CoverageRingDefinition(id: "lower", minimumElevation: -35, maximumElevation: -10, required: false), CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15), CoverageRingDefinition(id: "upper", minimumElevation: 15, maximumElevation: 40)]
 }
 
 public struct CoverageSector: Codable, Sendable, Equatable, Hashable, Identifiable {
@@ -672,7 +676,9 @@ public struct OrbitCoverageSnapshot: Codable, Sendable, Equatable {
     public let completionFraction: Double
     public let isComplete: Bool
     public init(configuration: OrbitCoverageConfiguration, capturedSectors: [CoverageSector], missingSectors: [CoverageSector], duplicateCaptureIDs: [String], invalidCaptureIDs: [String], observations: [CoveragePoseObservation]) {
-        self.configuration = configuration; self.capturedSectors = capturedSectors; self.missingSectors = missingSectors; self.duplicateCaptureIDs = duplicateCaptureIDs; self.invalidCaptureIDs = invalidCaptureIDs; self.observations = observations; self.completionFraction = missingSectors.isEmpty && !capturedSectors.isEmpty ? 1 : Double(capturedSectors.count) / Double(max(1, capturedSectors.count + missingSectors.count)); self.isComplete = missingSectors.isEmpty && !capturedSectors.isEmpty
+        // Optional-ring wedges are kept as evidence but do not count toward completion.
+        let requiredCaptured = capturedSectors.filter { sector in configuration.rings.first { $0.id == sector.ringID }?.required ?? true }.count
+        self.configuration = configuration; self.capturedSectors = capturedSectors; self.missingSectors = missingSectors; self.duplicateCaptureIDs = duplicateCaptureIDs; self.invalidCaptureIDs = invalidCaptureIDs; self.observations = observations; self.completionFraction = missingSectors.isEmpty && requiredCaptured > 0 ? 1 : Double(requiredCaptured) / Double(max(1, requiredCaptured + missingSectors.count)); self.isComplete = missingSectors.isEmpty && requiredCaptured > 0
     }
 }
 
@@ -822,7 +828,8 @@ public struct OrbitCoverageModel: Sendable, Equatable {
     }
     public func snapshot() -> OrbitCoverageSnapshot {
         let all = configuration.rings.flatMap { ring in (0..<configuration.azimuthBinCount).map { CoverageSector(ringID: ring.id, azimuthIndex: $0) } }
-        return OrbitCoverageSnapshot(configuration: configuration, capturedSectors: all.filter { captured.contains($0) }, missingSectors: all.filter { !captured.contains($0) }, duplicateCaptureIDs: duplicateIDs, invalidCaptureIDs: invalidIDs, observations: recordedObservations)
+        let requiredRings = Set(configuration.rings.filter(\.required).map(\.id))
+        return OrbitCoverageSnapshot(configuration: configuration, capturedSectors: all.filter { captured.contains($0) }, missingSectors: all.filter { !captured.contains($0) && requiredRings.contains($0.ringID) }, duplicateCaptureIDs: duplicateIDs, invalidCaptureIDs: invalidIDs, observations: recordedObservations)
     }
 }
 
@@ -981,7 +988,7 @@ public struct RingCoverageRequirement: Codable, Sendable, Equatable, Identifiabl
 
 public struct StandardBottleCoveragePolicy: Codable, Sendable, Equatable {
     public let requirements: [RingCoverageRequirement]
-    public init(requirements: [RingCoverageRequirement] = [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 4), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 4), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 4)]) { self.requirements = requirements }
+    public init(requirements: [RingCoverageRequirement] = [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 4, required: false), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 4), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 4)]) { self.requirements = requirements }
     public static let standard = StandardBottleCoveragePolicy()
 }
 
@@ -1466,6 +1473,7 @@ public enum OrbitGuidanceInstruction: Sendable, Equatable {
     case raise(toRingID: String)
     case lower(toRingID: String)
     case holdAndCapture
+    case pointAtPackage
 
     public var text: String {
         switch self {
@@ -1476,6 +1484,7 @@ public enum OrbitGuidanceInstruction: Sendable, Equatable {
         case .raise(let ring): return ring == OrbitGuidance.highestRingHint ? "Raise the phone and look down at the package" : "Raise the phone to \(OrbitGuidance.heightName(ringID: ring))"
         case .lower(let ring): return ring == "lower" ? "Hold the phone at table level (lens just above the table surface), or place the package near the table edge" : "Lower the phone to \(OrbitGuidance.heightName(ringID: ring))"
         case .holdAndCapture: return "Hold here — tap Manual Capture"
+        case .pointAtPackage: return "Point the camera at the package — keep it in the middle of the screen"
         }
     }
 }
@@ -1545,10 +1554,29 @@ public enum OrbitGuidance {
         }
     }
 
-    public static func instruction(current: CoveragePoseObservation?, target: CoverageSector?, configuration: OrbitCoverageConfiguration, centerSet: Bool) -> OrbitGuidanceInstruction {
+    /// Half-angle of the cone around the camera's viewing direction in which the object
+    /// center counts as "in view" (about the half-width of the portrait wide-camera image).
+    public static let maximumViewAngleDegrees = 25.0
+
+    /// Angle in degrees between the camera's viewing direction and the direction to the
+    /// object center; nil without a usable pose. ARKit cameras look along -Z of the camera
+    /// frame; `transform` is row-major (translation at 3, 7, 11; Z axis at 2, 6, 10).
+    public static func viewAngleToCenter(pose: PoseSample?, center: [Double]) -> Double? {
+        guard let pose, pose.hasValidTransform, pose.transform.count == 16, center.count == 3, center.allSatisfy(\.isFinite) else { return nil }
+        let m = pose.transform
+        let forward = [-m[2], -m[6], -m[10]]
+        let toCenter = [center[0] - m[3], center[1] - m[7], center[2] - m[11]]
+        let forwardLength = sqrt(forward.reduce(0) { $0 + $1 * $1 }), centerLength = sqrt(toCenter.reduce(0) { $0 + $1 * $1 })
+        guard forwardLength > 1e-9, centerLength > 1e-9 else { return nil }
+        let cosine = zip(forward, toCenter).reduce(0) { $0 + $1.0 * $1.1 } / (forwardLength * centerLength)
+        return acos(max(-1, min(1, cosine))) * 180 / Double.pi
+    }
+
+    public static func instruction(current: CoveragePoseObservation?, target: CoverageSector?, configuration: OrbitCoverageConfiguration, centerSet: Bool, viewAngle: Double? = nil) -> OrbitGuidanceInstruction {
         guard centerSet else { return .setObjectCenter }
         guard let target else { return .complete }
         guard let current, let azimuth = current.azimuthDegrees, let elevation = current.elevationDegrees else { return .waitForTracking }
+        if let viewAngle, viewAngle > maximumViewAngleDegrees { return .pointAtPackage }
         if current.sector == target { return .holdAndCapture }
         let targetRing = configuration.rings.firstIndex { $0.id == target.ringID } ?? 0
         let currentRing = ringPosition(elevation: elevation, configuration: configuration)
@@ -1662,7 +1690,7 @@ public struct OrbitGuidanceDial: View {
                     context.stroke(Path(ellipseIn: CGRect(x: dot.x - 6, y: dot.y - 6, width: 12, height: 12)), with: .color(.black), lineWidth: 2)
                 }
             }
-            .frame(width: 120, height: 120)
+            .frame(width: 100, height: 100)
             .accessibilityLabel("Orbit dial")
             VStack(spacing: 4) {
                 ForEach(Array(snapshot.configuration.rings.reversed())) { ring in
@@ -1673,6 +1701,9 @@ public struct OrbitGuidanceDial: View {
                         .frame(width: 58, height: 24)
                         .background((isTarget ? Color.blue : Color.gray.opacity(0.35)), in: RoundedRectangle(cornerRadius: 5))
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(isCurrent ? Color.white : Color.clear, lineWidth: 2))
+                        // Optional rings (e.g. lower) are dimmed: they never block completion.
+                        .opacity(ring.required ? 1 : 0.45)
+                        .accessibilityLabel(ring.required ? ring.id : "\(ring.id), optional")
                 }
             }
             .accessibilityLabel("Height: target \(target?.ringID ?? "none"), current \(current?.sector?.ringID ?? "unknown")")
