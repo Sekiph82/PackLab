@@ -82,7 +82,7 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Object center set"].waitForExistence(timeout: 10), "object center was not set")
         shot("\(name)-center-set")
         let hold = app.staticTexts["Hold here — tap Manual Capture"]
-        let toast = app.staticTexts["captureToast"]
+        let coverage = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Coverage '")).firstMatch
         for wedge in 1...16 {
             tap(app.buttons["replayNextPoseButton"], "next pose \(wedge)")
             if !hold.waitForExistence(timeout: 8) {
@@ -92,12 +92,9 @@ final class PackLabCaptureE2EUITests: XCTestCase {
             }
             XCTAssertTrue(hold.waitForExistence(timeout: 15), "guidance did not say hold at wedge \(wedge)")
             tap(app.buttons["manualCaptureButton"], "Manual Capture \(wedge)")
-            if !toast.waitForExistence(timeout: 10) {
-                // No capture attempt registered at all (every attempt shows a toast): retry once.
-                shot("\(name)-no-toast-\(wedge)")
-                tap(app.buttons["manualCaptureButton"], "Manual Capture \(wedge) retry")
-            }
-            waitForLabel(toast, containing: "(\(wedge)/16)", timeout: 30)
+            // The 2 s toast can be missed by a slow accessibility snapshot; the persistent
+            // coverage summary is the evidence that this wedge was captured.
+            waitForLabel(coverage, containing: wedge == 16 ? "Coverage complete" : "; \(16 - wedge) sectors missing", timeout: 30)
             shot("\(name)-capture-\(wedge)")
         }
         XCTAssertTrue(app.staticTexts["All positions covered — finish the scan in History"].waitForExistence(timeout: 10))
