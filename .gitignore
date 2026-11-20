@@ -12,6 +12,7 @@ __pycache__/
 .hiveai/
 .cache/
 /OwnerDev/
+/engines/
 
 # Local credentials and environment values. Safe example templates remain trackable.
 .env

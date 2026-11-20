@@ -1092,6 +1092,19 @@ jobs:
           if-no-files-found: ignore
           retention-days: 3
 
+      - name: Stage pinned COLMAP and OpenMVS engine bundle beside Studio
+        shell: pwsh
+        run: |
+          # PL-0444: unmodified upstream engines go in a side folder (engines/), never into
+          # the PyInstaller analysis. Their registry entries stay unresolved until the
+          # pending legal review, so redistribution clearance (installer upload) stays blocked.
+          $engines = Join-Path $env:GITHUB_WORKSPACE "build\windows-studio\PackLabStudio\engines"
+          uv run --locked python -m tools.packaging.engine_bundle `
+            --cache (Join-Path $env:RUNNER_TEMP "packlab-engine-cache") --dest $engines
+          if ($LASTEXITCODE -ne 0) { throw "Pinned engine bundle fetch/verify/stage failed." }
+          & (Join-Path $engines "colmap\bin\colmap.exe") help | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Bundled colmap.exe did not run." }
+
       - name: Deliver exact corresponding sources and replacement evidence
         shell: pwsh
         run: |

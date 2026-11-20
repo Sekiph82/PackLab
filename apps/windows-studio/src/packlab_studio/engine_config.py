@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -43,9 +44,15 @@ class EngineConfiguration:
     allow_path_lookup: bool = True
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "colmap_path", None if self.colmap_path is None else Path(self.colmap_path))
-        object.__setattr__(self, "openmvs_root", None if self.openmvs_root is None else Path(self.openmvs_root))
-        object.__setattr__(self, "openmvs_paths", {key: Path(value) for key, value in self.openmvs_paths.items()})
+        object.__setattr__(
+            self, "colmap_path", None if self.colmap_path is None else Path(self.colmap_path)
+        )
+        object.__setattr__(
+            self, "openmvs_root", None if self.openmvs_root is None else Path(self.openmvs_root)
+        )
+        object.__setattr__(
+            self, "openmvs_paths", {key: Path(value) for key, value in self.openmvs_paths.items()}
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +74,29 @@ _OPENMVS_EXECUTABLES = {
     "texture_mesh": "TextureMesh",
 }
 PathLookup = Callable[[str], str | None]
+_COLMAP_BUNDLED = Path("colmap") / "bin"
+_OPENMVS_BUNDLED = Path("openmvs")
+
+
+def default_bundled_engine_roots() -> tuple[Path, ...]:
+    """`engines/` folders PackLab ships or stages beside the application.
+
+    Frozen build: beside PackLabStudio.exe. Source/OwnerDev runtime: beside the
+    runtime root, plus the shared `OwnerDev/engines` when the root is an OwnerDev
+    runtime (identified by its `owner-dev-runtime.json`).
+    """
+
+    if getattr(sys, "frozen", False):
+        return (Path(sys.executable).resolve().parent / "engines",)
+    runtime_root = Path(__file__).resolve().parents[4]
+    roots = [runtime_root / "engines"]
+    if (runtime_root / "owner-dev-runtime.json").is_file():
+        roots.append(runtime_root.parent / "engines")
+    return tuple(roots)
+
+
+def _bundled(roots: tuple[Path, ...], relative: Path) -> Path | None:
+    return next((root / relative for root in roots if (root / relative).is_file()), None)
 
 
 def _windows_executable(name: str) -> str:
@@ -75,15 +105,37 @@ def _windows_executable(name: str) -> str:
 
 def _record(engine_id: str, value: str | Path | None, source: str) -> EnginePathDiagnostic:
     if value is None:
-        return EnginePathDiagnostic(engine_id, None, source, DiscoveryStatus.MISSING, "no executable found")
+        return EnginePathDiagnostic(
+            engine_id, None, source, DiscoveryStatus.MISSING, "no executable found"
+        )
     path = Path(value)
     if not path.exists():
-        return EnginePathDiagnostic(engine_id, path, source, DiscoveryStatus.MISSING, "configured executable does not exist")
+        return EnginePathDiagnostic(
+            engine_id, path, source, DiscoveryStatus.MISSING, "configured executable does not exist"
+        )
     if not path.is_file():
-        return EnginePathDiagnostic(engine_id, path, source, DiscoveryStatus.INVALID, "configured executable path is not a file")
+        return EnginePathDiagnostic(
+            engine_id,
+            path,
+            source,
+            DiscoveryStatus.INVALID,
+            "configured executable path is not a file",
+        )
     if os.name != "nt" and not os.access(path, os.X_OK):
-        return EnginePathDiagnostic(engine_id, path, source, DiscoveryStatus.INVALID, "configured executable is not executable")
-    return EnginePathDiagnostic(engine_id, path, source, DiscoveryStatus.CONFIGURED if source != "PATH" else DiscoveryStatus.PATH, "executable path is usable")
+        return EnginePathDiagnostic(
+            engine_id,
+            path,
+            source,
+            DiscoveryStatus.INVALID,
+            "configured executable is not executable",
+        )
+    return EnginePathDiagnostic(
+        engine_id,
+        path,
+        source,
+        DiscoveryStatus.CONFIGURED if source != "PATH" else DiscoveryStatus.PATH,
+        "executable path is usable",
+    )
 
 
 def _resolve(
@@ -92,6 +144,7 @@ def _resolve(
     environment_value: str | None,
     command: str,
     *,
+    bundled: Path | None,
     allow_path_lookup: bool,
     which: PathLookup,
 ) -> EnginePathDiagnostic:
@@ -99,6 +152,8 @@ def _resolve(
         return _record(engine_id, explicit, "explicit")
     if environment_value:
         return _record(engine_id, environment_value, "environment")
+    if bundled is not None:
+        return _record(engine_id, bundled, "bundled")
     if allow_path_lookup:
         located = which(command)
         return _record(engine_id, located, "PATH")
@@ -110,16 +165,22 @@ def discover_engines(
     *,
     environment: Mapping[str, str] | None = None,
     which: PathLookup = shutil.which,
+    bundled_roots: tuple[Path, ...] | None = None,
 ) -> EngineDiscoveryReport:
-    """Discover only the known executables, preferring explicit paths and never installing."""
+    """Discover only the known executables and never install anything.
+
+    Precedence: explicit configuration, environment, PackLab-bundled `engines/`, PATH.
+    """
 
     config = configuration or EngineConfiguration()
     env = os.environ if environment is None else environment
+    roots = default_bundled_engine_roots() if bundled_roots is None else bundled_roots
     colmap = _resolve(
         "colmap",
         config.colmap_path,
         env.get("PACKLAB_COLMAP_PATH"),
         _windows_executable("colmap"),
+        bundled=_bundled(roots, _COLMAP_BUNDLED / _windows_executable("colmap")),
         allow_path_lookup=config.allow_path_lookup,
         which=which,
     )
@@ -138,6 +199,7 @@ def discover_engines(
                 explicit,
                 environment_value,
                 _windows_executable(name),
+                bundled=_bundled(roots, _OPENMVS_BUNDLED / _windows_executable(name)),
                 allow_path_lookup=config.allow_path_lookup,
                 which=which,
             )
