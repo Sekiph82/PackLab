@@ -2,14 +2,26 @@
 
 from __future__ import annotations
 
+import json
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, replace
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, QStandardPaths, Qt
-from PySide6.QtGui import QCloseEvent, QGuiApplication
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QSplitter
+from PySide6.QtCore import QByteArray, QSettings, QStandardPaths, Qt, QTimer
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeySequence
+from PySide6.QtWidgets import (
+    QDialog,
+    QFileDialog,
+    QGridLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+)
 
 from .autosave import AutosaveService
 from .branding import application_icon
@@ -17,6 +29,7 @@ from .build_model import BuildBackend, BuildModelController, BuildModelView, Bui
 from .capture_inbox import CaptureInboxView
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .engineering_export import DesignModelExportSource, DestinationProvider
+from .history import Operation
 from .jobs import JobManager
 from .measure_view import MeasureDesignView
 from .model_viewer import ModelViewerView
@@ -38,11 +51,61 @@ from .packaging_library_browser import (
 from .preferences import PreferencesStore, WindowPreferences
 from .project import ProjectManager
 from .receiver_session import ReceiverSession
-from .recovery import RecoveryManager
+from .recovery import RecoveryItem, RecoveryManager, RecoveryStatus
 from .scan_master_promotion import ScanMasterPromotionAction, ScanMasterPromotionRequest
 from .shutdown import ShutdownCoordinator
 from .version import current_build_info
 from .workspace import WorkspaceManager
+
+AUTOSAVE_DRAFT_JOB = "autosave-design-draft"
+AUTOSAVE_DRAFT_PATH = "autosave/design-model-draft.json"
+AUTOSAVE_DELAY_MS = 2000
+_POINTER_LABELS = {
+    "active_design_model_revision_id": "Design Model",
+    "active_scan_master_revision_id": "Scan Master",
+}
+_RECOVERY_LABELS = {AUTOSAVE_DRAFT_JOB: "Unsaved Design Model edits (autosaved draft)"}
+
+
+class RecoveryDialog(QDialog):
+    """Shown on open when the last session ended uncleanly; one Accept/Discard per item."""
+
+    def __init__(self, window: StudioMainWindow) -> None:
+        super().__init__(window)
+        self.setObjectName("packlab.dialog.recovery")
+        self.setWindowTitle("Recover after an unexpected exit")
+        self.setModal(True)
+        grid = QGridLayout(self)
+        grid.addWidget(
+            QLabel("PackLab did not close cleanly last time. Recover or discard each item:"),
+            0,
+            0,
+            1,
+            3,
+        )
+        self.buttons: dict[str, tuple[QPushButton, QPushButton]] = {}
+        for row, item in enumerate(window.recovery_items, 1):
+            label = _RECOVERY_LABELS.get(item.job_id, f"Job {item.job_id}")
+            grid.addWidget(QLabel(f"{label}\n{item.status.value}: {item.reason}"), row, 0)
+            accept = QPushButton("Recover" if item.job_id == AUTOSAVE_DRAFT_JOB else "Accept")
+            discard = QPushButton("Discard")
+            if item.status is RecoveryStatus.INVALID:  # changed/missing: Discard only
+                accept.setText("Invalid")
+                accept.setEnabled(False)
+            accept.setObjectName(f"packlab.recovery.accept.{item.item_id}")
+            discard.setObjectName(f"packlab.recovery.discard.{item.item_id}")
+            accept.clicked.connect(partial(self._resolve, window.accept_recovery, item.item_id))
+            discard.clicked.connect(partial(self._resolve, window.discard_recovery, item.item_id))
+            grid.addWidget(accept, row, 1)
+            grid.addWidget(discard, row, 2)
+            self.buttons[item.item_id] = (accept, discard)
+
+    def _resolve(self, action: Callable[[str], object], item_id: str) -> None:
+        action(item_id)
+        for button in self.buttons[item_id]:
+            button.setEnabled(False)
+        if not any(button.isEnabled() for pair in self.buttons.values() for button in pair):
+            self.accept()
 
 
 class StudioMainWindow(QMainWindow):
@@ -117,7 +180,17 @@ class StudioMainWindow(QMainWindow):
         self.project_manager.add_listener(self._on_project_changed)
         self.autosave = AutosaveService(self.project_manager)
         self.recovery: RecoveryManager | None = None
-        self.recovery_items: tuple[object, ...] = ()
+        self.recovery_items: tuple[RecoveryItem, ...] = ()
+        self.recovery_dialog: RecoveryDialog | None = None
+        self.portability_dialog: QMessageBox | None = None
+        self._recovery_project: str | None = None
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setSingleShot(True)
+        self.autosave_timer.setInterval(AUTOSAVE_DELAY_MS)
+        self.autosave_timer.timeout.connect(self.autosave_draft)
+        self.save_indicator = QLabel("")
+        self.save_indicator.setObjectName("packlab.status.save")
+        self.statusBar().addPermanentWidget(self.save_indicator)
         default_diagnostics_root = QStandardPaths.writableLocation(
             QStandardPaths.StandardLocation.AppLocalDataLocation
         )
@@ -160,6 +233,8 @@ class StudioMainWindow(QMainWindow):
         if self.scan_master_request_provider is None and isinstance(measure, MeasureDesignView):
             # Editor > Promote uses the cleaned object selection from Measure & Design.
             self.scan_master_request_provider = measure.promotion_request
+            measure.draft_changed.connect(self._on_draft_changed)
+            measure.draft_saved.connect(self._on_draft_saved)
         editor = self.route_stack.views[Route.EDITOR]
         if isinstance(editor, ScanMasterEditorView):
             editor.promotion_requested.connect(self._promote_scan_master_from_editor)
@@ -207,7 +282,17 @@ class StudioMainWindow(QMainWindow):
             "&Close Project", self._close_project_from_menu
         )
         file_menu.addSeparator()
+        self.portability_action = file_menu.addAction(
+            "&Portability report…", self.show_portability_report
+        )
+        file_menu.addSeparator()
         file_menu.addAction("E&xit", self.close)
+        edit_menu = self.menuBar().addMenu("&Edit")
+        edit_menu.setObjectName("packlab.menu.edit")
+        self.undo_action = edit_menu.addAction("&Undo selection", self.undo)
+        self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        self.redo_action = edit_menu.addAction("&Redo selection", self.redo)
+        self.redo_action.setShortcut(QKeySequence.StandardKey.Redo)
         help_menu = self.menuBar().addMenu("&Help")
         help_menu.setObjectName("packlab.menu.help")
         self.diagnostic_bundle_action = help_menu.addAction(
@@ -232,13 +317,17 @@ class StudioMainWindow(QMainWindow):
             recent = [root, *[item for item in self.recent_projects() if item != root]]
             self._settings.setValue("projects/recent", recent[: self.MAX_RECENT_PROJECTS])
         self.close_project_action.setEnabled(layout is not None)
+        self.portability_action.setEnabled(layout is not None)
+        self.undo_action.setEnabled(self.project_manager.can_undo())
+        self.redo_action.setEnabled(self.project_manager.can_redo())
         self.recent_menu.clear()
         for item in self.recent_projects():
             action = self.recent_menu.addAction(item)
             action.triggered.connect(partial(self._open_project_path, item))
         self.recent_menu.setEnabled(not self.recent_menu.isEmpty())
         name = None if self.project_manager.current is None else self.project_manager.current.name
-        self.setWindowTitle(f"PackLab Studio — {name}" if name else "PackLab Studio")
+        # "[*]" shows "*" while the Design Model has unsaved (autosaved-only) edits.
+        self.setWindowTitle(f"PackLab Studio — {name}[*]" if name else "PackLab Studio[*]")
 
     def _menu_status(self, text: str) -> None:
         self.statusBar().showMessage(text, 15000)
@@ -271,6 +360,105 @@ class StudioMainWindow(QMainWindow):
             self._menu_status("Project closed")
         except Exception as error:  # e.g. a build is still running
             self._menu_status(f"Close project failed: {error}")
+
+    # ------------------------------------------------- history, autosave, recovery (PL-0456)
+
+    def undo(self) -> Operation | None:
+        return self._history_step(self.project_manager.undo, "Undo")
+
+    def redo(self) -> Operation | None:
+        return self._history_step(self.project_manager.redo, "Redo")
+
+    def _history_step(self, step: Callable[[], Operation | None], label: str) -> Operation | None:
+        try:
+            operation = step()
+        except Exception as error:
+            self._menu_status(f"{label} failed: {error}")
+            operation = None
+        else:
+            if operation is None:
+                self._menu_status(f"Nothing to {label.lower()}.")
+            else:
+                parameters = operation.parameters
+                undone = label == "Undo"
+                target = parameters.get("before" if undone else "after")
+                what = _POINTER_LABELS.get(str(parameters.get("pointer")), "selection")
+                self._menu_status(f"{label}: current {what} is now {target or 'none'}")
+        self._refresh_project_menu()
+        return operation
+
+    def _on_draft_changed(self) -> None:
+        self.setWindowModified(True)
+        self.save_indicator.setText("Design Model: unsaved edits (autosave pending)")
+        self.autosave_timer.start()
+
+    def autosave_draft(self) -> bool:
+        """Write the unsaved Design Model draft to temp/ and checkpoint it for crash recovery."""
+
+        measure = self.route_stack.views[Route.MEASURE_DESIGN]
+        layout, recovery = self.project_manager.layout, self.project_manager.recovery
+        draft = measure.draft() if isinstance(measure, MeasureDesignView) else None
+        if draft is None or layout is None or recovery is None:
+            return False
+        try:
+            target = layout.path("temp", AUTOSAVE_DRAFT_PATH)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            ProjectManager._atomic_json(target, draft)
+            recovery.checkpoint(
+                AUTOSAVE_DRAFT_JOB, area="temp", relative_path=AUTOSAVE_DRAFT_PATH, resumable=True
+            )
+        except (OSError, ValueError) as error:
+            self.save_indicator.setText(f"Autosave failed: {error}")
+            return False
+        self.save_indicator.setText(
+            f"Design Model: unsaved edits autosaved {datetime.now():%H:%M:%S} "
+            "(Save revision to keep them)"
+        )
+        return True
+
+    def _on_draft_saved(self) -> None:
+        self.autosave_timer.stop()
+        self.setWindowModified(False)
+        if self.project_manager.recovery is not None:
+            self.project_manager.recovery.discard(AUTOSAVE_DRAFT_JOB)  # draft is superseded
+        self.save_indicator.setText("All changes saved")
+
+    def show_recovery_dialog(self) -> RecoveryDialog | None:
+        if not self.recovery_items:
+            return None
+        self.recovery_dialog = RecoveryDialog(self)
+        self.recovery_dialog.show()
+        return self.recovery_dialog
+
+    def show_portability_report(self) -> QMessageBox | None:
+        try:
+            report = self.project_manager.portability_report()
+        except Exception as error:
+            self._menu_status(f"Portability report failed: {error}")
+            return None
+        counts = Counter(item.classification.value for item in report.findings)
+        missing = [
+            item.reference_id
+            for item in report.findings
+            if item.classification.value in {"required-missing", "unsafe-link"}
+        ]
+        box = QMessageBox(self)
+        box.setObjectName("packlab.dialog.portability")
+        box.setWindowTitle("Portability report")
+        box.setText(
+            "This project is portable: everything it needs is inside the project folder."
+            if report.portable
+            else "This project is NOT portable: see the missing or unsafe items below."
+        )
+        lines = [f"{name}: {count}" for name, count in sorted(counts.items())]
+        lines += [f"integrity {name}: {value}" for name, value in sorted(report.integrity.items())]
+        lines += [f"raw evidence files: {report.raw_file_count}"]
+        lines += [f"missing/unsafe: {item}" for item in missing[:10]]
+        box.setInformativeText("\n".join(lines))
+        box.setDetailedText(json.dumps(report.to_dict(), indent=1))
+        box.open()
+        self.portability_dialog = box
+        return box
 
     def _diagnostic_bundle_from_menu(self) -> None:
         try:
@@ -409,6 +597,15 @@ class StudioMainWindow(QMainWindow):
         available = self.project_manager.current is not None
         self.recovery = self.project_manager.recovery
         self.recovery_items = self.project_manager.recovery_items
+        layout = self.project_manager.layout
+        root = None if layout is None else str(layout.root)
+        if root != self._recovery_project:  # project opened, switched or closed
+            self._recovery_project = root
+            self.autosave_timer.stop()
+            self.setWindowModified(False)
+            self.save_indicator.setText("")
+            if self.recovery_items:
+                QTimer.singleShot(0, self.show_recovery_dialog)
         self.navigation_panel.set_project_available(available)
         self.route_stack.set_project_available(available)
         self.workspace.set_project_available(available)
@@ -451,8 +648,24 @@ class StudioMainWindow(QMainWindow):
         self.project_manager.close(allow_active_jobs=allow_active_jobs)
 
     def accept_recovery(self, item_id: str):
+        draft = None
+        layout = self.project_manager.layout
+        if item_id == AUTOSAVE_DRAFT_JOB and layout is not None:
+            try:  # read before accepting; accept keeps the file, discard deletes it
+                draft = json.loads(layout.path("temp", AUTOSAVE_DRAFT_PATH).read_text("utf-8"))
+            except (OSError, ValueError):
+                draft = None
         item = self.project_manager.accept_recovery(item_id)
         self._sync_project_state()
+        measure = self.route_stack.views[Route.MEASURE_DESIGN]
+        if (
+            item is not None
+            and item.status is RecoveryStatus.RESUMABLE  # digest still matches the checkpoint
+            and isinstance(draft, dict)
+            and isinstance(measure, MeasureDesignView)
+        ):
+            self.navigation.navigate(Route.MEASURE_DESIGN)
+            measure.restore_draft(draft)
         return item
 
     def discard_recovery(self, item_id: str):

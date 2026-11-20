@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from .history import HistoryError, HistoryManager, Operation
 from .jobs import JobManager
 from .project_layout import ProjectLayout, ProjectLayoutError
 from .recovery import RecoveryItem, RecoveryManager
@@ -27,6 +28,13 @@ if TYPE_CHECKING:
 
 PROJECT_SCHEMA_VERSION = "1.0"
 AUTHORITY_SCHEMA_VERSION = 1
+DESIGN_MODEL_DOCUMENT_CONTRACT = "packlab.studio-design-model-revision.v1"
+# Selection pointers whose changes are recorded in history and can be undone/redone.
+# Artifact records stay append-only; undo only moves the pointer and logs an event.
+_SELECTION_EVENTS = {
+    "active_scan_master_revision_id": "scan_master_selection_events",
+    "active_design_model_revision_id": "design_model_selection_events",
+}
 
 
 class ProjectError(RuntimeError):
@@ -105,6 +113,7 @@ class ProjectManager:
         self.metadata: ProjectMetadata | None = None
         self.recovery: RecoveryManager | None = None
         self.recovery_items: tuple[RecoveryItem, ...] = ()
+        self.history: HistoryManager | None = None
         self._listeners: list[Callable[[ProjectMetadata | None], None]] = []
 
     @property
@@ -333,7 +342,13 @@ class ProjectManager:
                 "reason": manifest.get("promotion_reason"),
             },
         ]
-        return self.commit_edit(next_state, expected_revision=expected_revision)
+        committed = self.commit_edit(next_state, expected_revision=expected_revision)
+        self._record_selection(
+            "active_scan_master_revision_id",
+            state.get("active_scan_master_revision_id"),
+            revision.revision_id,
+        )
+        return committed
 
     def load_scan_master_revision(self, revision_id: str):
         """Load and verify an immutable Scan Master record persisted in this project."""
@@ -401,6 +416,14 @@ class ProjectManager:
             if isinstance(error, ProjectError):
                 raise
             raise ProjectError("scan master artifact is corrupt") from error
+
+    def selected_scan_master_revision_id(self) -> str | None:
+        """Cheap identity of the selected Scan Master (no mesh load or digest check)."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        value = self._read_authority(self.layout)[1].get("active_scan_master_revision_id")
+        return value if isinstance(value, str) else None
 
     def selected_scan_master_revision(self):
         """Return the exact persisted Scan Master selected by current project authority."""
@@ -471,6 +494,255 @@ class ProjectManager:
         )
         return export_scan_master(request)
 
+    def persist_design_model_revision(
+        self, document: dict[str, Any], *, expected_revision: int
+    ) -> dict[str, Any]:
+        """Write a create-only Design Model document and select it in project authority.
+
+        The file stays at ``derived/design_model/<id>.json`` (studio contract v1); the
+        authority record adds its digest and the lineage to a persisted Scan Master.
+        """
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        revision_id = document.get("design_model_revision_id")
+        model = document.get("model")
+        parent = model.get("parent") if isinstance(model, dict) else None
+        if (
+            document.get("contract") != DESIGN_MODEL_DOCUMENT_CONTRACT
+            or not isinstance(revision_id, str)
+            or not re.fullmatch(r"[A-Za-z0-9_.:-]+", revision_id)
+            or not isinstance(model, dict)
+            or model.get("revision_id") != revision_id
+            or model.get("project_id") != self.metadata.project_id
+            or not isinstance(parent, dict)
+            or document.get("scan_master_replaced") is not False
+            or document.get("mold_use_authorized") is not False
+            or document.get("physical_accuracy_validation_status") != "DEFERRED_OWNER_VALIDATION"
+        ):
+            raise ProjectError("design model document is invalid for this project")
+        disk_metadata, state = self._read_authority(self.layout)
+        if (
+            disk_metadata.project_id != self.metadata.project_id
+            or disk_metadata.revision != self.metadata.revision
+        ):
+            raise RevisionConflict("project metadata changed on disk")
+        if expected_revision != self.metadata.revision:
+            raise RevisionConflict("editable state revision is stale")
+        scan_masters = state.get("scan_master_revisions", [])
+        scan_master_id = parent.get("scan_master_revision_id")
+        lineage = (
+            [
+                item
+                for item in scan_masters
+                if isinstance(item, dict) and item.get("revision_id") == scan_master_id
+            ]
+            if isinstance(scan_masters, list)
+            else []
+        )
+        if len(lineage) != 1 or lineage[0].get("mesh_sha256") != parent.get(
+            "scan_master_geometry_sha256"
+        ):
+            raise ProjectError(
+                "design model must be fitted to a Scan Master persisted in this project"
+            )
+        records = state.get("design_model_revisions", [])
+        events = state.get("design_model_selection_events", [])
+        if not isinstance(records, list) or not isinstance(events, list):
+            raise ProjectError("design model history is malformed")
+        if any(
+            isinstance(item, dict) and item.get("revision_id") == revision_id for item in records
+        ):
+            raise ProjectError("design model revision is append-only")
+        relative = f"design_model/{revision_id.split(':')[-1][:32]}.json"
+        payload = json.dumps(document, sort_keys=True, indent=1, default=str).encode("utf-8")
+        target = self.layout.path("derived", relative)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self._write_new_bytes(target, payload)
+        previous = state.get("active_design_model_revision_id")
+        record = {
+            "revision_id": revision_id,
+            "artifact_path": f"derived/{relative}",
+            "file_sha256": hashlib.sha256(payload).hexdigest(),
+            "scan_master_revision_id": scan_master_id,
+            "scan_master_geometry_sha256": parent.get("scan_master_geometry_sha256"),
+            "previous_design_model_revision_id": model.get("previous_revision_id"),
+            "overall_dimensions_mm_unverified": document.get("overall_dimensions_mm_unverified"),
+            "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
+            "mold_use_authorized": False,
+            "actor_id": model.get("actor_id"),
+            "project_revision": expected_revision + 1,
+        }
+        next_state = dict(state)
+        next_state["design_model_revisions"] = [*records, record]
+        next_state["active_design_model_revision_id"] = revision_id
+        next_state["design_model_selection_events"] = [
+            *events,
+            {
+                "project_revision": expected_revision + 1,
+                "previous_revision_id": previous,
+                "selected_revision_id": revision_id,
+                "actor_id": model.get("actor_id"),
+                "reason": "saved",
+            },
+        ]
+        try:
+            self.commit_edit(next_state, expected_revision=expected_revision)
+        except BaseException:
+            # If the authority does not reference the file, remove it so a retry is not
+            # blocked and readers never see an unregistered revision.
+            try:
+                _, after = self._read_authority(self.layout)
+                published = any(
+                    isinstance(item, dict) and item.get("revision_id") == revision_id
+                    for item in after.get("design_model_revisions", [])
+                )
+            except Exception:
+                published = True  # unknown: keep the file rather than risk a dangling record
+            if not published:
+                target.unlink(missing_ok=True)
+            raise
+        self._record_selection("active_design_model_revision_id", previous, revision_id)
+        return record
+
+    def selected_design_model(self) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """Return (authority record, verified document) of the project's current Design Model."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        _, state = self._read_authority(self.layout)
+        revision_id = state.get("active_design_model_revision_id")
+        if revision_id is None:
+            return None
+        records = state.get("design_model_revisions", [])
+        matching = [
+            item
+            for item in (records if isinstance(records, list) else [])
+            if isinstance(item, dict) and item.get("revision_id") == revision_id
+        ]
+        if len(matching) != 1:
+            raise ProjectError("selected design model revision missing or duplicated")
+        record = matching[0]
+        artifact = str(record.get("artifact_path", ""))
+        if not artifact.startswith("derived/design_model/"):
+            raise ProjectError("design model artifact path is invalid")
+        try:
+            payload = self.layout.path("derived", artifact.removeprefix("derived/")).read_bytes()
+        except OSError as error:
+            raise ProjectError("design model artifact is missing") from error
+        if hashlib.sha256(payload).hexdigest() != record.get("file_sha256"):
+            raise ProjectError("design model file digest mismatch")
+        document = json.loads(payload)
+        if document.get("design_model_revision_id") != revision_id:
+            raise ProjectError("design model document does not match its record")
+        return record, document
+
+    # ------------------------------------------------------------ undo / redo (PL-0456)
+
+    def _open_history(self) -> None:
+        assert self.layout is not None and self.metadata is not None
+        try:
+            self.history = HistoryManager(self.layout, current_revision=self.metadata.revision)
+        except HistoryError:
+            # ponytail: a corrupt history only disables undo; authority state is untouched.
+            self.history = None
+
+    def _record_selection(self, pointer: str, before: object, after: object) -> None:
+        if self.history is None or self.metadata is None or before == after:
+            return
+        try:
+            # HistoryManager numbers its own operations 1..n (continuity contract); the
+            # committed project revision is kept in the parameters.
+            self.history.append(
+                "select",
+                {
+                    "pointer": pointer,
+                    "before": before,
+                    "after": after,
+                    "committed_project_revision": self.metadata.revision,
+                    # Entries at or after this cursor were undone and are now superseded.
+                    "cursor_at_append": self.history.cursor,
+                },
+                project_revision=len(self.history.entries) + 1,
+                reversible=True,
+            )
+        except (HistoryError, OSError):
+            self.history = None  # the commit stands; only undo for it is lost
+        self._notify()  # undo/redo availability changed after the commit's notification
+
+    def can_undo(self) -> bool:
+        return self._plan(undo=True) is not None
+
+    def can_redo(self) -> bool:
+        return self._plan(undo=False) is not None
+
+    def undo(self) -> Operation | None:
+        return self._step(undo=True)
+
+    def redo(self) -> Operation | None:
+        return self._step(undo=False)
+
+    def _plan(self, *, undo: bool) -> tuple[int, Operation, dict[str, Any]] | None:
+        """Next applicable (steps, operation, state) without moving the cursor, else None."""
+
+        history = self.history
+        if history is None or self.layout is None or self.metadata is None:
+            return None
+        try:
+            _, state = self._read_authority(self.layout)
+        except (OSError, ValueError, ProjectError):
+            return None
+        steps = 0
+        while True:
+            index = history.cursor - 1 - steps if undo else history.cursor + steps
+            if not 0 <= index < len(history.entries):
+                return None
+            operation = history.entries[index]
+            if not operation.reversible or operation.operation_type != "select":
+                return None
+            steps += 1
+            superseded = any(
+                later.parameters.get("cursor_at_append", position) <= index
+                for position, later in enumerate(history.entries[index + 1 :], index + 1)
+            )
+            if superseded:  # undone, then replaced by a newer selection: skip it
+                continue
+            parameters = operation.parameters
+            if parameters.get("pointer") not in _SELECTION_EVENTS:
+                return None
+            current = parameters.get("after" if undo else "before")
+            if state.get(parameters["pointer"]) != current:
+                return None  # selection changed outside history; never clobber it
+            return steps, operation, state
+
+    def _step(self, *, undo: bool) -> Operation | None:
+        plan = self._plan(undo=undo)
+        history = self.history
+        if plan is None or history is None or self.metadata is None:
+            return None
+        steps, operation, state = plan
+        pointer = operation.parameters["pointer"]
+        current = operation.parameters.get("after" if undo else "before")
+        target = operation.parameters.get("before" if undo else "after")
+        events = state.get(_SELECTION_EVENTS[pointer], [])
+        next_state = dict(state)
+        next_state[pointer] = target
+        next_state[_SELECTION_EVENTS[pointer]] = [
+            *(events if isinstance(events, list) else []),
+            {
+                "project_revision": self.metadata.revision + 1,
+                "previous_revision_id": current,
+                "selected_revision_id": target,
+                "actor_id": "studio-history",
+                "reason": "undo" if undo else "redo",
+            },
+        ]
+        self.commit_edit(next_state, expected_revision=self.metadata.revision)
+        for _ in range(steps):
+            history.undo() if undo else history.redo()
+        self._notify()
+        return operation
+
     @staticmethod
     def _write_new_bytes(target: Path, payload: bytes) -> None:
         fd, temporary_name = tempfile.mkstemp(
@@ -539,6 +811,7 @@ class ProjectManager:
             self.close(allow_active_jobs=True)
         self.layout = ProjectLayout.open(target)
         self.metadata, _ = self._read_authority(self.layout)
+        self._open_history()
         self.recovery = RecoveryManager(self.layout)
         self.recovery_items = self.recovery.inspect()
         self.recovery.mark_start()
@@ -557,6 +830,7 @@ class ProjectManager:
         self.close()
         self.layout = layout
         self.metadata = metadata
+        self._open_history()
         self.recovery = RecoveryManager(layout)
         self.recovery_items = self.recovery.inspect()
         self.recovery.mark_start()
@@ -574,6 +848,7 @@ class ProjectManager:
             self.recovery.mark_clean_close()
         self.layout = None
         self.metadata = None
+        self.history = None
         self.recovery = None
         self.recovery_items = ()
         self._notify()

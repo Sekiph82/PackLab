@@ -37,7 +37,14 @@ class RecoveryManager:
         self.marker = layout.path("recovery", "session.json")
 
     def mark_start(self) -> None:
-        self._write({"schema_version": 1, "status": "active", "checkpoints": []})
+        # Checkpoints left by an unclean session stay until accepted or discarded;
+        # otherwise accept/discard after reopen would find nothing to act on.
+        try:
+            previous = self._read()
+        except ValueError:
+            previous = {}
+        pending = previous.get("checkpoints", []) if previous.get("status") == "active" else []
+        self._write({"schema_version": 1, "status": "active", "checkpoints": pending})
 
     def checkpoint(self, job_id: str, *, area: str, relative_path: str, resumable: bool) -> None:
         if area not in {"temp", "derived"}:
@@ -45,8 +52,18 @@ class RecoveryManager:
         path = self.layout.path(area, relative_path)
         payload = path.read_bytes() if path.is_file() else b""
         value = self._read()
-        checkpoints = [item for item in value.get("checkpoints", []) if item.get("job_id") != job_id]
-        checkpoints.append({"job_id": job_id, "area": area, "relative_path": relative_path, "resumable": resumable, "sha256": hashlib.sha256(payload).hexdigest()})
+        checkpoints = [
+            item for item in value.get("checkpoints", []) if item.get("job_id") != job_id
+        ]
+        checkpoints.append(
+            {
+                "job_id": job_id,
+                "area": area,
+                "relative_path": relative_path,
+                "resumable": resumable,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
         value.update({"schema_version": 1, "status": "active", "checkpoints": checkpoints})
         self._write(value)
 
@@ -62,13 +79,35 @@ class RecoveryManager:
             job_id = str(checkpoint.get("job_id", "unknown"))
             area = checkpoint.get("area")
             relative_path = checkpoint.get("relative_path")
-            if not isinstance(area, str) or not isinstance(relative_path, str) or area not in {"temp", "derived"}:
-                items.append(RecoveryItem(job_id, job_id, RecoveryStatus.INVALID, None, None, "checkpoint metadata is invalid"))
+            if (
+                not isinstance(area, str)
+                or not isinstance(relative_path, str)
+                or area not in {"temp", "derived"}
+            ):
+                items.append(
+                    RecoveryItem(
+                        job_id,
+                        job_id,
+                        RecoveryStatus.INVALID,
+                        None,
+                        None,
+                        "checkpoint metadata is invalid",
+                    )
+                )
                 continue
             try:
                 path = self.layout.path(area, relative_path)
             except ProjectLayoutError:
-                items.append(RecoveryItem(job_id, job_id, RecoveryStatus.INVALID, area, relative_path, "checkpoint path is unsafe"))
+                items.append(
+                    RecoveryItem(
+                        job_id,
+                        job_id,
+                        RecoveryStatus.INVALID,
+                        area,
+                        relative_path,
+                        "checkpoint path is unsafe",
+                    )
+                )
                 continue
             digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
             expected = checkpoint.get("sha256")
@@ -100,7 +139,9 @@ class RecoveryManager:
             if path.is_file():
                 path.unlink()
         value = self._read()
-        value["checkpoints"] = [item for item in value.get("checkpoints", []) if item.get("job_id") != item_id]
+        value["checkpoints"] = [
+            item for item in value.get("checkpoints", []) if item.get("job_id") != item_id
+        ]
         if not value["checkpoints"]:
             value["status"] = "clean"
         self._write(value)
@@ -119,7 +160,9 @@ class RecoveryManager:
 
     def _write(self, value: dict[str, Any]) -> None:
         self.marker.parent.mkdir(parents=True, exist_ok=True)
-        fd, temporary_name = tempfile.mkstemp(prefix=".session-", suffix=".tmp", dir=self.marker.parent)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=".session-", suffix=".tmp", dir=self.marker.parent
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                 json.dump(value, handle, sort_keys=True, separators=(",", ":"))
