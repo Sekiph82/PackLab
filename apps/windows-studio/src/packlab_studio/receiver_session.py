@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from packlab_core.pairing import PairingOffer
+from packlab_core.pairing import PairedDevice, PairingOffer
 from packlab_core.transfer_security import ensure_receiver_tls_identity
 
 from .ingest import ImportResult
@@ -107,6 +107,13 @@ class ReceiverSession:
 
     def stop(self) -> None:
         self.receiver.stop()
+
+    def paired_devices(self) -> list[PairedDevice]:
+        """Phones that paired once and may send without a new code (revoked ones excluded)."""
+        return [device for device in self.receiver.devices.devices() if device.active]
+
+    def revoke_device(self, device_id: str) -> bool:
+        return self.receiver.revoke_device(device_id)
 
     def import_file(self, path: str | Path) -> ImportResult:
         return self.receiver.ingest.import_path(path, source_channel="picker")

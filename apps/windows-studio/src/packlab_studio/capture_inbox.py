@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QListWidgetItem,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -82,6 +83,12 @@ class CaptureInboxView(QWidget):
         self.status_label.setWordWrap(True)
         self.inbox_list = QListWidget(self)
         self.inbox_list.setObjectName("packlab.capture-inbox.list")
+        # Phones paired once send later scans automatically; Revoke unpairs one.
+        self.devices_list = QListWidget(self)
+        self.devices_list.setObjectName("packlab.capture-inbox.devices")
+        self.devices_list.setMaximumHeight(90)
+        self.revoke_button = QPushButton("Revoke", self)
+        self.revoke_button.clicked.connect(self.revoke_selected_device)
         self.build_button = QPushButton("Build model", self)
         self.build_button.setObjectName("packlab.capture-inbox.build")
         self.build_button.setEnabled(False)
@@ -101,6 +108,11 @@ class CaptureInboxView(QWidget):
         layout.addWidget(self.qr_label)
         layout.addWidget(self.pairing_label)
         layout.addWidget(self.status_label)
+        layout.addWidget(QLabel("Paired devices"))
+        devices_row = QHBoxLayout()
+        devices_row.addWidget(self.devices_list, 1)
+        devices_row.addWidget(self.revoke_button, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(devices_row)
         layout.addWidget(QLabel("Received scans"))
         layout.addWidget(self.inbox_list, 1)
         build_row = QHBoxLayout()
@@ -204,10 +216,37 @@ class CaptureInboxView(QWidget):
             self._update_pairing_text()
         self.refresh_inbox()
 
+    def refresh_devices(self) -> None:
+        session = self.session
+        if session is None:
+            return
+        devices = session.paired_devices()
+        shown = [
+            self.devices_list.item(i).data(Qt.ItemDataRole.UserRole)
+            for i in range(self.devices_list.count())
+        ]
+        if shown == [device.device_id for device in devices]:
+            return
+        self.devices_list.clear()
+        for device in devices:
+            item = QListWidgetItem(f"{device.device_name}  (paired {time.ctime(device.paired_at)})")
+            item.setData(Qt.ItemDataRole.UserRole, device.device_id)
+            self.devices_list.addItem(item)
+
+    def revoke_selected_device(self) -> None:
+        session = self.session
+        item = self.devices_list.currentItem()
+        if session is None or item is None:
+            return
+        if session.revoke_device(str(item.data(Qt.ItemDataRole.UserRole))):
+            self.status_label.setText(f"Revoked {item.text().split('  ')[0]}; it must pair again.")
+        self.refresh_devices()
+
     def refresh_inbox(self) -> None:
         session = self.session
         if session is None:
             return
+        self.refresh_devices()
         try:
             records: list[object] = list(session.index_records())
         except Exception as error:

@@ -100,8 +100,18 @@ final class CaptureRuntimeViewModel: ObservableObject {
     /// Candidate sequence for the quality log; never reset, so loop restarts cannot collide.
     private var liveCandidateSequence = 0
 
+    /// PL-0451 UI-test replay camera (Simulator + XCUITest launch argument only; nil otherwise).
+    let replay: UITestReplaySource?
+
     init() {
         automaticallyPoll = true
+        let replaySource = UITestReplaySource.makeIfRequested()
+        replay = replaySource
+        if let replaySource {
+            trackingService = replaySource
+            motionService = SimulatorMotionService()
+            healthMonitor = DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())
+        } else {
         #if targetEnvironment(simulator)
         trackingService = SimulatorARTrackingService()
         motionService = SimulatorMotionService()
@@ -115,12 +125,14 @@ final class CaptureRuntimeViewModel: ObservableObject {
         motionService = FoundationMotionService()
         healthMonitor = DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider())
         #endif
+        }
         #if canImport(AVFoundation)
         cameraRecoveryOwner.onStateChange = { [weak self] state, message in self?.updateCameraRecovery(state: state, message: message) }
         #endif
     }
 
     init(trackingService: any ARTrackingService, motionService: any MotionService, healthMonitor: DeviceHealthMonitor, automaticallyPoll: Bool = true) {
+        replay = nil
         self.trackingService = trackingService
         self.motionService = motionService
         self.healthMonitor = healthMonitor
@@ -914,6 +926,16 @@ final class CaptureRuntimeViewModel: ObservableObject {
         scheduleM04ContextPersistence()
     }
 
+    /// UI-test replay composition: the same seams the production ARSession binds (still
+    /// backend, live frames + poses, base-plane raycast), fed by the synthetic replay camera.
+    func bindReplayCamera(_ replay: UITestReplaySource) async {
+        await bindStillCaptureBackend(replay)
+        bindLiveCandidateSources(frame: { [weak replay] in replay?.liveFrame() }, poses: { [weak replay] in replay?.poseBuffer ?? PoseBuffer() })
+        bindObjectCenterSources(center: { [weak replay] in replay?.raycastBasePlane() }, worldIdentity: { [weak replay] in replay?.worldIdentity })
+        updateCameraRecovery(state: .running, message: "")
+        replay.renderPreview()
+    }
+
     #if canImport(ARKit) && canImport(UIKit) && canImport(AVFoundation)
     /// Production camera composition: the shared ARSession is the only camera client.
     /// Preview, tracking, still capture, recovery and pairing hand-off all go through it.
@@ -1100,6 +1122,9 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
+                if let replay = runtime.replay {
+                    ReplayCameraPreview(source: replay).ignoresSafeArea()
+                } else {
                 #if targetEnvironment(simulator)
                 VStack(spacing: 12) {
                     Image(systemName: "camera.slash").font(.largeTitle)
@@ -1110,6 +1135,7 @@ struct ContentView: View {
                 #elseif canImport(RealityKit) && canImport(ARKit)
                 SharedARCameraPreview().ignoresSafeArea()
                 #endif
+                }
 
                 if orbitGuidanceActive {
                     // Crosshair at the image centre: aim it where the package touches the table; "Set object center" raycasts through it.
@@ -1304,6 +1330,14 @@ struct ContentView: View {
                         .onChange(of: window.frame(in: .global).midY) { _, midY in windowMidY = midY }
                 }.ignoresSafeArea())
 
+                if let replay = runtime.replay, orbitGuidanceActive {
+                    // UI-test operator stand-in: walk to the wedge the guidance asks for.
+                    Button("Replay: next pose") { replay.move(to: runtime.m04CoverageTarget, center: runtime.m04ObjectCenter?.position, configuration: runtime.m04Coverage.configuration) }
+                        .font(.caption2).buttonStyle(.borderedProminent).tint(.purple)
+                        .accessibilityIdentifier("replayNextPoseButton")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).padding(.leading, 6)
+                }
+
                 if showPoseDebug {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(runtime.overlay.lines, id: \.self) { line in
@@ -1355,9 +1389,15 @@ struct ContentView: View {
                 }
             }
             .task {
+                if let replay = runtime.replay {
+                    await runtime.bindReplayCamera(replay)
+                } else {
                 #if !targetEnvironment(simulator) && canImport(ARKit) && canImport(UIKit) && canImport(AVFoundation)
                 await runtime.bindProductionARCamera()
                 #endif
+                }
+                // Deliver finalized scans still queued from an earlier launch.
+                PairedSyncService.shared.kick()
                 await runtime.start(); let candidates = await SessionDiscoveryService(root: ContentView.sessionRoot).discover(); showResume = !candidates.isEmpty }
         }
     }

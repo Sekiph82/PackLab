@@ -1643,6 +1643,36 @@ final class PackLabCaptureTests: XCTestCase {
         if case .blocked(let reason) = try await store.reopen(requiredSourceIDs: []) { XCTAssertEqual(reason, "missing_or_corrupt_record") } else { XCTFail("missing record must block reopen") }
     }
 
+    /// Field issue (History on a real iPhone): the `exports/` folder of finalized packages was
+    /// listed as an "Unavailable scan", and sessions showed "missing_preview" because nothing
+    /// wrote a thumbnail. Sessions are now recognised by structure and the thumbnail is
+    /// derived from the first accepted photo.
+    func testHistoryIgnoresExportsFolderAndDerivesThumbnailFromFirstAcceptedPhoto() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let exports = root.appendingPathComponent("exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: exports.appendingPathComponent("old.packscan"))
+        let layout = SessionStorageLayout(root: root, sessionID: "s1")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "s1", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        let record = AcceptedCaptureRecord(captureID: "p", sequence: 0, sourceFilename: "p.heic", metadataFilename: "p.json")
+        let jpeg = try XCTUnwrap(makeJPEGFixture(width: 64, height: 48))
+        try await store.storeAcceptedCapture(source: jpeg, record: record, metadata: JSONEncoder().encode(record), state: JSONEncoder().encode(PersistedSessionState(sessionID: "s1", nextSequence: 1, epoch: 0, acceptedIDs: ["p"])))
+
+        let entries = await LocalScanHistoryStore(root: root).load()
+        XCTAssertEqual(entries.map(\.id), ["s1"])
+        let entry = try XCTUnwrap(entries.first)
+        XCTAssertNil(entry.degradedReason)
+        let preview = try XCTUnwrap(entry.previewPath)
+        XCTAssertEqual(URL(fileURLWithPath: preview).lastPathComponent, "p-thumbnail.jpg")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: preview))
+        // The source photo is untouched; the thumbnail is a separate derivative.
+        XCTAssertEqual(try Data(contentsOf: layout.images.appendingPathComponent("p.heic")), jpeg)
+        let candidates = await SessionDiscoveryService(root: root).discover()
+        XCTAssertEqual(candidates.map(\.id), ["s1"])
+    }
+
     func testHistoryMarksCorruptFinalizationAsDegraded() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -4237,6 +4267,53 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(admitted.canStart)
         await vm.stop()
         XCTAssertFalse(vm.newScanReadiness.sessionReady)
+    }
+
+    /// PL-0452: finalized scans queue only for a paired phone, and the queue survives an app
+    /// restart (an interrupted send resumes as queued with the same transfer ID).
+    @MainActor
+    func testPL0452SyncQueueRequiresPairingAndSurvivesRestart() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let queueURL = root.appendingPathComponent("queue.json")
+        let record = SessionFinalizationRecord(sessionID: "s1", state: .exported, packagePath: root.appendingPathComponent("s1.packscan").path, packageBytes: 200, packageSHA256: String(repeating: "a", count: 64))
+        let unpaired = PairedSyncService(queueURL: queueURL, credential: { nil }, autoStart: false)
+        XCTAssertFalse(unpaired.enqueue(record))
+        XCTAssertTrue(unpaired.items.isEmpty)
+        let credential = DeviceCredential(receiver: ReceiverReconnectIdentity(receiverInstanceID: "r", host: "127.0.0.1", port: 8443, tlsCertificateFingerprint: String(repeating: "b", count: 64)), deviceID: "d", deviceSecret: "s")
+        let paired = PairedSyncService(queueURL: queueURL, credential: { credential }, autoStart: false)
+        XCTAssertFalse(paired.enqueue(SessionFinalizationRecord(sessionID: "s0", state: .inProgress)))
+        XCTAssertTrue(paired.enqueue(record))
+        let queued = try XCTUnwrap(paired.items["s1"])
+        XCTAssertEqual(queued.state, .queued)
+        XCTAssertEqual(queued.statusText, "Queued for PackLab")
+        // Simulate an app exit mid-send, then relaunch.
+        var sending = queued
+        sending.state = .sending
+        sending.confirmedBytes = 50
+        XCTAssertEqual(sending.statusText, "Sending 25%")
+        try JSONEncoder().encode([sending]).write(to: queueURL)
+        let relaunched = PairedSyncService(queueURL: queueURL, credential: { credential }, autoStart: false)
+        let restored = try XCTUnwrap(relaunched.items["s1"])
+        XCTAssertEqual(restored.state, .queued)
+        XCTAssertEqual(restored.transferID, queued.transferID)
+        XCTAssertTrue(relaunched.enqueue(record))
+        XCTAssertEqual(relaunched.items["s1"]?.transferID, queued.transferID)
+        relaunched.markDelivered(record)
+        XCTAssertEqual(relaunched.items["s1"]?.statusText, "Delivered to PackLab")
+        XCTAssertEqual(PairedSyncService(queueURL: queueURL, credential: { nil }, autoStart: false).items["s1"]?.state, .delivered)
+    }
+
+    func testPL0452FailedStatusAndBackoff() {
+        var item = SyncQueueItem(finalization: SessionFinalizationRecord(sessionID: "s", state: .exported, packagePath: "/x", packageBytes: 10))
+        item.state = .failed
+        item.reason = "PackLab not reachable"
+        XCTAssertTrue(item.isPending)
+        XCTAssertEqual(item.statusText, "Failed: PackLab not reachable — retrying automatically")
+        item.terminal = true
+        XCTAssertFalse(item.isPending)
+        XCTAssertEqual(item.statusText, "Failed: PackLab not reachable")
+        XCTAssertEqual([1, 2, 3, 7, 50].map { SyncQueueItem.retryDelay(afterAttempts: $0) }, [5, 10, 20, 300, 300])
     }
 
 }

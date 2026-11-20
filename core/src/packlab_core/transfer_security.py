@@ -9,11 +9,11 @@ import secrets
 import ssl
 import subprocess
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from .pairing import PairingOffer, PairingStore
+from .pairing import DeviceRegistry, PairingOffer, PairingStore
 from .transfer_protocol import REQUIRED_TRANSPORT, TransferErrorCode, TransferProtocolError
 
 
@@ -180,6 +180,9 @@ class SessionCredential:
     token: str
     expires_at: float
     certificate_fingerprint: str
+    device_id: str | None = None
+    #: Returned once, at pairing; the receiver keeps only its SHA-256.
+    device_secret: str | None = field(default=None, repr=False)
 
 
 class PairingAuthenticator:
@@ -189,11 +192,14 @@ class PairingAuthenticator:
         *,
         clock: Callable[[], float],
         session_ttl_seconds: int = 300,
+        devices: DeviceRegistry | None = None,
     ) -> None:
         self._pairing_store = pairing_store
         self._clock = clock
         self._session_ttl = session_ttl_seconds
-        self._sessions: dict[str, tuple[str, float, str, str]] = {}
+        self.devices = devices if devices is not None else DeviceRegistry(clock=clock)
+        # token sha256 -> (receiver, expires_at, pin, pairing_id or "", device_id or "")
+        self._sessions: dict[str, tuple[str, float, str, str, str]] = {}
 
     def authenticate_pairing(
         self,
@@ -202,24 +208,77 @@ class PairingAuthenticator:
         receiver_instance_id: str,
         pairing_code: str,
         certificate_fingerprint_value: str,
+        device_name: str = "iPhone",
     ) -> SessionCredential:
+        """Consume a one-time offer; register the phone as a long-lived paired device."""
         identity = self._pairing_store.pair(
             offer,
             receiver_instance_id=receiver_instance_id,
             pairing_code=pairing_code,
             tls_certificate_fingerprint=certificate_fingerprint_value,
         )
+        device, device_secret = self.devices.register(device_name)
         token = secrets.token_urlsafe(32)
         expires_at = min(self._clock() + self._session_ttl, offer.expires_at + self._session_ttl)
-        self._sessions[hashlib.sha256(token.encode("utf-8")).hexdigest()] = (
+        self._sessions[_token_key(token)] = (
             identity.receiver_instance_id,
             expires_at,
             identity.tls_certificate_fingerprint,
             offer.pairing_id,
+            device.device_id,
         )
         return SessionCredential(
-            identity.receiver_instance_id, token, expires_at, identity.tls_certificate_fingerprint
+            identity.receiver_instance_id,
+            token,
+            expires_at,
+            identity.tls_certificate_fingerprint,
+            device.device_id,
+            device_secret,
         )
+
+    def authenticate_device(
+        self,
+        *,
+        receiver_instance_id: str,
+        expected_receiver_instance_id: str,
+        device_id: str,
+        device_secret: str,
+        nonce: str,
+        timestamp: float,
+        certificate_fingerprint_value: str,
+    ) -> SessionCredential:
+        """Open a fresh short-lived session for an already paired, non-revoked device."""
+        if receiver_instance_id != expected_receiver_instance_id:
+            raise TransferProtocolError(
+                TransferErrorCode.WRONG_RECEIVER, "receiver identity does not match"
+            )
+        device = self.devices.authenticate(
+            device_id, device_secret, nonce=nonce, timestamp=timestamp
+        )
+        token = secrets.token_urlsafe(32)
+        expires_at = self._clock() + self._session_ttl
+        self._sessions[_token_key(token)] = (
+            expected_receiver_instance_id,
+            expires_at,
+            certificate_fingerprint_value,
+            "",
+            device.device_id,
+        )
+        return SessionCredential(
+            expected_receiver_instance_id,
+            token,
+            expires_at,
+            certificate_fingerprint_value,
+            device.device_id,
+        )
+
+    def revoke_device(self, device_id: str) -> bool:
+        """Unpair a device and end every session it holds."""
+        revoked = self.devices.revoke(device_id)
+        self._sessions = {
+            key: value for key, value in self._sessions.items() if value[4] != device_id
+        }
+        return revoked
 
     def require_session(
         self,
@@ -231,14 +290,19 @@ class PairingAuthenticator:
     ) -> None:
         if transport != REQUIRED_TRANSPORT:
             raise TransferProtocolError(TransferErrorCode.INSECURE_TRANSPORT, "HTTPS is required")
-        record = self._sessions.get(hashlib.sha256(token.encode("utf-8")).hexdigest())
+        record = self._sessions.get(_token_key(token))
         if record is None:
             raise TransferProtocolError(TransferErrorCode.UNPAIRED, "session credential is unknown")
-        expected_receiver, expires_at, expected_pin, _ = record
+        expected_receiver, expires_at, expected_pin, _, device_id = record
         if self._clock() >= expires_at:
-            self._sessions.pop(hashlib.sha256(token.encode("utf-8")).hexdigest(), None)
+            self._sessions.pop(_token_key(token), None)
             raise TransferProtocolError(
                 TransferErrorCode.EXPIRED_PAIRING, "session credential has expired"
+            )
+        if device_id and not self.devices.is_active(device_id):
+            self._sessions.pop(_token_key(token), None)
+            raise TransferProtocolError(
+                TransferErrorCode.DEVICE_REVOKED, "this device was unpaired in PackLab Studio"
             )
         if receiver_instance_id != expected_receiver:
             raise TransferProtocolError(
@@ -250,4 +314,8 @@ class PairingAuthenticator:
             )
 
     def revoke(self, credential: SessionCredential) -> None:
-        self._sessions.pop(hashlib.sha256(credential.token.encode("utf-8")).hexdigest(), None)
+        self._sessions.pop(_token_key(credential.token), None)
+
+
+def _token_key(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
