@@ -748,6 +748,30 @@ public actor AcceptedPhotoMetadataStore {
         catch { throw AcceptedPhotoPersistenceError.invalidContract }
     }
 
+    /// Appends the wire metadata for a source that the session capture transaction has
+    /// already committed under `images/`. The source is not re-written; the binding
+    /// (id, path, dimensions, digest) is validated against the committed bytes.
+    public func appendForCommittedSource(metadata: PhotoCaptureMetadata, source: OriginalSourceRecord, bytes: Data) throws {
+        do {
+            try PhotoMetadataBinding.validate(metadata: metadata, source: source, bytes: bytes)
+            let wire = try PackScanPhotoMetadataWire.from(metadata)
+            let existing = try loadDocument()
+            guard !existing.photos.contains(where: { $0.photoID == wire.photoID }) else { throw AcceptedPhotoPersistenceError.duplicatePhoto }
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            try fileManager.createDirectory(at: metadataURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let temp = metadataURL.deletingLastPathComponent().appendingPathComponent(".photos-\(UUID().uuidString).tmp")
+            do {
+                try encoder.encode(PackScanPhotoMetadataDocument(photos: existing.photos + [wire])).write(to: temp, options: .atomic)
+                if fileManager.fileExists(atPath: metadataURL.path) { _ = try fileManager.replaceItemAt(metadataURL, withItemAt: temp, backupItemName: nil, options: .usingNewMetadataOnly) }
+                else { try fileManager.moveItem(at: temp, to: metadataURL) }
+            } catch {
+                try? fileManager.removeItem(at: temp)
+                throw AcceptedPhotoPersistenceError.writeFailed
+            }
+        } catch let error as AcceptedPhotoPersistenceError { throw error }
+        catch { throw AcceptedPhotoPersistenceError.invalidContract }
+    }
+
     private func recoverInterruptedTransaction() throws {
         let markerURL = metadataURL.deletingLastPathComponent().appendingPathComponent(".accepted-transaction.json")
         guard let data = try? Data(contentsOf: markerURL), let marker = try? JSONSerialization.jsonObject(with: data) as? [String: String], let captureID = marker["capture_id"], let sourceName = marker["source"], let document = try? loadDocument() else { return }

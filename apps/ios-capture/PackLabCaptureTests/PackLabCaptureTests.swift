@@ -12,6 +12,9 @@ import UIKit
 #if canImport(AVFoundation)
 import AVFoundation
 #endif
+#if canImport(CoreVideo)
+import CoreVideo
+#endif
 #if canImport(AVFoundation) && canImport(CoreGraphics)
 import CoreGraphics
 
@@ -91,6 +94,28 @@ private func acceptedPoseBinding(captureID: String, pose: PoseSample?) -> PoseCa
     guard let pose else { return nil }
     let status = pose.tracking == .normal && pose.hasValidTransform ? "available" : "unavailable"
     return PoseCaptureBinding(captureID: captureID, captureTimestamp: pose.timestamp, aligned: AlignedPose(sample: status == "available" ? pose : nil, delta: 0, status: status))
+}
+
+/// Synthetic bi-planar 4:2:0 camera buffer with a caller-defined luma plane (test fixture only).
+private func makeLumaPixelBuffer(width: Int, height: Int, format: OSType, luma: (Int, Int) -> UInt8) -> CVPixelBuffer? {
+    var created: CVPixelBuffer?
+    guard CVPixelBufferCreate(kCFAllocatorDefault, width, height, format, nil, &created) == kCVReturnSuccess, let buffer = created else { return nil }
+    guard CVPixelBufferLockBaseAddress(buffer, []) == kCVReturnSuccess else { return nil }
+    defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+    guard let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) else { return nil }
+    let rowBytes = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+    let pixels = base.assumingMemoryBound(to: UInt8.self)
+    for y in 0..<height { for x in 0..<width { pixels[y * rowBytes + x] = luma(x, y) } }
+    return buffer
+}
+
+/// Small decodable JPEG used as the fake still's immutable source bytes (test fixture only).
+private func makeJPEGFixture(width: Int, height: Int) -> Data? {
+    guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue), let image = context.makeImage() else { return nil }
+    let data = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, "public.jpeg" as CFString, 1, nil) else { return nil }
+    CGImageDestinationAddImage(destination, image, nil)
+    return CGImageDestinationFinalize(destination) ? data as Data : nil
 }
 
 private actor CountingStillPhotoBackend: StillPhotoBackend {
@@ -3078,6 +3103,121 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: layout.photoRecords.appendingPathComponent("blocked.json").path))
         let qualityLog = try await QualityCandidateLogStore(layout: layout).snapshot()
         XCTAssertTrue(qualityLog.contains { $0.manualAudit?.blockingReasons.contains("camera_not_ready") == true })
+    }
+
+    func testLiveQualityFrameSamplerNormalizesLumaPlane() throws {
+        // Full range (420f): luma = column index, so each 2x2 output cell averages to 2c + 0.5.
+        let full = try XCTUnwrap(makeLumaPixelBuffer(width: 128, height: 96, format: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) { x, _ in UInt8(x) })
+        let frame = LiveQualityFrameSampler.qualityFrame(from: full)
+        XCTAssertEqual(frame.width, 64)
+        XCTAssertEqual(frame.height, 48)
+        XCTAssertTrue(frame.isAvailable)
+        XCTAssertNil(frame.objectMask)
+        for row in [0, 23, 47] {
+            for cell in [0, 1, 31, 63] { XCTAssertEqual(frame.luminance[row * 64 + cell], (Double(2 * cell) + 0.5) / 255, accuracy: 1e-12) }
+        }
+        // Video range (420v): nominal black 16 maps to 0 and nominal white 235 to 1.
+        let video = try XCTUnwrap(makeLumaPixelBuffer(width: 128, height: 96, format: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange) { x, _ in x < 64 ? 16 : 235 })
+        let videoFrame = LiveQualityFrameSampler.qualityFrame(from: video)
+        XCTAssertEqual(videoFrame.luminance[0], 0, accuracy: 1e-12)
+        XCTAssertEqual(videoFrame.luminance[63], 1, accuracy: 1e-12)
+        // Unsupported pixel formats are unavailable, never guessed.
+        var bgra: CVPixelBuffer?
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 128, 96, kCVPixelFormatType_32BGRA, nil, &bgra), kCVReturnSuccess)
+        let unsupported = try XCTUnwrap(bgra)
+        XCTAssertEqual(LiveQualityFrameSampler.qualityFrame(from: unsupported), .unavailable)
+    }
+
+    /// Synthetic wiring proof only (fake still bytes, synthetic luma, injected pose): it does
+    /// not claim device image quality, ARKit tracking behaviour or physical accuracy.
+    @MainActor
+    func testManualCaptureEndToEndFromLiveFrameToFinalizedPackScan() async throws {
+        struct Backend: TimestampedStillPhotoBackend, Sendable {
+            let bytes: Data
+            func requestOriginalStill() async throws -> (bytes: Data, dimensions: CaptureDimensions) { (bytes, CaptureDimensions(width: 8, height: 6)) }
+            func lastCaptureMonotonicTimestamp() async -> TimeInterval? { 20.0 }
+        }
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        // Same steps as ContentView's New Scan onStart.
+        let draft = NewScanDraft(sessionID: "e2e-manual", packageName: "Bottle", packageType: .bottle, captureMode: .freehand, presetID: .matteHDPE)
+        let layout = SessionStorageLayout(root: root, sessionID: draft.sessionID)
+        try await ScanSessionStore(layout: layout).create(draft)
+        let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE)
+        vm.configureM04QualityRuntime(preset: preset, layout: layout)
+        vm.startLiveCandidateLoop()
+        try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: preset, preparationAcknowledged: false, treatmentMode: nil, preflight: nil, basePass: vm.m04BasePass, completion: vm.m04Completion, qualityGuidance: vm.m04QualityGuidanceState, asymmetricCoverage: vm.m04AsymmetricCoverage, turntableCoverage: vm.m04TurntableCoverage))
+        await ActiveScanSessionRegistry().install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: [])))
+        let jpeg = try XCTUnwrap(makeJPEGFixture(width: 8, height: 6))
+        await vm.bindStillCaptureBackend(Backend(bytes: jpeg))
+        // Camera 0.5 m along +Z of the AR origin: middle ring (elevation 0), azimuth 180 deg.
+        var transform = CoordinateTransform.identity.values
+        transform[11] = 0.5
+        var poses = PoseBuffer()
+        poses.append(PoseSample(timestamp: 19.9, transform: transform, tracking: .normal))
+        poses.append(PoseSample(timestamp: 20.0, transform: transform, tracking: .normal))
+        let poseSnapshot = poses
+        let checker = try XCTUnwrap(makeLumaPixelBuffer(width: 128, height: 96, format: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) { x, y in (x / 8 + y / 8) % 2 == 0 ? 60 : 190 })
+        let liveFrame = LiveQualityFrameSampler.qualityFrame(from: checker)
+        vm.bindLiveCandidateSources(frame: { (frame: liveFrame, timestamp: 19.9) }, poses: { poseSnapshot })
+
+        let tick = await vm.analyzeLiveCandidateFrame(sequence: 0)
+        let evaluation = try XCTUnwrap(tick)
+        XCTAssertTrue(evaluation.input.frame.isAvailable)
+        XCTAssertEqual(evaluation.input.pose?.aligned.status, "available")
+        XCTAssertEqual(evaluation.quality.metrics.framing.band, .unavailable)
+
+        let outcome = await vm.requestManualCapture(captureID: "manual-1", monotonicTimestamp: 20.0)
+        XCTAssertTrue(outcome.decision.allowed, "\(outcome.decision.blockingReasons)")
+        XCTAssertTrue(outcome.decision.warnings.contains("framing_object_region_unavailable"))
+        XCTAssertNotNil(outcome.still)
+        let persisted = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("manual-1.json")))
+        XCTAssertEqual(persisted.poseBinding?.aligned.status, "available")
+        XCTAssertEqual(persisted.manualAudit?.allowed, true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("manual-1.heic").path))
+        let state = try JSONDecoder().decode(PersistedSessionState.self, from: Data(contentsOf: layout.state))
+        XCTAssertEqual(state.nextSequence, 1)
+        XCTAssertEqual(state.acceptedIDs, ["manual-1"])
+        let photos = try JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: Data(contentsOf: layout.photoMetadata))
+        XCTAssertEqual(photos.photos.map(\.imagePath), ["images/manual-1.heic"])
+        XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "middle", azimuthIndex: 4)])
+
+        let destination = root.appendingPathComponent("exports/e2e-manual.packscan")
+        let finalization = try await ProductionScanFinalizeAction(root: root).finalize(sessionID: draft.sessionID, destination: destination)
+        XCTAssertEqual(finalization.state, .exported)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        let history = await LocalScanHistoryStore(root: root).load()
+        XCTAssertEqual(history.first { $0.id == draft.sessionID }?.exportState, "exported")
+        vm.stopLiveCandidateLoop()
+    }
+
+    @MainActor
+    func testManualCaptureWithoutLiveFrameIsBlockedWithExplanatoryReason() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()))
+        let noSession = await vm.requestManualCapture(captureID: "early")
+        XCTAssertEqual(noSession.decision.blockingReasons, ["session_not_ready"])
+        let layout = SessionStorageLayout(root: root, sessionID: "no-frame")
+        try await ScanSessionStore(layout: layout).create(NewScanDraft(sessionID: "no-frame", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
+        let backend = CountingStillPhotoBackend()
+        await vm.bindStillCaptureBackend(backend)
+        // No production camera frame source is bound (Simulator): the loop and tick are no-ops.
+        vm.startLiveCandidateLoop()
+        let tick = await vm.analyzeLiveCandidateFrame(sequence: 0)
+        XCTAssertNil(tick)
+        let blocked = await vm.requestManualCapture(captureID: "no-frame-capture")
+        XCTAssertFalse(blocked.decision.allowed)
+        XCTAssertNil(blocked.still)
+        XCTAssertTrue(blocked.decision.blockingReasons.contains("live_frame_unavailable"))
+        XCTAssertEqual(vm.manualCaptureDecision, blocked.decision)
+        XCTAssertTrue(ContentView.manualBlockHint("live_frame_unavailable").contains("point the camera"))
+        let requests = await backend.requestCount
+        XCTAssertEqual(requests, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.photoRecords.appendingPathComponent("no-frame-capture.json").path))
+        vm.stopLiveCandidateLoop()
     }
 
     func testPL0111MattePresetIsVersionedConfigDrivenAndPersisted() async throws {
