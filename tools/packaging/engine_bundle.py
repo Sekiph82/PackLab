@@ -159,6 +159,9 @@ def stage_bundle(
     manifest = manifest or load_manifest()
     if _record_matches(dest, manifest):
         return "UP_TO_DATE"
+    # Only ever replace a folder this tool staged (or an empty one), never an arbitrary path.
+    if dest.exists() and any(dest.iterdir()) and not (dest / RECORD_NAME).is_file():
+        raise ValueError(f"Refusing to replace {dest}: it is not an engine bundle folder")
     staging = dest.with_name(dest.name + ".staging")
     if staging.exists():
         shutil.rmtree(staging)

@@ -102,6 +102,18 @@ def test_tampered_cached_archive_is_rejected(tmp_path: Path) -> None:
         engine_bundle.stage_bundle(tmp_path / "cache", tmp_path / "engines", [seed], manifest)
 
 
+def test_refuses_to_replace_a_foreign_folder(tmp_path: Path) -> None:
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    manifest = _fake_manifest(seed)
+    foreign = tmp_path / "OwnerDev"
+    foreign.mkdir()
+    (foreign / "keep.txt").write_text("owner data", encoding="utf-8")
+    with pytest.raises(ValueError, match="not an engine bundle folder"):
+        engine_bundle.stage_bundle(tmp_path / "cache", foreign, [seed], manifest)
+    assert (foreign / "keep.txt").is_file()
+
+
 def test_unsafe_archive_member_is_rejected(tmp_path: Path) -> None:
     archive = tmp_path / "evil.zip"
     archive.write_bytes(_zip({"../escape.exe": b"x"}))
