@@ -54,7 +54,13 @@ class PhysicalMarkerReference:
             raise ReconstructionScaleError("physical_marker_side_must_be_positive_finite")
         if not _positive_finite(self.uncertainty_mm):
             raise ReconstructionScaleError("physical_reference_uncertainty_must_be_positive_finite")
-        if self.evidence_class not in {"accepted_owner_physical", "synthetic_test_fixture"}:
+        # owner_unverified_print: a real printed mat whose sides are not caliper-verified;
+        # promote_scale_provenance accepts only accepted_owner_physical references.
+        if self.evidence_class not in {
+            "accepted_owner_physical",
+            "owner_unverified_print",
+            "synthetic_test_fixture",
+        }:
             raise ReconstructionScaleError("physical_reference_evidence_class_invalid")
 
 

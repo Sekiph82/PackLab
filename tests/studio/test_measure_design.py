@@ -276,3 +276,108 @@ def test_build_next_step_and_latest_project_build_feed_measure_design(window, tm
     assert view.model is not None and view.model.path == built
     assert "8 COLMAP cameras" in view.results.text()
     assert metadata.project_id == window.project_manager.current.project_id
+
+
+def test_unverified_mat_print_can_never_promote_to_metric_verified(tmp_path) -> None:
+    from packlab_core.calibration.scale_provenance import (
+        ScalePromotionEvidence,
+        ScaleProvenanceError,
+        VerifiedPhysicalReference,
+        promote_scale_provenance,
+    )
+
+    model_path = _scene(tmp_path / "scene")
+    model = md.load_model(model_path)
+    images, sparse = md.find_colmap_workspace(model_path)
+    cameras = md.read_colmap_cameras(sparse)
+    isolation = md.isolate_object(model, cameras)
+    scale = md.estimate_marker_scale(model, isolation, cameras, images, "camera-test")
+    references = scale.provenance.physical_references
+    assert references and {r["evidence_class"] for r in references} == {"owner_unverified_print"}
+    # Even a complete, accepted owner record cannot lift unverified-print references.
+    evidence = ScalePromotionEvidence(
+        "accepted_owner_physical",
+        "owner_controlled_physical_record",
+        "caliper-record-1",
+        "a" * 64,
+        "ACCEPTED_FOR_CAPTURE",
+        "2026-11-21T00:00:00Z",
+        "owner",
+        "caliper",
+        True,
+        tuple(
+            VerifiedPhysicalReference(
+                r["reference_id"] + f"-{r['marker_id']}",
+                r["reference_digest"],
+                r["marker_id"],
+                r["value"],
+            )
+            for r in references[:1]
+        ),
+    )
+    with pytest.raises(ScaleProvenanceError):
+        promote_scale_provenance(scale.provenance, evidence)
+    manual = md.manual_scale(model, (0.0, 0.0, 0.0), (0.0, 0.0, 0.4), 40.0)
+    with pytest.raises(ScaleProvenanceError):
+        promote_scale_provenance(manual.provenance, evidence)
+
+
+def _ring_scan_master(*, radius_x: float, radius_y: float, arc: float):
+    from packlab_core.geometry_adapter import TriangleMeshData
+    from packlab_core.reconstruction import ScaleState
+    from packlab_core.scan_master import ScanMasterRevision, mesh_sha256
+
+    count = 64
+    levels = [index * 1.25 for index in range(33)]  # 40 mm tall straight jar
+    vertices = [
+        (radius_x * math.cos(arc * i / count), radius_y * math.sin(arc * i / count), z)
+        for z in levels
+        for i in range(count + (0 if arc >= math.tau else 1))
+    ]
+    ring = count + (0 if arc >= math.tau else 1)
+    faces = []
+    for level in range(len(levels) - 1):
+        for i in range(ring if arc >= math.tau else ring - 1):
+            j = (i + 1) % ring
+            a, b, c, d = (
+                level * ring + i,
+                level * ring + j,
+                (level + 1) * ring + j,
+                (level + 1) * ring + i,
+            )
+            faces.extend(((a, b, c), (a, c, d)))
+    mesh = TriangleMeshData(tuple(vertices), tuple(faces))
+    project = "0d6b5b12-18f4-4e8a-9d0d-62fe7116212a"  # UUID starting with a digit
+    return ScanMasterRevision(
+        "scan-master-ring",
+        project,
+        mesh,
+        {
+            "scan_master_revision_id": "scan-master-ring",
+            "project_id": project,
+            "authority_class": "SCAN_MASTER",
+            "output_geometry_sha256": mesh_sha256(mesh),
+            "reconstruction_revision_id": "reconstruction-r1",
+            "scale_state": ScaleState.METRIC_UNVERIFIED.value,
+            "scale_provenance_id": "scale-r1",
+            "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
+            "mold_use_authorized": False,
+        },
+    )
+
+
+def test_owner_review_policy_has_fixed_bounds_and_refuses_outside_them() -> None:
+    round_jar = _ring_scan_master(radius_x=35.0, radius_y=35.0, arc=math.tau)
+    design = md.fit_design_model(round_jar, actor_id="owner", owner_review=True)
+    assert design.model.project_id.startswith("0")  # digit-leading UUID end to end
+    # Not round about the axis (ellipse): refused before any policy relaxation.
+    oval = _ring_scan_master(radius_x=40.0, radius_y=30.0, arc=math.tau)
+    with pytest.raises(md.MeasureDesignError, match="not round about the measured axis"):
+        md.fit_design_model(oval, actor_id="owner", owner_review=True)
+    # Round about the axis but only a quarter of the ring observed: outside both bounds
+    # (a half ring, core coverage 0.68 / section CV 0.36, is still accepted).
+    half = _ring_scan_master(radius_x=35.0, radius_y=35.0, arc=math.tau * 0.25)
+    with pytest.raises(md.MeasureDesignError, match="owner-review bounds"):
+        md.fit_design_model(half, actor_id="owner", owner_review=True)
+    assert md.OWNER_REVIEW_MIN_ANGULAR_COVERAGE == 0.60
+    assert md.OWNER_REVIEW_MAX_SECTION_CV == 0.45

@@ -259,6 +259,7 @@ def test_attributed_manual_zone_override_is_accepted_for_revolve() -> None:
     assert override.review_required  # still flagged; only attribution makes it acceptable
     *_, result = _build((scan, strategy, profile_fit, override))
     assert result.feature_zone_revision_id == override.revision_id
-    unattributed = replace(override, actor_id=None)
-    with pytest.raises(RevolvedDesignModelError):
-        _build((scan, strategy, profile_fit, unattributed))
+    for missing in ({"actor_id": None}, {"reason": None}, {"previous_revision_id": None}):
+        unattributed = replace(override, **missing)
+        with pytest.raises(RevolvedDesignModelError):
+            _build((scan, strategy, profile_fit, unattributed))

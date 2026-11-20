@@ -532,7 +532,9 @@ def estimate_marker_scale(
     camera_solution_revision: str,
     *,
     print_correction: float = 1.0,
-    evidence_class: str = "accepted_owner_physical",
+    # The owner's print is not caliper-verified; only an explicit owner-verified print
+    # record may pass accepted_owner_physical (the class METRIC_VERIFIED promotion needs).
+    evidence_class: str = "owner_unverified_print",
 ) -> ScaleResult:
     """Detect mat markers per photo, cast corners onto the base plane, let core fit scale."""
 
@@ -1139,7 +1141,12 @@ class DesignState:
         }
 
 
+# Owner review may relax the core revolve policy only to these fixed bounds; the policy
+# is hashed into the recommendation id. A scan must still be round about the measured
+# axis (axis-centred radial CV <= 5 %); partial rings drag core's centroid-based CV up.
 OWNER_REVIEW_MAX_AXIS_CV = 0.05
+OWNER_REVIEW_MIN_ANGULAR_COVERAGE = 0.60
+OWNER_REVIEW_MAX_SECTION_CV = 0.45
 
 
 def axis_radial_cv(mesh: TriangleMeshData) -> float:
@@ -1249,12 +1256,8 @@ def fit_design_model(
                 f"not round about the measured axis (radial CV {axis_cv:.3f}); recapture"
             )
         policy = FittingStrategyPolicy(
-            minimum_angular_coverage=round(
-                min(0.85, *(s.angular_coverage for s in sections)) - 0.01, 3
-            ),
-            maximum_axisymmetric_radial_cv=round(
-                max(0.04, *(s.radial_coefficient_of_variation for s in sections)) + 0.01, 3
-            ),
+            minimum_angular_coverage=OWNER_REVIEW_MIN_ANGULAR_COVERAGE,
+            maximum_axisymmetric_radial_cv=OWNER_REVIEW_MAX_SECTION_CV,
         )
         strategy = recommend_fitting_strategy(
             scan_master,
@@ -1273,8 +1276,13 @@ def fit_design_model(
     if strategy.strategy is not FittingStrategy.AXISYMMETRIC_REVOLVE:
         raise MeasureDesignError(
             f"core fitting strategy is {strategy.strategy.value} "
-            f"({', '.join(strategy.uncertainty_codes)}). Tick owner review to accept a partial "
-            "scan as round, or recapture."
+            f"({', '.join(strategy.uncertainty_codes)}). "
+            + (
+                f"Exceeds the owner-review bounds (coverage >= {OWNER_REVIEW_MIN_ANGULAR_COVERAGE},"
+                f" section CV <= {OWNER_REVIEW_MAX_SECTION_CV}); recapture."
+                if owner_review
+                else "Tick owner review to accept a partial scan as round, or recapture."
+            )
         )
     revolved = build_axisymmetric_revolved_design_model(
         strategy,
