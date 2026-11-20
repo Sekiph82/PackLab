@@ -129,6 +129,10 @@ def test_receive_from_iphone_pairs_uploads_and_lists_scan(monkeypatch, tmp_path,
         previous = view.offer
         view.new_code_button.click()
         assert view.offer is not None and view.offer.pairing_id != previous.pairing_id
+        # Review MEDIUM 3: the owner can stop listening on the LAN.
+        view.stop_button.click()
+        assert not session.running and view.offer is None
+        assert view.receive_button.isEnabled() and not view.stop_button.isEnabled()
     finally:
         window.close()
         app.processEvents()
