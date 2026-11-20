@@ -182,6 +182,32 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
         return (LiveQualityFrameSampler.qualityFrame(from: current.capturedImage), current.timestamp)
     }
 
+    /// The AR world the current poses live in. Its origin moves with every new session and
+    /// every tracking reset/interruption (epoch), so world-space points are only comparable
+    /// within one identity.
+    public var worldIdentity: String { "\(session.identifier.uuidString)#\(epochCoordinator.epoch)" }
+
+    /// Raycasts from the image centre (the on-screen crosshair) and returns the hit as the
+    /// object center: estimated plane first, then detected plane geometry, then an infinite
+    /// horizontal plane. Nil when nothing is hit.
+    public func raycastObjectCenter() -> ObjectCenter? {
+        guard isStarted, let frame = session.currentFrame else { return nil }
+        let crosshair = CGPoint(x: 0.5, y: 0.5)
+        let attempts: [(target: ARRaycastQuery.Target, alignment: ARRaycastQuery.TargetAlignment, method: String)] = [
+            (.estimatedPlane, .any, "raycast_estimated_plane"),
+            (.existingPlaneGeometry, .any, "raycast_existing_plane"),
+            (.existingPlaneInfinite, .horizontal, "raycast_infinite_horizontal_plane"),
+        ]
+        for attempt in attempts {
+            let query = frame.raycastQuery(from: crosshair, allowing: attempt.target, alignment: attempt.alignment)
+            if let hit = session.raycast(query).first {
+                let t = hit.worldTransform.columns.3
+                return ObjectCenter(position: [Double(t.x), Double(t.y), Double(t.z)], method: attempt.method, worldIdentity: worldIdentity)
+            }
+        }
+        return nil
+    }
+
     /// Adds the exact pose of a captured still's frame to the shared buffer.
     public func recordCapturePose(_ sample: PoseSample) { poseBuffer.append(sample) }
 

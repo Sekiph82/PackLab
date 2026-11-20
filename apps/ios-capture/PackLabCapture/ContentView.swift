@@ -31,6 +31,13 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var manualCaptureDecision: ManualCaptureDecision?
     /// True while one manual capture (shutter + session transaction + photo metadata) runs.
     @Published private(set) var manualCaptureInFlight = false
+    /// Object the orbit is measured around; nil until the operator sets it (or after an AR reset).
+    @Published private(set) var m04ObjectCenter: ObjectCenter?
+    @Published private(set) var objectCenterMessage: String?
+    /// Live camera position relative to the object (100 ms tracking poll), for the dial.
+    @Published private(set) var m04LiveObservation: CoveragePoseObservation?
+    @Published private(set) var m04Instruction: OrbitGuidanceInstruction = .setObjectCenter
+    @Published private(set) var captureToast: CaptureToastMessage?
     @Published private(set) var m04ActivePreset = PackagingPresetCatalog.matteHDPE
     @Published private(set) var m04ReflectionGuidance: [String] = []
     @Published private(set) var m04AsymmetricCoverage: AsymmetricCoverageEvaluation?
@@ -77,6 +84,10 @@ final class CaptureRuntimeViewModel: ObservableObject {
     private var liveFrameSource: (@MainActor () -> (frame: QualityImageFrame, timestamp: TimeInterval)?)?
     /// Shared AR pose buffer; binds candidate frames and accepted stills to their poses.
     private var capturePoseSource: (@MainActor () -> PoseBuffer)?
+    /// Raycast from the screen centre into the AR world (production camera only).
+    private var objectCenterSource: (@MainActor () -> ObjectCenter?)?
+    /// Identity of the current AR world; a different value invalidates the object center.
+    private var worldIdentitySource: (@MainActor () -> String?)?
     static let liveCandidateIntervalNanoseconds: UInt64 = 500_000_000
     /// Manual capture refuses quality/pose evidence older than this (seconds, uptime domain).
     static let maximumLiveEvidenceAge: TimeInterval = 2.0
@@ -154,6 +165,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         tracking = trackingRecoveryPolicy.snapshot
         pose = await trackingService.latestPose()
         motion = await motionService.latestRecord()
+        updateOrbitGuidance()
         epoch = await trackingService.localizationEpoch()
         resetDiagnostics = await trackingService.resetDiagnostics()
         #if canImport(AVFoundation)
@@ -205,6 +217,10 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04CoverageActive = true
         m04AcceptedDuplicateEvidence = []
         m04Evaluation = nil
+        m04ObjectCenter = nil
+        objectCenterMessage = nil
+        m04LiveObservation = nil
+        updateOrbitGuidance()
     }
 
     private func detailCoverageConfiguration(for passID: CapturePassID) -> OrbitCoverageConfiguration {
@@ -300,13 +316,15 @@ final class CaptureRuntimeViewModel: ObservableObject {
 
     @discardableResult
     func recordAcceptedCaptureCoverage(_ record: AcceptedCaptureRecord) -> CoveragePoseObservation {
-        let observation = m04CoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding)
+        let center = m04ObjectCenter?.position
+        let observation = m04CoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding, center: center)
         m04Coverage = m04CoverageModel.snapshot()
         m04CoverageTarget = m04Coverage.missingSectors.first
         m04RingCoverage = RingCoverageEvaluation(snapshot: m04Coverage, policy: m04RingPolicy)
         m04AcceptedDuplicateEvidence.append(DuplicateEvidence(captureID: record.captureID, poseBinding: record.poseBinding))
+        updateOrbitGuidance()
         if let passID = record.passMetadata?.passID, var detailModel = m04DetailCoverageModels[passID] {
-            _ = detailModel.observe(captureID: record.captureID, poseBinding: record.poseBinding)
+            _ = detailModel.observe(captureID: record.captureID, poseBinding: record.poseBinding, center: center)
             m04DetailCoverageModels[passID] = detailModel
             if let policy = m04DetailPolicies[passID] {
                 let evaluation = DetailPassEvaluation(snapshot: detailModel.snapshot(), framing: FramingMetric(availability: .available, objectFraction: policy.minimumFramingFraction, bounds: nil, margins: [:], band: .acceptable, reasons: []), policy: policy)
@@ -315,7 +333,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
             }
         }
         if record.passMetadata?.passID == .base {
-            _ = m04BaseCoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding)
+            _ = m04BaseCoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding, center: center)
             m04BasePass = BasePassEvaluation(snapshot: m04BaseCoverageModel.snapshot(), availability: m04BaseAvailability)
             recomputeM04Completion()
         }
@@ -404,15 +422,22 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let target = m04CoverageTarget
         let overlapAllowed = target.map { !m04Coverage.capturedSectors.contains($0) } ?? false
         let candidateEvidence = DuplicateEvidence(captureID: evaluation.input.captureID, poseBinding: evaluation.input.pose)
-        let duplicateDecision = NearDuplicateDetector.evaluate(candidate: candidateEvidence, accepted: m04AcceptedDuplicateEvidence, configuration: m04Coverage.configuration)
+        let duplicateDecision = NearDuplicateDetector.evaluate(candidate: candidateEvidence, accepted: m04AcceptedDuplicateEvidence, configuration: m04Coverage.configuration, center: m04ObjectCenter?.position)
         return AutoCaptureInput(monotonicTimestamp: monotonicTimestamp, poseEligible: tracking.poseEvidenceEligible, targetSector: target, quality: evaluation.quality, overlapAllowed: overlapAllowed, duplicateDecision: duplicateDecision, admission: admission)
     }
 
+    /// `recordDiagnostics: false` (the 2 Hz live loop) skips the candidate log and only
+    /// persists the context when the quality-guidance state actually changed.
     @discardableResult
-    func analyzeM04Candidate(_ input: M04CandidateFrameInput) async -> M04CandidateQualityEvaluation {
+    func analyzeM04Candidate(_ input: M04CandidateFrameInput, recordDiagnostics: Bool = true) async -> M04CandidateQualityEvaluation {
         let evaluation = m04QualityRuntime.evaluate(input)
         m04Evaluation = evaluation
+        let guidanceBefore = m04QualityGuidanceState
         updateM04QualityGuidance(evaluation)
+        guard recordDiagnostics else {
+            if m04QualityGuidanceState != guidanceBefore { await persistBasePassContext() }
+            return evaluation
+        }
         await persistBasePassContext()
         if let store = m04QualityLogStore {
             try? await store.append(QualityCandidateLog(sessionID: input.sessionID, captureID: input.captureID, sequence: input.sequence, monotonicTimestamp: input.monotonicTimestamp, decision: evaluation.quality))
@@ -423,9 +448,9 @@ final class CaptureRuntimeViewModel: ObservableObject {
     /// Production candidate entry point. Motion is bound in the existing
     /// MotionService timestamp domain before the shared quality runtime runs.
     @discardableResult
-    func analyzeM04Candidate(sessionID: String, captureID: String, sequence: Int, monotonicTimestamp: TimeInterval, frame: QualityImageFrame, pose: PoseCaptureBinding? = nil) async -> M04CandidateQualityEvaluation {
+    func analyzeM04Candidate(sessionID: String, captureID: String, sequence: Int, monotonicTimestamp: TimeInterval, frame: QualityImageFrame, pose: PoseCaptureBinding? = nil, recordDiagnostics: Bool = true) async -> M04CandidateQualityEvaluation {
         let motionBinding = await motionService.bindCandidateMotion(captureID: captureID, timestamp: monotonicTimestamp)
-        return await analyzeM04Candidate(M04CandidateFrameInput(sessionID: sessionID, captureID: captureID, sequence: sequence, monotonicTimestamp: monotonicTimestamp, frame: frame, motion: motionBinding, pose: pose))
+        return await analyzeM04Candidate(M04CandidateFrameInput(sessionID: sessionID, captureID: captureID, sequence: sequence, monotonicTimestamp: monotonicTimestamp, frame: frame, motion: motionBinding, pose: pose), recordDiagnostics: recordDiagnostics)
     }
 
     /// Installs the same health-gated backend used by the production camera
@@ -522,8 +547,23 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard !manualCaptureInFlight else { return (ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: ["capture_in_flight"]), nil) }
         manualCaptureInFlight = true
         defer { manualCaptureInFlight = false }
+        let coveredBefore = m04Coverage.capturedSectors.count
+        let outcome = await performManualCapture(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
+        let coveredAfter = m04Coverage.capturedSectors.count
+        let observation = m04Coverage.observations.last { $0.captureID == captureID }
+        let hint = outcome.decision.blockingReasons.first.map { ContentView.manualBlockHint($0) }
+        showCaptureToast(CaptureToast.text(decision: outcome.decision, saved: outcome.still != nil, observation: observation, newlyCovered: coveredAfter > coveredBefore, capturedCount: coveredAfter, totalCount: coveredAfter + m04Coverage.missingSectors.count, blockHint: hint))
+        return outcome
+    }
+
+    private func performManualCapture(captureID: String, monotonicTimestamp: TimeInterval) async -> (decision: ManualCaptureDecision, still: AcceptedStill?) {
         guard let layout = m04SessionLayout, let stateData = try? Data(contentsOf: layout.state), let state = try? JSONDecoder().decode(PersistedSessionState.self, from: stateData) else {
             return (publishManualBlock(["session_not_ready"]), nil)
+        }
+        // Orbit coverage is measured around the object, so it must be set first (not for turntable).
+        validateObjectCenterWorld()
+        if m04ObjectCenter == nil && m04ActivePreset.id != .turntable {
+            return (publishManualBlock(["object_center_unset"] + (m04Evaluation == nil ? ["live_frame_unavailable"] : [])), nil)
         }
         guard let evaluation = m04Evaluation else {
             return (evaluateManualCapture(monotonicTimestamp: monotonicTimestamp, cameraReady: false, sessionReady: false, sourceIntegrityReady: false, metadataReady: false, poseEvidenceReady: false), nil)
@@ -545,6 +585,80 @@ final class CaptureRuntimeViewModel: ObservableObject {
         }
     }
 
+    private func showCaptureToast(_ text: String) {
+        let message = CaptureToastMessage(text: text)
+        captureToast = message
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if self?.captureToast == message { self?.captureToast = nil }
+        }
+    }
+
+    // MARK: Object center and live orbit guidance
+
+    /// Injection seam: production binds the shared ARSession raycast and world identity.
+    func bindObjectCenterSources(center: (@MainActor () -> ObjectCenter?)?, worldIdentity: (@MainActor () -> String?)?) {
+        objectCenterSource = center
+        worldIdentitySource = worldIdentity
+    }
+
+    /// Raycasts from the crosshair (screen centre) and, on a hit, makes it the object center.
+    @discardableResult
+    func setObjectCenterFromScreenCenter() async -> Bool {
+        guard let source = objectCenterSource else {
+            objectCenterMessage = "Object center needs the camera (not available here)"
+            return false
+        }
+        guard let center = source() else {
+            objectCenterMessage = "No surface found at the crosshair — move a little closer, keep the package in good light and try again"
+            return false
+        }
+        return await setObjectCenter(center)
+    }
+
+    @discardableResult
+    func setObjectCenter(_ center: ObjectCenter) async -> Bool {
+        guard center.isValid else { objectCenterMessage = "Object center was not measurable — try again"; return false }
+        m04ObjectCenter = center
+        objectCenterMessage = "Object center set"
+        updateOrbitGuidance()
+        await persistBasePassContext()
+        return true
+    }
+
+    /// Resume: a stored center is only valid inside the same AR world.
+    func restoreObjectCenter(_ center: ObjectCenter?) {
+        guard let center else { return }
+        if center.isValid, let current = worldIdentitySource?(), current == center.worldIdentity {
+            m04ObjectCenter = center
+            objectCenterMessage = nil
+        } else {
+            m04ObjectCenter = nil
+            objectCenterMessage = "The AR session restarted — set the object center again"
+        }
+        updateOrbitGuidance()
+    }
+
+    /// Drops the center once the AR world it was measured in is gone (tracking reset, new session).
+    private func validateObjectCenterWorld() {
+        guard let center = m04ObjectCenter, let current = worldIdentitySource?(), current != center.worldIdentity else { return }
+        m04ObjectCenter = nil
+        objectCenterMessage = "AR tracking was reset — set the object center again"
+    }
+
+    private func updateOrbitGuidance() {
+        validateObjectCenterWorld()
+        let configuration = m04Coverage.configuration
+        let live: CoveragePoseObservation? = m04ObjectCenter.map { CoveragePoseMapper.map(captureID: "live", pose: pose, configuration: configuration, center: $0.position) }
+        if live != m04LiveObservation { m04LiveObservation = live }
+        if m04ObjectCenter != nil, live?.azimuthDegrees != nil {
+            let target = OrbitGuidance.nextTarget(snapshot: m04Coverage, current: live)
+            if target != m04CoverageTarget { m04CoverageTarget = target }
+        }
+        let instruction = OrbitGuidance.instruction(current: live, target: m04CoverageTarget, configuration: configuration, centerSet: m04ObjectCenter != nil)
+        if instruction != m04Instruction { m04Instruction = instruction }
+    }
+
     private func publishManualBlock(_ reasons: [String]) -> ManualCaptureDecision {
         let decision = ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: reasons)
         manualCaptureDecision = decision
@@ -561,6 +675,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
         m04QualityLogStore = nil
         m04Evaluation = nil
         manualCaptureDecision = nil
+        m04ObjectCenter = nil
+        m04LiveObservation = nil
     }
 
     // MARK: Live candidate loop
@@ -599,7 +715,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         liveCandidateSequence += 1
         let candidateID = UUID().uuidString
         let pose = capturePoseSource?().bind(captureID: candidateID, timestamp: live.timestamp)
-        return await analyzeM04Candidate(sessionID: layout.sessionID, captureID: candidateID, sequence: sequence, monotonicTimestamp: live.timestamp, frame: live.frame, pose: pose)
+        return await analyzeM04Candidate(sessionID: layout.sessionID, captureID: candidateID, sequence: sequence, monotonicTimestamp: live.timestamp, frame: live.frame, pose: pose, recordDiagnostics: false)
     }
 
     func captureAndPersistTurntable(captureID: String = UUID().uuidString, angleDegrees: Double, monotonicTimestamp: TimeInterval = ProcessInfo.processInfo.systemUptime, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil) async throws -> (decision: AutoCaptureDecision, observation: TurntableObservation?, still: AcceptedStill?) {
@@ -660,7 +776,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
 
     private func persistBasePassContext() async {
         guard let layout = m04SessionLayout, let existing = try? await M04SessionContextStore(layout: layout).load() else { return }
-        let context = M04ScanContext(preset: existing.preset, preparationAcknowledged: existing.preparationAcknowledged, treatmentMode: existing.treatmentMode, preflight: existing.preflight, basePass: m04BasePass, completion: m04Completion, qualityGuidance: m04QualityGuidanceState, asymmetricCoverage: m04AsymmetricCoverage, turntableCoverage: m04TurntableCoverage, orbitCoverage: m04Coverage, detailPasses: makeM04DetailResumeState())
+        let context = M04ScanContext(preset: existing.preset, preparationAcknowledged: existing.preparationAcknowledged, treatmentMode: existing.treatmentMode, preflight: existing.preflight, basePass: m04BasePass, completion: m04Completion, qualityGuidance: m04QualityGuidanceState, asymmetricCoverage: m04AsymmetricCoverage, turntableCoverage: m04TurntableCoverage, orbitCoverage: m04Coverage, detailPasses: makeM04DetailResumeState(), objectCenter: m04ObjectCenter)
         try? await M04SessionContextStore(layout: layout).persist(context)
     }
 
@@ -724,6 +840,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         #if !targetEnvironment(simulator)
         // Live candidate frames and pose evidence come from the same shared ARSession.
         bindLiveCandidateSources(frame: { [weak owner] in owner?.currentCandidateFrame() }, poses: { [weak owner] in owner?.poseBuffer ?? PoseBuffer() })
+        bindObjectCenterSources(center: { [weak owner] in owner?.raycastObjectCenter() }, worldIdentity: { [weak owner] in owner?.worldIdentity })
         #endif
     }
 
@@ -856,18 +973,29 @@ struct ContentView: View {
     @State private var showARPreview = false
     @State private var turntableAngleText = "0"
     @StateObject private var runtime: CaptureRuntimeViewModel
-    /// Layout-test seam: receives the Manual Capture button frame in window coordinates.
-    private let onManualCaptureFrame: (@MainActor (CGRect) -> Void)?
+    /// Layout-test seam: receives named element frames ("manualCapture", "guidanceDial") in
+    /// window coordinates.
+    private let onLayoutFrame: (@MainActor (String, CGRect) -> Void)?
 
     init() {
         _runtime = StateObject(wrappedValue: CaptureRuntimeViewModel())
-        onManualCaptureFrame = nil
+        onLayoutFrame = nil
     }
 
     /// Hosts an already-configured runtime (layout tests); production uses `init()`.
-    init(runtime: CaptureRuntimeViewModel, onManualCaptureFrame: (@MainActor (CGRect) -> Void)? = nil) {
+    init(runtime: CaptureRuntimeViewModel, onLayoutFrame: (@MainActor (String, CGRect) -> Void)? = nil) {
         _runtime = StateObject(wrappedValue: runtime)
-        self.onManualCaptureFrame = onManualCaptureFrame
+        self.onLayoutFrame = onLayoutFrame
+    }
+
+    private var orbitGuidanceActive: Bool { runtime.m04CoverageActive && runtime.m04ActivePreset.id != .turntable }
+
+    private func frameReporter(_ key: String) -> some View {
+        GeometryReader { proxy in
+            Color.clear
+                .onAppear { onLayoutFrame?(key, proxy.frame(in: .global)) }
+                .onChange(of: proxy.frame(in: .global)) { _, frame in onLayoutFrame?(key, frame) }
+        }
     }
 
     var body: some View {
@@ -883,6 +1011,13 @@ struct ContentView: View {
                 #elseif canImport(RealityKit) && canImport(ARKit)
                 SharedARCameraPreview().ignoresSafeArea()
                 #endif
+
+                if orbitGuidanceActive {
+                    // Crosshair at the image centre: "Set object center" raycasts through this point.
+                    Image(systemName: "plus").font(.system(size: 34, weight: .light)).foregroundStyle(.yellow)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).ignoresSafeArea()
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                }
 
                 VStack {
                     if let healthMessage = runtime.healthMessage {
@@ -907,6 +1042,17 @@ struct ContentView: View {
                     Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
                     if let controlNote = runtime.controls.state.message {
                         Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
+                    }
+                    if orbitGuidanceActive {
+                        // Primary guidance: where to stand and what to do next.
+                        VStack(spacing: 6) {
+                            OrbitGuidanceDial(snapshot: runtime.m04Coverage, target: runtime.m04CoverageTarget, current: runtime.m04LiveObservation)
+                            Text(runtime.m04Instruction.text).font(.callout.weight(.semibold)).multilineTextAlignment(.center)
+                            if let message = runtime.objectCenterMessage { Text(message).font(.caption2).multilineTextAlignment(.center) }
+                        }
+                        .foregroundStyle(.white)
+                        .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
+                        .background(frameReporter("guidanceDial"))
                     }
                     if runtime.m04CoverageActive {
                         // Coverage detail can exceed the screen height; keep it in a bounded scroll
@@ -977,18 +1123,23 @@ struct ContentView: View {
                         }
                         }
                         }
-                        .frame(maxHeight: 320)
-                        Button("Manual Capture") {
-                            Task { _ = await runtime.requestManualCapture() }
+                        .frame(maxHeight: 200)
+                        HStack(spacing: 12) {
+                            if orbitGuidanceActive {
+                                Button(runtime.m04ObjectCenter == nil ? "Set object center" : "Reset center") {
+                                    Task { await runtime.setObjectCenterFromScreenCenter() }
+                                }
+                                .buttonStyle(.bordered).tint(.white)
+                                .accessibilityIdentifier("setObjectCenterButton")
+                            }
+                            Button("Manual Capture") {
+                                Task { _ = await runtime.requestManualCapture() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!runtime.admitCapture() || runtime.manualCaptureInFlight)
+                            .accessibilityIdentifier("manualCaptureButton")
+                            .background(frameReporter("manualCapture"))
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!runtime.admitCapture() || runtime.manualCaptureInFlight)
-                        .accessibilityIdentifier("manualCaptureButton")
-                        .background(GeometryReader { proxy in
-                            Color.clear
-                                .onAppear { onManualCaptureFrame?(proxy.frame(in: .global)) }
-                                .onChange(of: proxy.frame(in: .global)) { _, frame in onManualCaptureFrame?(frame) }
-                        })
                         // Only blocking reasons stay under the button, on a dark plate readable over the camera.
                         if let manual = runtime.manualCaptureDecision, !manual.blockingReasons.isEmpty {
                             VStack(alignment: .leading, spacing: 2) {
@@ -996,6 +1147,11 @@ struct ContentView: View {
                             }
                             .font(.caption).foregroundStyle(.white)
                             .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).padding(.horizontal)
+                        }
+                        if let toast = runtime.captureToast {
+                            Text(toast.text).font(.callout).foregroundStyle(.white).multilineTextAlignment(.center)
+                                .padding(10).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
+                                .accessibilityIdentifier("captureToast")
                         }
                     }
                     Spacer()
@@ -1019,6 +1175,7 @@ struct ContentView: View {
                 }
             }
             .navigationTitle("PackLab")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // Only the primary action stays in the bar; the rest share one menu so the
                 // toolbar fits an iPhone portrait width.
@@ -1045,7 +1202,7 @@ struct ContentView: View {
             .sheet(isPresented: $showHistory) { NavigationStack { LocalScanHistoryView(root: ContentView.sessionRoot, onFinalized: { sessionID in runtime.endActiveSession(sessionID: sessionID) }) } }
             .sheet(isPresented: $showARPreview) { NavigationStack { ARPreviewEntryView() } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
-                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); runtime.startLiveCandidateLoop(); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
+                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); runtime.startLiveCandidateLoop(); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage); runtime.restoreObjectCenter(context.objectCenter) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
                 runtime.endActiveSession(sessionID: candidate.id)
@@ -1074,6 +1231,7 @@ struct ContentView: View {
         case "health_hard_stop": return "device health stop (thermal/battery/storage) (health_hard_stop)"
         case "capture_persist_failed": return "photo could not be saved to the scan (capture_persist_failed)"
         case "live_frame_stale": return "camera evidence is out of date — keep the camera on the package for a moment and try again (live_frame_stale)"
+        case "object_center_unset": return "aim the crosshair at the middle of the package and tap Set object center (object_center_unset)"
         case "capture_in_flight": return "previous photo is still being saved — wait for it to finish (capture_in_flight)"
         default: return reason
         }
