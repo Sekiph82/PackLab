@@ -591,6 +591,16 @@ final class CaptureRuntimeViewModel: ObservableObject {
         guard evidenceAge.isFinite, evidenceAge <= CaptureRuntimeViewModel.maximumLiveEvidenceAge else {
             return (await refuseManual(["live_frame_stale"], captureID: captureID, monotonicTimestamp: monotonicTimestamp), nil)
         }
+        // Orbit photos must show the package: refuse when the camera points away from the
+        // object center or sits below the table surface (the table would hide the package).
+        if m04ActivePreset.id != .turntable, let center = m04ObjectCenter, let livePose = evaluation.input.pose?.aligned.sample {
+            if let angle = OrbitGuidance.viewAngleToCenter(pose: livePose, center: center.position), angle > OrbitGuidance.maximumViewAngleDegrees {
+                return (await refuseManual(["object_not_in_view"], captureID: captureID, monotonicTimestamp: monotonicTimestamp), nil)
+            }
+            if let base = center.basePosition, base.count == 3, livePose.transform.count == 16, livePose.transform[7] < base[1] - 0.01 {
+                return (await refuseManual(["camera_below_table"], captureID: captureID, monotonicTimestamp: monotonicTimestamp), nil)
+            }
+        }
         let record = AcceptedCaptureRecord(captureID: captureID, sequence: state.nextSequence, sourceFilename: "\(captureID).heic", metadataFilename: "\(captureID).json")
         // The committed state advances with the accepted capture (same transaction).
         let next = PersistedSessionState(sessionID: state.sessionID, schemaVersion: state.schemaVersion, nextSequence: state.nextSequence + 1, epoch: state.epoch, acceptedIDs: state.acceptedIDs + [captureID], rejectedIDs: state.rejectedIDs, replacementTrace: state.replacementTrace)
@@ -737,7 +747,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
             let target = OrbitGuidance.nextTarget(snapshot: m04Coverage, current: live)
             if target != m04CoverageTarget { m04CoverageTarget = target }
         }
-        let instruction = OrbitGuidance.instruction(current: live, target: m04CoverageTarget, configuration: configuration, centerSet: m04ObjectCenter != nil)
+        let viewAngle = m04ObjectCenter.flatMap { OrbitGuidance.viewAngleToCenter(pose: pose, center: $0.position) }
+        let instruction = OrbitGuidance.instruction(current: live, target: m04CoverageTarget, configuration: configuration, centerSet: m04ObjectCenter != nil, viewAngle: viewAngle)
         if instruction != m04Instruction { m04Instruction = instruction }
     }
 
@@ -1344,6 +1355,8 @@ struct ContentView: View {
         case "health_hard_stop": return "device health stop (thermal/battery/storage) (health_hard_stop)"
         case "capture_persist_failed": return "photo could not be saved to the scan (capture_persist_failed)"
         case "live_frame_stale": return "camera evidence is out of date — keep the camera on the package for a moment and try again (live_frame_stale)"
+        case "object_not_in_view": return "the package is not in the middle of the picture — point the camera at the package (object_not_in_view)"
+        case "camera_below_table": return "the phone is below the table surface, so the table hides the package — raise the phone above the table (camera_below_table)"
         case "object_center_unset": return "aim the crosshair where the package touches the table and tap Set object center (object_center_unset)"
         case "capture_in_flight": return "previous photo is still being saved — wait for it to finish (capture_in_flight)"
         default: return reason

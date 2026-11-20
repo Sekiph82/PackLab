@@ -3519,6 +3519,29 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertNotEqual(fallback?.ringID, "middle")
         XCTAssertEqual(fallback?.azimuthIndex, 2)
         XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: []), current: nil), sector("lower", 0))
+        // Tabletop: the lower ring (camera below the package) is optional. The model never
+        // lists its wedges as missing, so guidance never targets them and completion ignores them.
+        var tabletop = OrbitCoverageModel()
+        let empty = tabletop.snapshot()
+        XCTAssertEqual(empty.missingSectors.count, 16)
+        XCTAssertFalse(empty.missingSectors.contains { $0.ringID == "lower" })
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: empty, current: nil), sector("middle", 0))
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: empty, current: at(100, -20))?.ringID, "middle")
+        _ = tabletop.observe(captureID: "low", poseBinding: acceptedPoseBinding(captureID: "low", pose: orbitPose(0, -tan(20 * Double.pi / 180), 1)))
+        let lowOnly = tabletop.snapshot()
+        XCTAssertEqual(lowOnly.capturedSectors.map(\.ringID), ["lower"], "an optional-ring photo is still kept as evidence")
+        XCTAssertEqual(lowOnly.completionFraction, 0)
+        XCTAssertFalse(lowOnly.isComplete)
+        // The package must be in view: angle between the camera axis (-Z) and the object center.
+        let facing = orbitPose(0, 0, 1)
+        XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [0, 0, 0]) ?? -1, 0, accuracy: 1e-9)
+        XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [1, 0, 1]) ?? -1, 90, accuracy: 1e-9)
+        XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [0, 0, 2]) ?? -1, 180, accuracy: 1e-9)
+        XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [tan(20 * Double.pi / 180), 0, 0]) ?? -1, 20, accuracy: 1e-9)
+        XCTAssertNil(OrbitGuidance.viewAngleToCenter(pose: nil, center: [0, 0, 0]))
+        XCTAssertEqual(OrbitGuidance.instruction(current: at(100, 0), target: sector("middle", 2), configuration: configuration, centerSet: true, viewAngle: 40), .pointAtPackage)
+        XCTAssertEqual(OrbitGuidance.instruction(current: at(100, 0), target: sector("middle", 2), configuration: configuration, centerSet: true, viewAngle: 10), .holdAndCapture)
+        XCTAssertEqual(OrbitGuidanceInstruction.pointAtPackage.text, "Point the camera at the package — keep it in the middle of the screen")
         // Protocol explains the method in plain words.
         let method = CaptureProtocolViewModel(preset: PackagingPresetCatalog.matteHDPE).sections.first
         XCTAssertEqual(method?.title, "How to take the photos")
