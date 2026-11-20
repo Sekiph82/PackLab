@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from packlab_core.cad_adapter import probe_cad_runtime
 from packlab_core.cad_brep import CadBrepRepresentationRevision
 from packlab_core.cad_mesh_export import export_design_model_obj_glb
 from packlab_core.cad_preview import CadPreviewMeshRevision
@@ -28,6 +30,11 @@ from packlab_core.cad_stl_export import export_design_model_stl
 from packlab_core.design_model import DesignModelRevision
 from packlab_core.reconstruction import ScaleState
 from packlab_core.scan_master import ScanMasterRevision
+from packlab_core.technical_drawing import generate_orthographic_views
+from packlab_core.technical_drawing_dimensions import build_drawing_dimensions
+from packlab_core.technical_drawing_export import export_technical_drawing_vectors
+from packlab_core.technical_drawing_pdf import export_technical_drawing_pdf
+from packlab_core.technical_drawing_title_block import build_technical_drawing_title_block
 
 
 class ExportSourceKind(StrEnum):
@@ -57,6 +64,7 @@ class EngineeringExportView(QWidget):
         ("STEP", "step"),
         ("STL", "stl"),
         ("OBJ + GLB", "obj_glb"),
+        ("Dimension sheet (SVG + DXF + PDF)", "drawing"),
     )
 
     def __init__(
@@ -173,9 +181,13 @@ class EngineeringExportView(QWidget):
 
         self.source_summary.setText(summary)
         self.available_formats.setText(", ".join(label for label, _value in formats) or "None")
+        # Refreshing (also done right before each export) must keep the user's chosen format.
+        chosen = self.format_selector.currentData(Qt.ItemDataRole.UserRole)
         self.format_selector.clear()
         for label, value in formats:
             self.format_selector.addItem(label, value)
+        if self.format_selector.findData(chosen) >= 0:
+            self.format_selector.setCurrentIndex(self.format_selector.findData(chosen))
         self.export_button.setEnabled(source_available and bool(formats))
 
     def cancel_export(self) -> None:
@@ -291,7 +303,7 @@ class EngineeringExportView(QWidget):
         return tuple(
             (label, value)
             for label, value in cls.DESIGN_FORMATS
-            if value not in {"step", "stl"} or valid_mm
+            if value not in {"step", "stl", "drawing"} or valid_mm
         )
 
     def _choose_destination(self, source_kind: ExportSourceKind) -> Path | None:
@@ -363,7 +375,56 @@ class EngineeringExportView(QWidget):
                 destination / f"{stem}.obj",
                 destination / f"{stem}.glb",
             )
+        if format_value == "drawing":
+            return export_dimension_sheet(
+                source.model, source.representation, destination, stem=stem
+            )
         raise RuntimeError("unsupported Design Model export format")
+
+
+def export_dimension_sheet(
+    model: DesignModelRevision,
+    representation: CadBrepRepresentationRevision,
+    destination: Path,
+    *,
+    stem: str,
+    generated_at_utc: str | None = None,
+) -> dict[str, Path]:
+    """Write the M13 technical drawing (overall H/W/D in mm_unverified) as SVG, DXF and PDF."""
+    dimensions = build_drawing_dimensions(
+        model, representation, coordinate_frame_id="packlab-studio-design-frame:v1"
+    )
+    views = generate_orthographic_views(model, representation)
+    title = build_technical_drawing_title_block(
+        model,
+        representation,
+        probe_cad_runtime(),
+        generated_view_ids=("FRONT", "SIDE", "TOP"),
+        generated_at_utc=generated_at_utc,
+    )
+    vectors = export_technical_drawing_vectors(views, (), dimensions, title)
+    pdf = export_technical_drawing_pdf(vectors)
+    outputs = {
+        kind: destination / f"{stem}-dimension-sheet.{kind}"
+        for kind in ("svg", "dxf", "pdf", "manifest.json")
+    }
+    existing = [path.name for path in outputs.values() if path.exists()]
+    if existing:
+        raise RuntimeError(f"{existing[0]} already exists; nothing was overwritten")
+    outputs["svg"].write_bytes(vectors.svg_bytes)
+    outputs["dxf"].write_bytes(vectors.dxf_bytes)
+    outputs["pdf"].write_bytes(pdf.pdf_bytes)
+    outputs["manifest.json"].write_text(
+        json.dumps(
+            {"vectors": vectors.manifest, "pdf": pdf.as_dict()},
+            indent=2,
+            sort_keys=True,
+            default=str,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return outputs
 
 
 def _manifest_string(manifest: Mapping[str, object], key: str, fallback: str) -> str:
@@ -383,4 +444,5 @@ __all__ = [
     "DesignModelExportSource",
     "EngineeringExportView",
     "ExportSourceKind",
+    "export_dimension_sheet",
 ]

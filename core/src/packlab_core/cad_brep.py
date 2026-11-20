@@ -46,6 +46,9 @@ class CadBrepRepresentationRevision:
     profile_sample_count: int | None
     contract: str = CAD_BREP_CONTRACT
     representation_type: str = "BREP_SOLID"
+    # Profile runs whose radius stays within +/- this value were revolved as one exact
+    # cylinder at their mid-range radius (label hosts). None = plain uniform sampling.
+    straight_run_tolerance: float | None = None
 
     def __post_init__(self) -> None:
         if self.contract != CAD_BREP_CONTRACT or self.representation_type != "BREP_SOLID":
@@ -95,6 +98,12 @@ class CadBrepRepresentationRevision:
             or not 3 <= self.profile_sample_count <= 2048
         ):
             raise CadBrepError("cad_brep_profile_sample_count_invalid")
+        if self.straight_run_tolerance is not None and (
+            isinstance(self.straight_run_tolerance, bool)
+            or not isinstance(self.straight_run_tolerance, float)
+            or not 0.0 <= self.straight_run_tolerance <= 10.0
+        ):
+            raise CadBrepError("cad_brep_straight_run_tolerance_invalid")
         if self.revision_id != _revision_id(self):
             raise CadBrepError("cad_brep_revision_id_mismatch")
 
@@ -132,6 +141,11 @@ class CadBrepRepresentationRevision:
                     "method": "uniform_axial_samples_closed_to_revolve_axis",
                     "sample_count": self.profile_sample_count,
                 }
+                | (
+                    {"straight_run_tolerance": self.straight_run_tolerance}
+                    if self.straight_run_tolerance is not None
+                    else {}
+                )
                 if self.profile_sample_count is not None
                 else None
             ),
@@ -146,8 +160,16 @@ def revolve_design_model_to_brep(
     operation: DesignOperation,
     *,
     profile_sample_count: int = 257,
+    straight_run_tolerance: float | None = None,
 ) -> CadBrepRepresentationRevision:
-    """Derive one reproducible BREP solid without mutating Design Model authority."""
+    """Derive one reproducible BREP solid without mutating Design Model authority.
+
+    ``straight_run_tolerance`` (model units) revolves each run of samples whose radius
+    stays within +/- tolerance as one exact cylinder at the run mid-range radius; the
+    deviation is bounded by the tolerance and recorded in the revision identity.
+    """
+    if isinstance(straight_run_tolerance, int) and not isinstance(straight_run_tolerance, bool):
+        straight_run_tolerance = float(straight_run_tolerance)
     if not isinstance(model, DesignModelRevision):
         raise CadBrepError("design_model_revision_required")
     if not isinstance(profile, DesignProfile):
@@ -156,14 +178,22 @@ def revolve_design_model_to_brep(
         raise CadBrepError("design_model_revolve_operation_required")
     try:
         shape_build = build_revolved_shape(
-            model, profile, operation, profile_sample_count=profile_sample_count
+            model,
+            profile,
+            operation,
+            profile_sample_count=profile_sample_count,
+            straight_run_tolerance=straight_run_tolerance,
         )
     except CadAdapterError as error:
         raise CadBrepError(str(error)) from error
     except Exception as error:
         raise CadBrepError("cad_brep_backend_operation_failed") from error
     return _representation_from_build(
-        model, operation, shape_build, profile_sample_count=profile_sample_count
+        model,
+        operation,
+        shape_build,
+        profile_sample_count=profile_sample_count,
+        straight_run_tolerance=straight_run_tolerance,
     )
 
 
@@ -192,6 +222,7 @@ def _representation_from_build(
     shape_build: CadShapeBuild,
     *,
     profile_sample_count: int | None = None,
+    straight_run_tolerance: float | None = None,
 ) -> CadBrepRepresentationRevision:
     return _representation_from_lineage(
         model,
@@ -200,6 +231,7 @@ def _representation_from_build(
         shape_build,
         source_feature_ids=operation.parent_feature_ids,
         profile_sample_count=profile_sample_count,
+        straight_run_tolerance=straight_run_tolerance,
     )
 
 
@@ -211,6 +243,7 @@ def _representation_from_lineage(
     *,
     source_feature_ids: tuple[str, ...] = (),
     profile_sample_count: int | None = None,
+    straight_run_tolerance: float | None = None,
 ) -> CadBrepRepresentationRevision:
     if not isinstance(shape_build, CadShapeBuild):
         raise CadBrepError("cad_brep_shape_build_invalid")
@@ -239,6 +272,7 @@ def _representation_from_lineage(
         ("mold_use_authorized", model.mold_use_authorized),
         ("solid_count", shape_build.solid_count),
         ("profile_sample_count", profile_sample_count),
+        ("straight_run_tolerance", straight_run_tolerance),
     )
     for name, value in values:
         object.__setattr__(provisional, name, value)
@@ -258,6 +292,7 @@ def _representation_from_lineage(
         mold_use_authorized=model.mold_use_authorized,
         solid_count=shape_build.solid_count,
         profile_sample_count=profile_sample_count,
+        straight_run_tolerance=straight_run_tolerance,
     )
 
 
@@ -279,6 +314,8 @@ def _revision_id(revision: CadBrepRepresentationRevision) -> str:
         "solid_count": revision.solid_count,
         "profile_sample_count": revision.profile_sample_count,
     }
+    if revision.straight_run_tolerance is not None:  # absent keeps existing revision ids
+        payload["straight_run_tolerance"] = revision.straight_run_tolerance
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     ).hexdigest()

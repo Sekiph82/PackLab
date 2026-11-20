@@ -90,7 +90,9 @@ def test_design_model_selection_displays_exact_revision_and_uses_cad_export(tmp_
     assert "editable Design Model" in view.source_summary.text()
     assert source.model.revision_id in view.source_summary.text()
     assert "mm_unverified" in view.source_summary.text()
-    assert view.available_formats.text() == "STEP, STL, OBJ + GLB"
+    assert view.available_formats.text() == (
+        "STEP, STL, OBJ + GLB, Dimension sheet (SVG + DXF + PDF)"
+    )
     assert "DEFERRED_OWNER_VALIDATION" in view.source_summary.text()
     view.format_selector.setCurrentIndex(view.format_selector.findData("step"))
     view.export_button.click()
