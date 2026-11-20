@@ -777,7 +777,8 @@ jobs:
           cat "$RUNNER_TEMP/packlab-e2e-receiver.log"
           python tools/ci/ios_e2e_receiver.py verify --root "$RUNNER_TEMP/packlab-e2e-receiver" --expected-scans 2 --expected-images 16 | tee -a "$GITHUB_STEP_SUMMARY"
 
-      - name: Export XCUITest step screenshots
+      - name: Guard end-to-end screenshot artifact inputs
+        id: guard_e2e_screenshots
         if: always()
         run: |
           set -euo pipefail
@@ -790,10 +791,13 @@ jobs:
             echo "no result bundle" > "$out/NO_RESULT_BUNDLE.txt"
           fi
           cp "$RUNNER_TEMP/packlab-e2e-receiver.log" "$out/receiver.log" || true
+          if find "$out" -type l -print -quit | grep -q .; then echo 'Screenshot export contains a symbolic link.' >&2; exit 1; fi
+          size_kib="$(du -sk "$out" | awk '{ print $1 }')"
+          test "$size_kib" -le 524288
           find "$out" -type f | wc -l
 
       - name: Preserve XCUITest end-to-end screenshots
-        if: always()
+        if: ${{ always() && steps.guard_e2e_screenshots.outcome == 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
         with:
           name: packlab-capture-e2e-screenshots-${{ github.run_id }}
