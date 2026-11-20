@@ -839,8 +839,9 @@ public struct SessionResumeView: View {
                 Text(candidate.draft?.packageName ?? candidate.id)
                 switch candidate.disposition {
                 case .resumable:
-                    Button("Resume") { onResume(candidate); dismiss() }
-                    Button("Discard") { onDiscard(candidate); dismiss() }.foregroundStyle(.red)
+                    // Borderless: otherwise one tap on Resume also runs Discard and deletes the session.
+                    Button("Resume") { onResume(candidate); dismiss() }.buttonStyle(.borderless)
+                    Button("Discard") { onDiscard(candidate); dismiss() }.buttonStyle(.borderless).foregroundStyle(.red)
                 case .blocked(let reason): Text("Blocked: \(reason)").foregroundStyle(.red)
                 case .discardRequired: Text("Discard required").foregroundStyle(.orange)
                 }

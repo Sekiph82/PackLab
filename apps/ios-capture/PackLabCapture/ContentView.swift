@@ -740,6 +740,8 @@ struct ContentView: View {
                     if let scanStartError {
                         Text(scanStartError).font(.caption).multilineTextAlignment(.center)
                             .padding(8).background(.red.opacity(0.8), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
+                            .onTapGesture { self.scanStartError = nil }
+                            .accessibilityHint("Tap to dismiss")
                     }
                     if !runtime.cameraRecoveryMessage.isEmpty {
                         VStack(spacing: 6) {

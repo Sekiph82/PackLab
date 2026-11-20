@@ -1,7 +1,8 @@
 """Device regression: buttons sharing a Form/List row must be borderless.
 
-On iOS a tap on a Form/List row fires every default-style button in that row, so the
-New Scan "Start" button also ran "Cancel" and dismissed the wizard on the owner's iPhone.
+On iOS a tap on a Form/List row fires every default-style button in that row. On the
+owner's iPhone the New Scan "Start" button also ran "Cancel" (no scan ever started), and
+the same pattern let "Resume" also run "Discard" (deleting the session).
 """
 
 from __future__ import annotations
@@ -10,33 +11,50 @@ import re
 from pathlib import Path
 
 APP = Path(__file__).resolve().parents[2] / "apps" / "ios-capture" / "PackLabCapture"
+BUTTON = re.compile(r"\bButton\s*(?:\(|\{)")
 
 
-def _hstack_blocks(text: str) -> list[str]:
-    blocks = []
-    for match in re.finditer(r"HStack \{", text):
-        depth, index = 0, match.end() - 1
-        for index in range(match.end() - 1, len(text)):
-            depth += {"{": 1, "}": -1}.get(text[index], 0)
-            if depth == 0:
-                break
-        blocks.append(text[match.start() : index + 1])
-    return blocks
+def _block(text: str, open_brace: int) -> str:
+    depth = 0
+    for index in range(open_brace, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[index], 0)
+        if depth == 0:
+            return text[open_brace : index + 1]
+    return text[open_brace:]
 
 
-def test_every_row_with_several_buttons_uses_borderless_buttons() -> None:
-    session = (APP / "Services" / "SessionFoundation.swift").read_text(encoding="utf-8")
+def _blocks(text: str, pattern: str) -> list[str]:
+    return [_block(text, m.end() - 1) for m in re.finditer(pattern, text)]
+
+
+def _offending_rows(text: str) -> list[str]:
     offenders = []
-    for block in _hstack_blocks(session):
-        buttons = block.count('Button("')
-        if buttons >= 2 and block.count(".buttonStyle(.borderless)") < buttons:
-            offenders.append(block.splitlines()[1].strip())
-    assert offenders == []
+    for container in _blocks(text, r"\b(?:List\([^)]*\)\s*(?:\{\s*\w+\s+in)?|Form)\s*\{"):
+        for row in _blocks(container, r"\b(?:HStack|VStack)(?:\([^)]*\))?\s*\{"):
+            buttons = len(BUTTON.findall(row))
+            if buttons >= 2 and row.count(".buttonStyle(.borderless)") < buttons:
+                offenders.append(row.splitlines()[0].strip()[:80])
+    return offenders
 
 
-def test_new_scan_start_and_cancel_are_borderless() -> None:
-    session = (APP / "Services" / "SessionFoundation.swift").read_text(encoding="utf-8")
-    wizard = session[session.index("public struct NewScanWizard") :]
-    row = _hstack_blocks(wizard)[0]
-    assert 'Button("Cancel")' in row and 'Button("Start")' in row
-    assert row.count(".buttonStyle(.borderless)") == 2
+def test_no_list_or_form_row_has_several_default_style_buttons() -> None:
+    found = {
+        path.name: rows
+        for path in sorted(APP.rglob("*.swift"))
+        if (rows := _offending_rows(path.read_text(encoding="utf-8")))
+    }
+    assert found == {}
+
+
+def test_guard_detects_the_original_device_bugs() -> None:
+    new_scan = 'Form { HStack { Button("Cancel") { a() }; Button("Start") { b() } } }'
+    resume = (
+        'List(items) { item in VStack { Button("Resume") { a() }; Button("Discard") { b() } } }'
+    )
+    fixed = (
+        'Form { HStack { Button("Cancel") { a() }.buttonStyle(.borderless); '
+        'Button("Start") { b() }.buttonStyle(.borderless) } }'
+    )
+    assert _offending_rows(new_scan)
+    assert _offending_rows(resume)
+    assert _offending_rows(fixed) == []
