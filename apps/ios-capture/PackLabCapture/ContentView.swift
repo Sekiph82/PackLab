@@ -698,9 +698,14 @@ final class CaptureRuntimeViewModel: ObservableObject {
     }
 
     var newScanReadiness: ScanRuntimeReadiness {
-        let supportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("PackLabSessions", isDirectory: true)
-        let parent = supportRoot?.deletingLastPathComponent()
-        let storageAvailable = supportRoot.map { FileManager.default.fileExists(atPath: $0.path) ? FileManager.default.isWritableFile(atPath: $0.path) : (parent.map { FileManager.default.isWritableFile(atPath: $0.path) } ?? false) } ?? false
+        // Application Support does not exist on a fresh install; create the session root so a
+        // first launch is not misreported as unwritable storage.
+        let fm = FileManager.default
+        let storageAvailable: Bool = {
+            guard let root = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("PackLabSessions", isDirectory: true) else { return false }
+            try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+            return fm.isWritableFile(atPath: root.path)
+        }()
         return ScanRuntimeReadiness(cameraReady: captureAdmissionService != nil && cameraRecoveryState == .running, sessionReady: isRunning, storageAvailable: storageAvailable, calibration: .ownerRequired)
     }
 

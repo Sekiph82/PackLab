@@ -3368,6 +3368,8 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(vm.newScanReadiness.sessionReady)
         await vm.start()
         XCTAssertTrue(vm.newScanReadiness.sessionReady)
+        // Fresh install: Application Support may not exist yet; readiness must create it, not report storage_unavailable.
+        XCTAssertTrue(vm.newScanReadiness.storageAvailable)
         let unavailable = ScanSuitabilityPreflight.evaluate(ScanPreflightInput(preset: PackagingPresetCatalog.matteHDPE, admission: vm.admission, cameraReady: vm.newScanReadiness.cameraReady, sessionReady: vm.newScanReadiness.sessionReady, storageAvailable: vm.newScanReadiness.storageAvailable, calibration: vm.newScanReadiness.calibration, preparationAcknowledged: true, environmentGuidanceAcknowledged: true))
         XCTAssertFalse(unavailable.canStart)
         XCTAssertTrue(unavailable.issues.contains { $0.code == "camera_unavailable" && $0.severity == .blocker })
