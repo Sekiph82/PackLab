@@ -1,0 +1,29 @@
+OpenMVS 2.4.0 - corresponding source offer
+
+PackLab Studio ships the OpenMVS command-line programs (InterfaceCOLMAP,
+DensifyPointCloud, ReconstructMesh, RefineMesh, TextureMesh and their DLLs)
+as UNMODIFIED, separate executables taken byte-for-byte from the official
+upstream release archive:
+
+  https://github.com/cdcseacave/openMVS/releases/download/v2.4.0/OpenMVS_Windows_x64.zip
+  sha256 0c31660c15c9ebc4c106873cf67564d9570d404aef7a6403451da1b6178b2167
+
+PackLab runs them only as separate processes; PackLab does not link to,
+modify or embed OpenMVS code.
+
+OpenMVS is licensed under the GNU Affero General Public License version 3
+(see LICENSE.txt beside this file; third-party terms in COPYRIGHT.md).
+The complete corresponding source code for this exact release is available
+from the upstream project at the tagged revision:
+
+  https://github.com/cdcseacave/openMVS/tree/v2.4.0
+  https://github.com/cdcseacave/openMVS/archive/refs/tags/v2.4.0.tar.gz
+
+For at least three years after you received this copy of PackLab Studio,
+the PackLab distributor will also provide a copy of that corresponding
+source on request, for no more than the cost of physically performing the
+transfer. Requests: open an issue at https://github.com/Sekiph82/PackLab.
+
+Status: public redistribution of PackLab builds containing OpenMVS is held
+pending the PackLab legal/licensing review recorded in
+docs/architecture/DEPENDENCY_LICENSE_REGISTER.md.

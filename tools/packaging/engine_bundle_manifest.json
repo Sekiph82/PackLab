@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "purpose": "Pinned upstream reconstruction-engine archives staged beside the frozen PackLab Studio executable (engines/). Binaries never enter Git.",
+  "engines": [
+    {
+      "id": "colmap",
+      "component_id": "colmap-4.2.1",
+      "version": "4.2.1",
+      "url": "https://github.com/colmap/colmap/releases/download/4.2.1/colmap-x64-windows-nocuda.zip",
+      "archive_name": "colmap-x64-windows-nocuda.zip",
+      "archive_sha256": "c493d88cb4a43f21afba42cb55bf786e5434a0420e73db0ba1454c5d8b3686ae",
+      "archive_size": 127731595,
+      "archive_subdir": "",
+      "license_identifier": "BSD-3-Clause",
+      "archive_license_files": [],
+      "license_files": [
+        {
+          "path": "tools/packaging/windows_licenses/COLMAP-4.2.1/COPYING.txt",
+          "sha256": "ab30dabb4f0a6731f980108f57aa160cc8f5cebae6984e01a5d109df99669233",
+          "upstream_reference": "https://github.com/colmap/colmap/blob/4.2.1/COPYING.txt"
+        }
+      ],
+      "exclude_globs": ["*.pdb", "*.lib", "*_test.exe", "RUN_TESTS.bat"],
+      "executables": {"colmap": "bin/colmap.exe"}
+    },
+    {
+      "id": "openmvs",
+      "component_id": "openmvs-2.4.0",
+      "version": "2.4.0",
+      "url": "https://github.com/cdcseacave/openMVS/releases/download/v2.4.0/OpenMVS_Windows_x64.zip",
+      "archive_name": "OpenMVS_Windows_x64.zip",
+      "archive_sha256": "0c31660c15c9ebc4c106873cf67564d9570d404aef7a6403451da1b6178b2167",
+      "archive_size": 22363227,
+      "archive_subdir": "vc17/x64/Release",
+      "license_identifier": "AGPL-3.0-only",
+      "archive_license_files": [],
+      "license_files": [
+        {
+          "path": "tools/packaging/windows_licenses/OpenMVS-2.4.0/LICENSE.txt",
+          "sha256": "0f072d4a0ef59e7f6864bb45629c37417ccef63025b58f4073109d1c830bc55f",
+          "upstream_reference": "https://github.com/cdcseacave/openMVS/blob/v2.4.0/LICENSE"
+        },
+        {
+          "path": "tools/packaging/windows_licenses/OpenMVS-2.4.0/COPYRIGHT.md",
+          "sha256": "87663661db85017fad4773f3744cba9ef315a18c01b400785990addc47ab2123",
+          "upstream_reference": "https://github.com/cdcseacave/openMVS/blob/v2.4.0/COPYRIGHT.md"
+        },
+        {
+          "path": "tools/packaging/windows_licenses/OpenMVS-2.4.0/SOURCE_OFFER.txt",
+          "sha256": "6211603559a59cc28c0aa314a1d5d94e881de68c21a6c52220914266bc5fff58",
+          "upstream_reference": "https://github.com/cdcseacave/openMVS/tree/v2.4.0"
+        }
+      ],
+      "exclude_globs": ["*.pdb", "*.lib", "Tests.exe"],
+      "executables": {
+        "interface_colmap": "InterfaceCOLMAP.exe",
+        "densify_point_cloud": "DensifyPointCloud.exe",
+        "reconstruct_mesh": "ReconstructMesh.exe",
+        "refine_mesh": "RefineMesh.exe",
+        "texture_mesh": "TextureMesh.exe"
+      }
+    }
+  ]
+}
