@@ -59,21 +59,42 @@ class PairingOffer:
         try:
             value = json.loads(payload)
         except json.JSONDecodeError as error:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing QR payload is malformed") from error
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "pairing QR payload is malformed"
+            ) from error
         if not isinstance(value, dict):
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing QR payload must be an object")
-        required = ("receiver_instance_id", "host", "pairing_id", "pairing_code", "tls_certificate_fingerprint")
-        if value.get("protocol") != PROTOCOL_NAME or value.get("protocol_version") != PROTOCOL_VERSION:
-            raise TransferProtocolError(TransferErrorCode.UNSUPPORTED_VERSION, "pairing protocol is not supported")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "pairing QR payload must be an object"
+            )
+        required = (
+            "receiver_instance_id",
+            "host",
+            "pairing_id",
+            "pairing_code",
+            "tls_certificate_fingerprint",
+        )
+        if (
+            value.get("protocol") != PROTOCOL_NAME
+            or value.get("protocol_version") != PROTOCOL_VERSION
+        ):
+            raise TransferProtocolError(
+                TransferErrorCode.UNSUPPORTED_VERSION, "pairing protocol is not supported"
+            )
         if any(not isinstance(value.get(key), str) or not value[key] for key in required):
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing identity is incomplete")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "pairing identity is incomplete"
+            )
         if not isinstance(value.get("port"), int) or not 1 <= value["port"] <= 65535:
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing port is invalid")
         if not isinstance(value.get("expires_at"), int | float):
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing expiry is invalid")
         return cls(
-            receiver_instance_id=value["receiver_instance_id"], host=value["host"], port=value["port"],
-            pairing_id=value["pairing_id"], pairing_code=value["pairing_code"], expires_at=float(value["expires_at"]),
+            receiver_instance_id=value["receiver_instance_id"],
+            host=value["host"],
+            port=value["port"],
+            pairing_id=value["pairing_id"],
+            pairing_code=value["pairing_code"],
+            expires_at=float(value["expires_at"]),
             tls_certificate_fingerprint=value["tls_certificate_fingerprint"],
         )
 
@@ -95,30 +116,67 @@ class PairingStore:
         self._used: set[str] = set()
         self._paired: dict[str, PairedReceiverIdentity] = {}
 
-    def create_offer(self, *, receiver_instance_id: str, host: str, port: int, tls_certificate_fingerprint: str, ttl_seconds: int = 120) -> PairingOffer:
+    def create_offer(
+        self,
+        *,
+        receiver_instance_id: str,
+        host: str,
+        port: int,
+        tls_certificate_fingerprint: str,
+        ttl_seconds: int = 120,
+    ) -> PairingOffer:
         if ttl_seconds <= 0 or ttl_seconds > 900:
-            raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing TTL is outside the short-lived range")
+            raise TransferProtocolError(
+                TransferErrorCode.BAD_REQUEST, "pairing TTL is outside the short-lived range"
+            )
         offer = PairingOffer(
-            receiver_instance_id=receiver_instance_id, host=host, port=port,
-            pairing_id=uuid.uuid4().hex, pairing_code="".join(secrets.choice(_CODE_ALPHABET) for _ in range(8)),
-            expires_at=self._clock() + ttl_seconds, tls_certificate_fingerprint=tls_certificate_fingerprint,
+            receiver_instance_id=receiver_instance_id,
+            host=host,
+            port=port,
+            pairing_id=uuid.uuid4().hex,
+            pairing_code="".join(secrets.choice(_CODE_ALPHABET) for _ in range(8)),
+            expires_at=self._clock() + ttl_seconds,
+            tls_certificate_fingerprint=tls_certificate_fingerprint,
         )
         self._offers[offer.pairing_id] = offer
         return offer
 
-    def pair(self, offer: PairingOffer, *, receiver_instance_id: str, pairing_code: str, tls_certificate_fingerprint: str) -> PairedReceiverIdentity:
+    def pair(
+        self,
+        offer: PairingOffer,
+        *,
+        receiver_instance_id: str,
+        pairing_code: str,
+        tls_certificate_fingerprint: str,
+    ) -> PairedReceiverIdentity:
         current = self._offers.get(offer.pairing_id)
         if current is None or offer.pairing_id in self._used:
-            raise TransferProtocolError(TransferErrorCode.REPLAYED_PAIRING, "pairing offer was already used")
+            raise TransferProtocolError(
+                TransferErrorCode.REPLAYED_PAIRING, "pairing offer was already used"
+            )
         if self._clock() >= current.expires_at:
-            raise TransferProtocolError(TransferErrorCode.EXPIRED_PAIRING, "pairing offer has expired")
-        if receiver_instance_id != current.receiver_instance_id or offer.receiver_instance_id != current.receiver_instance_id:
-            raise TransferProtocolError(TransferErrorCode.WRONG_RECEIVER, "receiver identity does not match offer")
+            raise TransferProtocolError(
+                TransferErrorCode.EXPIRED_PAIRING, "pairing offer has expired"
+            )
+        if (
+            receiver_instance_id != current.receiver_instance_id
+            or offer.receiver_instance_id != current.receiver_instance_id
+        ):
+            raise TransferProtocolError(
+                TransferErrorCode.WRONG_RECEIVER, "receiver identity does not match offer"
+            )
         if pairing_code.replace("-", "").upper() != current.pairing_code:
             raise TransferProtocolError(TransferErrorCode.BAD_REQUEST, "pairing code is invalid")
         if tls_certificate_fingerprint != current.tls_certificate_fingerprint:
-            raise TransferProtocolError(TransferErrorCode.WRONG_PIN, "receiver certificate fingerprint does not match")
-        identity = PairedReceiverIdentity(current.receiver_instance_id, current.host, current.port, current.tls_certificate_fingerprint)
+            raise TransferProtocolError(
+                TransferErrorCode.WRONG_PIN, "receiver certificate fingerprint does not match"
+            )
+        identity = PairedReceiverIdentity(
+            current.receiver_instance_id,
+            current.host,
+            current.port,
+            current.tls_certificate_fingerprint,
+        )
         self._used.add(current.pairing_id)
         self._offers.pop(current.pairing_id, None)
         self._paired[identity.receiver_instance_id] = identity
@@ -164,7 +222,9 @@ class DeviceRegistry:
     ``path=None`` keeps the registry in memory (tests, ephemeral receivers).
     """
 
-    def __init__(self, path: str | Path | None = None, *, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self, path: str | Path | None = None, *, clock: Callable[[], float] = time.time
+    ) -> None:
         self._path = Path(path) if path is not None else None
         self._clock = clock
         self._lock = threading.Lock()
@@ -177,7 +237,9 @@ class DeviceRegistry:
                 self._devices = {item["device_id"]: PairedDevice(**item) for item in devices}
             except (OSError, ValueError, TypeError, KeyError) as error:
                 # Fail closed: an unreadable registry must not silently drop revocations.
-                raise TransferProtocolError(TransferErrorCode.INTERNAL_ERROR, "paired-device registry is unreadable") from error
+                raise TransferProtocolError(
+                    TransferErrorCode.INTERNAL_ERROR, "paired-device registry is unreadable"
+                ) from error
 
     def register(self, device_name: str) -> tuple[PairedDevice, str]:
         name = (device_name.strip() or "iPhone")[:64]
@@ -188,21 +250,33 @@ class DeviceRegistry:
             self._persist()
         return device, secret
 
-    def authenticate(self, device_id: str, device_secret: str, *, nonce: str, timestamp: float) -> PairedDevice:
+    def authenticate(
+        self, device_id: str, device_secret: str, *, nonce: str, timestamp: float
+    ) -> PairedDevice:
         now = self._clock()
         with self._lock:
             device = self._devices.get(device_id)
             # Unknown id and wrong secret are indistinguishable to the caller.
-            if device is None or not hmac.compare_digest(device.secret_sha256, _secret_digest(device_secret)):
-                raise TransferProtocolError(TransferErrorCode.UNPAIRED, "device credential is unknown")
+            if device is None or not hmac.compare_digest(
+                device.secret_sha256, _secret_digest(device_secret)
+            ):
+                raise TransferProtocolError(
+                    TransferErrorCode.UNPAIRED, "device credential is unknown"
+                )
             if not device.active:
-                raise TransferProtocolError(TransferErrorCode.DEVICE_REVOKED, "this device was unpaired in PackLab Studio")
+                raise TransferProtocolError(
+                    TransferErrorCode.DEVICE_REVOKED, "this device was unpaired in PackLab Studio"
+                )
             if not 16 <= len(nonce) <= 128 or abs(now - timestamp) > DEVICE_REQUEST_SKEW_SECONDS:
-                raise TransferProtocolError(TransferErrorCode.REPLAYED_REQUEST, "device request is stale or malformed")
+                raise TransferProtocolError(
+                    TransferErrorCode.REPLAYED_REQUEST, "device request is stale or malformed"
+                )
             self._nonces = {key: expiry for key, expiry in self._nonces.items() if expiry > now}
             key = f"{device_id}:{nonce}"
             if key in self._nonces:
-                raise TransferProtocolError(TransferErrorCode.REPLAYED_REQUEST, "device request was already used")
+                raise TransferProtocolError(
+                    TransferErrorCode.REPLAYED_REQUEST, "device request was already used"
+                )
             self._nonces[key] = now + 2 * DEVICE_REQUEST_SKEW_SECONDS
             device = replace(device, last_seen_at=now)
             self._devices[device_id] = device
@@ -229,7 +303,11 @@ class DeviceRegistry:
         if self._path is None:
             return
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        body = json.dumps({"version": 1, "devices": [asdict(device) for device in self.devices()]}, indent=2, sort_keys=True)
+        body = json.dumps(
+            {"version": 1, "devices": [asdict(device) for device in self.devices()]},
+            indent=2,
+            sort_keys=True,
+        )
         descriptor, temporary = tempfile.mkstemp(dir=self._path.parent, prefix=".paired-devices-")
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
