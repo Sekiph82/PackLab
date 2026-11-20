@@ -118,7 +118,7 @@ def detect_markers(image: Any) -> DetectionBatch:
             detector = cv2.aruco.ArucoDetector(dictionary, parameters)
             raw_corners, raw_ids, _ = detector.detectMarkers(gray)
         else:
-            raw_corners, raw_ids, _ = cv2.aruco.detectMarkers(
+            raw_corners, raw_ids, _ = cv2.aruco.detectMarkers(  # type: ignore[attr-defined]
                 gray, dictionary, parameters=parameters
             )
     except MarkerPolicyError as error:

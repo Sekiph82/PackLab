@@ -14,7 +14,10 @@ from packlab_core.design_profile_fit import (
     ProfileTransitionKind,
     fit_design_profile,
 )
-from packlab_core.design_profile_zones import detect_design_profile_zones
+from packlab_core.design_profile_zones import (
+    detect_design_profile_zones,
+    override_design_profile_zones,
+)
 from packlab_core.fitting_strategy import (
     STRATEGY_CONTRACT,
     FittingStrategy,
@@ -239,3 +242,23 @@ def test_axis_strategy_must_match_profile_axis() -> None:
         RevolvedDesignModelError, match="revolve_profile_axis_must_match_z_strategy"
     ):
         _build((scan, wrong_axis, profile_fit, zones))
+
+
+def test_attributed_manual_zone_override_is_accepted_for_revolve() -> None:
+    scan, strategy, profile_fit, zones = _evidence()
+    override = override_design_profile_zones(
+        zones,
+        profile_fit,
+        expected_zone_revision_id=zones.revision_id,
+        expected_fit_id=profile_fit.fit_id,
+        boundaries=zones.boundaries,
+        actor_id="operator-1",
+        reason="Owner reviewed the zone partition.",
+        created_at_utc="2026-10-03T15:30:00Z",
+    )
+    assert override.review_required  # still flagged; only attribution makes it acceptable
+    *_, result = _build((scan, strategy, profile_fit, override))
+    assert result.feature_zone_revision_id == override.revision_id
+    unattributed = replace(override, actor_id=None)
+    with pytest.raises(RevolvedDesignModelError):
+        _build((scan, strategy, profile_fit, unattributed))

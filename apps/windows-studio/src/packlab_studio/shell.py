@@ -16,6 +16,7 @@ from .capture_inbox import CaptureInboxView
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .engineering_export import DesignModelExportSource, DestinationProvider
 from .jobs import JobManager
+from .measure_view import MeasureDesignView
 from .navigation import (
     NavigationController,
     NavigationPanel,
@@ -135,6 +136,10 @@ class StudioMainWindow(QMainWindow):
             design_model_export_source_provider=design_model_export_source_provider,
             export_destination_provider=export_destination_provider,
         )
+        measure = self.route_stack.views[Route.MEASURE_DESIGN]
+        if self.scan_master_request_provider is None and isinstance(measure, MeasureDesignView):
+            # Editor > Promote uses the cleaned object selection from Measure & Design.
+            self.scan_master_request_provider = measure.promotion_request
         editor = self.route_stack.views[Route.EDITOR]
         if isinstance(editor, ScanMasterEditorView):
             editor.promotion_requested.connect(self._promote_scan_master_from_editor)

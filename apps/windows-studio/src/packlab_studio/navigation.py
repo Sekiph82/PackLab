@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from .capture_inbox import CaptureInboxView
 from .engineering_export import EngineeringExportView
 from .mask_correction import MaskCorrectionView
+from .measure_view import MeasureDesignView
 from .model_viewer import ModelViewerView
 from .packaging_library_browser import PackagingLibraryBrowserService, PackagingLibraryBrowserView
 from .receiver_session import ReceiverSession
@@ -37,6 +38,7 @@ class Route(StrEnum):
     EXPORTS = "exports"
     SETTINGS = "settings"
     MODEL_VIEWER = "model-viewer"
+    MEASURE_DESIGN = "measure-design"
 
 
 class NavigationError(ValueError):
@@ -192,6 +194,8 @@ class RouteStack(QStackedWidget):
                 )
             elif route is Route.MODEL_VIEWER:
                 view = ModelViewerView()
+            elif route is Route.MEASURE_DESIGN:
+                view = MeasureDesignView(project_manager)
             elif route is Route.MASK_CORRECTION:
                 view = MaskCorrectionView()
             elif route is Route.SETTINGS:

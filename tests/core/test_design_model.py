@@ -226,3 +226,13 @@ def test_deleted_or_replaced_feature_reference_fails_without_retargeting() -> No
     )
     with pytest.raises(DesignModelError, match="feature_reference_stale_or_deleted"):
         resolve_design_model_feature(revision, old.feature_id)
+
+
+def test_project_id_may_be_a_uuid_starting_with_a_digit() -> None:
+    import re
+
+    from packlab_core import design_model
+
+    assert design_model._PROJECT_ID.fullmatch("0a6b5b12-18f4-4e8a-9d0d-62fe7116212a")
+    assert not design_model._PROJECT_ID.fullmatch("-bad")
+    assert re.fullmatch(design_model._ID, "0abc") is None  # other ids keep their rule

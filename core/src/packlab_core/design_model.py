@@ -22,6 +22,8 @@ _REVISION_PREFIX = "design-model:"
 _FEATURE_PREFIX = "packlab-feature:"
 _DEFERRED = "DEFERRED_OWNER_VALIDATION"
 _ID = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
+# Project ids are canonical UUIDs, which may start with a digit.
+_PROJECT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 type _JSONScalar = str | int | float | bool | None
 
 
@@ -269,7 +271,8 @@ class DesignModelRevision:
     standalone_root: StandaloneDesignGeometryRoot | None = None
 
     def __post_init__(self) -> None:
-        _identifier(self.project_id, "project_id")
+        if not isinstance(self.project_id, str) or not _PROJECT_ID.fullmatch(self.project_id):
+            raise DesignModelError("project_id_invalid")
         if not isinstance(self.package_family, PackageFamily):
             raise DesignModelError("package_family_invalid")
         if not isinstance(self.parameters, tuple) or any(

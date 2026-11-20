@@ -1,0 +1,548 @@
+"""Measure & Design route: object-only, scale, mm measurements, Scan Master, Design Model."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import uuid
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+from PySide6.QtCore import QSettings, Qt
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
+
+from . import measure_design as md
+from .model_viewer import MODEL_FILTER, POINT_DISPLAY_BUDGET, ModelViewerView
+from .scan_master_promotion import ScanMasterPromotionAction, ScanMasterPromotionRequest
+from .viewport import MeshGeometry, PointCloudGeometry, SceneObjectKind, ViewportService
+
+BAR_SETTING = "calibration/mat_bar_measured_mm"
+_DESIGN_COLOR = "design"
+
+
+def _display(points: np.ndarray) -> tuple[tuple[float, float, float], ...]:
+    """Normalized z-up -> viewer y-up."""
+
+    return tuple((float(x), float(z), float(-y)) for x, y, z in points)
+
+
+def _colors(colors: np.ndarray | None, count: int) -> tuple[tuple[int, int, int], ...]:
+    if colors is None or len(colors) != count:
+        return ()
+    values = np.clip(np.asarray(colors) * 255, 0, 255).astype(int)
+    return tuple((int(r), int(g), int(b)) for r, g, b in values)
+
+
+class MeasureDesignView(QWidget):
+    """Buttons call ``measure_design``; core owns every authority decision."""
+
+    def __init__(
+        self,
+        project_manager: Any = None,
+        *,
+        file_chooser: Callable[[QWidget], str] | None = None,
+        save_chooser: Callable[[QWidget, str], str] | None = None,
+        settings: QSettings | None = None,
+    ) -> None:
+        super().__init__()
+        self.setObjectName("packlab.view.measure-design")
+        self.project_manager = project_manager
+        self._choose_file = file_chooser or (
+            lambda parent: QFileDialog.getOpenFileName(
+                parent, "Open built model", "", MODEL_FILTER
+            )[0]
+        )
+        self._choose_save = save_chooser or (
+            lambda parent, name: QFileDialog.getSaveFileName(parent, "Save", name)[0]
+        )
+        self.settings = settings or QSettings()
+        self.model: md.LoadedModel | None = None
+        self.mesh_model: md.LoadedModel | None = None
+        self.cameras: tuple[md.CameraPose, ...] = ()
+        self.workspace: tuple[Path, Path] | None = None
+        self.isolation: md.Isolation | None = None
+        self.scale: md.ScaleResult | None = None
+        self.frame: md.Frame | None = None
+        self.measurements: md.Measurements | None = None
+        self.scan_master: Any = None
+        self.design: md.DesignState | None = None
+        self.saved_design_path: Path | None = None
+        self._companion: Path | None = None
+
+        self.viewer = ModelViewerView()
+        self.viewer.open_button.hide()
+
+        def button(text: str, name: str, slot: Callable[[], object]) -> QPushButton:
+            widget = QPushButton(text)
+            widget.setObjectName(f"packlab.measure.{name}")
+            widget.clicked.connect(slot)
+            return widget
+
+        self.open_button = button("Open built model…", "open", self.open_model)
+        self.isolate_button = button("1. Isolate object", "isolate", self.isolate)
+        self.bar_mm = QDoubleSpinBox()
+        self.bar_mm.setRange(80.0, 120.0)
+        self.bar_mm.setDecimals(2)
+        self.bar_mm.setSuffix(" mm")
+        self.bar_mm.setValue(float(str(self.settings.value(BAR_SETTING, md.MAT_REFERENCE_BAR_MM))))
+        self.bar_mm.valueChanged.connect(lambda value: self.settings.setValue(BAR_SETTING, value))
+        self.marker_button = button(
+            "2. Scale from mat markers", "marker-scale", self.scale_from_markers
+        )
+        self.point_a = QLineEdit()
+        self.point_b = QLineEdit()
+        self.known_mm = QDoubleSpinBox()
+        self.known_mm.setRange(0.0, 5000.0)
+        self.known_mm.setDecimals(2)
+        self.known_mm.setSuffix(" mm")
+        self.manual_button = button("Use manual reference", "manual-scale", self.scale_manually)
+        self.measure_button = button("3. Measure (mm)", "measure", self.measure)
+        self.report_button = button("Export dimension report…", "report", self.export_report)
+        self.actor = QLineEdit(os.environ.get("USERNAME") or os.environ.get("USER") or "owner")
+        self.reason = QLineEdit("Isolated, scaled jar from the built model.")
+        self.promote_button = button("Promote Scan Master", "promote", self.promote)
+        self.owner_review = QCheckBox("Owner review: accept partial scan / straight jar")
+        self.fit_button = button("4. Fit Design Model", "fit", self.fit_design)
+        self.height_mm = QDoubleSpinBox()
+        self.diameter_mm = QDoubleSpinBox()
+        for spin in (self.height_mm, self.diameter_mm):
+            spin.setRange(1.0, 2000.0)
+            spin.setDecimals(2)
+            spin.setSuffix(" mm")
+        self.apply_button = button("Apply dimensions", "apply", self.apply_dimensions)
+        self.save_button = button("Save Design Model revision", "save", self.save_design)
+        self.results = QLabel("Open the built model (dense PLY or textured OBJ).")
+        self.results.setObjectName("packlab.measure.results")
+        self.results.setWordWrap(True)
+        self.results.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.status = QLabel("")
+        self.status.setObjectName("packlab.measure.status")
+        self.status.setWordWrap(True)
+
+        scale_box = QGroupBox("Scale and upright")
+        scale_form = QFormLayout(scale_box)
+        scale_form.addRow("Mat print check: 100 mm bar measures", self.bar_mm)
+        scale_form.addRow(self.marker_button)
+        scale_form.addRow("Manual point A (model units x, y, z)", self.point_a)
+        scale_form.addRow("Manual point B", self.point_b)
+        scale_form.addRow("Known A-B length", self.known_mm)
+        scale_form.addRow(self.manual_button)
+        scan_box = QGroupBox("Scan Master")
+        scan_form = QFormLayout(scan_box)
+        scan_form.addRow("Actor", self.actor)
+        scan_form.addRow("Reason", self.reason)
+        scan_form.addRow(self.promote_button)
+        design_box = QGroupBox("Design Model (editable)")
+        design_form = QFormLayout(design_box)
+        design_form.addRow(self.owner_review)
+        design_form.addRow(self.fit_button)
+        design_form.addRow("Height", self.height_mm)
+        design_form.addRow("Diameter", self.diameter_mm)
+        design_form.addRow(self.apply_button)
+        design_form.addRow(self.save_button)
+
+        controls = QWidget()
+        column = QVBoxLayout(controls)
+        for widget in (
+            self.open_button,
+            self.isolate_button,
+            scale_box,
+            self.measure_button,
+            self.report_button,
+            scan_box,
+            design_box,
+        ):
+            column.addWidget(widget)
+        column.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidget(controls)
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumWidth(380)
+        layout = QHBoxLayout(self)
+        layout.addWidget(scroll)
+        right = QVBoxLayout()
+        right.addWidget(self.status)
+        right.addWidget(self.viewer, 1)
+        right.addWidget(self.results)
+        layout.addLayout(right, 1)
+        self._sync_buttons()
+
+    # ------------------------------------------------------------ helpers
+
+    def _sync_buttons(self) -> None:
+        self.isolate_button.setEnabled(self.model is not None)
+        scaled_ready = self.isolation is not None
+        self.marker_button.setEnabled(
+            scaled_ready and bool(self.cameras) and self.workspace is not None
+        )
+        self.manual_button.setEnabled(scaled_ready)
+        self.measure_button.setEnabled(self.frame is not None)
+        self.report_button.setEnabled(self.measurements is not None)
+        self.promote_button.setEnabled(self.frame is not None)
+        self.fit_button.setEnabled(self.scan_master is not None)
+        for widget in (self.height_mm, self.diameter_mm, self.apply_button, self.save_button):
+            widget.setEnabled(self.design is not None)
+
+    def _run(self, label: str, action: Callable[[], str]) -> bool:
+        QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            # ponytail: runs on the UI thread (marker scale ~10 s on 24 photos); move to
+            # JobManager when the Build-model job service lands.
+            self.status.setText(f"{label}: {action()}")
+            return True
+        except Exception as error:  # owner-facing: every core refusal is shown, not raised
+            self.status.setText(f"{label} failed: {error}")
+            return False
+        finally:
+            QGuiApplication.restoreOverrideCursor()
+            self._sync_buttons()
+
+    def _show(self, service: ViewportService) -> None:
+        self.viewer.service = service
+        self.viewer.fit()
+        self.viewer.status.setText(
+            "Drag to orbit, right-drag to pan, wheel to zoom. "
+            "Units: mm_unverified after scale, reconstruction units before."
+        )
+
+    def _project_id(self) -> str:
+        current = getattr(self.project_manager, "current", None)
+        return current.project_id if current is not None else str(uuid.UUID(int=0))
+
+    # ------------------------------------------------------------ steps
+
+    def open_model(self) -> None:
+        chosen = self._choose_file(self)
+        if chosen:
+            self.load(Path(chosen))
+
+    def load(self, path: Path) -> bool:
+        def action() -> str:
+            self.model = md.load_model(path)
+            companion = md.companion_mesh_path(path) if self.model.triangles is None else None
+            self.mesh_model = self.model if self.model.triangles is not None else None
+            self._companion = companion
+            self.workspace = md.find_colmap_workspace(path)
+            self.cameras = md.read_colmap_cameras(self.workspace[1]) if self.workspace else ()
+            self.isolation = self.scale = self.frame = self.measurements = None
+            self.scan_master = self.design = None
+            stride = max(1, len(self.model.points) // POINT_DISPLAY_BUDGET)
+            service = ViewportService(self.viewer.service.adapter)
+            service.add_geometry(
+                "model",
+                SceneObjectKind.SCAN_MESH,
+                PointCloudGeometry(
+                    tuple(map(tuple, self.model.points[::stride].tolist())),
+                    _colors(
+                        None if self.model.colors is None else self.model.colors[::stride],
+                        len(self.model.points[::stride]),
+                    ),
+                ),
+            )
+            self._show(service)
+            kind = "mesh" if self.model.triangles is not None else "point cloud"
+            cams = (
+                f"{len(self.cameras)} COLMAP cameras" if self.cameras else "no camera poses found"
+            )
+            self.results.setText(
+                f"{path.name}: {len(self.model.points):,}-point {kind}, {cams}. "
+                "Units: reconstruction units until scale is set."
+            )
+            return "loaded"
+
+        return self._run("Open", action)
+
+    def isolate(self) -> None:
+        model = self.model
+        if model is None:
+            return
+
+        def action() -> str:
+            self.isolation = isolation = md.isolate_object(model, self.cameras)
+            self.scale = self.frame = self.measurements = None
+            upright = md.upright_matrix(isolation)
+            points = model.points[isolation.object_indices] @ upright[:3, :3].T + upright[:3, 3]
+            service = ViewportService(self.viewer.service.adapter)
+            colors = None if model.colors is None else model.colors[isolation.object_indices]
+            service.add_geometry(
+                "object",
+                SceneObjectKind.SCAN_MESH,
+                PointCloudGeometry(_display(points), _colors(colors, len(points))),
+            )
+            self._show(service)
+            bottom = isolation.center
+            top = isolation.center + isolation.normal * isolation.top
+            self.point_a.setText(", ".join(f"{value:.6g}" for value in bottom))
+            self.point_b.setText(", ".join(f"{value:.6g}" for value in top))
+            self.results.setText(
+                f"Object only: {len(isolation.object_indices):,} points kept of "
+                f"{len(model.points):,}. Method {isolation.method}: "
+                + "; ".join(isolation.notes)
+                + ". Manual points prefilled with the object's base and top along its axis."
+            )
+            return "isolated"
+
+        self._run("Isolate", action)
+
+    def _set_scale(self, scale: md.ScaleResult) -> str:
+        assert self.model is not None and self.isolation is not None
+        self.scale = scale
+        self.frame = md.build_frame(
+            self.model, self.isolation, scale, project_id=self._project_id()
+        )
+        self.measurements = None
+        points = self.frame.apply(self.model.points[self.isolation.object_indices])
+        service = ViewportService(self.viewer.service.adapter)
+        colors = (
+            None if self.model.colors is None else self.model.colors[self.isolation.object_indices]
+        )
+        service.add_geometry(
+            "object",
+            SceneObjectKind.SCAN_MESH,
+            PointCloudGeometry(_display(points), _colors(colors, len(points))),
+        )
+        self._show(service)
+        relative = 100 * scale.uncertainty / scale.mm_per_unit
+        self.results.setText(
+            f"Scale source: {scale.source} — {scale.mm_per_unit:.4g} mm per unit "
+            f"(± {relative:.2g} %), {scale.details}. Upright: base-plane normal is +Z. "
+            "State METRIC_UNVERIFIED (no physical validation)."
+        )
+        return scale.source
+
+    def scale_from_markers(self) -> None:
+        model, isolation, workspace = self.model, self.isolation, self.workspace
+        if model is None or isolation is None or workspace is None:
+            return
+
+        def action() -> str:
+            revision = "camera-" + md._sha256_file(workspace[1] / "images.bin")[:40]
+            return self._set_scale(
+                md.estimate_marker_scale(
+                    model,
+                    isolation,
+                    self.cameras,
+                    workspace[0],
+                    revision,
+                    print_correction=self.bar_mm.value() / md.MAT_REFERENCE_BAR_MM,
+                )
+            )
+
+        self._run("Marker scale", action)
+
+    def scale_manually(self) -> None:
+        model = self.model
+        if model is None or self.isolation is None:
+            return
+
+        def parse(text: str) -> tuple[float, float, float]:
+            values = [float(item) for item in re.split(r"[,\s]+", text.strip()) if item]
+            if len(values) != 3:
+                raise md.MeasureDesignError("points need three numbers: x, y, z")
+            return values[0], values[1], values[2]
+
+        self._run(
+            "Manual scale",
+            lambda: self._set_scale(
+                md.manual_scale(
+                    model,
+                    parse(self.point_a.text()),
+                    parse(self.point_b.text()),
+                    self.known_mm.value(),
+                )
+            ),
+        )
+
+    def measure(self) -> None:
+        frame, model, isolation = self.frame, self.model, self.isolation
+        if frame is None or model is None or isolation is None:
+            return
+
+        def action() -> str:
+            self.measurements = result = md.measure(frame, model, isolation)
+            lines = [f"{item.name.replace('_', ' ')}: {item.display}" for item in result.dimensions]
+            lines.append(
+                f"bounding box W×D×H: {result.bounding.width:.1f} × {result.bounding.depth:.1f} × "
+                f"{result.bounding.height:.1f} mm_unverified"
+            )
+            lines.extend(result.notes)
+            lines.append(f"scale source: {frame.scale.source}; METRIC_UNVERIFIED")
+            self.results.setText("\n".join(lines))
+            return "measured"
+
+        self._run("Measure", action)
+
+    def export_report(self) -> None:
+        if self.measurements is None or self.frame is None:
+            return
+        target = self._choose_save(self, "dimension-report.json")
+        if not target:
+            return
+        measurements, frame = self.measurements, self.frame
+
+        def action() -> str:
+            current = getattr(self.project_manager, "current", None)
+            report = md.dimension_report(
+                measurements,
+                frame,
+                project_id=self._project_id(),
+                project_revision=f"r{current.revision}" if current is not None else "r0",
+            )
+            json_path, markdown_path = md.write_dimension_report(report, Path(target))
+            return f"wrote {json_path.name} and {markdown_path.name}"
+
+        self._run("Report", action)
+
+    def promotion_request(self, actor_id: str, reason: str) -> ScanMasterPromotionRequest | None:
+        """Shell ``scan_master_request_provider``: the cleaned object selection."""
+
+        if self.model is None or self.isolation is None or self.frame is None:
+            return None
+        if self.mesh_model is None:
+            companion = self._companion
+            if companion is None:
+                raise md.MeasureDesignError("promotion needs a mesh; open the built OBJ/PLY mesh")
+            self.mesh_model = md.load_model(companion)
+        if self.frame.geometry.project_id != self._project_id():
+            self.frame = md.build_frame(
+                self.model, self.isolation, self.frame.scale, project_id=self._project_id()
+            )
+        return md.promotion_request(
+            project_id=self._project_id(),
+            model=self.model,
+            mesh_model=self.mesh_model,
+            isolation=self.isolation,
+            frame=self.frame,
+            actor_id=actor_id,
+            reason=reason,
+        )
+
+    def promote(self) -> None:
+        manager = self.project_manager
+        if manager is None or getattr(manager, "current", None) is None:
+            self.status.setText("Promote: open or create a project first (File menu).")
+            return
+
+        def action() -> str:
+            request = self.promotion_request(self.actor.text().strip(), self.reason.text().strip())
+            if request is None:
+                raise md.MeasureDesignError("isolate and scale the object first")
+            revision = ScanMasterPromotionAction(manager).promote(
+                request, expected_project_revision=manager.current.revision
+            )
+            self.scan_master = revision
+            self._show_scan_master()
+            return (
+                f"Scan Master {revision.revision_id[:24]}… selected; "
+                f"{len(revision.mesh.triangles):,} triangles; DEFERRED_OWNER_VALIDATION"
+            )
+
+        self._run("Promote", action)
+
+    def _show_scan_master(self, design: MeshGeometry | None = None) -> None:
+        service = ViewportService(self.viewer.service.adapter)
+        if self.measurements is not None:
+            points = self.measurements.points_mm[
+                :: max(1, len(self.measurements.points_mm) // POINT_DISPLAY_BUDGET)
+            ]
+            service.add_geometry(
+                "scan", SceneObjectKind.SCAN_MESH, PointCloudGeometry(_display(points))
+            )
+        elif self.scan_master is not None:
+            vertices = np.asarray(self.scan_master.mesh.vertices)
+            service.add_geometry(
+                "scan", SceneObjectKind.SCAN_MESH, PointCloudGeometry(_display(vertices))
+            )
+        if design is not None:
+            service.add_geometry(_DESIGN_COLOR, SceneObjectKind.DESIGN_MODEL, design)
+            service.select(_DESIGN_COLOR)
+        self._show(service)
+
+    def _design_geometry(self) -> MeshGeometry:
+        assert self.design is not None
+        mesh = self.design.preview_mesh()
+        return MeshGeometry(_display(np.asarray(mesh.vertices)), mesh.triangles)
+
+    def fit_design(self) -> None:
+        scan_master = self.scan_master
+        if scan_master is None:
+            return
+
+        def action() -> str:
+            self.design = md.fit_design_model(
+                scan_master,
+                actor_id=self.actor.text().strip() or "owner",
+                owner_review=self.owner_review.isChecked(),
+            )
+            self.height_mm.setValue(self.design.height)
+            self.diameter_mm.setValue(self.design.diameter)
+            self._show_scan_master(self._design_geometry())
+            notes = "; ".join(self.design.notes)
+            return (
+                f"Design Model {self.design.model.revision_id[:26]}… fitted "
+                f"(H {self.design.height:.2f}, Ø {self.design.diameter:.2f} mm_unverified)"
+                + (f"; {notes}" if notes else "")
+                + ". Overlay: yellow = Design Model, cyan = scan."
+            )
+
+        self._run("Fit Design Model", action)
+
+    def apply_dimensions(self) -> None:
+        design = self.design
+        if design is None:
+            return
+
+        def action() -> str:
+            self.design = md.edit_dimensions(
+                design,
+                height=self.height_mm.value(),
+                diameter=self.diameter_mm.value(),
+                actor_id=self.actor.text().strip() or "owner",
+            )
+            self._show_scan_master(self._design_geometry())
+            return (
+                f"revision {self.design.model.revision_id[:26]}… "
+                f"H {self.design.height:.2f} mm, Ø {self.design.diameter:.2f} mm; Scan Master unchanged"
+            )
+
+        self._run("Edit dimensions", action)
+
+    def save_design(self) -> None:
+        design = self.design
+        if design is None:
+            return
+        name = design.model.revision_id.split(":")[-1][:32] + ".json"
+        layout = getattr(self.project_manager, "layout", None)
+
+        def action() -> str:
+            if layout is not None:
+                target = layout.path("derived", f"design_model/{name}")
+                target.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                chosen = self._choose_save(self, f"design-model-{name}")
+                if not chosen:
+                    return "cancelled"
+                target = Path(chosen)
+            with target.open("x", encoding="utf-8") as handle:  # revisions are append-only
+                json.dump(design.as_dict(), handle, sort_keys=True, indent=1, default=str)
+            self.saved_design_path = target
+            return f"saved {target}"
+
+        self._run("Save Design Model", action)
