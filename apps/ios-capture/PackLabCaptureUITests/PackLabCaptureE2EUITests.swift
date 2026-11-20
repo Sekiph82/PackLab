@@ -54,6 +54,9 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         XCTAssertFalse(app.textFields["pairing.code"].exists, "automatic sync must not ask to pair again")
         waitForLabel(status, equal: "Delivered to PackLab", timeout: 240)
         shot("history-scan2-delivered-automatically")
+        // Clean History: only the two scans (no exports folder row) and no problem labels.
+        XCTAssertFalse(app.staticTexts["Unavailable scan"].exists, "a non-session folder is listed in History")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Problem:'")).count, 0, "History rows report problems")
     }
 
     // MARK: Steps

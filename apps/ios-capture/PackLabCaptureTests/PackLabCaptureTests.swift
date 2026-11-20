@@ -1643,6 +1643,36 @@ final class PackLabCaptureTests: XCTestCase {
         if case .blocked(let reason) = try await store.reopen(requiredSourceIDs: []) { XCTAssertEqual(reason, "missing_or_corrupt_record") } else { XCTFail("missing record must block reopen") }
     }
 
+    /// Field issue (History on a real iPhone): the `exports/` folder of finalized packages was
+    /// listed as an "Unavailable scan", and sessions showed "missing_preview" because nothing
+    /// wrote a thumbnail. Sessions are now recognised by structure and the thumbnail is
+    /// derived from the first accepted photo.
+    func testHistoryIgnoresExportsFolderAndDerivesThumbnailFromFirstAcceptedPhoto() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let exports = root.appendingPathComponent("exports", isDirectory: true)
+        try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: exports.appendingPathComponent("old.packscan"))
+        let layout = SessionStorageLayout(root: root, sessionID: "s1")
+        let store = ScanSessionStore(layout: layout)
+        try await store.create(NewScanDraft(sessionID: "s1", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        let record = AcceptedCaptureRecord(captureID: "p", sequence: 0, sourceFilename: "p.heic", metadataFilename: "p.json")
+        let jpeg = try XCTUnwrap(makeJPEGFixture(width: 64, height: 48))
+        try await store.storeAcceptedCapture(source: jpeg, record: record, metadata: JSONEncoder().encode(record), state: JSONEncoder().encode(PersistedSessionState(sessionID: "s1", nextSequence: 1, epoch: 0, acceptedIDs: ["p"])))
+
+        let entries = await LocalScanHistoryStore(root: root).load()
+        XCTAssertEqual(entries.map(\.id), ["s1"])
+        let entry = try XCTUnwrap(entries.first)
+        XCTAssertNil(entry.degradedReason)
+        let preview = try XCTUnwrap(entry.previewPath)
+        XCTAssertEqual(URL(fileURLWithPath: preview).lastPathComponent, "p-thumbnail.jpg")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: preview))
+        // The source photo is untouched; the thumbnail is a separate derivative.
+        XCTAssertEqual(try Data(contentsOf: layout.images.appendingPathComponent("p.heic")), jpeg)
+        let candidates = await SessionDiscoveryService(root: root).discover()
+        XCTAssertEqual(candidates.map(\.id), ["s1"])
+    }
+
     func testHistoryMarksCorruptFinalizationAsDegraded() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
