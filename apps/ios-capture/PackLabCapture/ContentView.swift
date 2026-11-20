@@ -710,6 +710,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
 struct ContentView: View {
     @State private var showPoseDebug = false
     @State private var showNewScan = false
+    @State private var scanStartError: String?
     @State private var showResume = false
     @State private var showActiveProtocol = false
     @State private var showHistory = false
@@ -735,6 +736,12 @@ struct ContentView: View {
                     if let healthMessage = runtime.healthMessage {
                         Text(healthMessage).font(.caption).multilineTextAlignment(.center)
                             .padding(8).background(.black.opacity(0.72), in: Capsule()).foregroundStyle(.white).padding(.top)
+                    }
+                    if let scanStartError {
+                        Text(scanStartError).font(.caption).multilineTextAlignment(.center)
+                            .padding(8).background(.red.opacity(0.8), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
+                            .onTapGesture { self.scanStartError = nil }
+                            .accessibilityHint("Tap to dismiss")
                     }
                     if !runtime.cameraRecoveryMessage.isEmpty {
                         VStack(spacing: 6) {
@@ -820,7 +827,7 @@ struct ContentView: View {
                         Text(runtime.tracking.message).font(.caption)
                             .padding(8).background(.black.opacity(0.65), in: Capsule()).foregroundStyle(.white).padding()
                     } else {
-                        Text("PackLab Capture").font(.headline)
+                        Text(runtime.m04CoverageActive ? "Use Manual Capture to take photos" : "Tap New Scan to start a scan").font(.headline)
                             .padding(8).background(.black.opacity(0.65), in: Capsule()).foregroundStyle(.white).padding()
                     }
                 }
@@ -856,7 +863,7 @@ struct ContentView: View {
                 }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission, readiness: runtime.newScanReadiness) { draft in
-                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))) } catch { } }
+                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))); scanStartError = nil } catch { scanStartError = "Scan could not start: \(error.localizedDescription)" } }
                 showNewScan = false
             } } }
             .sheet(isPresented: $showHistory) { NavigationStack { LocalScanHistoryView(root: ContentView.sessionRoot) } }
