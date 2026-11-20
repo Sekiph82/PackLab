@@ -211,6 +211,7 @@ class JobPanel(QListWidget):
     def refresh(self, _job_id: str | None = None) -> None:
         self.clear()
         for job in self.manager.jobs():
-            item = QListWidgetItem(f"{job.title} [{job.state.value}] {job.progress:.0%}")
+            text = f"{job.title} [{job.state.value}] {job.progress:.0%}"
+            item = QListWidgetItem(f"{text}  {job.message}" if job.message else text)
             item.setData(0x0100, job.job_id)
             self.addItem(item)

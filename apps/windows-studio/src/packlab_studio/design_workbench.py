@@ -68,7 +68,10 @@ from packlab_core.design_operations import (
 )
 from packlab_core.design_profile import DesignProfile, ProfilePoint, create_design_profile
 from packlab_core.design_serialization import (
+    DOCUMENT_CONTRACT,
     MAX_DOCUMENT_BYTES,
+    STANDALONE_DOCUMENT_CONTRACT,
+    _canonical_json,
     deserialize_design_model,
     serialize_design_model,
 )
@@ -105,6 +108,9 @@ from .engineering_export import DesignModelExportSource, export_dimension_sheet
 from .version import current_build_info
 
 DESIGN_DOCUMENT_SUFFIX = ".packlab-design.json"
+# Measure & Design saves revisions here (project "derived" area) with this contract.
+PROJECT_DESIGN_MODEL_DIR = Path("derived") / "design_model"
+STUDIO_REVISION_CONTRACT = "packlab.studio-design-model-revision.v1"
 # Labels are refused on regions curving tighter than this (|k| <= 0.05/mm, radius >= 20 mm).
 LABEL_MAXIMUM_ABSOLUTE_CURVATURE_PER_MM = 0.05
 _DEFAULT_PROFILE_SAMPLES = 257
@@ -233,6 +239,8 @@ def load_design_model_session(
         part_name = part_name or path.name.removesuffix(DESIGN_DOCUMENT_SUFFIX).removesuffix(
             ".json"
         )
+    if b'"revolved_fit"' in data:  # Measure & Design project revision, not a document
+        data = _document_from_studio_revision(data)
     document = deserialize_design_model(data)
     revolves = [item for item in document.operations if item.kind is OperationKind.REVOLVE]
     if len(revolves) != 1:
@@ -260,6 +268,80 @@ def load_design_model_session(
         hashlib.sha256(data).hexdigest(),
         name[:80],
     )
+
+
+def _document_from_studio_revision(data: bytes) -> bytes:
+    """Canonical document for a Measure & Design project revision (derived/design_model).
+
+    The record keeps the fitted revolve profile plus the edited overall dimensions; the
+    profile is scaled exactly like that route's preview (radial = D/D_fit, axial = H/H_fit)
+    and revolved for the latest model revision. The model itself is re-validated by the
+    strict core document parser.
+    """
+    try:
+        record = json.loads(data)
+        model_dict = record["model"]
+        fit = record["revolved_fit"]
+        profile_dict = fit["profile"]
+        operation_dict = fit["operation"]
+        dims = record["overall_dimensions_mm_unverified"]
+        fitted = record["fitted_from_scan"]
+        radial = float(dims["diameter"]) / float(fitted["diameter"])
+        axial = float(dims["height"]) / float(fitted["height"])
+    except (ValueError, KeyError, TypeError, ZeroDivisionError) as error:
+        raise DesignWorkbenchError("The project Design Model revision is unreadable.") from error
+    if record.get("contract") != STUDIO_REVISION_CONTRACT or not (
+        math.isfinite(radial) and math.isfinite(axial) and radial > 0 and axial > 0
+    ):
+        raise DesignWorkbenchError("The project Design Model revision is unreadable.")
+    points = tuple(
+        ProfilePoint(
+            float(point["axial"]) * axial,
+            float(point["radius"]) * radial,
+            None if point["tangent"] is None else float(point["tangent"]) * radial / axial,
+        )
+        for point in profile_dict["control_points"]
+    )
+    profile = create_design_profile(points, ScaleState(profile_dict["scale_state"]))
+    body = {
+        "contract": (
+            STANDALONE_DOCUMENT_CONTRACT
+            if model_dict.get("contract") == "packlab.design-model.v2"
+            else DOCUMENT_CONTRACT
+        ),
+        "model": model_dict,
+        "profiles": [profile.as_dict()],
+        "cross_sections": [],
+        "operations": [],
+    }
+    envelope = {"body": body, "content_sha256": hashlib.sha256(_canonical_json(body)).hexdigest()}
+    model = deserialize_design_model(_canonical_json(envelope)).model
+    profile_feature, axis_feature = operation_dict["parent_feature_ids"]
+    operation = create_revolve_operation(
+        model,
+        profile,
+        profile_feature_id=profile_feature,
+        axis_feature_id=axis_feature,
+        axis_origin=_vector3(operation_dict["axis_origin"]),
+        axis_direction=_vector3(operation_dict["axis_direction"]),
+        angle_degrees=float(operation_dict["angle_degrees"]),
+    )
+    return serialize_design_model(model, profiles=(profile,), operations=(operation,))
+
+
+def _vector3(value: object) -> tuple[float, float, float]:
+    if not isinstance(value, list) or len(value) != 3:
+        raise DesignWorkbenchError("The project Design Model revision is unreadable.")
+    return (float(value[0]), float(value[1]), float(value[2]))
+
+
+def latest_project_design_model(project_root: Path) -> Path | None:
+    """Newest Design Model revision saved by Measure & Design in the open project."""
+    folder = project_root / PROJECT_DESIGN_MODEL_DIR
+    if not folder.is_dir():
+        return None
+    files = [path for path in folder.glob("*.json") if path.is_file()]
+    return max(files, key=lambda path: path.stat().st_mtime_ns, default=None)
 
 
 def nominal_jar_design_document(
@@ -772,6 +854,7 @@ __all__ = [
     "LabelZoneSuggestion",
     "MockupJob",
     "find_blender",
+    "latest_project_design_model",
     "load_design_model_session",
     "nominal_jar_design_document",
 ]

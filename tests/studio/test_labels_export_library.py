@@ -247,3 +247,60 @@ def test_library_asset_sku_backup_restore_and_contact_sheet(window, jar_file, tm
     _click(bar, "packlab.library.contact-sheet")
     assert bar.status.text().startswith("Contact sheet written"), bar.status.text()
     assert list(sheets.glob("*/contact-sheet.png"))
+
+
+def _studio_revision_record(jar_file: Path, *, height: float) -> dict:
+    """Same shape Measure & Design saves under the project's derived/design_model."""
+    session = load_design_model_session(jar_file)
+    return {
+        "contract": "packlab.studio-design-model-revision.v1",
+        "design_model_revision_id": session.model.revision_id,
+        "revision_history": [session.model.revision_id],
+        "overall_dimensions_mm_unverified": {"height": height, "diameter": 85.0},
+        "fitted_from_scan": {"height": 50.0, "diameter": 85.0},
+        "model": session.model.as_dict(),
+        "revolved_fit": {
+            "profile": session.profile.as_dict(),
+            "operation": session.operation.as_dict(),
+        },
+        "notes": [],
+        "scan_master_replaced": False,
+        "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
+        "mold_use_authorized": False,
+    }
+
+
+def test_project_design_model_revision_feeds_labels_and_exports(window, jar_file, tmp_path):
+    window.new_project(tmp_path / "project", "Jar")
+    folder = window.project_manager.layout.root / "derived" / "design_model"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "abc.json").write_text(
+        json.dumps(_studio_revision_record(jar_file, height=60.0)), encoding="utf-8"
+    )
+    labels = window.route_stack.views[Route.LABELS]
+    _click(labels, "packlab.labels.use-project-design-model")
+    assert "height 60.0 mm" in labels.model_summary.text(), labels.status.text()
+    exports = window.route_stack.views[Route.EXPORTS]
+    exports.source_selector.setCurrentIndex(
+        exports.source_selector.findData(ExportSourceKind.DESIGN_MODEL.value)
+    )
+    assert "STEP" in exports.available_formats.text()
+
+
+def test_project_revision_is_opened_automatically_when_a_project_opens(app, jar_file, tmp_path):
+    root = tmp_path / "project"
+    first = StudioMainWindow(packaging_library_root=tmp_path / "lib1")
+    first.new_project(root, "Jar")
+    folder = root / "derived" / "design_model"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "abc.json").write_text(
+        json.dumps(_studio_revision_record(jar_file, height=50.0)), encoding="utf-8"
+    )
+    first.close()
+    app.processEvents()
+    second = StudioMainWindow(packaging_library_root=tmp_path / "lib2")
+    second.open_project(root)
+    assert second.design_workbench.session is not None
+    assert second.design_workbench.export_source() is not None
+    second.close()
+    app.processEvents()

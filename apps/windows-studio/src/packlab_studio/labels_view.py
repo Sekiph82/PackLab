@@ -32,6 +32,7 @@ from .design_workbench import (
     LabelZoneEntry,
     LabelZoneSuggestion,
     MockupJob,
+    latest_project_design_model,
 )
 from .jobs import JobManager
 
@@ -82,10 +83,16 @@ class LabelsView(QWidget):
         self.model_summary.setObjectName("packlab.labels.model-summary")
         self.model_summary.setWordWrap(True)
         self.open_button = self._button("Open Design Model…", "open-design-model", self.open_model)
+        self.project_model_button = self._button(
+            "Use project Design Model", "use-project-design-model", self.use_project_model
+        )
         model_box = QGroupBox("Design Model", self)
         model_layout = QVBoxLayout(model_box)
         model_layout.addWidget(self.model_summary)
-        model_layout.addWidget(self.open_button)
+        model_row = QHBoxLayout()
+        model_row.addWidget(self.project_model_button)
+        model_row.addWidget(self.open_button)
+        model_layout.addLayout(model_row)
 
         self.kind = QComboBox(self)
         self.kind.setObjectName("packlab.labels.zone-kind")
@@ -221,6 +228,22 @@ class LabelsView(QWidget):
         if not path:
             return
         self._run(lambda: f"Opened {self.workbench.open_document(path).part_name}.")
+
+    def use_project_model(self, *, automatic: bool = False) -> None:
+        """Open the newest Design Model revision Measure & Design saved in the project."""
+        root = self.project_root()
+        latest = latest_project_design_model(root) if root is not None else None
+        if latest is None:
+            if not automatic:
+                self.status.setText(
+                    "No Design Model saved in this project yet (Measure & Design > Save)."
+                )
+            return
+        if automatic and self.workbench.session is not None:
+            return
+        self._run(
+            lambda: f"Opened project Design Model {self.workbench.open_document(latest).part_name}."
+        )
 
     def suggest_zone(self) -> None:
         def action() -> str:
@@ -409,8 +432,8 @@ class LabelsView(QWidget):
 __all__ = ["LabelsView", "install_design_workbench"]
 
 
-def install_design_workbench(window: StudioMainWindow) -> DesignWorkbench:
-    """Attach the Labels route, the Exports Design Model source and the library actions."""
+def install_design_workbench(window: StudioMainWindow) -> None:
+    """Connect the shared workbench to Exports, the library and the open project."""
     from .engineering_export import EngineeringExportView
     from .library_actions import LibraryActionsBar
     from .navigation import Route
@@ -419,31 +442,19 @@ def install_design_workbench(window: StudioMainWindow) -> DesignWorkbench:
         PackagingLibraryBrowserView,
     )
 
-    workbench = DesignWorkbench()
+    workbench = window.design_workbench
     manager = window.project_manager
-
-    def project_folder() -> Path | None:
-        layout = getattr(manager, "layout", None)
-        return layout.root if layout is not None else None
+    stack = window.route_stack
 
     def selected_scan_master() -> object:
         return manager.selected_scan_master_revision() if manager.current is not None else None
 
-    stack = window.route_stack
-    placeholder = stack.views[Route.LABELS]
-    view = LabelsView(workbench, job_manager=window.job_manager, project_root=project_folder)
-    index = stack.indexOf(placeholder)
-    stack.removeWidget(placeholder)
-    placeholder.deleteLater()
-    stack.insertWidget(index, view)
-    stack.views[Route.LABELS] = view
-
     exports = stack.views[Route.EXPORTS]
     if isinstance(exports, EngineeringExportView):
-        if exports.design_model_source_provider is None:
-            exports.design_model_source_provider = workbench.export_source
         workbench.changed.connect(exports.refresh_source)
-
+    labels = stack.views[Route.LABELS]
+    if isinstance(labels, LabelsView):
+        manager.add_listener(lambda _metadata: labels.use_project_model(automatic=True))
     library = stack.views[Route.LIBRARY]
     service = window.packaging_library_service
     if isinstance(library, PackagingLibraryBrowserView) and isinstance(
@@ -457,4 +468,6 @@ def install_design_workbench(window: StudioMainWindow) -> DesignWorkbench:
         library_layout = library.layout()
         if isinstance(library_layout, QVBoxLayout):
             library_layout.insertWidget(0, bar)
-    return workbench
+
+
+__all__ = ["LabelsView", "install_design_workbench"]
