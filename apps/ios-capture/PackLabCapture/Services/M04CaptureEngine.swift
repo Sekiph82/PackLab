@@ -1423,6 +1423,21 @@ public enum OrbitGuidance {
         (Double(azimuthIndex) + 0.5) * 360 / Double(configuration.azimuthBinCount)
     }
 
+    /// Egocentric dial: screen angle (degrees clockwise from the top, y down) at which an
+    /// azimuth is drawn so the operator's current azimuth sits at the bottom (180) and the
+    /// package is in the middle. Walking left (larger azimuth) then moves clockwise from the
+    /// bottom, i.e. toward screen-left. Without a live position azimuth 0 is at the bottom.
+    public static func dialScreenAngle(azimuth: Double, current: Double?) -> Double {
+        let angle = (azimuth - (current ?? 0) + 180).truncatingRemainder(dividingBy: 360)
+        return angle < 0 ? angle + 360 : angle
+    }
+
+    /// Unit vector for a dial screen angle in screen coordinates (x right, y down).
+    public static func dialUnitVector(screenAngle: Double) -> (x: Double, y: Double) {
+        let radians = screenAngle * Double.pi / 180
+        return (sin(radians), -cos(radians))
+    }
+
     /// Signed shortest turn from `from` to `to` in degrees, in (-180, 180].
     public static func signedDelta(from: Double, to: Double) -> Double {
         var delta = (to - from).truncatingRemainder(dividingBy: 360)
@@ -1518,8 +1533,9 @@ public struct CoverageGridView: View {
     }
 }
 
-/// Top-down orbit dial: the package in the middle, one wedge per azimuth bin of the shown
-/// ring (captured green, target blue), the live camera position as a white dot, and a
+/// Egocentric top-down orbit dial: the package in the middle, the operator's own position
+/// always at the bottom, one wedge per azimuth bin of the shown ring (captured green,
+/// target blue), the live camera position as a white dot, and a
 /// height ladder (high at the top) marking the current and target ring.
 public struct OrbitGuidanceDial: View {
     public let snapshot: OrbitCoverageSnapshot
@@ -1536,10 +1552,11 @@ public struct OrbitGuidanceDial: View {
                 let middle = CGPoint(x: size.width / 2, y: size.height / 2)
                 let outer = min(size.width, size.height) / 2 - 6
                 let inner = outer * 0.35
-                // Azimuth 0 at the top, increasing clockwise (see OrbitGuidance).
+                // Rotated so the operator's current azimuth is at the bottom (OrbitGuidance.dialScreenAngle).
+                let currentAzimuth = current?.azimuthDegrees
                 func point(_ degrees: Double, _ radius: CGFloat) -> CGPoint {
-                    let radians = degrees * .pi / 180
-                    return CGPoint(x: middle.x + radius * CGFloat(sin(radians)), y: middle.y - radius * CGFloat(cos(radians)))
+                    let unit = OrbitGuidance.dialUnitVector(screenAngle: OrbitGuidance.dialScreenAngle(azimuth: degrees, current: currentAzimuth))
+                    return CGPoint(x: middle.x + radius * CGFloat(unit.x), y: middle.y + radius * CGFloat(unit.y))
                 }
                 for index in 0..<bins {
                     let start = Double(index) * 360 / Double(bins), end = Double(index + 1) * 360 / Double(bins)

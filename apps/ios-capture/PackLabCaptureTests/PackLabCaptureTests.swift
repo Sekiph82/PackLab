@@ -3471,6 +3471,28 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(text.contains("8 photos per height"))
     }
 
+    func testOrbitDialIsEgocentricAndMatchesWalkInstructions() {
+        let configuration = OrbitCoverageConfiguration()
+        // (a) The operator's own azimuth is drawn at the bottom; without a pose, azimuth 0 is.
+        for current in [0.0, 22.5, 137, 202.5, 350] {
+            let bottom = OrbitGuidance.dialUnitVector(screenAngle: OrbitGuidance.dialScreenAngle(azimuth: current, current: current))
+            XCTAssertEqual(bottom.x, 0, accuracy: 1e-9)
+            XCTAssertEqual(bottom.y, 1, accuracy: 1e-9)
+        }
+        XCTAssertEqual(OrbitGuidance.dialScreenAngle(azimuth: 0, current: nil), 180, accuracy: 1e-9)
+        // (b) The target wedge is drawn on the side the instruction says to walk, incl. 0/360.
+        let cases: [(current: Double, target: Int, expected: WalkDirection)] = [(22.5, 2, .left), (202.5, 2, .right), (350, 0, .left), (10, 7, .right), (100, 5, .left), (100, 0, .right)]
+        for item in cases {
+            let ring = configuration.rings[1]
+            let observation = CoveragePoseObservation(captureID: "live", sector: CoverageSector(ringID: ring.id, azimuthIndex: Int(item.current / 45)), azimuthDegrees: item.current, elevationDegrees: 0, status: "available")
+            let target = CoverageSector(ringID: ring.id, azimuthIndex: item.target)
+            guard case .walk(let direction, _) = OrbitGuidance.instruction(current: observation, target: target, configuration: configuration, centerSet: true) else { return XCTFail("expected a walk instruction for \(item)") }
+            XCTAssertEqual(direction, item.expected)
+            let wedge = OrbitGuidance.dialUnitVector(screenAngle: OrbitGuidance.dialScreenAngle(azimuth: OrbitGuidance.wedgeCenter(azimuthIndex: item.target, configuration: configuration), current: item.current))
+            if direction == .left { XCTAssertLessThan(wedge.x, 0, "\(item)") } else { XCTAssertGreaterThan(wedge.x, 0, "\(item)") }
+        }
+    }
+
     func testCaptureToastExplainsEachOutcome() {
         let allowed = ManualCaptureDecision(allowed: true, warnings: [], blockingReasons: [])
         let placed = CoveragePoseObservation(captureID: "p", sector: CoverageSector(ringID: "upper", azimuthIndex: 2), azimuthDegrees: 100, elevationDegrees: 20, status: "available")
