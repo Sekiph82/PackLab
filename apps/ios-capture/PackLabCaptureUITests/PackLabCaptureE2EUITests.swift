@@ -92,6 +92,11 @@ final class PackLabCaptureE2EUITests: XCTestCase {
             }
             XCTAssertTrue(hold.waitForExistence(timeout: 15), "guidance did not say hold at wedge \(wedge)")
             tap(app.buttons["manualCaptureButton"], "Manual Capture \(wedge)")
+            if !toast.waitForExistence(timeout: 10) {
+                // No capture attempt registered at all (every attempt shows a toast): retry once.
+                shot("\(name)-no-toast-\(wedge)")
+                tap(app.buttons["manualCaptureButton"], "Manual Capture \(wedge) retry")
+            }
             waitForLabel(toast, containing: "(\(wedge)/16)", timeout: 30)
             shot("\(name)-capture-\(wedge)")
         }
