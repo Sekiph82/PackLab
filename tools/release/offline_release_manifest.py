@@ -187,7 +187,8 @@ def _runtime_pins(root: Path, source_commit: str) -> dict[str, str]:
         ).decode("utf-8")
     )
     nextlevel = [pin for pin in package["pins"] if pin.get("identity", "").lower() == "nextlevel"]
-    if len(swift_values) != 4 or len(swift_versions) != 1 or len(nextlevel) != 1:
+    # App, unit-test and UI-test targets x Debug/Release: one Swift language mode everywhere.
+    if len(swift_values) != 6 or len(swift_versions) != 1 or len(nextlevel) != 1:
         raise ValueError("BUILD_SOURCE_AMBIGUOUS")
     occt_records = [
         record for record in native_lock["records"] if record.get("component") == "OCCT"
