@@ -491,6 +491,11 @@ def install_design_workbench(window: StudioMainWindow) -> None:
     labels = stack.views[Route.LABELS]
     if isinstance(labels, LabelsView):
         manager.add_listener(lambda _metadata: labels.use_project_model(automatic=True))
+        measure = stack.views.get(Route.MEASURE_DESIGN)
+        save = getattr(measure, "save_button", None)
+        if isinstance(save, QPushButton):
+            # Measure & Design > Save writes a new revision: make it the active Design Model.
+            save.clicked.connect(lambda _checked=False: labels.use_project_model())
     library = stack.views[Route.LIBRARY]
     service = window.packaging_library_service
     if isinstance(library, PackagingLibraryBrowserView) and isinstance(

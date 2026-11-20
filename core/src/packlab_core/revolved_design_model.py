@@ -307,8 +307,16 @@ def _validate_feature_zones(
         raise RevolvedDesignModelError("design_profile_fit_not_accepted")
     if (
         not isinstance(zones.status, ProfileZoneStatus)
-        or zones.status is not ProfileZoneStatus.DETECTED
-        or zones.review_required
+        or not (
+            (zones.status is ProfileZoneStatus.DETECTED and not zones.review_required)
+            # An attributed manual override resolves ambiguous detection (e.g. straight jars).
+            or (
+                zones.status is ProfileZoneStatus.MANUAL_OVERRIDE
+                and bool(zones.actor_id)
+                and bool(zones.reason)
+                and zones.previous_revision_id is not None
+            )
+        )
         or zones.source_profile_id != profile_fit.source_profile_id
         or zones.parent_binding_revision_id != profile_fit.parent_binding.revision_id
         or zones.scan_master_revision_id != profile_fit.scan_master_revision_id

@@ -495,6 +495,28 @@
       "license_mapping_evidence": "pinned engine_bundle_manifest.json archive sha256 plus per-file staged sha256 record",
       "provenance_class": "PROJECT_OFFICIAL_BINARY",
       "native_unresolved_reason": "PL-0444: pinned upstream binary staged unmodified as a separate process in engines/. Its archive also carries third-party DLLs (Qt, Boost, OpenCV, CGAL, OpenEXR and others) without per-file license texts, and OpenMVS COPYRIGHT.md lists a research-only component (ibfs). Redistribution stays blocked pending the PackLab legal/licensing review."
+    },
+    "opencv-python-headless": {
+      "version": "5.1.0.95",
+      "license_identifier": "Apache-2.0",
+      "license_mapping_evidence": "Exact locked Windows abi3 wheel SHA-256 (uv.lock); wheel METADATA 'License: Apache 2.0' and its cv2/LICENSE.txt + cv2/LICENSE-3RD-PARTY.txt license files.",
+      "upstream_reference": "https://github.com/opencv/opencv-python/tree/95",
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "source_evidence_required": true,
+      "source_evidence": [
+        {
+          "record_id": "opencv-python-headless-wheel-5.1.0.95-win-abi3",
+          "version": "5.1.0.95",
+          "build": "cp37-abi3-win_amd64",
+          "url": "https://files.pythonhosted.org/packages/26/d1/a52c8d8e1cecf86725930170dfba1c7c1f59674ac8f131e96583aa41433d/opencv_python_headless-5.1.0.95-cp37-abi3-win_amd64.whl",
+          "sha256": "2fd11ce2e88feb28869ad5762a31546ce0062e7c55c130c425ccd3918a19e4fa",
+          "retained_runtime_surface": [
+            "cv2/cv2.pyd",
+            "cv2/opencv_videoio_ffmpeg510_64.dll"
+          ]
+        }
+      ],
+      "native_unresolved_reason": "Studio marker scale (PL-0446): the exact locked wheel ships cv2/cv2.pyd (OpenCV 5.1.0, Apache-2.0, statically including the third-party libraries listed in cv2/LICENSE-3RD-PARTY.txt such as libjpeg-turbo, libpng/libspng, libwebp, OpenJPEG, libtiff, protobuf, flatbuffers, quirc, libavif/aom, MLAS and CLapack) and cv2/opencv_videoio_ffmpeg510_64.dll (FFmpeg, LGPL-2.1+). The per-binary native composition, the FFmpeg LGPL source/relink obligations and the bundled notices are not yet reviewed, so frozen redistribution stays BLOCKED pending the PackLab legal/licensing review."
     }
   },
   "native_review": {
@@ -555,6 +577,11 @@
       "status": "UNRESOLVED_IF_STAGED",
       "provenance_class": null,
       "reason": "Every native file not mapped to reviewed exact component/license evidence remains unresolved."
+    },
+    "opencv-python-headless": {
+      "status": "UNRESOLVED_IF_NATIVE_FILES_STAGED",
+      "provenance_class": "PROJECT_OFFICIAL_BINARY",
+      "reason": "Studio marker scale (PL-0446): the exact locked wheel ships cv2/cv2.pyd (OpenCV 5.1.0, Apache-2.0, statically including the third-party libraries listed in cv2/LICENSE-3RD-PARTY.txt such as libjpeg-turbo, libpng/libspng, libwebp, OpenJPEG, libtiff, protobuf, flatbuffers, quirc, libavif/aom, MLAS and CLapack) and cv2/opencv_videoio_ffmpeg510_64.dll (FFmpeg, LGPL-2.1+). The per-binary native composition, the FFmpeg LGPL source/relink obligations and the bundled notices are not yet reviewed, so frozen redistribution stays BLOCKED pending the PackLab legal/licensing review."
     }
   }
 }
