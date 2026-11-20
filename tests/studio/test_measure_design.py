@@ -381,3 +381,183 @@ def test_owner_review_policy_has_fixed_bounds_and_refuses_outside_them() -> None
         md.fit_design_model(half, actor_id="owner", owner_review=True)
     assert md.OWNER_REVIEW_MIN_ANGULAR_COVERAGE == 0.60
     assert md.OWNER_REVIEW_MAX_SECTION_CV == 0.45
+
+
+# ---------------------------------------------------------------- PL-0447 / PL-0456
+
+
+def _promoted_design(window, tmp_path, root_name: str = "project"):
+    """Synthetic jar -> Scan Master promoted in the project -> fitted Design Model."""
+
+    model_path = _scene(tmp_path / "scene")
+    window.new_project(tmp_path / root_name, "Synthetic jar")
+    view = window.route_stack.views[Route.MEASURE_DESIGN]
+    assert view.load(model_path)
+    view.isolate_button.click()
+    view.bar_mm.setValue(100.0)
+    view.marker_button.click()
+    view.promote_button.click()
+    assert view.scan_master is not None, view.status.text()
+    view.owner_review.setChecked(True)
+    view.fit_button.click()
+    assert view.design is not None, view.status.text()
+    return view
+
+
+def _save_with_height(view, height: float) -> str:
+    view.height_mm.setValue(height)
+    view.apply_button.click()
+    view.save_button.click()
+    assert "current Design Model" in view.status.text(), view.status.text()
+    return view.design.model.revision_id
+
+
+def test_design_model_revisions_are_project_authority_with_undo_redo(window, tmp_path) -> None:
+    import json
+
+    from packlab_studio.project import ProjectManager
+
+    view = _promoted_design(window, tmp_path)
+    manager = window.project_manager
+    scan_master_id = view.scan_master.revision_id
+    first = _save_with_height(view, 45.0)
+    # File stays at derived/design_model/<id>.json, contract v1 (labels branch reads it).
+    assert view.saved_design_path.parent == tmp_path / "project" / "derived" / "design_model"
+    document = json.loads(view.saved_design_path.read_text(encoding="utf-8"))
+    assert document["contract"] == "packlab.studio-design-model-revision.v1"
+    record, loaded = manager.selected_design_model()
+    assert record["revision_id"] == first == loaded["design_model_revision_id"]
+    assert record["scan_master_revision_id"] == scan_master_id
+    assert record["mold_use_authorized"] is False
+    assert "Project Design Model (current)" in view.project_design.text()
+    assert not window.isWindowModified()
+
+    second = _save_with_height(view, 50.0)
+    assert manager.selected_design_model()[0]["revision_id"] == second
+    with pytest.raises(Exception, match="append-only|already exists"):
+        manager.persist_design_model_revision(
+            view.design.as_dict(), expected_revision=manager.current.revision
+        )
+
+    assert window.undo_action.isEnabled()
+    window.undo_action.trigger()
+    assert manager.selected_design_model()[0]["revision_id"] == first
+    assert "H 45.00" in view.project_design.text()
+    window.redo_action.trigger()
+    assert manager.selected_design_model()[0]["revision_id"] == second
+    # Undo, then a new save: the undone revision is skipped by later undos.
+    window.undo()
+    third = _save_with_height(view, 55.0)
+    assert not window.redo_action.isEnabled()
+    window.undo()
+    assert manager.selected_design_model()[0]["revision_id"] == first
+    window.undo()
+    assert manager.selected_design_model() is None  # before the first save
+    _, state = manager._read_authority(manager.layout)
+    # Records stay append-only; undo/redo only moved the pointer and logged events.
+    assert [item["revision_id"] for item in state["design_model_revisions"]] == [
+        first,
+        second,
+        third,
+    ]
+    assert [event["reason"] for event in state["design_model_selection_events"]] == [
+        "saved",
+        "saved",
+        "undo",
+        "redo",
+        "undo",
+        "saved",
+        "undo",
+        "undo",
+    ]
+    window.redo()  # back to first, then third (the superseded second is skipped)
+    window.redo()
+    assert manager.selected_design_model()[0]["revision_id"] == third
+
+    window.close_project()
+    reopened = ProjectManager()
+    reopened.open_project(tmp_path / "project")
+    assert reopened.selected_design_model()[0]["revision_id"] == third
+    assert reopened.can_undo()
+    window.open_project(tmp_path / "project")
+    assert "H 55.00" in view.project_design.text()
+    assert view.scan_master.revision_id == scan_master_id  # Fit available after reopen
+    assert view.fit_button.isEnabled()
+
+
+def test_design_model_registration_refuses_foreign_lineage(window, tmp_path) -> None:
+    from packlab_studio.project import ProjectError
+
+    view = _promoted_design(window, tmp_path)
+    manager = window.project_manager
+    document = view.design.as_dict()
+    document["model"] = dict(document["model"])
+    document["model"]["parent"] = {
+        **document["model"]["parent"],
+        "scan_master_revision_id": "scan-master:" + "0" * 64,
+    }
+    with pytest.raises(ProjectError, match="Scan Master persisted in this project"):
+        manager.persist_design_model_revision(document, expected_revision=manager.current.revision)
+    document = view.design.as_dict()
+    document["mold_use_authorized"] = True
+    with pytest.raises(ProjectError, match="invalid"):
+        manager.persist_design_model_revision(document, expected_revision=manager.current.revision)
+    assert not (tmp_path / "project" / "derived" / "design_model").exists()
+
+
+def test_autosave_crash_recovery_dialog_and_portability(window, tmp_path) -> None:
+    import time
+
+    from packlab_studio.shell import AUTOSAVE_DRAFT_JOB, StudioMainWindow
+
+    app = create_application(["packlab-history"])
+    view = _promoted_design(window, tmp_path)
+    window.autosave_timer.setInterval(10)
+    view.height_mm.setValue(47.5)
+    assert window.isWindowModified() and window.autosave_timer.isActive()
+    for _ in range(100):
+        app.processEvents()
+        if not window.autosave_timer.isActive():
+            break
+        time.sleep(0.02)
+    draft = tmp_path / "project" / "temp" / "autosave" / "design-model-draft.json"
+    assert draft.is_file() and "autosaved" in window.save_indicator.text()
+
+    # "Crash": the first window never closes cleanly; a second instance opens the project.
+    def restart(name: str) -> StudioMainWindow:
+        studio = StudioMainWindow(
+            diagnostics_root=tmp_path / f"diagnostics-{name}",
+            packaging_library_root=tmp_path / f"library-{name}",
+        )
+        studio.open_project(tmp_path / "project")
+        app.processEvents()
+        return studio
+
+    second = restart("second")
+    try:
+        assert [item.job_id for item in second.recovery_items] == [AUTOSAVE_DRAFT_JOB]
+        dialog = second.recovery_dialog
+        assert dialog is not None and dialog.isVisible()
+        dialog.buttons[AUTOSAVE_DRAFT_JOB][0].click()  # Recover
+        restored = second.route_stack.views[Route.MEASURE_DESIGN]
+        assert restored.design is not None, restored.status.text()
+        assert restored.design.height == pytest.approx(47.5)
+        assert draft.is_file() and not dialog.isVisible()
+        assert second.isWindowModified()
+
+        box = second.show_portability_report()
+        assert box is not None and "portable" in box.text()
+        assert "integrity layout: pass" in box.informativeText()
+        # Second "crash" after another autosave; discard it on the next start.
+        assert second.autosave_draft()
+    finally:
+        second.hide()
+    third = restart("third")
+    try:
+        dialog = third.recovery_dialog
+        assert dialog is not None
+        dialog.buttons[AUTOSAVE_DRAFT_JOB][1].click()  # Discard
+        assert not draft.exists()
+        assert third.recovery_items == ()
+    finally:
+        third.close()

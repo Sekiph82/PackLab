@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -53,6 +53,9 @@ def _colors(colors: np.ndarray | None, count: int) -> tuple[tuple[int, int, int]
 class MeasureDesignView(QWidget):
     """Buttons call ``measure_design``; core owns every authority decision."""
 
+    draft_changed = Signal()  # unsaved Design Model edits exist (autosave trigger)
+    draft_saved = Signal()  # the edits were saved as a project Design Model revision
+
     def __init__(
         self,
         project_manager: Any = None,
@@ -84,6 +87,8 @@ class MeasureDesignView(QWidget):
         self.scan_master: Any = None
         self.design: md.DesignState | None = None
         self.saved_design_path: Path | None = None
+        self.dirty = False
+        self._project_seen: str | None = None
         self._companion: Path | None = None
 
         self.viewer = ModelViewerView()
@@ -131,6 +136,11 @@ class MeasureDesignView(QWidget):
             spin.setSuffix(" mm")
         self.apply_button = button("Apply dimensions", "apply", self.apply_dimensions)
         self.save_button = button("Save Design Model revision", "save", self.save_design)
+        self.project_design = QLabel("")
+        self.project_design.setObjectName("packlab.measure.project-design")
+        self.project_design.setWordWrap(True)
+        for spin in (self.height_mm, self.diameter_mm):
+            spin.valueChanged.connect(lambda _value: self._mark_dirty())
         self.results = QLabel("Open the built model (dense PLY or textured OBJ).")
         self.results.setObjectName("packlab.measure.results")
         self.results.setWordWrap(True)
@@ -154,6 +164,7 @@ class MeasureDesignView(QWidget):
         scan_form.addRow(self.promote_button)
         design_box = QGroupBox("Design Model (editable)")
         design_form = QFormLayout(design_box)
+        design_form.addRow(self.project_design)
         design_form.addRow(self.owner_review)
         design_form.addRow(self.fit_button)
         design_form.addRow("Height", self.height_mm)
@@ -187,8 +198,99 @@ class MeasureDesignView(QWidget):
         right.addWidget(self.results)
         layout.addLayout(right, 1)
         self._sync_buttons()
+        if hasattr(project_manager, "add_listener"):
+            project_manager.add_listener(lambda _metadata: self.refresh_project_design())
+        self.refresh_project_design()
 
     # ------------------------------------------------------------ helpers
+
+    def _mark_dirty(self) -> None:
+        if self.design is not None:
+            self.dirty = True
+            self.draft_changed.emit()
+
+    def refresh_project_design(self) -> None:
+        """Show the project's current Design Model (authority state); reset on project switch."""
+
+        manager = self.project_manager
+        current = getattr(manager, "current", None)
+        project_id = None if current is None else current.project_id
+        if project_id != self._project_seen:
+            self._project_seen = project_id
+            self.design, self.dirty = None, False
+            try:
+                self.scan_master = (
+                    None if current is None else manager.selected_scan_master_revision()
+                )
+            except Exception:  # unreadable Scan Master: Fit stays disabled
+                self.scan_master = None
+            self._sync_buttons()
+        if current is None:
+            self.project_design.setText("Project Design Model: no project open.")
+            return
+        try:
+            selected = manager.selected_design_model()
+        except Exception as error:
+            self.project_design.setText(f"Project Design Model unreadable: {error}")
+            return
+        if selected is None:
+            self.project_design.setText("Project Design Model: none saved yet.")
+            return
+        record, _document = selected
+        size = record.get("overall_dimensions_mm_unverified") or {}
+        self.project_design.setText(
+            f"Project Design Model (current): {record['revision_id'][:34]}… "
+            f"H {float(size.get('height', 0)):.2f} × Ø {float(size.get('diameter', 0)):.2f} "
+            f"mm_unverified; fitted to {str(record.get('scan_master_revision_id'))[:24]}…; "
+            f"saved at project revision {record.get('project_revision')}"
+        )
+
+    def draft(self) -> dict[str, object] | None:
+        """Unsaved editor state for autosave/crash recovery (re-fit + dimensions)."""
+
+        if self.design is None:
+            return None
+        return {
+            "contract": "packlab.studio-design-draft.v1",
+            "scan_master_revision_id": self.design.model.fitted_to_scan_master_revision_id,
+            "base_design_model_revision_id": self.design.model.revision_id,
+            "owner_review": self.owner_review.isChecked(),
+            "height_mm": self.height_mm.value(),
+            "diameter_mm": self.diameter_mm.value(),
+        }
+
+    def restore_draft(self, draft: dict[str, Any]) -> bool:
+        manager = self.project_manager
+
+        def action() -> str:
+            if draft.get("contract") != "packlab.studio-design-draft.v1":
+                raise md.MeasureDesignError("autosaved draft has an unknown format")
+            scan_master = manager.selected_scan_master_revision()
+            if scan_master is None or scan_master.revision_id != draft.get(
+                "scan_master_revision_id"
+            ):
+                raise md.MeasureDesignError("the draft's Scan Master is no longer selected")
+            actor = self.actor.text().strip() or "owner"
+            owner_review = bool(draft.get("owner_review"))
+            self.scan_master = scan_master
+            self.owner_review.setChecked(owner_review)
+            fitted = md.fit_design_model(scan_master, actor_id=actor, owner_review=owner_review)
+            self.design = md.edit_dimensions(
+                fitted,
+                height=float(draft["height_mm"]),
+                diameter=float(draft["diameter_mm"]),
+                actor_id=actor,
+            )
+            self.height_mm.setValue(self.design.height)
+            self.diameter_mm.setValue(self.design.diameter)
+            self._show_scan_master(self._design_geometry())
+            self._mark_dirty()
+            return (
+                f"restored autosaved draft H {self.design.height:.2f} × "
+                f"Ø {self.design.diameter:.2f} mm_unverified (not saved yet)"
+            )
+
+        return self._run("Recover draft", action)
 
     def _sync_buttons(self) -> None:
         self.isolate_button.setEnabled(self.model is not None)
@@ -511,6 +613,7 @@ class MeasureDesignView(QWidget):
             self.height_mm.setValue(self.design.height)
             self.diameter_mm.setValue(self.design.diameter)
             self._show_scan_master(self._design_geometry())
+            self._mark_dirty()
             notes = "; ".join(self.design.notes)
             return (
                 f"Design Model {self.design.model.revision_id[:26]}… fitted "
@@ -534,6 +637,7 @@ class MeasureDesignView(QWidget):
                 actor_id=self.actor.text().strip() or "owner",
             )
             self._show_scan_master(self._design_geometry())
+            self._mark_dirty()
             return (
                 f"revision {self.design.model.revision_id[:26]}… "
                 f"H {self.design.height:.2f} mm, Ø {self.design.diameter:.2f} mm; Scan Master unchanged"
@@ -546,20 +650,28 @@ class MeasureDesignView(QWidget):
         if design is None:
             return
         name = design.model.revision_id.split(":")[-1][:32] + ".json"
-        layout = getattr(self.project_manager, "layout", None)
+        manager = self.project_manager
 
         def action() -> str:
-            if layout is not None:
-                target = layout.path("derived", f"design_model/{name}")
-                target.parent.mkdir(parents=True, exist_ok=True)
+            if getattr(manager, "current", None) is not None:
+                # Project authority writes derived/design_model/<id>.json create-only and
+                # selects it as the project's current Design Model (lineage: Scan Master).
+                record = manager.persist_design_model_revision(
+                    design.as_dict(), expected_revision=manager.current.revision
+                )
+                target = manager.layout.root / record["artifact_path"]
+                note = "now the project's current Design Model"
             else:
                 chosen = self._choose_save(self, f"design-model-{name}")
                 if not chosen:
                     return "cancelled"
                 target = Path(chosen)
-            with target.open("x", encoding="utf-8") as handle:  # revisions are append-only
-                json.dump(design.as_dict(), handle, sort_keys=True, indent=1, default=str)
+                with target.open("x", encoding="utf-8") as handle:  # append-only
+                    json.dump(design.as_dict(), handle, sort_keys=True, indent=1, default=str)
+                note = "no project open: file only, not in project authority"
             self.saved_design_path = target
-            return f"saved {target}"
+            self.dirty = False
+            self.draft_saved.emit()
+            return f"saved {target}; {note}"
 
         self._run("Save Design Model", action)
