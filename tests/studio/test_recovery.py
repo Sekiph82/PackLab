@@ -26,7 +26,11 @@ def test_resumable_restart_invalid_and_accept_discard(tmp_path) -> None:
     recovery.checkpoint("job-restart", area="temp", relative_path="restart.part", resumable=False)
     recovery.checkpoint("job-invalid", area="derived", relative_path="missing.bin", resumable=True)
     statuses = {item.job_id: item.status for item in recovery.inspect()}
-    assert statuses == {"job-resume": RecoveryStatus.RESUMABLE, "job-restart": RecoveryStatus.RESTART_REQUIRED, "job-invalid": RecoveryStatus.INVALID}
+    assert statuses == {
+        "job-resume": RecoveryStatus.RESUMABLE,
+        "job-restart": RecoveryStatus.RESTART_REQUIRED,
+        "job-invalid": RecoveryStatus.INVALID,
+    }
     recovery.accept("job-resume")
     recovery.discard("job-restart")
     assert not restart.exists()
@@ -52,3 +56,21 @@ def test_reconstruction_checkpoint_digest_mismatch_is_not_resumable(tmp_path) ->
     item = recovery.inspect()[0]
     assert item.job_id == "reconstruction-1"
     assert item.status is RecoveryStatus.INVALID
+
+
+def test_unclean_session_checkpoints_survive_restart_until_resolved(tmp_path) -> None:
+    layout = ProjectLayout.create(tmp_path / "project")
+    first = RecoveryManager(layout)
+    first.mark_start()
+    draft = layout.path("temp", "draft.json")
+    draft.write_bytes(b"{}")
+    first.checkpoint("draft", area="temp", relative_path="draft.json", resumable=True)
+    # Crash: no mark_clean_close. The next session starts and still sees the item.
+    second = RecoveryManager(layout)
+    second.mark_start()
+    assert [item.job_id for item in second.inspect()] == ["draft"]
+    assert second.discard("draft") is not None and not draft.exists()
+    second.mark_clean_close()
+    third = RecoveryManager(layout)
+    third.mark_start()
+    assert third.inspect() == ()
