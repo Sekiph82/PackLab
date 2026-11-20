@@ -874,6 +874,8 @@ public struct LocalScanHistoryView: View {
                             do {
                                 _ = try await ProductionScanFinalizeAction(root: store.rootURL).finalize(sessionID: entry.id)
                                 entries = await store.load()
+                            } catch FinalizationError.invalidManifest {
+                                finalizationMessage = "Finalize failed: no accepted photos yet. Take photos with Manual Capture first."
                             } catch { finalizationMessage = "Finalize failed: \(error)" }
                         }
                     }

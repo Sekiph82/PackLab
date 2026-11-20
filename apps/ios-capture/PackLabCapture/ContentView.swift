@@ -782,6 +782,10 @@ struct ContentView: View {
                         .padding(6).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 6))
                     }
                     if runtime.m04CoverageActive {
+                        // Coverage detail can exceed the screen height; keep it in a bounded scroll
+                        // area so the Manual Capture button below stays visible on an iPhone.
+                        ScrollView {
+                        VStack(spacing: 4) {
                         Text("Preset: \(runtime.m04ActivePreset.displayName) v\(runtime.m04ActivePreset.version)")
                             .font(.caption2.monospaced()).foregroundStyle(.white)
                         ForEach(runtime.m04ReflectionGuidance, id: \.self) { Text($0) }
@@ -817,6 +821,9 @@ struct ContentView: View {
                         }
                         .font(.caption2.monospaced()).foregroundStyle(.white)
                             .padding(.horizontal, 12)
+                        }
+                        }
+                        .frame(maxHeight: 320)
                         Button("Manual Capture") {
                             Task { _ = await runtime.requestManualCapture() }
                         }
