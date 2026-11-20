@@ -736,10 +736,47 @@ public enum NewScanActionCoordinator {
     public static func cancel(workflow: inout NewScanWorkflowModel) { workflow.cancel() }
 }
 
+/// One accepted capture shown in the session photo viewer.
+public struct SessionPhotoItem: Sendable, Equatable, Identifiable {
+    public let id: String
+    public let sequence: Int
+    public let sourceURL: URL
+    public let label: String
+    public init(id: String, sequence: Int, sourceURL: URL, label: String) { self.id = id; self.sequence = sequence; self.sourceURL = sourceURL; self.label = label }
+}
+
+public enum SessionPhotoIndex {
+    /// The session's accepted captures (in state.acceptedIDs, with a record and an existing
+    /// source) in sequence order, labelled with ring/wedge when an orbit observation exists.
+    public static func items(layout: SessionStorageLayout) -> [SessionPhotoItem] {
+        let fileManager = FileManager.default
+        guard let stateData = try? Data(contentsOf: layout.state), let state = try? JSONDecoder().decode(PersistedSessionState.self, from: stateData) else { return [] }
+        let accepted = Set(state.acceptedIDs)
+        let context = (try? Data(contentsOf: layout.m04Context)).flatMap { try? JSONDecoder().decode(M04ScanContext.self, from: $0) }
+        let observations = context?.orbitCoverage?.observations ?? []
+        let files = (try? fileManager.contentsOfDirectory(at: layout.photoRecords, includingPropertiesForKeys: nil)) ?? []
+        let records = files.filter { $0.pathExtension == "json" }.compactMap { url -> AcceptedCaptureRecord? in
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return try? JSONDecoder().decode(AcceptedCaptureRecord.self, from: data)
+        }
+        return records
+            .filter { accepted.contains($0.captureID) && fileManager.fileExists(atPath: layout.images.appendingPathComponent($0.sourceFilename).path) }
+            .sorted { $0.sequence < $1.sequence }
+            .map { record in
+                let sector = observations.last { $0.captureID == record.captureID && $0.status == "available" }?.sector
+                let position = sector.map { " · \($0.ringID) wedge \($0.azimuthIndex + 1)" } ?? ""
+                return SessionPhotoItem(id: record.captureID, sequence: record.sequence, sourceURL: layout.images.appendingPathComponent(record.sourceFilename), label: "#\(record.sequence + 1)\(position)")
+            }
+    }
+}
+
 #if canImport(SwiftUI)
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
+#endif
+#if canImport(ImageIO)
+import ImageIO
 #endif
 public struct NewScanWizard: View {
     @Environment(\.dismiss) private var dismiss
@@ -877,6 +914,7 @@ public struct LocalScanHistoryView: View {
     @State private var showShare = false
     @State private var transferSelection: FinalizedTransferSelection?
     @State private var finalizationMessage: String?
+    @State private var photoSession: PhotoSessionSelection?
     @StateObject private var shareCoordinator = PackScanSharePresentationCoordinator()
     private let store: LocalScanHistoryStore
     private let onFinalized: (@MainActor (String) -> Void)?
@@ -887,6 +925,8 @@ public struct LocalScanHistoryView: View {
                 if let path = entry.previewPath, let image = UIImage(contentsOfFile: path) { Image(uiImage: image).resizable().scaledToFit().frame(width: 64, height: 64) }
                 else { Image(systemName: "exclamationmark.triangle").frame(width: 64, height: 64) }
                 VStack(alignment: .leading) { Text(entry.packageName); Text(entry.exportState).font(.caption); if let reason = entry.degradedReason { Text(reason).foregroundStyle(.orange).font(.caption2) } }
+                // Read-only view of the accepted photos kept in the app's session folder.
+                Button("View photos") { photoSession = PhotoSessionSelection(id: entry.id) }.buttonStyle(.borderless)
                 if entry.exportState == SessionFinalizationState.exported.rawValue {
                     // Borderless so each button in this List row handles only its own tap.
                     Button("Share") { presentShare(for: entry) }.buttonStyle(.borderless)
@@ -908,6 +948,7 @@ public struct LocalScanHistoryView: View {
             }
         }.task { entries = await store.load() }
             .sheet(isPresented: $showShare) { if let share = shareCoordinator.activeShare { PackScanShareSheet(share: share) { completed in shareCoordinator.activityFinished(completed: completed); showShare = false } } }
+            .sheet(item: $photoSession) { selection in NavigationStack { SessionPhotoGridView(layout: SessionStorageLayout(root: store.rootURL, sessionID: selection.id)) } }
             .sheet(item: $transferSelection) { selection in NavigationStack { FinalizedTransferWorkflowView(share: selection.share, finalization: selection.finalization) } }
             .overlay(alignment: .bottom) {
                 if let finalizationMessage {
@@ -925,6 +966,77 @@ public struct LocalScanHistoryView: View {
         let layout = SessionStorageLayout(root: store.rootURL, sessionID: entry.id)
         guard let data = try? Data(contentsOf: layout.finalization), let finalization = try? JSONDecoder().decode(SessionFinalizationRecord.self, from: data), let path = finalization.packagePath, let share = try? PackScanShareCoordinator().eligiblePackage(at: URL(fileURLWithPath: path), finalization: finalization) else { return }
         transferSelection = FinalizedTransferSelection(share: share, finalization: finalization)
+    }
+}
+
+public struct PhotoSessionSelection: Identifiable, Sendable, Equatable {
+    public let id: String
+}
+
+/// Read-only grid of a session's accepted captures (downsampled thumbnails); tap for a
+/// full-screen view. Photos stay inside the app; nothing is exported to the Photos library.
+public struct SessionPhotoGridView: View {
+    private let layout: SessionStorageLayout
+    @State private var items: [SessionPhotoItem] = []
+    @State private var loaded = false
+    @State private var selected: SessionPhotoItem?
+    public init(layout: SessionStorageLayout) { self.layout = layout }
+    public var body: some View {
+        ScrollView {
+            if loaded && items.isEmpty { Text("No accepted photos yet.").foregroundStyle(.secondary).padding() }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 6)], spacing: 6) {
+                ForEach(items) { item in
+                    Button { selected = item } label: { SessionPhotoThumbnail(item: item) }
+                        .buttonStyle(.borderless)
+                }
+            }
+            .padding(6)
+        }
+        .navigationTitle("Photos (\(items.count))")
+        .task { items = SessionPhotoIndex.items(layout: layout); loaded = true }
+        .fullScreenCover(item: $selected) { item in SessionPhotoFullScreen(item: item) }
+    }
+}
+
+struct SessionPhotoThumbnail: View {
+    let item: SessionPhotoItem
+    @State private var image: Image?
+    var body: some View {
+        VStack(spacing: 2) {
+            ZStack {
+                Color.gray.opacity(0.2)
+                if let image { image.resizable().scaledToFill() } else { ProgressView() }
+            }
+            .frame(width: 104, height: 104).clipShape(RoundedRectangle(cornerRadius: 6))
+            Text(item.label).font(.caption2).lineLimit(1)
+        }
+        // ponytail: thumbnails decode on the main actor one visible cell at a time; move to a
+        // background decoder if large sessions stutter.
+        .task(id: item.id) { image = SessionPhotoIndex.image(at: item.sourceURL, maxPixelSize: 300).map { Image(decorative: $0, scale: 1) } }
+    }
+}
+
+struct SessionPhotoFullScreen: View {
+    let item: SessionPhotoItem
+    @Environment(\.dismiss) private var dismiss
+    @State private var image: Image?
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            if let image { image.resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: .infinity) } else { ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity) }
+            Button("Close") { dismiss() }.buttonStyle(.borderedProminent).padding()
+        }
+        .overlay(alignment: .bottom) { Text(item.label).foregroundStyle(.white).padding() }
+        .task(id: item.id) { image = SessionPhotoIndex.image(at: item.sourceURL, maxPixelSize: 2048).map { Image(decorative: $0, scale: 1) } }
+    }
+}
+
+public extension SessionPhotoIndex {
+    /// Downsampled decode via an ImageIO thumbnail, so 12 MP stills stay small in memory.
+    static func image(at url: URL, maxPixelSize: Int) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: maxPixelSize]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
 

@@ -656,7 +656,10 @@ public struct CoveragePoseObservation: Codable, Sendable, Equatable {
     public let azimuthDegrees: Double?
     public let elevationDegrees: Double?
     public let status: String
-    public init(captureID: String, sector: CoverageSector?, azimuthDegrees: Double?, elevationDegrees: Double?, status: String) { self.captureID = captureID; self.sector = sector; self.azimuthDegrees = azimuthDegrees; self.elevationDegrees = elevationDegrees; self.status = status }
+    /// AR world identity of the object center this observation was measured around; nil
+    /// for world-origin (pre-center) observations.
+    public let frameID: String?
+    public init(captureID: String, sector: CoverageSector?, azimuthDegrees: Double?, elevationDegrees: Double?, status: String, frameID: String? = nil) { self.captureID = captureID; self.sector = sector; self.azimuthDegrees = azimuthDegrees; self.elevationDegrees = elevationDegrees; self.status = status; self.frameID = frameID }
 }
 
 public struct OrbitCoverageSnapshot: Codable, Sendable, Equatable {
@@ -673,10 +676,102 @@ public struct OrbitCoverageSnapshot: Codable, Sendable, Equatable {
     }
 }
 
+/// Where the packaged object sits in the AR world (metres, ARKit world frame). The AR world
+/// origin is wherever the phone was when the session started, so orbit azimuth/elevation are
+/// only meaningful relative to this point. `worldIdentity` names the AR world the point belongs
+/// to; after a tracking reset or a new session the point is invalid and must be set again.
+public struct ObjectCenter: Codable, Sendable, Equatable {
+    public let position: [Double]
+    public let method: String
+    public let worldIdentity: String
+    public let setAt: Date
+    /// Where the package touches the table (raycast hit); the center is this point raised by
+    /// half the package height. Nil for centers not derived from a base point.
+    public let basePosition: [Double]?
+    public let packageHeightMeters: Double?
+    /// "operator_entered" or "package_type_default".
+    public let heightSource: String?
+    public init(position: [Double], method: String, worldIdentity: String, setAt: Date = Date(), basePosition: [Double]? = nil, packageHeightMeters: Double? = nil, heightSource: String? = nil) { self.position = position; self.method = method; self.worldIdentity = worldIdentity; self.setAt = setAt; self.basePosition = basePosition; self.packageHeightMeters = packageHeightMeters; self.heightSource = heightSource }
+    public var isValid: Bool { position.count == 3 && position.allSatisfy(\.isFinite) }
+}
+
+/// A horizontal-surface raycast hit at the crosshair, with the camera position at that time.
+public struct BasePlaneHit: Sendable, Equatable {
+    public let position: [Double]
+    public let normal: [Double]
+    public let cameraPosition: [Double]
+    public let method: String
+    public let worldIdentity: String
+    public init(position: [Double], normal: [Double], cameraPosition: [Double], method: String, worldIdentity: String) { self.position = position; self.normal = normal; self.cameraPosition = cameraPosition; self.method = method; self.worldIdentity = worldIdentity }
+}
+
+public enum ObjectCenterRejection: String, Error, Sendable, Equatable {
+    case tooFar = "base_point_too_far"
+    case tooNear = "base_point_too_near"
+    case tooFarBelow = "base_point_too_far_below"
+    case notHorizontal = "base_point_not_horizontal"
+    case invalidHeight = "package_height_invalid"
+    case invalidHit = "base_point_invalid"
+
+    public var message: String {
+        switch self {
+        case .tooFar: return "Aim at where the package touches the table — that point is more than 1.5 m away; step closer"
+        case .tooNear: return "Aim at where the package touches the table — that point is closer than 10 cm; step back"
+        case .tooFarBelow: return "Aim at where the package touches the table — that point is more than 60 cm below the phone (the floor?)"
+        case .notHorizontal: return "Aim at where the package touches the table — the crosshair is not on a flat, level surface"
+        case .invalidHeight: return "Set the package height first"
+        case .invalidHit: return "Aim at where the package touches the table and try again"
+        }
+    }
+}
+
+/// Conservative standing heights (metres) used until the operator enters the real one.
+public enum PackageHeightDefaults {
+    public static func meters(for type: PackageType) -> Double {
+        switch type {
+        case .bottle: return 0.20
+        case .jar: return 0.12
+        case .jerrycan: return 0.30
+        case .tube: return 0.15
+        case .sachet: return 0.10
+        case .other: return 0.15
+        }
+    }
+    public static let range: ClosedRange<Double> = 0.02...1.0
+}
+
+public enum ObjectCenterBuilder {
+    public static let maximumDistance = 1.5
+    public static let minimumDistance = 0.1
+    /// A table-top base point is never far below a hand-held phone; a deeper hit is the floor.
+    public static let maximumDropBelowCamera = 0.6
+    /// cos(15 deg): the surface normal must be within 15 deg of world up.
+    public static let minimumUpComponent = 0.966
+
+    /// Center = base point + up x (height / 2) in the gravity-aligned ARKit world (y up).
+    /// Rejects hits that are too far/near the camera, more than 0.6 m below it, or not level.
+    public static func center(from hit: BasePlaneHit, packageHeight: Double, heightSource: String, at date: Date = Date()) -> Result<ObjectCenter, ObjectCenterRejection> {
+        guard hit.position.count == 3, hit.cameraPosition.count == 3, hit.normal.count == 3, (hit.position + hit.cameraPosition + hit.normal).allSatisfy(\.isFinite) else { return .failure(.invalidHit) }
+        guard packageHeight.isFinite, PackageHeightDefaults.range.contains(packageHeight) else { return .failure(.invalidHeight) }
+        let distance = sqrt(zip(hit.position, hit.cameraPosition).reduce(0.0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) })
+        if distance > maximumDistance { return .failure(.tooFar) }
+        if distance < minimumDistance { return .failure(.tooNear) }
+        if hit.cameraPosition[1] - hit.position[1] > maximumDropBelowCamera { return .failure(.tooFarBelow) }
+        let length = sqrt(hit.normal.reduce(0.0) { $0 + $1 * $1 })
+        guard length > 1e-9, hit.normal[1] / length >= minimumUpComponent else { return .failure(.notHorizontal) }
+        let position = [hit.position[0], hit.position[1] + packageHeight / 2, hit.position[2]]
+        return .success(ObjectCenter(position: position, method: hit.method, worldIdentity: hit.worldIdentity, setAt: date, basePosition: hit.position, packageHeightMeters: packageHeight, heightSource: heightSource))
+    }
+}
+
 public enum CoveragePoseMapper {
-    public static func map(captureID: String, pose: PoseSample?, configuration: OrbitCoverageConfiguration) -> CoveragePoseObservation {
+    /// `center` (x, y, z in the AR world) makes azimuth/elevation relative to the object;
+    /// nil keeps the historical world-origin-relative mapping.
+    public static func map(captureID: String, pose: PoseSample?, configuration: OrbitCoverageConfiguration, center: [Double]? = nil) -> CoveragePoseObservation {
         guard let pose, pose.tracking == .normal, pose.hasValidTransform, pose.transform.count == 16 else { return CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: "pose_unavailable") }
-        let x = pose.transform[3], y = pose.transform[7], z = pose.transform[11]
+        let origin = center ?? [0, 0, 0]
+        guard origin.count == 3, origin.allSatisfy(\.isFinite) else { return CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: "object_center_invalid") }
+        let x = pose.transform[3] - origin[0], y = pose.transform[7] - origin[1], z = pose.transform[11] - origin[2]
         let radius = sqrt(x * x + z * z)
         guard radius > 1e-9 else { return CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: "pose_radius_unavailable") }
         let azimuth = (atan2(x, -z) * 180 / Double.pi + 360).truncatingRemainder(dividingBy: 360)
@@ -708,7 +803,7 @@ public struct OrbitCoverageModel: Sendable, Equatable {
     }
     /// Coverage is admitted only from the accepted-capture pose binding. Raw
     /// preview poses cannot create coverage evidence.
-    public mutating func observe(captureID: String, poseBinding: PoseCaptureBinding?) -> CoveragePoseObservation {
+    public mutating func observe(captureID: String, poseBinding: PoseCaptureBinding?, center: [Double]? = nil, frameID: String? = nil) -> CoveragePoseObservation {
         let observation: CoveragePoseObservation
         guard let poseBinding, poseBinding.captureID == captureID else {
             observation = CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: poseBinding == nil ? "pose_unavailable" : "pose_capture_mismatch")
@@ -718,7 +813,8 @@ public struct OrbitCoverageModel: Sendable, Equatable {
             observation = CoveragePoseObservation(captureID: captureID, sector: nil, azimuthDegrees: nil, elevationDegrees: nil, status: "pose_\(poseBinding.aligned.status)")
             recordedObservations.append(observation); invalidIDs.append(captureID); return observation
         }
-        observation = CoveragePoseMapper.map(captureID: captureID, pose: pose, configuration: configuration)
+        let mapped = CoveragePoseMapper.map(captureID: captureID, pose: pose, configuration: configuration, center: center)
+        observation = CoveragePoseObservation(captureID: mapped.captureID, sector: mapped.sector, azimuthDegrees: mapped.azimuthDegrees, elevationDegrees: mapped.elevationDegrees, status: mapped.status, frameID: frameID)
         recordedObservations.append(observation)
         guard let sector = observation.sector, observation.status == "available" else { invalidIDs.append(captureID); return observation }
         if captured.contains(sector) { duplicateIDs.append(captureID) } else { captured.insert(sector) }
@@ -844,13 +940,13 @@ public struct DuplicateDecision: Sendable, Equatable {
 }
 
 public enum NearDuplicateDetector {
-    public static func evaluate(candidate: DuplicateEvidence, accepted: [DuplicateEvidence], configuration: OrbitCoverageConfiguration = OrbitCoverageConfiguration(), policy: DuplicatePolicy = .provisional) -> DuplicateDecision {
+    public static func evaluate(candidate: DuplicateEvidence, accepted: [DuplicateEvidence], configuration: OrbitCoverageConfiguration = OrbitCoverageConfiguration(), policy: DuplicatePolicy = .provisional, center: [Double]? = nil) -> DuplicateDecision {
         guard let candidatePose = pose(for: candidate), candidatePose.tracking == .normal, candidatePose.hasValidTransform else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
         guard let candidatePosition = position(candidatePose) else { return DuplicateDecision(isDuplicate: false, reasonCode: "duplicate_pose_unavailable") }
-        let candidateObservation = CoveragePoseMapper.map(captureID: candidate.captureID, pose: candidatePose, configuration: configuration)
+        let candidateObservation = CoveragePoseMapper.map(captureID: candidate.captureID, pose: candidatePose, configuration: configuration, center: center)
         for previous in accepted {
             guard let previousPose = pose(for: previous), previousPose.tracking == .normal, let previousPosition = position(previousPose) else { continue }
-            let previousObservation = CoveragePoseMapper.map(captureID: previous.captureID, pose: previousPose, configuration: configuration)
+            let previousObservation = CoveragePoseMapper.map(captureID: previous.captureID, pose: previousPose, configuration: configuration, center: center)
             let squaredDistances = zip(candidatePosition, previousPosition).map { lhs, rhs in (lhs - rhs) * (lhs - rhs) }
             let distance = sqrt(squaredDistances.reduce(0, +))
             let elevationDelta = abs((candidateObservation.elevationDegrees ?? 0) - (previousObservation.elevationDegrees ?? 0))
@@ -1233,7 +1329,12 @@ public struct M04ScanContext: Codable, Sendable, Equatable {
     public let turntableCoverage: TurntableCoverageSnapshot?
     public let orbitCoverage: OrbitCoverageSnapshot?
     public let detailPasses: [M04DetailPassResumeState]?
-    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil, asymmetricCoverage: AsymmetricCoverageEvaluation? = nil, turntableCoverage: TurntableCoverageSnapshot? = nil, orbitCoverage: OrbitCoverageSnapshot? = nil, detailPasses: [M04DetailPassResumeState]? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance; self.asymmetricCoverage = asymmetricCoverage; self.turntableCoverage = turntableCoverage; self.orbitCoverage = orbitCoverage; self.detailPasses = detailPasses }
+    /// Optional (absent in older contexts). Restored only inside the same AR world.
+    public let objectCenter: ObjectCenter?
+    /// Coverage measured in an earlier AR world (tracking reset, relaunch); kept for the record
+    /// but never counted toward completion.
+    public let previousWorldCoverage: OrbitCoverageSnapshot?
+    public init(preset: PackagingPreset, preparationAcknowledged: Bool = false, treatmentMode: String? = nil, preflight: ScanPreflightResult? = nil, basePass: BasePassEvaluation? = nil, completion: CompletionDiagnostics? = nil, qualityGuidance: M04QualityGuidanceState? = nil, asymmetricCoverage: AsymmetricCoverageEvaluation? = nil, turntableCoverage: TurntableCoverageSnapshot? = nil, orbitCoverage: OrbitCoverageSnapshot? = nil, detailPasses: [M04DetailPassResumeState]? = nil, objectCenter: ObjectCenter? = nil, previousWorldCoverage: OrbitCoverageSnapshot? = nil) { self.preset = preset; self.preparationAcknowledged = preparationAcknowledged; self.treatmentMode = treatmentMode; self.preflight = preflight; self.basePass = basePass; self.completion = completion; self.qualityGuidance = qualityGuidance; self.asymmetricCoverage = asymmetricCoverage; self.turntableCoverage = turntableCoverage; self.orbitCoverage = orbitCoverage; self.detailPasses = detailPasses; self.objectCenter = objectCenter; self.previousWorldCoverage = previousWorldCoverage }
 }
 
 public extension SessionStorageLayout {
@@ -1332,10 +1433,152 @@ public struct CaptureProtocolViewModel: Sendable {
     public let preset: PackagingPreset
     public let sections: [CaptureProtocolSection]
     public private(set) var acknowledgementGiven: Bool
-    public init(preset: PackagingPreset, acknowledgementGiven: Bool = false) { self.preset = preset; self.acknowledgementGiven = acknowledgementGiven; sections = [CaptureProtocolSection(title: "Lighting", lines: preset.lightingGuidance), CaptureProtocolSection(title: "Background and reflections", lines: preset.preparationGuidance), CaptureProtocolSection(title: "Handling and working distance", lines: ["Keep the package stable and centered.", "Use the supported main camera and preserve safe margins."])] }
+    public init(preset: PackagingPreset, acknowledgementGiven: Bool = false) { self.preset = preset; self.acknowledgementGiven = acknowledgementGiven; sections = [CaptureProtocolSection(title: "How to take the photos", lines: CaptureProtocolViewModel.methodLines(for: preset)), CaptureProtocolSection(title: "Lighting", lines: preset.lightingGuidance), CaptureProtocolSection(title: "Background and reflections", lines: preset.preparationGuidance), CaptureProtocolSection(title: "Handling and working distance", lines: ["Keep the package stable and centered.", "Use the supported main camera and preserve safe margins."])] }
+    /// The capture method in plain words, derived from the preset's orbit configuration.
+    public static func methodLines(for preset: PackagingPreset) -> [String] {
+        let orbit = preset.coverage.orbit
+        if preset.id == .turntable {
+            return ["Put the package in the middle of the turntable and keep the phone still on a stand.", "Turn the package step by step and take one photo per step (\(orbit.azimuthBinCount) steps), recording each angle."]
+        }
+        let heights = orbit.rings.map { OrbitGuidance.heightName(ringID: $0.id) }.joined(separator: ", ")
+        return [
+            "Put the package on the A4 mat in the middle of a table, with room to walk all the way around it.",
+            "After Start, aim the crosshair where the package touches the mat, check the package height, and tap Set object center.",
+            "Walk around the package at \(orbit.rings.count == 1 ? "one height" : "\(orbit.rings.count) heights") (\(heights)), keeping the whole package in view.",
+            "Take \(orbit.azimuthBinCount) photos per height: go to the blue wedge on the dial, follow the instruction line, then tap Manual Capture.",
+            "For the low height, hold the phone at table level (lens just above the table surface), or place the package near the table edge.",
+        ]
+    }
+
     public var acknowledgementRequired: Bool { preset.requiresPreparationAcknowledgement }
     public var canContinue: Bool { !acknowledgementRequired || acknowledgementGiven }
     public mutating func acknowledgePreparation() { acknowledgementGiven = true }
+}
+
+public enum WalkDirection: String, Sendable, Equatable { case left, right }
+
+/// One plain-language orbit instruction for the operator.
+public enum OrbitGuidanceInstruction: Sendable, Equatable {
+    case setObjectCenter
+    case waitForTracking
+    case complete
+    case walk(WalkDirection, degrees: Int)
+    case raise(toRingID: String)
+    case lower(toRingID: String)
+    case holdAndCapture
+
+    public var text: String {
+        switch self {
+        case .setObjectCenter: return "Aim the crosshair where the package touches the table, check its height, then tap Set object center"
+        case .waitForTracking: return "Hold the phone steady until tracking is ready"
+        case .complete: return "All positions covered — finish the scan in History"
+        case .walk(let direction, let degrees): return "Walk \(direction.rawValue) ~\(degrees)° around the package"
+        case .raise(let ring): return ring == OrbitGuidance.highestRingHint ? "Raise the phone and look down at the package" : "Raise the phone to \(OrbitGuidance.heightName(ringID: ring))"
+        case .lower(let ring): return ring == "lower" ? "Hold the phone at table level (lens just above the table surface), or place the package near the table edge" : "Lower the phone to \(OrbitGuidance.heightName(ringID: ring))"
+        case .holdAndCapture: return "Hold here — tap Manual Capture"
+        }
+    }
+}
+
+/// Pure orbit guidance: where the camera is relative to the object and what to do next.
+/// Azimuth increases clockwise seen from above (CoveragePoseMapper: atan2(x, -z)); for an
+/// operator facing the package, moving to a larger azimuth is walking to their left.
+public enum OrbitGuidance {
+    static let highestRingHint = "upper"
+
+    public static func heightName(ringID: String) -> String {
+        switch ringID {
+        case "lower": return "low (table level)"
+        case "middle": return "middle (package height)"
+        case "upper": return "high (above, looking down)"
+        default: return ringID
+        }
+    }
+
+    /// Index of the ring containing `elevation`; -1 below all rings, rings.count above.
+    public static func ringPosition(elevation: Double, configuration: OrbitCoverageConfiguration) -> Int {
+        if let index = configuration.rings.firstIndex(where: { elevation >= $0.minimumElevation && elevation < $0.maximumElevation }) { return index }
+        let lowest = configuration.rings.map(\.minimumElevation).min() ?? 0
+        return elevation < lowest ? -1 : configuration.rings.count
+    }
+
+    public static func wedgeCenter(azimuthIndex: Int, configuration: OrbitCoverageConfiguration) -> Double {
+        (Double(azimuthIndex) + 0.5) * 360 / Double(configuration.azimuthBinCount)
+    }
+
+    /// Egocentric dial: screen angle (degrees clockwise from the top, y down) at which an
+    /// azimuth is drawn so the operator's current azimuth sits at the bottom (180) and the
+    /// package is in the middle. Walking left (larger azimuth) then moves clockwise from the
+    /// bottom, i.e. toward screen-left. Without a live position azimuth 0 is at the bottom.
+    public static func dialScreenAngle(azimuth: Double, current: Double?) -> Double {
+        let angle = (azimuth - (current ?? 0) + 180).truncatingRemainder(dividingBy: 360)
+        return angle < 0 ? angle + 360 : angle
+    }
+
+    /// Unit vector for a dial screen angle in screen coordinates (x right, y down).
+    public static func dialUnitVector(screenAngle: Double) -> (x: Double, y: Double) {
+        let radians = screenAngle * Double.pi / 180
+        return (sin(radians), -cos(radians))
+    }
+
+    /// Signed shortest turn from `from` to `to` in degrees, in (-180, 180].
+    public static func signedDelta(from: Double, to: Double) -> Double {
+        var delta = (to - from).truncatingRemainder(dividingBy: 360)
+        if delta > 180 { delta -= 360 }
+        if delta <= -180 { delta += 360 }
+        return delta
+    }
+
+    /// Next sector to capture: the nearest missing wedge on the operator's current ring,
+    /// otherwise the nearest ring that still has missing wedges. Without a position the
+    /// first missing sector (configuration order) is returned.
+    public static func nextTarget(snapshot: OrbitCoverageSnapshot, current: CoveragePoseObservation?) -> CoverageSector? {
+        let missing = snapshot.missingSectors
+        guard let current, let azimuth = current.azimuthDegrees, let elevation = current.elevationDegrees else { return missing.first }
+        let configuration = snapshot.configuration
+        let ringIndex = ringPosition(elevation: elevation, configuration: configuration)
+        func ringDistance(_ sector: CoverageSector) -> Int { abs((configuration.rings.firstIndex { $0.id == sector.ringID } ?? 0) - ringIndex) }
+        func turn(_ sector: CoverageSector) -> Double { abs(signedDelta(from: azimuth, to: wedgeCenter(azimuthIndex: sector.azimuthIndex, configuration: configuration))) }
+        return missing.min { lhs, rhs in
+            let left = (ringDistance(lhs), turn(lhs)), right = (ringDistance(rhs), turn(rhs))
+            return left.0 != right.0 ? left.0 < right.0 : left.1 < right.1
+        }
+    }
+
+    public static func instruction(current: CoveragePoseObservation?, target: CoverageSector?, configuration: OrbitCoverageConfiguration, centerSet: Bool) -> OrbitGuidanceInstruction {
+        guard centerSet else { return .setObjectCenter }
+        guard let target else { return .complete }
+        guard let current, let azimuth = current.azimuthDegrees, let elevation = current.elevationDegrees else { return .waitForTracking }
+        if current.sector == target { return .holdAndCapture }
+        let targetRing = configuration.rings.firstIndex { $0.id == target.ringID } ?? 0
+        let currentRing = ringPosition(elevation: elevation, configuration: configuration)
+        if currentRing < targetRing { return .raise(toRingID: target.ringID) }
+        if currentRing > targetRing { return .lower(toRingID: target.ringID) }
+        let delta = signedDelta(from: azimuth, to: wedgeCenter(azimuthIndex: target.azimuthIndex, configuration: configuration))
+        let degrees = max(5, Int((abs(delta) / 5).rounded()) * 5)
+        return .walk(delta > 0 ? .left : .right, degrees: degrees)
+    }
+}
+
+/// One on-screen capture confirmation; the id distinguishes repeated identical texts.
+public struct CaptureToastMessage: Sendable, Equatable {
+    public let id: UUID
+    public let text: String
+    public init(text: String, id: UUID = UUID()) { self.id = id; self.text = text }
+}
+
+/// Text of the 2 s confirmation shown after a manual capture attempt.
+public enum CaptureToast {
+    public static func text(decision: ManualCaptureDecision, saved: Bool, observation: CoveragePoseObservation?, newlyCovered: Bool, capturedCount: Int, totalCount: Int, blockHint: String? = nil, orbit: Bool = true) -> String {
+        guard decision.allowed else { return "Not saved: \(blockHint ?? decision.blockingReasons.first ?? "capture_failed")" }
+        guard saved else { return "Not saved: the camera did not return a photo — try again" }
+        guard orbit else { return "Saved — record the turntable angle for this photo" }
+        guard let sector = observation?.sector, observation?.status == "available" else {
+            return "Saved, but the position is unknown (\(observation?.status ?? "pose_unavailable")) — set the object center and keep tracking steady"
+        }
+        guard newlyCovered else { return "Saved, but this wedge was already covered — go to the blue wedge" }
+        return "Saved: \(sector.ringID) ring, wedge \(sector.azimuthIndex + 1) (\(capturedCount)/\(totalCount))"
+    }
 }
 
 #if canImport(SwiftUI)
@@ -1371,6 +1614,70 @@ public struct CoverageGridView: View {
     }
     private func color(for status: CoverageDisplayStatus) -> Color {
         switch status { case .captured: return .green; case .targeted: return .blue; case .missing: return .orange; case .unavailable: return .gray }
+    }
+}
+
+/// Egocentric top-down orbit dial: the package in the middle, the operator's own position
+/// always at the bottom, one wedge per azimuth bin of the shown ring (captured green,
+/// target blue), the live camera position as a white dot, and a
+/// height ladder (high at the top) marking the current and target ring.
+public struct OrbitGuidanceDial: View {
+    public let snapshot: OrbitCoverageSnapshot
+    public let target: CoverageSector?
+    public let current: CoveragePoseObservation?
+    public init(snapshot: OrbitCoverageSnapshot, target: CoverageSector?, current: CoveragePoseObservation?) { self.snapshot = snapshot; self.target = target; self.current = current }
+
+    private var shownRingID: String? { target?.ringID ?? current?.sector?.ringID ?? snapshot.configuration.rings.first?.id }
+
+    public var body: some View {
+        HStack(spacing: 10) {
+            Canvas { [snapshot = self.snapshot, target = self.target, current = self.current, shownRingID = self.shownRingID] context, size in
+                let bins = snapshot.configuration.azimuthBinCount
+                let middle = CGPoint(x: size.width / 2, y: size.height / 2)
+                let outer = min(size.width, size.height) / 2 - 6
+                let inner = outer * 0.35
+                // Rotated so the operator's current azimuth is at the bottom (OrbitGuidance.dialScreenAngle).
+                let currentAzimuth = current?.azimuthDegrees
+                func point(_ degrees: Double, _ radius: CGFloat) -> CGPoint {
+                    let unit = OrbitGuidance.dialUnitVector(screenAngle: OrbitGuidance.dialScreenAngle(azimuth: degrees, current: currentAzimuth))
+                    return CGPoint(x: middle.x + radius * CGFloat(unit.x), y: middle.y + radius * CGFloat(unit.y))
+                }
+                for index in 0..<bins {
+                    let start = Double(index) * 360 / Double(bins), end = Double(index + 1) * 360 / Double(bins)
+                    var wedge = Path()
+                    let steps = 8
+                    wedge.move(to: point(start, inner))
+                    for step in 0...steps { wedge.addLine(to: point(start + (end - start) * Double(step) / Double(steps), outer)) }
+                    for step in stride(from: steps, through: 0, by: -1) { wedge.addLine(to: point(start + (end - start) * Double(step) / Double(steps), inner)) }
+                    wedge.closeSubpath()
+                    let sector = CoverageSector(ringID: shownRingID ?? "", azimuthIndex: index)
+                    let fill: Color = snapshot.capturedSectors.contains(sector) ? .green : (sector == target ? .blue : .gray.opacity(0.35))
+                    context.fill(wedge, with: .color(fill))
+                    context.stroke(wedge, with: .color(.white.opacity(0.6)), lineWidth: 1)
+                }
+                context.fill(Path(ellipseIn: CGRect(x: middle.x - inner * 0.5, y: middle.y - inner * 0.5, width: inner, height: inner)), with: .color(.orange))
+                if let azimuth = current?.azimuthDegrees {
+                    let dot = point(azimuth, outer + 1)
+                    context.fill(Path(ellipseIn: CGRect(x: dot.x - 6, y: dot.y - 6, width: 12, height: 12)), with: .color(.white))
+                    context.stroke(Path(ellipseIn: CGRect(x: dot.x - 6, y: dot.y - 6, width: 12, height: 12)), with: .color(.black), lineWidth: 2)
+                }
+            }
+            .frame(width: 120, height: 120)
+            .accessibilityLabel("Orbit dial")
+            VStack(spacing: 4) {
+                ForEach(Array(snapshot.configuration.rings.reversed())) { ring in
+                    let isTarget = ring.id == target?.ringID
+                    let isCurrent = ring.id == current?.sector?.ringID
+                    Text(ring.id)
+                        .font(.caption2.weight(isTarget ? .bold : .regular))
+                        .frame(width: 58, height: 24)
+                        .background((isTarget ? Color.blue : Color.gray.opacity(0.35)), in: RoundedRectangle(cornerRadius: 5))
+                        .overlay(RoundedRectangle(cornerRadius: 5).stroke(isCurrent ? Color.white : Color.clear, lineWidth: 2))
+                }
+            }
+            .accessibilityLabel("Height: target \(target?.ringID ?? "none"), current \(current?.sector?.ringID ?? "unknown")")
+        }
+        .foregroundStyle(.white)
     }
 }
 #endif

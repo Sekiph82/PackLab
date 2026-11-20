@@ -94,6 +94,8 @@ private final class DeviceARSessionDriver: ARSessionLifecycleDriver {
     var isSupported: Bool { ARWorldTrackingConfiguration.isSupported }
     func run(resetTracking: Bool) {
         let configuration = ARWorldTrackingConfiguration()
+        // Horizontal planes give the table/mat the object-center step raycasts onto.
+        configuration.planeDetection = [.horizontal]
         #if !targetEnvironment(simulator)
         // The AR session is the app's only camera client, so its video format must also
         // serve high-resolution stills (ARSession.captureHighResolutionFrame).
@@ -180,6 +182,37 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
     public func currentCandidateFrame() -> (frame: QualityImageFrame, timestamp: TimeInterval)? {
         guard isStarted, let current = session.currentFrame else { return nil }
         return (LiveQualityFrameSampler.qualityFrame(from: current.capturedImage), current.timestamp)
+    }
+
+    /// The AR world the current poses live in. Its origin moves with every new session and
+    /// every tracking reset/interruption (epoch), so world-space points are only comparable
+    /// within one identity.
+    public var worldIdentity: String { "\(session.identifier.uuidString)#\(epochCoordinator.epoch)" }
+
+    /// Raycasts from the image centre (the on-screen crosshair, aimed where the package
+    /// touches the table) onto a horizontal surface: a detected plane's geometry, then an
+    /// estimated horizontal plane, and only then a detected plane extended to infinity (which
+    /// can be the floor under the table; ObjectCenterBuilder rejects hits far below the
+    /// camera). Returns the hit,
+    /// its surface normal and the camera position; nil when nothing horizontal is hit.
+    public func raycastBasePlane() -> BasePlaneHit? {
+        guard isStarted, let frame = session.currentFrame else { return nil }
+        let crosshair = CGPoint(x: 0.5, y: 0.5)
+        let attempts: [(target: ARRaycastQuery.Target, method: String)] = [
+            (.existingPlaneGeometry, "base_plane_raycast"),
+            (.estimatedPlane, "base_estimated_plane_raycast"),
+            (.existingPlaneInfinite, "base_plane_infinite_raycast"),
+        ]
+        let camera = frame.camera.transform.columns.3
+        for attempt in attempts {
+            let query = frame.raycastQuery(from: crosshair, allowing: attempt.target, alignment: .horizontal)
+            if let hit = session.raycast(query).first {
+                let t = hit.worldTransform.columns.3
+                let up = hit.worldTransform.columns.1
+                return BasePlaneHit(position: [Double(t.x), Double(t.y), Double(t.z)], normal: [Double(up.x), Double(up.y), Double(up.z)], cameraPosition: [Double(camera.x), Double(camera.y), Double(camera.z)], method: attempt.method, worldIdentity: worldIdentity)
+            }
+        }
+        return nil
     }
 
     /// Adds the exact pose of a captured still's frame to the shared buffer.
