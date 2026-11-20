@@ -1066,6 +1066,8 @@ struct ContentView: View {
     @State private var showHistory = false
     @State private var showARPreview = false
     @State private var turntableAngleText = "0"
+    /// Global midY of the full window (crosshair / raycast point), measured outside the safe area.
+    @State private var windowMidY: CGFloat = 0
     @StateObject private var runtime: CaptureRuntimeViewModel
     /// Layout-test seam: receives named element frames ("manualCapture", "guidanceDial") in
     /// window coordinates.
@@ -1118,7 +1120,9 @@ struct ContentView: View {
                 // health warning, long message or coverage readout can ever cover the crosshair.
                 GeometryReader { geo in
                     let clearBand: CGFloat = 40
-                    let middle = geo.size.height / 2
+                    let frame = geo.frame(in: .global)
+                    // Crosshair position in this safe-area-bounded reader's local coordinates.
+                    let crosshairY = (windowMidY > 0 ? windowMidY : frame.midY) - frame.minY
                     VStack(spacing: 0) {
                         ScrollView {
                         VStack(spacing: 6) {
@@ -1169,7 +1173,7 @@ struct ContentView: View {
                         }
                         }
                         .scrollBounceBehavior(.basedOnSize)
-                        .frame(height: max(0, middle - clearBand - geo.safeAreaInsets.top), alignment: .top)
+                        .frame(height: max(0, crosshairY - clearBand), alignment: .top)
                         .background(frameReporter("topOverlay"))
                         Spacer(minLength: 2 * clearBand)
                         VStack(spacing: 6) {
@@ -1280,13 +1284,15 @@ struct ContentView: View {
                             .padding(8).background(.black.opacity(0.65), in: Capsule()).foregroundStyle(.white).padding()
                     }
                         }
-                        .frame(height: max(0, middle - clearBand - geo.safeAreaInsets.bottom), alignment: .bottom)
+                        .frame(height: max(0, geo.size.height - crosshairY - clearBand), alignment: .bottom)
                         .background(frameReporter("bottomControls"))
                     }
-                    .padding(.top, geo.safeAreaInsets.top)
-                    .padding(.bottom, geo.safeAreaInsets.bottom)
                 }
-                .ignoresSafeArea(.container)
+                .background(GeometryReader { window in
+                    Color.clear
+                        .onAppear { windowMidY = window.frame(in: .global).midY }
+                        .onChange(of: window.frame(in: .global).midY) { _, midY in windowMidY = midY }
+                }.ignoresSafeArea())
 
                 if showPoseDebug {
                     VStack(alignment: .leading, spacing: 4) {
