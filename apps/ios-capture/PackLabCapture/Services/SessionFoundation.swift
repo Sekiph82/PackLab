@@ -1050,7 +1050,11 @@ public struct FinalizedTransferSelection: Identifiable {
 /// the persisted record only after the canonical package is committed.
 public struct ProductionScanFinalizeAction: Sendable {
     private let root: URL
-    public init(root: URL) { self.root = root }
+    /// Where a copy of each finalized package is placed for pickup: the app's Documents
+    /// folder, which UIFileSharingEnabled exposes in the Files app ("On My iPhone") and over
+    /// USB to a PC (Apple Devices file sharing / AFC). Nil disables the copy.
+    private let sharedCopyDirectory: URL?
+    public init(root: URL, sharedCopyDirectory: URL? = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first) { self.root = root; self.sharedCopyDirectory = sharedCopyDirectory }
     public func finalize(sessionID: String, destination: URL? = nil) async throws -> SessionFinalizationRecord {
         let layout = SessionStorageLayout(root: root, sessionID: sessionID)
         let packageURL = destination ?? root.appendingPathComponent("exports", isDirectory: true).appendingPathComponent("\(sessionID).packscan")
@@ -1060,6 +1064,14 @@ public struct ProductionScanFinalizeAction: Sendable {
               record.sessionID == sessionID,
               record.state == .exported,
               record.packagePath == packageURL.path else { throw FinalizationError.packagingFailed }
+        // ponytail: best-effort pickup copy; the committed package and record above stay the
+        // authority, so a failed copy is retried by finalizing again, not surfaced as an error.
+        if let shared = sharedCopyDirectory {
+            let copy = shared.appendingPathComponent(packageURL.lastPathComponent)
+            try? FileManager.default.createDirectory(at: shared, withIntermediateDirectories: true)
+            try? FileManager.default.removeItem(at: copy)
+            try? FileManager.default.copyItem(at: packageURL, to: copy)
+        }
         return record
     }
 }

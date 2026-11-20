@@ -3244,9 +3244,12 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "middle", azimuthIndex: 4)])
 
         let destination = root.appendingPathComponent("exports/e2e-manual.packscan")
-        let finalization = try await ProductionScanFinalizeAction(root: root).finalize(sessionID: draft.sessionID, destination: destination)
+        let pickup = root.appendingPathComponent("documents-pickup", isDirectory: true)
+        let finalization = try await ProductionScanFinalizeAction(root: root, sharedCopyDirectory: pickup).finalize(sessionID: draft.sessionID, destination: destination)
         XCTAssertEqual(finalization.state, .exported)
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        // The PC/Files-app pickup copy is byte-identical to the committed package.
+        XCTAssertEqual(try Data(contentsOf: pickup.appendingPathComponent("e2e-manual.packscan")), try Data(contentsOf: destination))
         let history = await LocalScanHistoryStore(root: root).load()
         XCTAssertEqual(history.first { $0.id == draft.sessionID }?.exportState, "exported")
 
