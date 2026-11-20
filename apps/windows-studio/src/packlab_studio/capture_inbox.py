@@ -62,6 +62,8 @@ class CaptureInboxView(QWidget):
 
         self.receive_button = QPushButton("Receive from iPhone", self)
         self.new_code_button = QPushButton("New code", self)
+        self.stop_button = QPushButton("Stop receiving", self)
+        self.stop_button.setEnabled(False)
         self.new_code_button.setEnabled(False)
         self.import_button = QPushButton("Import .packscan file…", self)
         self.qr_label = QLabel(self)
@@ -84,7 +86,12 @@ class CaptureInboxView(QWidget):
         self.revoke_button.clicked.connect(self.revoke_selected_device)
 
         buttons = QHBoxLayout()
-        for button in (self.receive_button, self.new_code_button, self.import_button):
+        for button in (
+            self.receive_button,
+            self.new_code_button,
+            self.stop_button,
+            self.import_button,
+        ):
             buttons.addWidget(button)
         buttons.addStretch(1)
         layout = QVBoxLayout(self)
@@ -106,6 +113,7 @@ class CaptureInboxView(QWidget):
         self.timer.timeout.connect(self._tick)
         self.receive_button.clicked.connect(self.start_receiving)
         self.new_code_button.clicked.connect(self.new_code)
+        self.stop_button.clicked.connect(self.stop_receiving)
         self.import_button.clicked.connect(self.import_file)
         for button in (self.receive_button, self.import_button):
             button.setEnabled(session_factory is not None)
@@ -132,12 +140,26 @@ class CaptureInboxView(QWidget):
             return
         self.receive_button.setEnabled(False)
         self.new_code_button.setEnabled(True)
+        self.stop_button.setEnabled(True)
         self.status_label.setText(
             f"Listening on {session.lan_host}:{session.port}. If Windows asks, allow "
             "PackLab on private networks."
         )
         self.new_code()
         self.timer.start()
+
+    def stop_receiving(self) -> None:
+        """Close the LAN listener; pairing codes stop being issued."""
+        self.timer.stop()
+        if self._session is not None:
+            self._session.stop()
+        self.offer = None
+        self.qr_label.clear()
+        self.pairing_label.setText("Not receiving.")
+        self.status_label.setText("Receiver stopped.")
+        self.receive_button.setEnabled(True)
+        self.new_code_button.setEnabled(False)
+        self.stop_button.setEnabled(False)
 
     def new_code(self) -> None:
         session = self.session

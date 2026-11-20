@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import ssl
 import sys
 import threading
 import uuid
@@ -37,10 +38,40 @@ class ReceiverError(RuntimeError):
     pass
 
 
+# An unauthenticated LAN peer may send at most this much JSON; chunks are capped too.
+MAX_JSON_BODY_BYTES = 64 * 1024
+MAX_CHUNK_BYTES = 8 * 1024 * 1024
+CONNECTION_TIMEOUT_SECONDS = 30
+
+
 class _ExclusiveHTTPServer(ThreadingHTTPServer):
     # HTTPServer sets SO_REUSEADDR, which on Windows lets a second socket bind a
     # port that is already listening; claim it exclusively so a busy port fails.
     allow_reuse_address = sys.platform != "win32"
+    # Connection threads never hold up shutdown or window close.
+    daemon_threads = True
+    block_on_close = False
+    tls_context: ssl.SSLContext | None = None
+
+    def finish_request(self, request: Any, client_address: Any) -> None:
+        # The TLS handshake runs here, in the per-connection thread with a timeout,
+        # never on the accept loop: an idle or slow peer cannot block other phones
+        # or stop().
+        request.settimeout(CONNECTION_TIMEOUT_SECONDS)
+        if self.tls_context is None:
+            super().finish_request(request, client_address)
+            return
+        try:
+            tls = self.tls_context.wrap_socket(request, server_side=True)
+        except (OSError, ssl.SSLError):
+            return
+        try:
+            super().finish_request(tls, client_address)
+        finally:
+            try:
+                tls.close()
+            except OSError:
+                pass
 
     def server_bind(self) -> None:
         if sys.platform == "win32":
@@ -228,6 +259,8 @@ class PackLabReceiver:
 
             def _body(self) -> dict[str, object]:
                 length = int(self.headers.get("Content-Length", "0"))
+                if length < 0 or length > MAX_JSON_BODY_BYTES:
+                    raise TransferProtocolError("bad_request", "request body is too large")
                 value = json.loads(self.rfile.read(length).decode("utf-8"))
                 if not isinstance(value, dict):
                     raise TransferProtocolError("bad_request", "JSON object required")
@@ -271,6 +304,8 @@ class PackLabReceiver:
                             offset = int(self.headers["X-PackLab-Offset"])
                             digest = self.headers["X-PackLab-Chunk-SHA256"]
                             length = int(self.headers.get("Content-Length", "0"))
+                            if length < 0 or length > MAX_CHUNK_BYTES:
+                                raise TransferProtocolError("bad_request", "chunk is too large")
                             self._json(
                                 HTTPStatus.OK,
                                 receiver.put_chunk(
@@ -318,9 +353,7 @@ class PackLabReceiver:
                     )
 
         server = _ExclusiveHTTPServer((self.host, self.port), Handler)
-        server.socket = create_server_tls_context(self.tls_identity).wrap_socket(
-            server.socket, server_side=True
-        )
+        server.tls_context = create_server_tls_context(self.tls_identity)
         self._server = server
         self.port = int(server.server_address[1])
         self._thread = threading.Thread(
