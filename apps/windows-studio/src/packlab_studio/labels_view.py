@@ -66,6 +66,7 @@ class LabelsView(QWidget):
         self.last_mockup: dict[str, object] | None = None
         self._render_thread: threading.Thread | None = None
         self._mockup_job: MockupJob | None = None
+        self._auto_project_root: Path | None = None
         # Injectable choosers keep every action drivable offscreen.
         self.choose_design_model_path: Callable[[], str] = lambda: QFileDialog.getOpenFileName(
             self,
@@ -239,14 +240,16 @@ class LabelsView(QWidget):
     def use_project_model(self, *, automatic: bool = False) -> None:
         """Open the newest Design Model revision Measure & Design saved in the project."""
         root = self.project_root()
+        if automatic:  # project listener: act once per opened project, not per autosave
+            if root == self._auto_project_root:
+                return
+            self._auto_project_root = root
         latest = latest_project_design_model(root) if root is not None else None
         if latest is None:
             if not automatic:
                 self.status.setText(
                     "No Design Model saved in this project yet (Measure & Design > Save)."
                 )
-            return
-        if automatic and self.workbench.session is not None:
             return
         self._run(
             lambda: f"Opened project Design Model {self.workbench.open_document(latest).part_name}."

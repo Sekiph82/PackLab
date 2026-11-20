@@ -362,13 +362,17 @@ def test_project_revision_is_opened_automatically_when_a_project_opens(app, jar_
     folder = root / "derived" / "design_model"
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "abc.json").write_text(
-        json.dumps(_studio_revision_record(jar_file, height=50.0)), encoding="utf-8"
+        json.dumps(_studio_revision_record(jar_file, height=60.0)), encoding="utf-8"
     )
     first.close()
     app.processEvents()
     second = StudioMainWindow(packaging_library_root=tmp_path / "lib2")
+    second.design_workbench.open_document(jar_file)  # another model was open before
     second.open_project(root)
-    assert second.design_workbench.session is not None
+    assert "height 60.0 mm" in second.design_workbench.summary()  # switched to the project
+    second.design_workbench.open_document(jar_file)
+    second.project_manager._notify()  # e.g. a revision bump of the same project
+    assert "height 50.0 mm" in second.design_workbench.summary()  # no reload on autosave
     assert second.design_workbench.export_source() is not None
     second.close()
     app.processEvents()
