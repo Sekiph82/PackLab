@@ -228,7 +228,10 @@ private struct DeterministicZipArchive {
         appendUInt32(&output, 0x02014b50); appendUInt16(&output, 20); appendUInt16(&output, 20); appendUInt16(&output, Self.generalPurposeUTF8Flag)
         appendUInt16(&output, Self.deflateMethod); appendUInt16(&output, Self.dosTimeMidnight); appendUInt16(&output, Self.dosDate1980Jan1)
         appendUInt32(&output, CRC32.checksum(bytes)); appendUInt32(&output, UInt32(compressed.count)); appendUInt32(&output, UInt32(bytes.count))
-        appendName(&output, name); appendUInt16(&output, 0); appendUInt16(&output, 0); appendUInt16(&output, 0); appendUInt16(&output, 0); appendUInt32(&output, 0); appendUInt32(&output, offset)
+        // ZIP spec: name/extra/comment lengths, disk, attrs and offset precede the name bytes.
+        let nameData = Data(name.utf8)
+        appendUInt16(&output, UInt16(nameData.count)); appendUInt16(&output, 0); appendUInt16(&output, 0); appendUInt16(&output, 0); appendUInt16(&output, 0); appendUInt32(&output, 0); appendUInt32(&output, offset)
+        output.append(nameData)
     }
 
     private func appendName(_ output: inout Data, _ name: String) {

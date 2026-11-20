@@ -1069,6 +1069,46 @@ final class PackLabCaptureTests: XCTestCase {
         }
     }
 
+    func testPackScanWriterCentralDirectoryFollowsZipSpecLayout() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let metadata = Data("{}".utf8)
+        let image = Data([1, 2, 3])
+        let manifest = try JSONSerialization.data(withJSONObject: [
+            "schema_version": "1.0.0",
+            "capture_id": "zip-layout",
+            "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization],
+            "payloads": [
+                ["path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": metadata.count, "sha256": SourceIntegrity.digest(metadata)],
+                ["path": "images/p.heic", "kind": "image", "required": true, "authority": "source", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)],
+            ],
+        ])
+        let destination = root.appendingPathComponent("layout.packscan")
+        try PackScanWriter().write(manifestJSON: manifest, payloads: ["metadata/photos.json": metadata, "images/p.heic": image], to: destination)
+        let zip = [UInt8](try Data(contentsOf: destination))
+        func u16(_ at: Int) -> Int { Int(zip[at]) | Int(zip[at + 1]) << 8 }
+        func u32(_ at: Int) -> Int { u16(at) | u16(at + 2) << 16 }
+
+        let eocd = zip.count - 22
+        XCTAssertEqual(u32(eocd), 0x06054b50)
+        let count = u16(eocd + 10)
+        var cursor = u32(eocd + 16)
+        var names: [String] = []
+        for _ in 0..<count {
+            XCTAssertEqual(u32(cursor), 0x02014b50)
+            let nameLength = u16(cursor + 28), extraLength = u16(cursor + 30), commentLength = u16(cursor + 32)
+            let localOffset = u32(cursor + 42)
+            let name = String(decoding: zip[(cursor + 46)..<(cursor + 46 + nameLength)], as: UTF8.self)
+            names.append(name)
+            XCTAssertEqual(u32(localOffset), 0x04034b50, name)
+            let localNameLength = u16(localOffset + 26)
+            XCTAssertEqual(String(decoding: zip[(localOffset + 30)..<(localOffset + 30 + localNameLength)], as: UTF8.self), name)
+            cursor += 46 + nameLength + extraLength + commentLength
+        }
+        XCTAssertEqual(cursor, eocd)
+        XCTAssertEqual(Set(names), ["manifest.json", "metadata/photos.json", "checksums.json", "images/p.heic"])
+    }
+
     func testPL0119CanonicalWorkflowRequiresAuthoritativeRecordsAndUsesSourceEntryPoint() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
