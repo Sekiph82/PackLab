@@ -227,7 +227,16 @@ final class CaptureRuntimeViewModel: ObservableObject {
         objectCenterMessage = nil
         m04LiveObservation = nil
         m04PreviousWorldCoverage = nil
+        packageHeightMeters = PackageHeightDefaults.meters(for: .other)
+        packageHeightSource = "package_type_default"
         updateOrbitGuidance()
+    }
+
+    /// New scan or resume: fresh runtime for the preset plus the package-type height default.
+    /// On resume, restoreObjectCenter then adopts a stored center's recorded height.
+    func beginScan(preset: PackagingPreset, layout: SessionStorageLayout, packageType: PackageType) {
+        configureM04QualityRuntime(preset: preset, layout: layout)
+        setPackageHeight(PackageHeightDefaults.meters(for: packageType), source: "package_type_default")
     }
 
     private func detailCoverageConfiguration(for passID: CapturePassID) -> OrbitCoverageConfiguration {
@@ -663,13 +672,16 @@ final class CaptureRuntimeViewModel: ObservableObject {
     /// evidence and live coverage restarts.
     func restoreObjectCenter(_ center: ObjectCenter?, previousWorldCoverage: OrbitCoverageSnapshot? = nil) {
         if let previousWorldCoverage, !previousWorldCoverage.capturedSectors.isEmpty { m04PreviousWorldCoverage = previousWorldCoverage }
+        // The recorded package height is a property of the package, valid in any AR world.
+        if let height = center?.packageHeightMeters, let source = center?.heightSource { packageHeightMeters = height; packageHeightSource = source }
         if let center, center.isValid, let current = worldIdentitySource?(), current == center.worldIdentity {
             m04ObjectCenter = center
-            if let height = center.packageHeightMeters, let source = center.heightSource { packageHeightMeters = height; packageHeightSource = source }
             objectCenterMessage = nil
         } else {
             m04ObjectCenter = nil
-            if center != nil || !m04Coverage.capturedSectors.isEmpty {
+            // Turntable coverage is angle evidence, not AR-world sectors: like a mid-session
+            // tracking reset (no center, nothing dropped), resume leaves it as restored.
+            if m04ActivePreset.id != .turntable, center != nil || !m04Coverage.capturedSectors.isEmpty {
                 restartCoverageForNewWorld()
                 objectCenterMessage = "This is a new AR session — set the object center again; earlier coverage is kept but not counted"
             }
@@ -1275,13 +1287,13 @@ struct ContentView: View {
                 }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission, readiness: runtime.newScanReadiness) { draft in
-                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); runtime.setPackageHeight(PackageHeightDefaults.meters(for: draft.packageType), source: "package_type_default"); runtime.startLiveCandidateLoop(); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))); scanStartError = nil } catch { scanStartError = "Scan could not start: \(error.localizedDescription)" } }
+                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.beginScan(preset: preset, layout: layout, packageType: draft.packageType); runtime.startLiveCandidateLoop(); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))); scanStartError = nil } catch { scanStartError = "Scan could not start: \(error.localizedDescription)" } }
                 showNewScan = false
             } } }
             .sheet(isPresented: $showHistory) { NavigationStack { LocalScanHistoryView(root: ContentView.sessionRoot, onFinalized: { sessionID in runtime.endActiveSession(sessionID: sessionID) }) } }
             .sheet(isPresented: $showARPreview) { NavigationStack { ARPreviewEntryView() } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
-                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); runtime.startLiveCandidateLoop(); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage); runtime.restoreObjectCenter(context.objectCenter, previousWorldCoverage: context.previousWorldCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
+                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.beginScan(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout, packageType: draft.packageType); runtime.startLiveCandidateLoop(); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage); runtime.restoreObjectCenter(context.objectCenter, previousWorldCoverage: context.previousWorldCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
                 runtime.endActiveSession(sessionID: candidate.id)

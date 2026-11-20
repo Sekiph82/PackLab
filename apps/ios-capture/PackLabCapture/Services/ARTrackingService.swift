@@ -190,16 +190,18 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
     public var worldIdentity: String { "\(session.identifier.uuidString)#\(epochCoordinator.epoch)" }
 
     /// Raycasts from the image centre (the on-screen crosshair, aimed where the package
-    /// touches the table) onto a horizontal surface: a detected plane's geometry, then that
-    /// plane extended, then an estimated horizontal plane as the last resort. Returns the hit,
+    /// touches the table) onto a horizontal surface: a detected plane's geometry, then an
+    /// estimated horizontal plane, and only then a detected plane extended to infinity (which
+    /// can be the floor under the table; ObjectCenterBuilder rejects hits far below the
+    /// camera). Returns the hit,
     /// its surface normal and the camera position; nil when nothing horizontal is hit.
     public func raycastBasePlane() -> BasePlaneHit? {
         guard isStarted, let frame = session.currentFrame else { return nil }
         let crosshair = CGPoint(x: 0.5, y: 0.5)
         let attempts: [(target: ARRaycastQuery.Target, method: String)] = [
             (.existingPlaneGeometry, "base_plane_raycast"),
-            (.existingPlaneInfinite, "base_plane_infinite_raycast"),
             (.estimatedPlane, "base_estimated_plane_raycast"),
+            (.existingPlaneInfinite, "base_plane_infinite_raycast"),
         ]
         let camera = frame.camera.transform.columns.3
         for attempt in attempts {

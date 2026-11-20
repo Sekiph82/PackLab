@@ -3521,6 +3521,10 @@ final class PackLabCaptureTests: XCTestCase {
         // Plausibility: 0.1 m ... 1.5 m from the camera, level surface, real height.
         XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, -0.5, -2.0]), packageHeight: 0.2, heightSource: "x")), .tooFar)
         XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, 0.25, -0.03]), packageHeight: 0.2, heightSource: "x")), .tooNear)
+        // Camera at y 0.3: a base 0.59 m below is a table; 0.61 m below is the floor plane.
+        XCTAssertNil(rejection(ObjectCenterBuilder.center(from: hit([0, -0.29, -0.4]), packageHeight: 0.2, heightSource: "x")))
+        XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, -0.31, -0.4]), packageHeight: 0.2, heightSource: "x")), .tooFarBelow)
+        XCTAssertTrue(ObjectCenterRejection.tooFarBelow.message.contains("where the package touches the table"))
         XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, 0, -0.4], normal: [0, 0, 1]), packageHeight: 0.2, heightSource: "x")), .notHorizontal)
         XCTAssertEqual(rejection(ObjectCenterBuilder.center(from: hit([0, 0, -0.4], normal: [sin(20 * Double.pi / 180), cos(20 * Double.pi / 180), 0]), packageHeight: 0.2, heightSource: "x")), .notHorizontal)
         XCTAssertNil(rejection(ObjectCenterBuilder.center(from: hit([0, 0, -0.4], normal: [sin(10 * Double.pi / 180), cos(10 * Double.pi / 180), 0]), packageHeight: 0.2, heightSource: "x")))
@@ -3588,6 +3592,57 @@ final class PackLabCaptureTests: XCTestCase {
         legacy.restoreObjectCenter(nil)
         XCTAssertTrue(legacy.m04Coverage.capturedSectors.isEmpty)
         XCTAssertEqual(legacy.m04PreviousWorldCoverage?.capturedSectors.count, 1)
+    }
+
+    @MainActor
+    func testPackageHeightIsNotInheritedBetweenScansAndResumeUsesRecordedHeight() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func makeRuntime() -> CaptureRuntimeViewModel {
+            CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()), automaticallyPoll: false)
+        }
+        let matte = PackagingPresetCatalog.matteHDPE
+        // Scan A (bottle): operator raises the height to 25 cm.
+        let vm = makeRuntime()
+        vm.beginScan(preset: matte, layout: SessionStorageLayout(root: root, sessionID: "scan-a"), packageType: .bottle)
+        XCTAssertEqual(vm.packageHeightMeters, 0.20, accuracy: 1e-12)
+        XCTAssertEqual(vm.packageHeightSource, "package_type_default")
+        vm.adjustPackageHeight(byCentimeters: 5)
+        XCTAssertEqual(vm.packageHeightMeters, 0.25, accuracy: 1e-9)
+        XCTAssertEqual(vm.packageHeightSource, "operator_entered")
+        // Resume scan B (jar, legacy context without a center) in the same runtime: no inheritance.
+        vm.beginScan(preset: matte, layout: SessionStorageLayout(root: root, sessionID: "scan-b"), packageType: .jar)
+        vm.restoreObjectCenter(nil)
+        XCTAssertEqual(vm.packageHeightMeters, 0.12, accuracy: 1e-12)
+        XCTAssertEqual(vm.packageHeightSource, "package_type_default")
+        // A bare configure also resets (no stale operator value).
+        vm.adjustPackageHeight(byCentimeters: 3)
+        vm.configureM04QualityRuntime(preset: matte, layout: SessionStorageLayout(root: root, sessionID: "scan-c"))
+        XCTAssertEqual(vm.packageHeightSource, "package_type_default")
+        // Relaunch-resume of a bottle whose stored center has no recorded height: 20 cm default.
+        let relaunched = makeRuntime()
+        relaunched.bindObjectCenterSources(center: nil, worldIdentity: { "new-world" })
+        relaunched.beginScan(preset: matte, layout: SessionStorageLayout(root: root, sessionID: "scan-d"), packageType: .bottle)
+        relaunched.restoreObjectCenter(ObjectCenter(position: [0, 0.1, 0], method: "test_injected", worldIdentity: "old-world"))
+        XCTAssertEqual(relaunched.packageHeightMeters, 0.20, accuracy: 1e-12)
+        XCTAssertEqual(relaunched.packageHeightSource, "package_type_default")
+        XCTAssertNil(relaunched.m04ObjectCenter)
+        // ...and with a recorded operator height, that height and source are kept across worlds.
+        let recorded = makeRuntime()
+        recorded.bindObjectCenterSources(center: nil, worldIdentity: { "new-world" })
+        recorded.beginScan(preset: matte, layout: SessionStorageLayout(root: root, sessionID: "scan-e"), packageType: .bottle)
+        recorded.restoreObjectCenter(ObjectCenter(position: [0, 0.09, 0], method: "test_injected", worldIdentity: "old-world", basePosition: [0, 0, 0], packageHeightMeters: 0.18, heightSource: "operator_entered"))
+        XCTAssertEqual(recorded.packageHeightMeters, 0.18, accuracy: 1e-12)
+        XCTAssertEqual(recorded.packageHeightSource, "operator_entered")
+        // Turntable: resume leaves restored coverage in place, as a mid-session reset does.
+        let turntable = makeRuntime()
+        turntable.beginScan(preset: PackagingPresetCatalog.turntable, layout: SessionStorageLayout(root: root, sessionID: "scan-t"), packageType: .bottle)
+        var model = OrbitCoverageModel(configuration: PackagingPresetCatalog.turntable.coverage.orbit)
+        _ = model.observe(captureID: "t1", poseBinding: acceptedPoseBinding(captureID: "t1", pose: orbitPose(0, 0, 0.5)))
+        XCTAssertTrue(turntable.restoreM04OrbitCoverage(model.snapshot()))
+        turntable.restoreObjectCenter(nil)
+        XCTAssertEqual(turntable.m04Coverage.capturedSectors.count, 1)
+        XCTAssertNil(turntable.m04PreviousWorldCoverage)
     }
 
     func testCaptureToastExplainsEachOutcome() {

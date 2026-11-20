@@ -708,6 +708,7 @@ public struct BasePlaneHit: Sendable, Equatable {
 public enum ObjectCenterRejection: String, Error, Sendable, Equatable {
     case tooFar = "base_point_too_far"
     case tooNear = "base_point_too_near"
+    case tooFarBelow = "base_point_too_far_below"
     case notHorizontal = "base_point_not_horizontal"
     case invalidHeight = "package_height_invalid"
     case invalidHit = "base_point_invalid"
@@ -716,6 +717,7 @@ public enum ObjectCenterRejection: String, Error, Sendable, Equatable {
         switch self {
         case .tooFar: return "Aim at where the package touches the table — that point is more than 1.5 m away; step closer"
         case .tooNear: return "Aim at where the package touches the table — that point is closer than 10 cm; step back"
+        case .tooFarBelow: return "Aim at where the package touches the table — that point is more than 60 cm below the phone (the floor?)"
         case .notHorizontal: return "Aim at where the package touches the table — the crosshair is not on a flat, level surface"
         case .invalidHeight: return "Set the package height first"
         case .invalidHit: return "Aim at where the package touches the table and try again"
@@ -741,17 +743,20 @@ public enum PackageHeightDefaults {
 public enum ObjectCenterBuilder {
     public static let maximumDistance = 1.5
     public static let minimumDistance = 0.1
+    /// A table-top base point is never far below a hand-held phone; a deeper hit is the floor.
+    public static let maximumDropBelowCamera = 0.6
     /// cos(15 deg): the surface normal must be within 15 deg of world up.
     public static let minimumUpComponent = 0.966
 
     /// Center = base point + up x (height / 2) in the gravity-aligned ARKit world (y up).
-    /// Rejects hits that are too far/near the camera or not on a level surface.
+    /// Rejects hits that are too far/near the camera, more than 0.6 m below it, or not level.
     public static func center(from hit: BasePlaneHit, packageHeight: Double, heightSource: String, at date: Date = Date()) -> Result<ObjectCenter, ObjectCenterRejection> {
         guard hit.position.count == 3, hit.cameraPosition.count == 3, hit.normal.count == 3, (hit.position + hit.cameraPosition + hit.normal).allSatisfy(\.isFinite) else { return .failure(.invalidHit) }
         guard packageHeight.isFinite, PackageHeightDefaults.range.contains(packageHeight) else { return .failure(.invalidHeight) }
         let distance = sqrt(zip(hit.position, hit.cameraPosition).reduce(0.0) { $0 + ($1.0 - $1.1) * ($1.0 - $1.1) })
         if distance > maximumDistance { return .failure(.tooFar) }
         if distance < minimumDistance { return .failure(.tooNear) }
+        if hit.cameraPosition[1] - hit.position[1] > maximumDropBelowCamera { return .failure(.tooFarBelow) }
         let length = sqrt(hit.normal.reduce(0.0) { $0 + $1 * $1 })
         guard length > 1e-9, hit.normal[1] / length >= minimumUpComponent else { return .failure(.notHorizontal) }
         let position = [hit.position[0], hit.position[1] + packageHeight / 2, hit.position[2]]
