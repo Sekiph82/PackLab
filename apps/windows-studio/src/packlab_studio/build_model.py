@@ -207,7 +207,8 @@ class ColmapOpenMvsBackend:
             raise BuildModelError(
                 "Reconstruction engines not found: "
                 + ", ".join(missing)
-                + ". Set PACKLAB_COLMAP_PATH and PACKLAB_OPENMVS_ROOT."
+                + ". Place them in the bundled engines folder or set PACKLAB_COLMAP_PATH"
+                " and PACKLAB_OPENMVS_ROOT (see Settings > Reconstruction engines)."
             )
         paths = {record.engine_id: cast(Path, record.executable) for record in report.records}
         ffmpeg = os.environ.get("PACKLAB_FFMPEG_PATH") or shutil.which("ffmpeg")

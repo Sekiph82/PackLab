@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt
 
 from packlab_core.engine_probe import EngineProbeResult, EngineProbeStatus, EngineVersion
 from packlab_studio import app as studio_app
-from packlab_studio import navigation
+from packlab_studio import engine_config, navigation
 from packlab_studio.app import create_application
 from packlab_studio.engine_config import (
     DiscoveryStatus,
@@ -158,3 +158,22 @@ def test_settings_engines_panel_lists_discovery_and_rechecks(monkeypatch) -> Non
     view.recheck_button.click()
     assert "version 4.2.1 (unsupported)" in view.engines.item(0).text()
     assert probes == [Path("C:/engines/colmap.exe")]
+
+
+def test_settings_engines_panel_shows_bundled_engines(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    create_application(["packlab-engines-bundled-test"])
+    colmap = tmp_path / "engines" / "colmap" / "bin" / "colmap.exe"
+    colmap.parent.mkdir(parents=True)
+    colmap.write_bytes(b"stub")
+    monkeypatch.setattr(
+        navigation,
+        "discover_engines",
+        lambda: engine_config.discover_engines(
+            environment={}, which=lambda _name: None, bundled_roots=(tmp_path / "engines",)
+        ),
+    )
+    view = SettingsView()
+    first = view.engines.item(0).text()
+    assert first.startswith("colmap: configured via bundled") and str(colmap) in first
+    assert "openmvs.texture_mesh: missing" in view.engines.item(5).text()
