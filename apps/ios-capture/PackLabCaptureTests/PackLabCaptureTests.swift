@@ -1109,6 +1109,58 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(Set(names), ["manifest.json", "metadata/photos.json", "checksums.json", "images/p.heic"])
     }
 
+    func testCanonicalSessionManifestMatchesPackScanManifestSchema() throws {
+        // Mirrors schemas/packscan/manifest.schema.json (validated by packlab_core.packscan on Windows).
+        let required: Set<String> = ["schema_version", "capture_id", "created_at", "device", "capture_mode", "payloads", "source_evidence", "checksums"]
+        let allowed = required.union(["started_at", "ended_at", "calibration_profile_ref"])
+        let kinds: Set<String> = ["image", "photo_metadata", "mask", "preview", "thumbnail", "diagnostics", "calibration", "other"]
+        let payloads = ["metadata/photos.json": Data("{}".utf8), "images/p.heic": Data([1]), "metadata/accepted-records/p.json": Data("{}".utf8)]
+        func matches(_ value: Any?, _ pattern: String) -> Bool { (value as? String)?.range(of: pattern, options: .regularExpression) != nil }
+        for mode in CaptureModeID.allCases {
+            let draft = NewScanDraft(sessionID: "6F9619FF-8B86-D011-B42D-00C04FC964FF", packageName: "Bottle", packageType: .bottle, captureMode: mode, createdAt: Date(timeIntervalSince1970: 1_790_000_000.25))
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: SessionGalleryStore.packScanManifest(draft: draft, payloads: payloads)) as? [String: Any])
+            XCTAssertTrue(required.isSubset(of: object.keys), "\(mode)")
+            XCTAssertTrue(Set(object.keys).isSubset(of: allowed), "\(mode)")
+            XCTAssertEqual(object["schema_version"] as? String, "1.0.0")
+            XCTAssertTrue(matches(object["capture_id"], "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"))
+            XCTAssertTrue(matches(object["created_at"], "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"), "\(String(describing: object["created_at"]))")
+            let device = try XCTUnwrap(object["device"] as? [String: Any])
+            XCTAssertEqual(device["platform"] as? String, "iOS")
+            XCTAssertTrue(matches(device["model"], "^.{1,128}$"))
+            XCTAssertTrue(matches(device["os_version"], "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$"), "\(String(describing: device["os_version"]))")
+            XCTAssertTrue(Set(device.keys).isSubset(of: ["platform", "model", "os_version", "device_identifier", "lens"]))
+            let captureMode = try XCTUnwrap(object["capture_mode"] as? [String: Any])
+            XCTAssertEqual(captureMode["version"] as? Int, 1)
+            switch captureMode["mode"] as? String {
+            case "freehand":
+                XCTAssertNotEqual(mode, .guidedOrbit)
+                XCTAssertTrue(Set(captureMode.keys).isSubset(of: ["mode", "version", "parameters"]))
+            case "guided_orbit":
+                let parameters = try XCTUnwrap(captureMode["parameters"] as? [String: Any])
+                XCTAssertEqual(parameters["orbit_axis"] as? String, "subject_vertical")
+                let coverage = try XCTUnwrap(parameters["coverage"] as? [String: Any])
+                let sector = try XCTUnwrap(coverage["target_sector_deg"] as? Double)
+                XCTAssertTrue(sector > 0 && sector < 360)
+                let minimumViews = try XCTUnwrap(coverage["minimum_view_count"] as? Int)
+                XCTAssertGreaterThanOrEqual(minimumViews, 1)
+            default:
+                XCTFail("capture_mode \(String(describing: captureMode["mode"])) is not schema-valid for a multi-photo session")
+            }
+            let evidence = try XCTUnwrap(object["source_evidence"] as? [String: Any])
+            XCTAssertEqual(evidence["immutable"] as? Bool, true)
+            XCTAssertEqual(evidence["authority"] as? String, "original_capture")
+            let declared = try XCTUnwrap(object["payloads"] as? [[String: Any]])
+            XCTAssertEqual(Set(declared.compactMap { $0["path"] as? String }), Set(payloads.keys))
+            for item in declared {
+                XCTAssertTrue(kinds.contains(item["kind"] as? String ?? ""), "\(item)")
+                XCTAssertEqual(Set(item.keys), ["path", "kind", "required", "authority", "size_bytes", "sha256"])
+                XCTAssertTrue(matches(item["sha256"], "^[0-9a-f]{64}$"))
+            }
+            let checksums = try XCTUnwrap(object["checksums"] as? [String: Any])
+            XCTAssertEqual(checksums["canonicalization"] as? String, PackScanWriter.checksumCanonicalization)
+        }
+    }
+
     func testPL0119CanonicalWorkflowRequiresAuthoritativeRecordsAndUsesSourceEntryPoint() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

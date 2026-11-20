@@ -594,7 +594,7 @@ jobs:
           failed="$(printf '%s' "$safe_summary" | jq -r '.failedTests // 0')"
           skipped="$(printf '%s' "$safe_summary" | jq -r '.skippedTests // 0')"
           case "$FOCUSED_GROUP" in
-            all) expected=232 ;;
+            all) expected=233 ;;
             recovery_all) expected=25 ;;
             pl0119_finalization_failures) expected=1 ;;
             session_integrity) expected=7 ;;

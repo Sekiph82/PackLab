@@ -307,18 +307,47 @@ public actor SessionGalleryStore {
         }
         let expectedImages = Set(records.map { "images/\($0.sourceFilename)" })
         guard Set(document.photos.map(\.imagePath)) == expectedImages else { throw FinalizationError.invalidMetadataBinding }
+        guard let draftData = try? Data(contentsOf: layout.metadata),
+              let draft = try? JSONDecoder().decode(NewScanDraft.self, from: draftData),
+              draft.sessionID == layout.sessionID else { throw FinalizationError.invalidManifest }
+        let manifest = try Self.packScanManifest(draft: draft, payloads: payloads)
+        try CanonicalSessionFinalizationWorkflow(finalizer: finalizer).finalize(layout: layout, records: records, immutableSourceBytes: immutable, manifest: manifest, payloads: payloads, destination: destination)
+    }
+
+    /// Manifest conforming to schemas/packscan/manifest.schema.json, the contract
+    /// packlab_core.packscan.validate_packscan enforces on the Windows side.
+    static func packScanManifest(draft: NewScanDraft, payloads: [String: Data], device: [String: String] = PackScanDeviceInfo.current) throws -> Data {
         let declarations: [[String: Any]] = payloads.keys.sorted().map { path in
             let bytes = payloads[path] ?? Data()
-            let kind = path == "metadata/photos.json" ? "photo_metadata" : (path.hasPrefix("images/") ? "image" : "accepted_record")
+            // Accepted capture records have no dedicated schema kind; "other" is the canonical bucket.
+            let kind = path == "metadata/photos.json" ? "photo_metadata" : (path.hasPrefix("images/") ? "image" : "other")
             return ["path": path, "kind": kind, "required": true, "authority": "source", "size_bytes": bytes.count, "sha256": SourceIntegrity.digest(bytes)]
         }
-        let manifest = try JSONSerialization.data(withJSONObject: [
+        var provenance = "packlab_ios_capture"
+        let captureMode: [String: Any]
+        switch draft.captureMode {
+        case .freehand:
+            captureMode = ["mode": "freehand", "version": 1]
+        case .guidedOrbit:
+            let bins = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE).coverage.orbit.azimuthBinCount
+            captureMode = ["mode": "guided_orbit", "version": 1, "parameters": ["orbit_axis": "subject_vertical", "coverage": ["target_sector_deg": 360.0 / Double(max(2, bins)), "minimum_view_count": bins]]]
+        case .turntable:
+            // ponytail: the schema's turntable mode describes ONE frame per manifest; a multi-photo
+            // session keeps per-photo angles in its accepted records and declares freehand, flagged
+            // in provenance, until the schema gains a session-level turntable mode.
+            captureMode = ["mode": "freehand", "version": 1]
+            provenance = "packlab_ios_capture_turntable_session"
+        }
+        return try JSONSerialization.data(withJSONObject: [
             "schema_version": PackScanWriter.schemaVersion,
-            "capture_id": layout.sessionID,
-            "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization],
+            "capture_id": draft.sessionID,
+            "created_at": ISO8601DateFormatter().string(from: draft.createdAt),
+            "device": device,
+            "capture_mode": captureMode,
             "payloads": declarations,
+            "source_evidence": ["immutable": true, "authority": "original_capture", "provenance": provenance],
+            "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization],
         ])
-        try CanonicalSessionFinalizationWorkflow(finalizer: finalizer).finalize(layout: layout, records: records, immutableSourceBytes: immutable, manifest: manifest, payloads: payloads, destination: destination)
     }
 
     private func canonicalRecords() throws -> [AcceptedCaptureRecord] {
@@ -1094,3 +1123,15 @@ public struct SessionDeletionView: View {
     }
 }
 #endif
+
+/// Device block for the PackScan manifest: hardware identifier (e.g. "iPhone17,3") and OS version.
+enum PackScanDeviceInfo {
+    static var current: [String: String] {
+        var info = utsname()
+        _ = uname(&info)
+        let machine = withUnsafeBytes(of: &info.machine) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+        let model = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] ?? machine
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        return ["platform": "iOS", "model": model.isEmpty ? "unknown" : String(model.prefix(128)), "os_version": "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"]
+    }
+}
