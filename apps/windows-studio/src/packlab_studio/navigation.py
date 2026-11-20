@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+import threading
 from collections.abc import Callable, Sequence
 from enum import StrEnum
 from pathlib import Path
@@ -23,9 +24,16 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from packlab_core.engine_probe import probe_colmap, probe_openmvs
+from packlab_core.engine_probe import (
+    COLMAP_PROBE_POLICY,
+    EngineId,
+    EngineProbeStatus,
+    parse_colmap_version,
+    probe_engine,
+    probe_openmvs,
+)
 
-from .build_model import BuildModelView
+from .build_model import SUPPORTED_COLMAP_VERSIONS, BuildModelView
 from .capture_inbox import CaptureInboxView
 from .engine_config import discover_engines
 from .engineering_export import EngineeringExportView
@@ -146,6 +154,18 @@ def _probe_runner(executable: Path, arguments: Sequence[str]) -> tuple[int, str,
     return completed.returncode, stdout[:4096], (completed.stderr or "")[:4096]
 
 
+def probe_colmap(executable: Path, *, runner: Any = None) -> Any:
+    """Probe against the versions the Build model command plan can drive (4.x options)."""
+    return probe_engine(
+        EngineId.COLMAP,
+        executable,
+        parse_colmap_version,
+        supported_versions=SUPPORTED_COLMAP_VERSIONS,
+        policy=COLMAP_PROBE_POLICY,
+        runner=runner or _probe_runner,
+    )
+
+
 def engine_rows(*, probe: bool = False) -> list[str]:
     """One line per discovered engine executable: status, source, path, optional version."""
     rows: list[str] = []
@@ -163,11 +183,16 @@ def engine_rows(*, probe: bool = False) -> list[str]:
                 "openmvs.interface_colmap",
             }
         ):
-            prober = probe_colmap if record.engine_id == "colmap" else probe_openmvs
             try:
-                result = prober(record.executable, runner=_probe_runner)
+                result = (
+                    probe_colmap(record.executable, runner=_probe_runner)
+                    if record.engine_id == "colmap"
+                    else probe_openmvs(record.executable, runner=_probe_runner)
+                )
                 version = result.version.text if result.version else "unknown"
                 line += f" | version {version} ({result.status.value})"
+                if record.engine_id == "colmap" and result.status is EngineProbeStatus.UNSUPPORTED:
+                    line += " | Build model needs COLMAP " + ", ".join(SUPPORTED_COLMAP_VERSIONS)
             except Exception as error:  # a broken engine must not break Settings
                 line += f" | probe failed: {type(error).__name__}"
         rows.append(line)
@@ -176,6 +201,8 @@ def engine_rows(*, probe: bool = False) -> list[str]:
 
 class SettingsView(QWidget):
     """Settings route: Studio options, reconstruction engines, version/about details."""
+
+    _engine_rows_ready = Signal(list)
 
     def __init__(self) -> None:
         super().__init__()
@@ -187,7 +214,8 @@ class SettingsView(QWidget):
         self.engines.setObjectName("packlab.settings.engines")
         self.recheck_button = QPushButton("Re-check engines", self)
         self.recheck_button.setObjectName("packlab.settings.engines-recheck")
-        self.recheck_button.clicked.connect(lambda: self.refresh_engines(probe=True))
+        self.recheck_button.clicked.connect(self.recheck_engines)
+        self._engine_rows_ready.connect(self._show_engine_rows)
         layout = QVBoxLayout(self)
         layout.addWidget(self.auto_build)
         layout.addWidget(QLabel("Reconstruction engines (COLMAP / OpenMVS)", self))
@@ -197,10 +225,25 @@ class SettingsView(QWidget):
         layout.addStretch(1)
         self.refresh_engines()
 
-    def refresh_engines(self, *, probe: bool = False) -> None:
+    def refresh_engines(self) -> None:
         """Path discovery is cheap; version probes start the engines, so only on Re-check."""
+        self._show_engine_rows(engine_rows())
+
+    def recheck_engines(self) -> None:
+        """Probe versions on a worker thread; the UI stays responsive meanwhile."""
+        self.recheck_button.setEnabled(False)
+        self.recheck_button.setText("Checking engines…")
+        threading.Thread(
+            target=lambda: self._engine_rows_ready.emit(engine_rows(probe=True)),
+            name="packlab-engine-probe",
+            daemon=True,
+        ).start()
+
+    def _show_engine_rows(self, rows: list[str]) -> None:
         self.engines.clear()
-        self.engines.addItems(engine_rows(probe=probe))
+        self.engines.addItems(rows)
+        self.recheck_button.setEnabled(True)
+        self.recheck_button.setText("Re-check engines")
 
 
 # Routes that need an open project. Navigation and view gating both read this set.

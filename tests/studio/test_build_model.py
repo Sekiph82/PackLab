@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from tests.transfer.test_loopback_receiver import _package
 
+from packlab_core.packscan import write_packscan
 from packlab_core.reconstruction import (
     BackendProvenance,
     ReconstructionBackendId,
@@ -315,3 +316,119 @@ def test_real_command_plan_is_a_valid_orchestration_plan(tmp_path) -> None:
     stages = backend.stages(tmp_path, "working/reconstruction/r1", {})
     assert tuple(stage.stage_id for stage in stages) == STAGE_ORDER
     assert all(stage.configuration["max_image_size"] == 2000 for stage in stages)
+
+
+def _second_package(path: Path, repo_root: Path) -> Path:
+    manifest = json.loads(
+        (repo_root / "tests/fixtures/packscan/manifest-valid.json").read_text(encoding="utf-8")
+    )
+    manifest["capture_id"] = "second-capture"
+    manifest["payloads"][0]["size_bytes"] = 4
+    manifest["payloads"][0]["sha256"] = hashlib.sha256(b"IMG2").hexdigest()
+    manifest["payloads"][1]["size_bytes"] = 2
+    manifest["payloads"][1]["sha256"] = hashlib.sha256(b"{}").hexdigest()
+    return write_packscan(
+        path, manifest, {"images/0001.jpg": b"IMG2", "metadata/photos.json": b"{}"}
+    )
+
+
+def test_existing_scans_never_auto_build_at_startup_with_auto_on(
+    monkeypatch, tmp_path, repo_root
+) -> None:
+    package = _package(tmp_path / "scan.packscan", repo_root)
+    ReceiverSession(tmp_path / "inbox", tls_root=tmp_path / "tls", port=0).import_file(package)
+    app, window, inbox, _builds = _window(monkeypatch, tmp_path, FakeBackend())
+    try:
+        settings = window.route_stack.views[Route.SETTINGS]
+        assert isinstance(settings, SettingsView) and settings.auto_build.isChecked()
+        inbox.refresh_inbox()
+        assert inbox.inbox_list.count() == 1
+        assert window.job_manager.jobs() == ()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_unreadable_index_at_startup_fails_closed(monkeypatch, tmp_path, repo_root) -> None:
+    package = _package(tmp_path / "scan.packscan", repo_root)
+    ReceiverSession(tmp_path / "inbox", tls_root=tmp_path / "tls", port=0).import_file(package)
+    real_entries = ReceiverSession.entries
+    calls = {"count": 0}
+
+    def flaky_entries(self):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise OSError("index locked")
+        return real_entries(self)
+
+    monkeypatch.setattr(ReceiverSession, "entries", flaky_entries)
+    app, window, inbox, _builds = _window(monkeypatch, tmp_path, FakeBackend())
+    try:
+        inbox.refresh_inbox()  # the first readable index becomes the baseline
+        assert calls["count"] >= 2 and inbox.inbox_list.count() == 1
+        assert window.job_manager.jobs() == ()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_builds_run_one_at_a_time_and_duplicates_are_ignored(
+    monkeypatch, tmp_path, repo_root
+) -> None:
+    first = _package(tmp_path / "first.packscan", repo_root)
+    second = _second_package(tmp_path / "second.packscan", repo_root)
+    gate = threading.Event()
+    app, window, inbox, _builds = _window(monkeypatch, tmp_path, FakeBackend(provenance_gate=gate))
+    try:
+        _import(inbox, first)
+        first_job = window.job_manager.jobs()[0].job_id
+        digest = hashlib.sha256(first.read_bytes()).hexdigest()
+        assert window.start_build("loopback-capture", digest) == first_job  # duplicate
+        _import(inbox, second)
+        jobs = window.job_manager.jobs()
+        assert len(jobs) == 2
+        second_job = jobs[1].job_id
+        assert window.build_model._running == first_job
+        assert window.job_manager.get(second_job).state is JobState.QUEUED
+        gate.set()
+        _pump(
+            app,
+            lambda: all(
+                window.job_manager.get(job_id).state is JobState.SUCCEEDED
+                for job_id in (first_job, second_job)
+            ),
+        )
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_heic_decode_is_hardened_and_names_do_not_collide(tmp_path, monkeypatch) -> None:
+    command = build_model.heic_decode_command(
+        Path("ffmpeg.exe"), Path("in/IMG_1.HEIC"), Path("out/IMG_1.HEIC.jpg")
+    )
+    assert command[command.index("-protocol_whitelist") + 1] == "file"
+    assert command[command.index("-f") + 1] == "mov"
+    assert "-nostdin" in command and command.index("-f") < command.index("-i")
+    assert build_model.working_image_name(Path("IMG_1.HEIC")) != (
+        build_model.working_image_name(Path("IMG_1.JPG"))
+    )
+    # ffmpeg is never picked up from the current directory.
+    (tmp_path / "ffmpeg.exe").write_bytes(b"stub")
+    (tmp_path / "ffmpeg").write_bytes(b"stub")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("PACKLAB_FFMPEG_PATH", raising=False)
+    monkeypatch.setenv("PATH", ".")
+    assert build_model.find_ffmpeg() is None
+
+
+def test_unsupported_colmap_version_fails_closed(monkeypatch, tmp_path) -> None:
+    def fake_stage(stage_id, args, **_kwargs):
+        text = "COLMAP 3.12.6 -- Structure-from-Motion" if "help" in args else ""
+        return ReconstructionStageResult(stage_id, StageStatus.SUCCEEDED, 0, 0.0, text)
+
+    monkeypatch.setattr(build_model, "run_reconstruction_stage", fake_stage)
+    (tmp_path / "logs").mkdir()
+    backend = ColmapOpenMvsBackend(tmp_path / "colmap.exe", {"interface_colmap": tmp_path / "i"})
+    with pytest.raises(BuildModelError, match="needs COLMAP 4.2.1"):
+        backend.provenance(tmp_path)

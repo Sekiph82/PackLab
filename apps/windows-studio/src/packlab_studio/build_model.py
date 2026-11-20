@@ -60,6 +60,51 @@ BUILD_PRESET = "studio-cpu-v1"
 MAX_IMAGE_SIZE = 2000  # long side; keeps CPU-only laptops at minutes, not hours
 HEIC_SUFFIXES = {".heic", ".heif"}
 COPY_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+# The command plan uses COLMAP 4.x option names (FeatureExtraction.*, FeatureMatching.*);
+# 4.2.1 is the version it was verified with (Test-333) and the one PL-0444 bundles.
+SUPPORTED_COLMAP_VERSIONS = ("4.2.1",)
+_COLMAP_VERSION = re.compile(r"COLMAP (\d+\.\d+\.\d+)")
+
+
+def heic_decode_command(ffmpeg: Path, source: Path, target: Path) -> tuple[str, ...]:
+    """Decode one untrusted HEIC photo: forced HEIF/MOV demuxer, local files only, no stdin."""
+    return (
+        str(ffmpeg),
+        "-nostdin",
+        "-v",
+        "error",
+        "-protocol_whitelist",
+        "file",
+        "-f",
+        "mov",
+        "-i",
+        str(source),
+        "-q:v",
+        "2",
+        "-y",
+        str(target),
+    )
+
+
+def working_image_name(source: Path) -> str:
+    """HEIC decodes keep the full source name (IMG_1.HEIC -> IMG_1.HEIC.jpg), so they
+    can never collide with a JPEG of the same stem in the same capture."""
+    return source.name + ".jpg" if source.suffix.lower() in HEIC_SUFFIXES else source.name
+
+
+def find_ffmpeg() -> Path | None:
+    """PACKLAB_FFMPEG_PATH, else absolute PATH entries only (never the current directory)."""
+    configured = os.environ.get("PACKLAB_FFMPEG_PATH")
+    if configured:
+        return Path(configured)
+    name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = Path(entry) / name
+        if Path(entry).is_absolute() and candidate.is_file():
+            return candidate
+    return None
+
+
 STAGE_LABELS = {
     "feature-extraction": "Decoding photos and finding features",
     "matching": "Matching photos",
@@ -211,7 +256,7 @@ class ColmapOpenMvsBackend:
                 " and PACKLAB_OPENMVS_ROOT (see Settings > Reconstruction engines)."
             )
         paths = {record.engine_id: cast(Path, record.executable) for record in report.records}
-        ffmpeg = os.environ.get("PACKLAB_FFMPEG_PATH") or shutil.which("ffmpeg")
+        ffmpeg = find_ffmpeg()
         return cls(
             paths["colmap"],
             {
@@ -219,7 +264,7 @@ class ColmapOpenMvsBackend:
                 for key, value in paths.items()
                 if key != "colmap"
             },
-            Path(ffmpeg) if ffmpeg else None,
+            ffmpeg,
         )
 
     def provenance(self, workspace_dir: Path) -> BackendProvenance:
@@ -229,11 +274,34 @@ class ColmapOpenMvsBackend:
             "engine-probe", (str(self.openmvs["interface_colmap"]), "--help"), cwd=logs
         )
         colmap_version = next(iter(colmap.stdout.splitlines()), "COLMAP unknown").strip()
-        match = re.search(r"OpenMVS \S+ (v[\w.]+)", openmvs.stdout + openmvs.stderr)
+        found = _COLMAP_VERSION.search(colmap.stdout)
+        if found is None or found.group(1) not in SUPPORTED_COLMAP_VERSIONS:
+            raise BuildModelError(
+                f"COLMAP {found.group(1) if found else 'version unknown'} is not supported by "
+                f"the Build model plan (needs COLMAP {', '.join(SUPPORTED_COLMAP_VERSIONS)})"
+            )
+        # Without a console OpenMVS writes its banner only to a log in its working folder.
+        banner = (
+            openmvs.stdout
+            + openmvs.stderr
+            + "".join(
+                log.read_text(encoding="utf-8", errors="replace")
+                for log in sorted(logs.glob("InterfaceCOLMAP*.log"))
+            )
+        )
+        match = re.search(r"OpenMVS \S+ (v[\w.]+)", banner)
         executables = {"colmap": self.colmap, **self.openmvs}
+        version = f"{colmap_version[:80]}; OpenMVS {match.group(1) if match else 'unknown'}"
+        if self.ffmpeg is not None:
+            ffmpeg = run_reconstruction_stage(
+                "engine-probe", (str(self.ffmpeg), "-nostdin", "-version"), cwd=logs
+            )
+            ffmpeg_version = next(iter(ffmpeg.stdout.splitlines()), "ffmpeg unknown")
+            version += f"; HEIC decode {ffmpeg_version.split(' Copyright')[0].strip()[:80]}"
+            executables["ffmpeg"] = self.ffmpeg
         return BackendProvenance(
             ReconstructionBackendId.COLMAP_OPENMVS,
-            f"{colmap_version[:80]}; OpenMVS {match.group(1) if match else 'unknown'}",
+            version,
             "local external executables (CPU)",
             "COLMAP BSD-3-Clause; OpenMVS AGPL-3.0 (external process, not bundled)",
             {name: _sha256_file(path) for name, path in sorted(executables.items())},
@@ -287,25 +355,10 @@ class ColmapOpenMvsBackend:
                 if suffix in HEIC_SUFFIXES:
                     if self.ffmpeg is None:
                         raise BuildModelError("HEIC photos need ffmpeg; set PACKLAB_FFMPEG_PATH")
-                    target = images / (source.stem + ".jpg")
-                    commands.append(
-                        (
-                            (
-                                str(self.ffmpeg),
-                                "-v",
-                                "error",
-                                "-y",
-                                "-i",
-                                str(source),
-                                "-q:v",
-                                "2",
-                                str(target),
-                            ),
-                            w,
-                        )
-                    )
+                    target = images / working_image_name(source)
+                    commands.append((heic_decode_command(self.ffmpeg, source, target), w))
                 elif suffix in COPY_SUFFIXES:
-                    shutil.copyfile(source, images / source.name)
+                    shutil.copyfile(source, images / working_image_name(source))
                 else:
                     raise BuildModelError(f"unsupported photo type: {source.name}")
             facts["input_images"] = len(sources)
@@ -585,11 +638,19 @@ class BuildModelController(QObject):
         self.projects = projects
         self._backend = backend
         self._invoker = MainThreadInvoker()
+        # ponytail: one build at a time (CPU-bound engines); FIFO of not-yet-started runs.
+        self._queue: list[tuple[str, threading.Thread]] = []
+        self._running: str | None = None
+        self._by_package: dict[str, str] = {}  # package sha256 -> latest job id
+        self.build_finished.connect(self._on_finished)
 
     def build(self, package: Path, capture_id: str, package_sha256: str) -> str:
         """Register the capture in the open project and start a background build."""
         if self.projects.layout is None or self.projects.metadata is None:
             raise BuildModelError("open a project before building a model")
+        existing = self._by_package.get(package_sha256)
+        if existing is not None and self.jobs.get(existing).state not in TERMINAL_STATES:
+            return existing  # already queued or running for this scan
         backend = self._backend or ColmapOpenMvsBackend.discover()
         source_asset = register_raw_capture(self.projects, package, package_sha256)
         job = self.jobs.create(f"Build model {capture_id[:8]}", "reconstruction")
@@ -617,9 +678,21 @@ class BuildModelController(QObject):
             name=f"packlab-build-{job.job_id[:8]}",
             daemon=True,
         )
-        thread.start()
+        self._by_package[package_sha256] = job.job_id
+        self._queue.append((job.job_id, thread))
         self.build_started.emit(job.job_id, capture_id)
+        self._start_next()
         return job.job_id
+
+    def _start_next(self) -> None:
+        if self._running is None and self._queue:
+            self._running, thread = self._queue.pop(0)
+            thread.start()
+
+    def _on_finished(self, result: BuildResult) -> None:
+        if result.job_id == self._running:
+            self._running = None
+        self._start_next()
 
     def _work(
         self,

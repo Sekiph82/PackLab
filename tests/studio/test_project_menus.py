@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCoreApplication, Qt
 
 from packlab_core.engine_probe import EngineProbeResult, EngineProbeStatus, EngineVersion
 from packlab_studio import app as studio_app
@@ -155,9 +156,26 @@ def test_settings_engines_panel_lists_discovery_and_rechecks(monkeypatch) -> Non
     assert rows[0].startswith("colmap: configured via environment")
     assert rows[1] == "openmvs.texture_mesh: missing via PATH | no executable found"
     assert probes == []  # no engine is started just by opening Settings
-    view.recheck_button.click()
+    view.recheck_button.click()  # probes on a worker thread
+    assert not view.recheck_button.isEnabled()
+    deadline = time.monotonic() + 10
+    while not view.recheck_button.isEnabled():
+        assert time.monotonic() < deadline
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
     assert "version 4.2.1 (unsupported)" in view.engines.item(0).text()
+    assert "Build model needs COLMAP 4.2.1" in view.engines.item(0).text()
     assert probes == [Path("C:/engines/colmap.exe")]
+
+
+def test_colmap_probe_accepts_the_version_the_build_plan_drives() -> None:
+    def runner(version: str):
+        return lambda _exe, _args: (0, f"COLMAP {version} (Commit x)", "")
+
+    supported = navigation.probe_colmap(Path(__file__), runner=runner("4.2.1"))
+    assert supported.status is EngineProbeStatus.VALID
+    old = navigation.probe_colmap(Path(__file__), runner=runner("3.12.6"))
+    assert old.status is EngineProbeStatus.UNSUPPORTED
 
 
 def test_settings_engines_panel_shows_bundled_engines(monkeypatch, tmp_path) -> None:

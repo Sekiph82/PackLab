@@ -129,7 +129,9 @@ class CaptureInboxView(QWidget):
     def session(self) -> ReceiverSession | None:
         if self._session is None and self._session_factory is not None:
             self._session = self._session_factory()
-            # Scans already in the inbox at startup are not "new imports".
+            # Scans already in the inbox at startup are not "new imports". If the index
+            # cannot be read now, the first successful refresh becomes the baseline
+            # instead (fail closed: old scans never auto-build).
             try:
                 self._known_imports = {
                     entry.package_sha256
@@ -137,7 +139,7 @@ class CaptureInboxView(QWidget):
                     if entry.status == "imported"
                 }
             except Exception:
-                self._known_imports = set()
+                self._known_imports = None
         return self._session
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -222,7 +224,11 @@ class CaptureInboxView(QWidget):
                 f"{entry.capture_id}  [{entry.status}{images}, {entry.source_channel or '?'}]  "
                 f"sha256 {entry.package_sha256[:12]}"
             )
-        known = self._known_imports if self._known_imports is not None else set()
+        imported = {e.package_sha256 for e in self._shown_entries if e.status == "imported"}
+        if self._known_imports is None:
+            self._known_imports = imported
+            return
+        known = self._known_imports
         for entry in self._shown_entries:
             if entry.status == "imported" and entry.package_sha256 not in known:
                 known.add(entry.package_sha256)
