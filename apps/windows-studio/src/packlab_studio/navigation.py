@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Any
 
@@ -18,9 +19,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .capture_inbox import CaptureInboxView
 from .engineering_export import EngineeringExportView
 from .mask_correction import MaskCorrectionView
 from .packaging_library_browser import PackagingLibraryBrowserService, PackagingLibraryBrowserView
+from .receiver_session import ReceiverSession
 from .version import AboutView
 
 
@@ -68,18 +71,6 @@ class NavigationController(QObject):
     def set_project_context(self, context: Any) -> None:
         self._project_context = context
         self.project_changed.emit(context)
-
-
-class CaptureInboxView(QWidget):
-    """Presentation-only view composed with accepted M05 services."""
-
-    def __init__(self, *, ingest_controller: Any = None, receiver: Any = None) -> None:
-        super().__init__()
-        self.setObjectName("packlab.view.capture-inbox")
-        self.ingest_controller = ingest_controller
-        self.receiver = receiver
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Capture Inbox"))
 
 
 class ScanMasterEditorView(QWidget):
@@ -146,8 +137,8 @@ class NavigationPanel(QWidget):
         for index in range(self.list.count()):
             item = self.list.item(index)
             route = item.data(Qt.ItemDataRole.UserRole)
+            # Capture Inbox is per-user, not per-project: it stays reachable without a project.
             if route in {
-                Route.CAPTURE_INBOX.value,
                 Route.RECONSTRUCTION.value,
                 Route.EDITOR.value,
                 Route.EXPORTS.value,
@@ -178,6 +169,7 @@ class RouteStack(QStackedWidget):
         *,
         ingest_controller: Any = None,
         receiver: Any = None,
+        receiver_session_factory: Callable[[], ReceiverSession] | None = None,
         project_manager: Any = None,
         packaging_library_service: PackagingLibraryBrowserService | None = None,
         design_model_export_source_provider: Any = None,
@@ -191,7 +183,11 @@ class RouteStack(QStackedWidget):
             if route is Route.LIBRARY:
                 view = PackagingLibraryBrowserView(packaging_library_service)
             elif route is Route.CAPTURE_INBOX:
-                view = CaptureInboxView(ingest_controller=ingest_controller, receiver=receiver)
+                view = CaptureInboxView(
+                    ingest_controller=ingest_controller,
+                    receiver=receiver,
+                    session_factory=receiver_session_factory,
+                )
             elif route is Route.MASK_CORRECTION:
                 view = MaskCorrectionView()
             elif route is Route.SETTINGS:
@@ -215,7 +211,6 @@ class RouteStack(QStackedWidget):
 
     def set_project_available(self, available: bool) -> None:
         for route in (
-            Route.CAPTURE_INBOX,
             Route.RECONSTRUCTION,
             Route.EDITOR,
             Route.MASK_CORRECTION,

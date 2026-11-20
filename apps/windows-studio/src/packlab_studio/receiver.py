@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import socket
+import sys
 import threading
 import uuid
 from http import HTTPStatus
@@ -33,6 +35,17 @@ from .transfer_store import ReceiverTransferState, ResumableTransferStore
 
 class ReceiverError(RuntimeError):
     pass
+
+
+class _ExclusiveHTTPServer(ThreadingHTTPServer):
+    # HTTPServer sets SO_REUSEADDR, which on Windows lets a second socket bind a
+    # port that is already listening; claim it exclusively so a busy port fails.
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self) -> None:
+        if sys.platform == "win32":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 
 class PackLabReceiver:
@@ -68,6 +81,13 @@ class PackLabReceiver:
     @property
     def running(self) -> bool:
         return self._server is not None and self._thread is not None and self._thread.is_alive()
+
+    def use_tls_identity(self, identity: TLSIdentity) -> None:
+        """Install the HTTPS identity (and its pin) before the receiver starts."""
+        if self.running:
+            raise ReceiverError("TLS identity cannot change while the receiver is running")
+        self.tls_identity = identity
+        self._pin = identity.fingerprint
 
     def pairing_offer(self, *, host: str | None = None, ttl_seconds: int = 120) -> PairingOffer:
         if not self._pin:
@@ -236,7 +256,7 @@ class PackLabReceiver:
                         ).to_dict(),
                     )
 
-        server = ThreadingHTTPServer((self.host, self.port), Handler)
+        server = _ExclusiveHTTPServer((self.host, self.port), Handler)
         server.socket = create_server_tls_context(self.tls_identity).wrap_socket(
             server.socket, server_side=True
         )

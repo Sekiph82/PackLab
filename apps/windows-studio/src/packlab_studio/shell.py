@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QMainWindow, QSplitter
 
 from .autosave import AutosaveService
 from .branding import application_icon
+from .capture_inbox import CaptureInboxView
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .engineering_export import DesignModelExportSource, DestinationProvider
 from .jobs import JobManager
@@ -31,6 +32,7 @@ from .packaging_library_browser import (
 )
 from .preferences import PreferencesStore, WindowPreferences
 from .project import ProjectManager
+from .receiver_session import ReceiverSession
 from .recovery import RecoveryManager
 from .scan_master_promotion import ScanMasterPromotionAction, ScanMasterPromotionRequest
 from .shutdown import ShutdownCoordinator
@@ -48,6 +50,7 @@ class StudioMainWindow(QMainWindow):
         *,
         ingest_controller: object = None,
         receiver: object = None,
+        receiver_session_factory: Callable[[], ReceiverSession] | None = None,
         preferences: PreferencesStore | None = None,
         diagnostics_root: str | Path | None = None,
         available_work_area: tuple[int, int, int, int] | None = None,
@@ -117,10 +120,16 @@ class StudioMainWindow(QMainWindow):
         self._available_work_area = available_work_area
         self.shutdown = ShutdownCoordinator(self.job_manager)
         self._shutdown_requested = False
+        if receiver_session_factory is None:
+            transfer_root = Path(default_diagnostics_root or Path.home() / ".packlab")
+            receiver_session_factory = lambda: ReceiverSession(  # noqa: E731
+                transfer_root / "transfer-inbox", tls_root=transfer_root / "transfer-tls"
+            )
         self.navigation_panel = NavigationPanel()
         self.route_stack = RouteStack(
             ingest_controller=ingest_controller,
             receiver=receiver,
+            receiver_session_factory=receiver_session_factory,
             project_manager=self.project_manager,
             packaging_library_service=packaging_library_service,
             design_model_export_source_provider=design_model_export_source_provider,
@@ -266,6 +275,9 @@ class StudioMainWindow(QMainWindow):
             self._shutdown_requested = True
             self.shutdown.begin(lambda result: self._finish_shutdown(result))
             return
+        capture_inbox = self.route_stack.views[Route.CAPTURE_INBOX]
+        if isinstance(capture_inbox, CaptureInboxView):
+            capture_inbox.shutdown()
         self.autosave.shutdown_flush()
         self.project_manager.close()
         if self.preferences is not None:
