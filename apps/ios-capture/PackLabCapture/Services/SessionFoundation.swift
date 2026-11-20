@@ -340,8 +340,9 @@ public actor SessionGalleryStore {
         var state = try loadState()
         state = PersistedSessionState(sessionID: state.sessionID, schemaVersion: state.schemaVersion, nextSequence: state.nextSequence, epoch: state.epoch, acceptedIDs: state.acceptedIDs.filter { $0 != id }, rejectedIDs: state.rejectedIDs, replacementTrace: state.replacementTrace.filter { $0.key != id && $0.value != id })
         let files = [recordURL, URL(fileURLWithPath: entry.sourcePath), entry.previewPath.map(URL.init(fileURLWithPath:))].compactMap { $0 }
-        try mutate(files: files) {
+        try mutate(files: files + [layout.photoMetadata]) {
             for url in files where fileManager.fileExists(atPath: url.path) { try perform("delete.\(url.lastPathComponent)") { try fileManager.removeItem(at: url) } }
+            try rewritePhotoMetadata { $0.filter { $0.photoID != id } }
             try persist(state: state, audit: audit)
         }
     }
@@ -360,13 +361,34 @@ public actor SessionGalleryStore {
         let trace = state.replacementTrace.merging([id: record.captureID]) { _, replacement in replacement }
         let next = max(state.nextSequence, record.sequence + 1)
         let updated = PersistedSessionState(sessionID: state.sessionID, schemaVersion: state.schemaVersion, nextSequence: next, epoch: state.epoch, acceptedIDs: accepted, rejectedIDs: state.rejectedIDs, replacementTrace: trace)
-        let files = oldFiles + [sourceURL, recordURL]
+        let files = oldFiles + [sourceURL, recordURL, layout.photoMetadata]
         try mutate(files: files) {
             try perform("retake.source") { try source.write(to: sourceURL, options: .atomic) }
             try perform("retake.record") { try JSONEncoder().encode(canonicalRecord).write(to: recordURL, options: .atomic) }
+            try rewritePhotoMetadata { photos in
+                guard photos.contains(where: { $0.photoID == id }) else { return photos }
+                // The replacement's dimensions come from its own bytes; orientation is derived
+                // from them and no camera measurement is claimed.
+                guard let dimensions = SourceMetadataExtractor.decodedDimensions(from: source) else { throw GalleryMutationError.invalidReplacement }
+                let orientation: PackScanOrientationValue = dimensions.width > dimensions.height ? .landscape : (dimensions.width < dimensions.height ? .portrait : .square)
+                let replacement = PackScanPhotoMetadataWire(photoID: record.captureID, imagePath: "images/\(record.sourceFilename)", sequence: record.sequence, originalFilename: record.sourceFilename, pixelDimensions: dimensions, orientation: PackScanOrientation(value: orientation, source: .derived), focalLengthMM: PackScanNumericMeasurement(status: .unavailable), exposure: PackScanNumericMeasurement(status: .unavailable), iso: PackScanISOMeasurement(status: .unavailable), whiteBalanceKelvin: PackScanNumericMeasurement(status: .unavailable))
+                return photos.filter { $0.photoID != id } + [replacement]
+            }
             try persist(state: updated, audit: GalleryAuditEvent(action: "retake", captureID: id, replacementID: record.captureID))
             for url in oldFiles where url != sourceURL && url != recordURL && fileManager.fileExists(atPath: url.path) { try perform("retake.remove.\(url.lastPathComponent)") { try fileManager.removeItem(at: url) } }
         }
+    }
+
+    /// Keeps `metadata/photos.json` (when the session has one) in step with the accepted
+    /// records, so finalization still binds after a gallery delete or retake.
+    private func rewritePhotoMetadata(_ update: ([PackScanPhotoMetadataWire]) throws -> [PackScanPhotoMetadataWire]) throws {
+        guard fileManager.fileExists(atPath: layout.photoMetadata.path) else { return }
+        guard let data = try? Data(contentsOf: layout.photoMetadata), let document = try? JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: data) else { throw GalleryLoadError.corruptRecord("photos.json") }
+        let photos = try update(document.photos)
+        let updated = PackScanPhotoMetadataDocument(photos: photos)
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let bytes = try encoder.encode(updated)
+        try perform("mutation.photoMetadata") { try bytes.write(to: layout.photoMetadata, options: .atomic) }
     }
 
     private func loadState() throws -> PersistedSessionState {
@@ -857,7 +879,8 @@ public struct LocalScanHistoryView: View {
     @State private var finalizationMessage: String?
     @StateObject private var shareCoordinator = PackScanSharePresentationCoordinator()
     private let store: LocalScanHistoryStore
-    public init(root: URL) { store = LocalScanHistoryStore(root: root) }
+    private let onFinalized: (@MainActor (String) -> Void)?
+    public init(root: URL, onFinalized: (@MainActor (String) -> Void)? = nil) { store = LocalScanHistoryStore(root: root); self.onFinalized = onFinalized }
     public var body: some View {
         List(entries) { entry in
             HStack {
@@ -873,7 +896,10 @@ public struct LocalScanHistoryView: View {
                         Task {
                             do {
                                 _ = try await ProductionScanFinalizeAction(root: store.rootURL).finalize(sessionID: entry.id)
+                                onFinalized?(entry.id)
                                 entries = await store.load()
+                            } catch FinalizationError.invalidManifest {
+                                finalizationMessage = "Finalize failed: no accepted photos yet. Take photos with Manual Capture first."
                             } catch { finalizationMessage = "Finalize failed: \(error)" }
                         }
                     }

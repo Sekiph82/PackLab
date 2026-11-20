@@ -174,6 +174,14 @@ public final class SharedARSessionOwner: NSObject, @preconcurrency ARSessionDele
         onCameraSignal?(signal)
     }
 
+    /// Latest camera frame for the live candidate-quality loop, reduced to a Sendable
+    /// QualityImageFrame here so the pixel buffer never leaves the main actor. The
+    /// timestamp is the ARFrame (pose buffer / CoreMotion uptime) domain.
+    public func currentCandidateFrame() -> (frame: QualityImageFrame, timestamp: TimeInterval)? {
+        guard isStarted, let current = session.currentFrame else { return nil }
+        return (LiveQualityFrameSampler.qualityFrame(from: current.capturedImage), current.timestamp)
+    }
+
     /// Adds the exact pose of a captured still's frame to the shared buffer.
     public func recordCapturePose(_ sample: PoseSample) { poseBuffer.append(sample) }
 

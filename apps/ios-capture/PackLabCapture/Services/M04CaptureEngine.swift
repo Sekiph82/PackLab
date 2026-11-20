@@ -33,6 +33,52 @@ public struct QualityImageFrame: Sendable, Equatable {
     public static let unavailable = QualityImageFrame(width: 0, height: 0, luminance: [])
 }
 
+#if canImport(CoreVideo)
+import CoreVideo
+
+/// Live-candidate adapter: reduces the luma (Y) plane of a bi-planar 4:2:0 camera
+/// buffer (420f full range or 420v video range, as delivered by ARFrame.capturedImage)
+/// to a small QualityImageFrame with luminance normalized to [0, 1]. Each output cell is
+/// the mean of a 4x4 grid of samples inside that cell. No object mask is produced:
+/// framing/background stay "unavailable" rather than being inferred.
+public enum LiveQualityFrameSampler {
+    public static func qualityFrame(from buffer: CVPixelBuffer, width: Int = 64, height: Int = 48) -> QualityImageFrame {
+        let format = CVPixelBufferGetPixelFormatType(buffer)
+        let fullRange = format == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+        guard fullRange || format == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange, width > 0, height > 0 else { return .unavailable }
+        guard CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return .unavailable }
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let planeWidth = CVPixelBufferGetWidthOfPlane(buffer, 0)
+        let planeHeight = CVPixelBufferGetHeightOfPlane(buffer, 0)
+        let rowBytes = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+        guard planeWidth >= width, planeHeight >= height, let base = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) else { return .unavailable }
+        let luma = base.assumingMemoryBound(to: UInt8.self)
+        // ponytail: 16 samples per cell keeps this ~50k reads per frame; a full box filter
+        // (or vImage downscale) is the upgrade if sub-sampling aliasing skews sharpness.
+        let samples = 4
+        var values: [Double] = []
+        values.reserveCapacity(width * height)
+        for cellY in 0..<height {
+            let y0 = cellY * planeHeight / height, y1 = (cellY + 1) * planeHeight / height
+            for cellX in 0..<width {
+                let x0 = cellX * planeWidth / width, x1 = (cellX + 1) * planeWidth / width
+                var sum = 0
+                for sy in 0..<samples {
+                    let y = y0 + (2 * sy + 1) * (y1 - y0) / (2 * samples)
+                    for sx in 0..<samples {
+                        let x = x0 + (2 * sx + 1) * (x1 - x0) / (2 * samples)
+                        sum += Int(luma[y * rowBytes + x])
+                    }
+                }
+                let mean = Double(sum) / Double(samples * samples)
+                values.append(fullRange ? mean / 255 : min(1, max(0, (mean - 16) / 219)))
+            }
+        }
+        return QualityImageFrame(width: width, height: height, luminance: values)
+    }
+}
+#endif
+
 public enum QualityMetricAvailability: String, Codable, Sendable, Equatable {
     case available
     case unavailable
