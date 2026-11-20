@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import segno
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap, QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from packlab_core.pairing import PairingOffer
 
-from .receiver_session import ReceiverSession
+from .receiver_session import InboxEntry, ReceiverSession
 
 
 def qr_pixmap(payload: str, *, scale: int = 5) -> QPixmap:
@@ -36,6 +36,9 @@ def qr_pixmap(payload: str, *, scale: int = 5) -> QPixmap:
 
 class CaptureInboxView(QWidget):
     """Presentation-only view composed with accepted M05 services."""
+
+    scan_imported = Signal(str, str)  # capture_id, package_sha256 of a newly imported scan
+    build_requested = Signal(str, str)  # capture_id, package_sha256 chosen by the owner
 
     def __init__(
         self,
@@ -58,6 +61,8 @@ class CaptureInboxView(QWidget):
         )
         self.offer: PairingOffer | None = None
         self._shown_records: list[object] | None = None
+        self._shown_entries: list[InboxEntry] = []
+        self._known_imports: set[str] | None = None
 
         self.receive_button = QPushButton("Receive from iPhone", self)
         self.new_code_button = QPushButton("New code", self)
@@ -75,6 +80,9 @@ class CaptureInboxView(QWidget):
         self.status_label.setWordWrap(True)
         self.inbox_list = QListWidget(self)
         self.inbox_list.setObjectName("packlab.capture-inbox.list")
+        self.build_button = QPushButton("Build model", self)
+        self.build_button.setObjectName("packlab.capture-inbox.build")
+        self.build_button.setEnabled(False)
 
         buttons = QHBoxLayout()
         for button in (self.receive_button, self.new_code_button, self.import_button):
@@ -88,6 +96,10 @@ class CaptureInboxView(QWidget):
         layout.addWidget(self.status_label)
         layout.addWidget(QLabel("Received scans"))
         layout.addWidget(self.inbox_list, 1)
+        build_row = QHBoxLayout()
+        build_row.addWidget(self.build_button)
+        build_row.addStretch(1)
+        layout.addLayout(build_row)
 
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
@@ -95,6 +107,13 @@ class CaptureInboxView(QWidget):
         self.receive_button.clicked.connect(self.start_receiving)
         self.new_code_button.clicked.connect(self.new_code)
         self.import_button.clicked.connect(self.import_file)
+        self.build_button.clicked.connect(self._request_build)
+        self.inbox_list.currentRowChanged.connect(
+            lambda row: self.build_button.setEnabled(
+                0 <= row < len(self._shown_entries)
+                and self._shown_entries[row].status == "imported"
+            )
+        )
         for button in (self.receive_button, self.import_button):
             button.setEnabled(session_factory is not None)
 
@@ -102,6 +121,15 @@ class CaptureInboxView(QWidget):
     def session(self) -> ReceiverSession | None:
         if self._session is None and self._session_factory is not None:
             self._session = self._session_factory()
+            # Scans already in the inbox at startup are not "new imports".
+            try:
+                self._known_imports = {
+                    entry.package_sha256
+                    for entry in self._session.entries()
+                    if entry.status == "imported"
+                }
+            except Exception:
+                self._known_imports = set()
         return self._session
 
     def showEvent(self, event: QShowEvent) -> None:
@@ -164,13 +192,26 @@ class CaptureInboxView(QWidget):
         if records == self._shown_records:
             return
         self._shown_records = records
+        self._shown_entries = session.entries()
         self.inbox_list.clear()
-        for entry in session.entries():
+        for entry in self._shown_entries:
             images = "" if entry.image_count is None else f", {entry.image_count} images"
             self.inbox_list.addItem(
                 f"{entry.capture_id}  [{entry.status}{images}, {entry.source_channel or '?'}]  "
                 f"sha256 {entry.package_sha256[:12]}"
             )
+        known = self._known_imports if self._known_imports is not None else set()
+        for entry in self._shown_entries:
+            if entry.status == "imported" and entry.package_sha256 not in known:
+                known.add(entry.package_sha256)
+                self.scan_imported.emit(entry.capture_id, entry.package_sha256)
+        self._known_imports = known
+
+    def _request_build(self) -> None:
+        row = self.inbox_list.currentRow()
+        if 0 <= row < len(self._shown_entries):
+            entry = self._shown_entries[row]
+            self.build_requested.emit(entry.capture_id, entry.package_sha256)
 
     def import_file(self) -> None:
         session = self.session

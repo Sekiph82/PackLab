@@ -8,6 +8,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFormLayout,
     QLabel,
     QLineEdit,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .build_model import BuildModelView
 from .capture_inbox import CaptureInboxView
 from .engineering_export import EngineeringExportView
 from .mask_correction import MaskCorrectionView
@@ -119,6 +121,21 @@ class ScanMasterEditorView(QWidget):
         self.status.setText(text)
 
 
+class SettingsView(QWidget):
+    """Settings route: Studio options above the version/about details."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("packlab.view.settings")
+        self.auto_build = QCheckBox("Build model automatically after import", self)
+        self.auto_build.setObjectName("packlab.settings.auto-build")
+        self.auto_build.setChecked(True)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.auto_build)
+        layout.addWidget(AboutView())
+        layout.addStretch(1)
+
+
 class NavigationPanel(QWidget):
     route_requested = Signal(str)
 
@@ -176,6 +193,7 @@ class RouteStack(QStackedWidget):
         packaging_library_service: PackagingLibraryBrowserService | None = None,
         design_model_export_source_provider: Any = None,
         export_destination_provider: Any = None,
+        job_manager: Any = None,
     ) -> None:
         super().__init__()
         self.setObjectName("packlab.navigation.stack")
@@ -195,7 +213,9 @@ class RouteStack(QStackedWidget):
             elif route is Route.MASK_CORRECTION:
                 view = MaskCorrectionView()
             elif route is Route.SETTINGS:
-                view = AboutView()
+                view = SettingsView()
+            elif route is Route.RECONSTRUCTION:
+                view = BuildModelView(job_manager)
             elif route is Route.EDITOR:
                 view = ScanMasterEditorView()
             elif route is Route.EXPORTS:

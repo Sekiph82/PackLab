@@ -6,22 +6,25 @@ from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QStandardPaths, Qt
+from PySide6.QtCore import QByteArray, QSettings, QStandardPaths, Qt
 from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import QMainWindow, QSplitter
 
 from .autosave import AutosaveService
 from .branding import application_icon
+from .build_model import BuildBackend, BuildModelController, BuildModelView, BuildResult
 from .capture_inbox import CaptureInboxView
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .engineering_export import DesignModelExportSource, DestinationProvider
 from .jobs import JobManager
+from .model_viewer import ModelViewerView
 from .navigation import (
     NavigationController,
     NavigationPanel,
     Route,
     RouteStack,
     ScanMasterEditorView,
+    SettingsView,
 )
 from .packaging_library_audit import PackagingLibraryAuditStore
 from .packaging_library_browser import (
@@ -69,6 +72,9 @@ class StudioMainWindow(QMainWindow):
             [str], tuple[LibraryRelatedRecord, ...]
         ]
         | None = None,
+        default_project_root: str | Path | None = None,
+        settings_path: str | Path | None = None,
+        build_backend: BuildBackend | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName(self.WINDOW_OBJECT_NAME)
@@ -134,7 +140,20 @@ class StudioMainWindow(QMainWindow):
             packaging_library_service=packaging_library_service,
             design_model_export_source_provider=design_model_export_source_provider,
             export_destination_provider=export_destination_provider,
+            job_manager=self.job_manager,
         )
+        self._default_project_root = (
+            None if default_project_root is None else Path(default_project_root)
+        )
+        self._settings = (
+            None
+            if settings_path is None
+            else QSettings(str(settings_path), QSettings.Format.IniFormat)
+        )
+        self.build_model = BuildModelController(
+            self.job_manager, self.project_manager, backend=build_backend
+        )
+        self._wire_build_model()
         editor = self.route_stack.views[Route.EDITOR]
         if isinstance(editor, ScanMasterEditorView):
             editor.promotion_requested.connect(self._promote_scan_master_from_editor)
@@ -155,6 +174,90 @@ class StudioMainWindow(QMainWindow):
         self.navigation.set_project_context(self.project_manager)
         self._sync_project_state()
         self._restore_preferences()
+        if self._default_project_root is not None:
+            self.ensure_project()
+
+    # ------------------------------------------------------------- build model (PL-0443/0453)
+
+    def _wire_build_model(self) -> None:
+        inbox = self.route_stack.views[Route.CAPTURE_INBOX]
+        settings = self.route_stack.views[Route.SETTINGS]
+        builds = self.route_stack.views[Route.RECONSTRUCTION]
+        viewer = self.route_stack.views[Route.MODEL_VIEWER]
+        assert isinstance(inbox, CaptureInboxView) and isinstance(settings, SettingsView)
+        assert isinstance(builds, BuildModelView) and isinstance(viewer, ModelViewerView)
+        if self._settings is not None:
+            stored = self._settings.value("build/auto_after_import", True)
+            settings.auto_build.setChecked(str(stored).lower() not in {"false", "0"})
+            settings.auto_build.toggled.connect(
+                lambda value: (
+                    self._settings.setValue("build/auto_after_import", value)
+                    if self._settings is not None
+                    else None
+                )
+            )
+        inbox.build_requested.connect(self.start_build)
+        inbox.scan_imported.connect(
+            lambda capture_id, digest: (
+                self.start_build(capture_id, digest) if settings.auto_build.isChecked() else None
+            )
+        )
+        self.build_model.build_started.connect(builds.track)
+        self.build_model.build_finished.connect(self._on_build_finished)
+        builds.open_model_requested.connect(self._open_in_viewer)
+        builds.route_requested.connect(self.navigation.navigate)
+
+    def ensure_project(self):
+        """Open (or create on first run) the per-user default project; no dialog needed."""
+        if self.project_manager.current is not None or self._default_project_root is None:
+            return self.project_manager.current
+        root = self._default_project_root
+        try:
+            if root.exists():
+                return self.project_manager.open_project(root)
+            root.parent.mkdir(parents=True, exist_ok=True)
+            return self.project_manager.new_project(root, "My scans")
+        except Exception as error:  # surfaced in the inbox; Studio stays usable
+            self._inbox_note(f"Default project unavailable: {error}")
+            return None
+
+    def _inbox_note(self, text: str) -> None:
+        """Append to the inbox status so the import result stays visible."""
+        inbox = self.route_stack.views[Route.CAPTURE_INBOX]
+        if isinstance(inbox, CaptureInboxView):
+            current = inbox.status_label.text()
+            inbox.status_label.setText(f"{current}\n{text}" if current else text)
+
+    def start_build(self, capture_id: str, package_sha256: str) -> str | None:
+        inbox = self.route_stack.views[Route.CAPTURE_INBOX]
+        assert isinstance(inbox, CaptureInboxView)
+        session = inbox.session
+        package = None if session is None else session.package_path(package_sha256)
+        if package is None:
+            self._inbox_note(f"Build model: scan {capture_id} is not in the inbox.")
+            return None
+        self.ensure_project()
+        try:
+            job_id = self.build_model.build(package, capture_id, package_sha256)
+        except Exception as error:
+            self._inbox_note(f"Build model could not start: {error}")
+            return None
+        self.navigation.navigate(Route.RECONSTRUCTION)
+        return job_id
+
+    def _on_build_finished(self, result: BuildResult) -> None:
+        builds = self.route_stack.views[Route.RECONSTRUCTION]
+        if isinstance(builds, BuildModelView):
+            builds.show_result(result)
+        if result.status == "succeeded" and result.model_path is not None:
+            self._open_in_viewer(result.model_path, note=result.message)
+
+    def _open_in_viewer(self, path: Path, note: str = "") -> None:
+        viewer = self.route_stack.views[Route.MODEL_VIEWER]
+        if isinstance(viewer, ModelViewerView) and viewer.load(Path(path)):
+            if note:
+                viewer.status.setText(f"{note} {viewer.status.text()}")
+            self.navigation.navigate(Route.MODEL_VIEWER)
 
     def _restore_preferences(self) -> None:
         if self.preferences is None:
@@ -279,7 +382,7 @@ class StudioMainWindow(QMainWindow):
         if isinstance(capture_inbox, CaptureInboxView):
             capture_inbox.shutdown()
         self.autosave.shutdown_flush()
-        self.project_manager.close()
+        self.project_manager.close(allow_active_jobs=self._shutdown_requested)
         if self.preferences is not None:
             state = self.saveState().toBase64().toStdString()
             self.preferences.save(
