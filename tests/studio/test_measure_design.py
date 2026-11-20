@@ -561,3 +561,76 @@ def test_autosave_crash_recovery_dialog_and_portability(window, tmp_path) -> Non
         assert third.recovery_items == ()
     finally:
         third.close()
+
+
+def test_failed_commit_leaves_no_file_refusals_and_tamper(window, tmp_path) -> None:
+    from packlab_studio.project import ProjectError
+
+    view = _promoted_design(window, tmp_path)
+    manager = window.project_manager
+    design_dir = tmp_path / "project" / "derived" / "design_model"
+    # M1: the authority commit fails (disk full) -> no orphan file; the retry succeeds.
+    reader = manager._free_space_reader
+    manager._free_space_reader = lambda _path: 0
+    view.save_button.click()
+    assert "insufficient disk space" in view.status.text()
+    assert not any(design_dir.glob("*.json"))
+    manager._free_space_reader = reader
+    first = _save_with_height(view, view.design.height)
+    second = _save_with_height(view, 50.0)
+
+    # Selection changed outside history: Undo is disabled and refuses, nothing clobbered.
+    _, state = manager._read_authority(manager.layout)
+    manager.commit_edit(
+        {**state, "active_design_model_revision_id": first},
+        expected_revision=manager.current.revision,
+    )
+    assert not manager.can_undo() and not window.undo_action.isEnabled()
+    assert window.undo() is None
+    assert manager.selected_design_model()[0]["revision_id"] == first
+    manager.commit_edit(
+        {**state, "active_design_model_revision_id": second},
+        expected_revision=manager.current.revision,
+    )
+
+    # Undoing past the Scan Master promotion clears the view's Scan Master (Fit disabled).
+    assert window.undo() is not None and window.undo() is not None  # second, first
+    assert window.undo() is not None  # Scan Master selection
+    assert manager.selected_scan_master_revision_id() is None
+    assert view.scan_master is None and not view.fit_button.isEnabled()
+    window.redo()
+    assert view.scan_master is not None and view.fit_button.isEnabled()
+
+    # Digest tamper on the selected artifact is refused and shown, not trusted.
+    window.redo()
+    artifact = tmp_path / "project" / manager.selected_design_model()[0]["artifact_path"]
+    artifact.write_bytes(artifact.read_bytes() + b" ")
+    with pytest.raises(ProjectError, match="digest mismatch"):
+        manager.selected_design_model()
+    view.refresh_project_design()
+    assert "unreadable" in view.project_design.text()
+
+
+def test_invalid_autosave_checkpoint_can_only_be_discarded(window, tmp_path) -> None:
+    from packlab_studio.shell import AUTOSAVE_DRAFT_JOB, StudioMainWindow
+
+    app = create_application(["packlab-history"])
+    _promoted_design(window, tmp_path)
+    assert window.autosave_draft()
+    draft = tmp_path / "project" / "temp" / "autosave" / "design-model-draft.json"
+    draft.write_text('{"contract": "tampered"}', encoding="utf-8")
+    window.hide()  # "crash": no clean close
+    studio = StudioMainWindow(
+        diagnostics_root=tmp_path / "diagnostics-invalid",
+        packaging_library_root=tmp_path / "library-invalid",
+    )
+    try:
+        studio.open_project(tmp_path / "project")
+        app.processEvents()
+        assert studio.recovery_items[0].status.value == "invalid"
+        accept, discard = studio.recovery_dialog.buttons[AUTOSAVE_DRAFT_JOB]
+        assert not accept.isEnabled() and accept.text() == "Invalid"
+        assert studio.accept_recovery(AUTOSAVE_DRAFT_JOB) is not None
+        assert studio.route_stack.views[Route.MEASURE_DESIGN].design is None  # not restored
+    finally:
+        studio.close()

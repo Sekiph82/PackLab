@@ -225,6 +225,17 @@ class MeasureDesignView(QWidget):
             except Exception:  # unreadable Scan Master: Fit stays disabled
                 self.scan_master = None
             self._sync_buttons()
+        elif current is not None:
+            # Selection changed in place (Edit > Undo/Redo): fit against the selected one.
+            try:
+                selected_id = manager.selected_scan_master_revision_id()
+                if selected_id != getattr(self.scan_master, "revision_id", None):
+                    self.scan_master = (
+                        None if selected_id is None else manager.selected_scan_master_revision()
+                    )
+            except Exception:
+                self.scan_master = None
+            self._sync_buttons()
         if current is None:
             self.project_design.setText("Project Design Model: no project open.")
             return

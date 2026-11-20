@@ -51,7 +51,7 @@ from .packaging_library_browser import (
 from .preferences import PreferencesStore, WindowPreferences
 from .project import ProjectManager
 from .receiver_session import ReceiverSession
-from .recovery import RecoveryItem, RecoveryManager
+from .recovery import RecoveryItem, RecoveryManager, RecoveryStatus
 from .scan_master_promotion import ScanMasterPromotionAction, ScanMasterPromotionRequest
 from .shutdown import ShutdownCoordinator
 from .version import current_build_info
@@ -89,6 +89,9 @@ class RecoveryDialog(QDialog):
             grid.addWidget(QLabel(f"{label}\n{item.status.value}: {item.reason}"), row, 0)
             accept = QPushButton("Recover" if item.job_id == AUTOSAVE_DRAFT_JOB else "Accept")
             discard = QPushButton("Discard")
+            if item.status is RecoveryStatus.INVALID:  # changed/missing: Discard only
+                accept.setText("Invalid")
+                accept.setEnabled(False)
             accept.setObjectName(f"packlab.recovery.accept.{item.item_id}")
             discard.setObjectName(f"packlab.recovery.discard.{item.item_id}")
             accept.clicked.connect(partial(self._resolve, window.accept_recovery, item.item_id))
@@ -655,7 +658,12 @@ class StudioMainWindow(QMainWindow):
         item = self.project_manager.accept_recovery(item_id)
         self._sync_project_state()
         measure = self.route_stack.views[Route.MEASURE_DESIGN]
-        if item is not None and isinstance(draft, dict) and isinstance(measure, MeasureDesignView):
+        if (
+            item is not None
+            and item.status is RecoveryStatus.RESUMABLE  # digest still matches the checkpoint
+            and isinstance(draft, dict)
+            and isinstance(measure, MeasureDesignView)
+        ):
             self.navigation.navigate(Route.MEASURE_DESIGN)
             measure.restore_draft(draft)
         return item

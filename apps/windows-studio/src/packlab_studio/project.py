@@ -417,6 +417,14 @@ class ProjectManager:
                 raise
             raise ProjectError("scan master artifact is corrupt") from error
 
+    def selected_scan_master_revision_id(self) -> str | None:
+        """Cheap identity of the selected Scan Master (no mesh load or digest check)."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        value = self._read_authority(self.layout)[1].get("active_scan_master_revision_id")
+        return value if isinstance(value, str) else None
+
     def selected_scan_master_revision(self):
         """Return the exact persisted Scan Master selected by current project authority."""
 
@@ -578,7 +586,22 @@ class ProjectManager:
                 "reason": "saved",
             },
         ]
-        self.commit_edit(next_state, expected_revision=expected_revision)
+        try:
+            self.commit_edit(next_state, expected_revision=expected_revision)
+        except BaseException:
+            # If the authority does not reference the file, remove it so a retry is not
+            # blocked and readers never see an unregistered revision.
+            try:
+                _, after = self._read_authority(self.layout)
+                published = any(
+                    isinstance(item, dict) and item.get("revision_id") == revision_id
+                    for item in after.get("design_model_revisions", [])
+                )
+            except Exception:
+                published = True  # unknown: keep the file rather than risk a dangling record
+            if not published:
+                target.unlink(missing_ok=True)
+            raise
         self._record_selection("active_design_model_revision_id", previous, revision_id)
         return record
 
@@ -648,20 +671,10 @@ class ProjectManager:
         self._notify()  # undo/redo availability changed after the commit's notification
 
     def can_undo(self) -> bool:
-        history = self.history
-        return (
-            history is not None
-            and history.cursor > 0
-            and history.entries[history.cursor - 1].reversible
-        )
+        return self._plan(undo=True) is not None
 
     def can_redo(self) -> bool:
-        history = self.history
-        return (
-            history is not None
-            and history.cursor < len(history.entries)
-            and history.entries[history.cursor].reversible
-        )
+        return self._plan(undo=False) is not None
 
     def undo(self) -> Operation | None:
         return self._step(undo=True)
@@ -669,48 +682,66 @@ class ProjectManager:
     def redo(self) -> Operation | None:
         return self._step(undo=False)
 
-    def _step(self, *, undo: bool) -> Operation | None:
+    def _plan(self, *, undo: bool) -> tuple[int, Operation, dict[str, Any]] | None:
+        """Next applicable (steps, operation, state) without moving the cursor, else None."""
+
         history = self.history
-        while history is not None and self.layout is not None and self.metadata is not None:
-            index = history.cursor - 1 if undo else history.cursor
+        if history is None or self.layout is None or self.metadata is None:
+            return None
+        try:
+            _, state = self._read_authority(self.layout)
+        except (OSError, ValueError, ProjectError):
+            return None
+        steps = 0
+        while True:
+            index = history.cursor - 1 - steps if undo else history.cursor + steps
             if not 0 <= index < len(history.entries):
                 return None
             operation = history.entries[index]
             if not operation.reversible or operation.operation_type != "select":
                 return None
+            steps += 1
             superseded = any(
                 later.parameters.get("cursor_at_append", position) <= index
                 for position, later in enumerate(history.entries[index + 1 :], index + 1)
             )
             if superseded:  # undone, then replaced by a newer selection: skip it
-                history.undo() if undo else history.redo()
                 continue
-            pointer = operation.parameters.get("pointer")
-            if pointer not in _SELECTION_EVENTS:
+            parameters = operation.parameters
+            if parameters.get("pointer") not in _SELECTION_EVENTS:
                 return None
-            before, after = operation.parameters.get("before"), operation.parameters.get("after")
-            current, target = (after, before) if undo else (before, after)
-            _, state = self._read_authority(self.layout)
-            if state.get(pointer) != current:
+            current = parameters.get("after" if undo else "before")
+            if state.get(parameters["pointer"]) != current:
                 return None  # selection changed outside history; never clobber it
-            events = state.get(_SELECTION_EVENTS[pointer], [])
-            next_state = dict(state)
-            next_state[pointer] = target
-            next_state[_SELECTION_EVENTS[pointer]] = [
-                *(events if isinstance(events, list) else []),
-                {
-                    "project_revision": self.metadata.revision + 1,
-                    "previous_revision_id": current,
-                    "selected_revision_id": target,
-                    "actor_id": "studio-history",
-                    "reason": "undo" if undo else "redo",
-                },
-            ]
-            self.commit_edit(next_state, expected_revision=self.metadata.revision)
+            return steps, operation, state
+
+    def _step(self, *, undo: bool) -> Operation | None:
+        plan = self._plan(undo=undo)
+        history = self.history
+        if plan is None or history is None or self.metadata is None:
+            return None
+        steps, operation, state = plan
+        pointer = operation.parameters["pointer"]
+        current = operation.parameters.get("after" if undo else "before")
+        target = operation.parameters.get("before" if undo else "after")
+        events = state.get(_SELECTION_EVENTS[pointer], [])
+        next_state = dict(state)
+        next_state[pointer] = target
+        next_state[_SELECTION_EVENTS[pointer]] = [
+            *(events if isinstance(events, list) else []),
+            {
+                "project_revision": self.metadata.revision + 1,
+                "previous_revision_id": current,
+                "selected_revision_id": target,
+                "actor_id": "studio-history",
+                "reason": "undo" if undo else "redo",
+            },
+        ]
+        self.commit_edit(next_state, expected_revision=self.metadata.revision)
+        for _ in range(steps):
             history.undo() if undo else history.redo()
-            self._notify()
-            return operation
-        return None
+        self._notify()
+        return operation
 
     @staticmethod
     def _write_new_bytes(target: Path, payload: bytes) -> None:
