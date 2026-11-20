@@ -1701,6 +1701,9 @@ public struct OrbitGuidanceDial: View {
                         .frame(width: 58, height: 24)
                         .background((isTarget ? Color.blue : Color.gray.opacity(0.35)), in: RoundedRectangle(cornerRadius: 5))
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(isCurrent ? Color.white : Color.clear, lineWidth: 2))
+                        // Optional rings (e.g. lower) are dimmed: they never block completion.
+                        .opacity(ring.required ? 1 : 0.45)
+                        .accessibilityLabel(ring.required ? ring.id : "\(ring.id), optional")
                 }
             }
             .accessibilityLabel("Height: target \(target?.ringID ?? "none"), current \(current?.sector?.ringID ?? "unknown")")

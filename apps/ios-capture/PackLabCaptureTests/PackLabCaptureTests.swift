@@ -1251,9 +1251,16 @@ final class PackLabCaptureTests: XCTestCase {
         try FileManager.default.createDirectory(at: layout.sessionRoot, withIntermediateDirectories: true)
         let candidate = SessionResumeCandidate(id: "s1", draft: nil, disposition: .resumable, state: nil)
         let plan = SessionDeletionPlan(root: root, candidate: candidate)
-        let report = try await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true)
+        // The Files/USB pickup copy of the finalized package is deleted with the session.
+        let pickup = root.appendingPathComponent("pickup", isDirectory: true)
+        try FileManager.default.createDirectory(at: pickup, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: pickup.appendingPathComponent("s1.packscan"))
+        try Data([4]).write(to: pickup.appendingPathComponent("other.packscan"))
+        let report = try await SafeSessionDeleter(pickupDirectory: pickup).deleteDetailed(plan: plan, confirmed: true)
         XCTAssertEqual(report.sessionID, "s1")
         XCTAssertFalse(FileManager.default.fileExists(atPath: layout.sessionRoot.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: pickup.appendingPathComponent("s1.packscan").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pickup.appendingPathComponent("other.packscan").path), "only this session's copy is removed")
         let traversal = SessionDeletionPlan(root: root, session: root.appendingPathComponent("../escape"))
         XCTAssertThrowsError(try traversal.validate(confirmed: true)) { XCTAssertEqual($0 as? DeletionError, .outsideRoot) }
     }
@@ -3514,6 +3521,11 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(unsetBottom.intersects(crosshairZone), "unset: bottom controls \(unsetBottom) cover the crosshair \(crosshairZone)")
         XCTAssertTrue(unsetSafe.contains(unsetDial), "unset: guidance panel \(unsetDial) outside safe area \(unsetSafe)")
         XCTAssertTrue(unsetSafe.contains(unsetBottom), "unset: bottom controls \(unsetBottom) outside safe area \(unsetSafe)")
+        // The hot/low-storage/low-battery warning must be on screen, not scrolled away.
+        let health = try XCTUnwrap(unsetRecorder.frames["healthMessage"], "health warning was never laid out")
+        XCTAssertGreaterThan(health.height, 0)
+        XCTAssertTrue(unsetBottom.insetBy(dx: -1, dy: -1).contains(health), "health warning \(health) is not fully visible in the bottom band \(unsetBottom)")
+        XCTAssertFalse(health.intersects(crosshairZone))
         attachSnapshot(of: unsetWindow, named: "main-screen-center-unset")
         unsetWindow.isHidden = true
         unsetWindow.rootViewController = nil

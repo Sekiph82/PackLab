@@ -569,9 +569,12 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let coveredBefore = m04Coverage.capturedSectors.count
         let outcome = await performManualCapture(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
         let coveredAfter = m04Coverage.capturedSectors.count
+        // The count shows required-ring wedges only, matching missingSectors (optional rings excluded).
+        let requiredRings = Set(m04Coverage.configuration.rings.filter(\.required).map(\.id))
+        let requiredCovered = m04Coverage.capturedSectors.filter { requiredRings.contains($0.ringID) }.count
         let observation = m04Coverage.observations.last { $0.captureID == captureID }
         let hint = outcome.decision.blockingReasons.first.map { ContentView.manualBlockHint($0) }
-        showCaptureToast(CaptureToast.text(decision: outcome.decision, saved: outcome.still != nil, observation: observation, newlyCovered: coveredAfter > coveredBefore, capturedCount: coveredAfter, totalCount: coveredAfter + m04Coverage.missingSectors.count, blockHint: hint, orbit: m04ActivePreset.id != .turntable))
+        showCaptureToast(CaptureToast.text(decision: outcome.decision, saved: outcome.still != nil, observation: observation, newlyCovered: coveredAfter > coveredBefore, capturedCount: requiredCovered, totalCount: requiredCovered + m04Coverage.missingSectors.count, blockHint: hint, orbit: m04ActivePreset.id != .turntable))
         return outcome
     }
 
@@ -1145,9 +1148,26 @@ struct ContentView: View {
                         .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
                         .background(frameReporter("guidanceDial"))
                     }
+                    if showPoseDebug || !orbitGuidanceActive {
+                    Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
+                    }
+                    if showPoseDebug || !orbitGuidanceActive, let controlNote = runtime.controls.state.message {
+                        Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
+                    }
+                        }
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .frame(height: max(0, crosshairY - clearBand), alignment: .top)
+                        .background(frameReporter("topOverlay"))
+                        Spacer(minLength: 2 * clearBand)
+                        VStack(spacing: 6) {
+                    // Health, start-error and camera-recovery messages are pinned first in the bottom band
+                    // (outside every ScrollView) so they can never be scrolled out of view; the top band
+                    // is fully used by the guidance panel on a 6.1" iPhone.
                     if let healthMessage = runtime.healthMessage {
                         Text(healthMessage).font(.caption).multilineTextAlignment(.center)
-                            .padding(8).background(.black.opacity(0.72), in: Capsule()).foregroundStyle(.white).padding(.top)
+                            .padding(8).background(.black.opacity(0.72), in: Capsule()).foregroundStyle(.white)
+                            .background(frameReporter("healthMessage"))
                     }
                     if let scanStartError {
                         Text(scanStartError).font(.caption).multilineTextAlignment(.center)
@@ -1164,19 +1184,6 @@ struct ContentView: View {
                         }
                         .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
                     }
-                    if showPoseDebug || !orbitGuidanceActive {
-                    Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
-                    }
-                    if showPoseDebug || !orbitGuidanceActive, let controlNote = runtime.controls.state.message {
-                        Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
-                    }
-                        }
-                        }
-                        .scrollBounceBehavior(.basedOnSize)
-                        .frame(height: max(0, crosshairY - clearBand), alignment: .top)
-                        .background(frameReporter("topOverlay"))
-                        Spacer(minLength: 2 * clearBand)
-                        VStack(spacing: 6) {
                     if runtime.m04CoverageActive {
                         // Coverage detail scrolls inside whatever room is left above the buttons.
                         ScrollView {
@@ -1285,6 +1292,9 @@ struct ContentView: View {
                     }
                         }
                         .frame(height: max(0, geo.size.height - crosshairY - clearBand), alignment: .bottom)
+                        // Overflow (e.g. keyboard up) is cut at the band top, never drawn over the crosshair;
+                        // bottom alignment keeps the capture buttons visible.
+                        .clipped()
                         .background(frameReporter("bottomControls"))
                     }
                 }

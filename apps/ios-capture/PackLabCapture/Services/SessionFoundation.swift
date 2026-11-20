@@ -731,7 +731,9 @@ public struct DeletionReport: Sendable, Equatable { public let sessionID: String
 public actor SafeSessionDeleter {
     private let fileManager: FileManager
     private let failureInjector: (@Sendable (String) -> Bool)?
-    public init(fileManager: FileManager = .default, failureInjector: (@Sendable (String) -> Bool)? = nil) { self.fileManager = fileManager; self.failureInjector = failureInjector }
+    /// Pickup folder holding `<sessionID>.packscan` copies (see ProductionScanFinalizeAction).
+    private let pickupDirectory: URL?
+    public init(fileManager: FileManager = .default, failureInjector: (@Sendable (String) -> Bool)? = nil, pickupDirectory: URL? = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first) { self.fileManager = fileManager; self.failureInjector = failureInjector; self.pickupDirectory = pickupDirectory }
     public func delete(plan: SessionDeletionPlan, confirmed: Bool) throws {
         let report = try deleteDetailed(plan: plan, confirmed: confirmed)
         if !report.failures.isEmpty { throw DeletionError.partialFailure }
@@ -742,6 +744,10 @@ public actor SafeSessionDeleter {
         var removed: [String] = []; var failures: [String] = []
         if failureInjector?(plan.session.path) == true { failures.append(plan.session.path) }
         else { do { try fileManager.removeItem(at: plan.session); removed.append(plan.session.path) } catch { failures.append(plan.session.path) } }
+        // The Files/USB pickup copy holds every scan photo: it goes with the session.
+        if let pickup = pickupDirectory?.appendingPathComponent("\(plan.sessionID).packscan"), fileManager.fileExists(atPath: pickup.path) {
+            do { try fileManager.removeItem(at: pickup); removed.append(pickup.path) } catch { failures.append(pickup.path) }
+        }
         let historyURL = historyIndex ?? plan.root.appendingPathComponent("history.json")
         if fileManager.fileExists(atPath: historyURL.path) {
             do {
@@ -1100,6 +1106,7 @@ public struct ProductionScanFinalizeAction: Sendable {
             try? FileManager.default.createDirectory(at: shared, withIntermediateDirectories: true)
             try? FileManager.default.removeItem(at: copy)
             try? FileManager.default.copyItem(at: packageURL, to: copy)
+            try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: copy.path)
         }
         return record
     }
