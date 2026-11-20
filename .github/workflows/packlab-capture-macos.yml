@@ -576,7 +576,7 @@ jobs:
           failed="$(printf '%s' "$safe_summary" | jq -r '.failedTests // 0')"
           skipped="$(printf '%s' "$safe_summary" | jq -r '.skippedTests // 0')"
           case "$FOCUSED_GROUP" in
-            all) expected=220 ;;
+            all) expected=222 ;;
             recovery_all) expected=25 ;;
             pl0119_finalization_failures) expected=1 ;;
             session_integrity) expected=7 ;;
@@ -589,6 +589,25 @@ jobs:
             echo "XCTest selection did not pass with its expected count (group=$FOCUSED_GROUP, result=$result, total=$total, expected=$expected, failed=$failed, skipped=$skipped)." >&2
             exit 1
           fi
+
+      - name: Export XCTest UI screenshot attachments
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/ui-screenshots"
+          mkdir -p "$out"
+          # Only the export is tolerated; the XCTest result was already enforced above.
+          if ! xcrun xcresulttool export attachments --path "$RUNNER_TEMP/PackLabCapture.xcresult" --output-path "$out"; then
+            echo "xcresulttool attachment export failed" > "$out/EXPORT_FAILED.txt"
+          fi
+          find "$out" -type f | sed "s|$out/||" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve XCTest UI screenshots
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: packlab-capture-ui-screenshots-${{ github.run_id }}
+          path: ${{ runner.temp }}/ui-screenshots
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Guard failed XCTest diagnostic artifact inputs
         id: guard_failed_xctest_diagnostics

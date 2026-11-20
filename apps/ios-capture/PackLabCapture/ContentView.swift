@@ -29,6 +29,8 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var m04BasePass = BasePassEvaluation(snapshot: OrbitCoverageModel().snapshot(), availability: BasePassAvailability(physicallyFeasible: false, reasonCode: "base_pass_unavailable"))
     @Published private(set) var m04Completion = CompletionDiagnostics(rings: RingCoverageEvaluation(snapshot: OrbitCoverageModel().snapshot()))
     @Published private(set) var manualCaptureDecision: ManualCaptureDecision?
+    /// True while one manual capture (shutter + session transaction + photo metadata) runs.
+    @Published private(set) var manualCaptureInFlight = false
     @Published private(set) var m04ActivePreset = PackagingPresetCatalog.matteHDPE
     @Published private(set) var m04ReflectionGuidance: [String] = []
     @Published private(set) var m04AsymmetricCoverage: AsymmetricCoverageEvaluation?
@@ -76,6 +78,10 @@ final class CaptureRuntimeViewModel: ObservableObject {
     /// Shared AR pose buffer; binds candidate frames and accepted stills to their poses.
     private var capturePoseSource: (@MainActor () -> PoseBuffer)?
     static let liveCandidateIntervalNanoseconds: UInt64 = 500_000_000
+    /// Manual capture refuses quality/pose evidence older than this (seconds, uptime domain).
+    static let maximumLiveEvidenceAge: TimeInterval = 2.0
+    /// Candidate sequence for the quality log; never reset, so loop restarts cannot collide.
+    private var liveCandidateSequence = 0
 
     init() {
         automaticallyPoll = true
@@ -126,6 +132,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
                 }
             }
         }
+        if m04CoverageActive { startLiveCandidateLoop() }
         await refresh()
     }
 
@@ -451,12 +458,13 @@ final class CaptureRuntimeViewModel: ObservableObject {
         return decision
     }
 
-    /// `photoMetadata`, when given, also appends the accepted still to the PackScan
-    /// `metadata/photos.json` contract that finalization requires. The binding is
-    /// validated before the session transaction so an unbindable still commits nothing.
+    /// `photoLayout`, when given, also appends the accepted still to the session's PackScan
+    /// `metadata/photos.json` contract that finalization requires. The binding is validated
+    /// before the session transaction so an unbindable still commits nothing, and a failed
+    /// append rolls the committed capture back so no record exists without its metadata.
     /// Empty `poses`/`motion` buffers fall back to the live AR pose buffer and CoreMotion
     /// records read after the shutter, so the still binds to its own frame's pose.
-    func captureAndPersistManual(captureID: String = UUID().uuidString, monotonicTimestamp: TimeInterval, cameraReady: Bool, sessionReady: Bool, sourceIntegrityReady: Bool, metadataReady: Bool, poseEvidenceReady: Bool, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil, photoMetadata: AcceptedPhotoMetadataStore? = nil) async throws -> (decision: ManualCaptureDecision, still: AcceptedStill?) {
+    func captureAndPersistManual(captureID: String = UUID().uuidString, monotonicTimestamp: TimeInterval, cameraReady: Bool, sessionReady: Bool, sourceIntegrityReady: Bool, metadataReady: Bool, poseEvidenceReady: Bool, record: AcceptedCaptureRecord, metadata: Data, state: Data, store: ScanSessionStore, poses: PoseBuffer, motion: MotionBuffer, bridge: TimestampDomainBridge? = nil, photoLayout: SessionStorageLayout? = nil) async throws -> (decision: ManualCaptureDecision, still: AcceptedStill?) {
         let decision = evaluateManualCapture(monotonicTimestamp: monotonicTimestamp, cameraReady: cameraReady, sessionReady: sessionReady, sourceIntegrityReady: sourceIntegrityReady, metadataReady: metadataReady, poseEvidenceReady: poseEvidenceReady)
         let audit = ManualCaptureAudit(decision: decision)
         if let evaluation = m04Evaluation, let logStore = m04QualityLogStore {
@@ -467,7 +475,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let result = await service.requestManual(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
         guard case .accepted(let still) = result else { return (decision, nil) }
         var pendingPhoto: (metadata: PhotoCaptureMetadata, source: OriginalSourceRecord)?
-        if photoMetadata != nil { pendingPhoto = try manualPhotoMetadata(still: still, record: record) }
+        if photoLayout != nil { pendingPhoto = try manualPhotoMetadata(still: still, record: record) }
         let posesAtCapture = poses.samples.isEmpty ? (capturePoseSource?() ?? poses) : poses
         var motionAtCapture = motion
         if motionAtCapture.samples.isEmpty { for sample in await motionService.records() { motionAtCapture.append(sample) } }
@@ -475,8 +483,15 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let manualRecord = AcceptedCaptureRecord(captureID: record.captureID, sequence: record.sequence, sourceFilename: record.sourceFilename, metadataFilename: record.metadataFilename, acceptedAt: record.acceptedAt, poseBinding: evidence.pose ?? record.poseBinding, motionBinding: evidence.motion ?? record.motionBinding, passMetadata: record.passMetadata, manualAudit: audit, turntableEvidence: record.turntableEvidence)
         let manualMetadata = (try? JSONEncoder().encode(manualRecord)) ?? metadata
         try await store.storeAcceptedCapture(still: still, record: manualRecord, metadata: manualMetadata, state: state, poses: posesAtCapture, motion: motionAtCapture, bridge: bridge)
-        if let photoMetadata, let pendingPhoto {
-            try await photoMetadata.appendForCommittedSource(metadata: pendingPhoto.metadata, source: pendingPhoto.source, bytes: still.sourceBytes)
+        if let photoLayout, let pendingPhoto {
+            do {
+                try await AcceptedPhotoMetadataStore(sourceRoot: photoLayout.images, metadataURL: photoLayout.photoMetadata).appendForCommittedSource(metadata: pendingPhoto.metadata, source: pendingPhoto.source, bytes: still.sourceBytes)
+            } catch {
+                // ponytail: rollback, not one transaction; a crash between commit and append still
+                // leaves a record without photo metadata (finalize then refuses the session).
+                try? await SessionGalleryStore(layout: photoLayout).delete(id: record.captureID, confirmed: true)
+                throw error
+            }
         }
         recordAcceptedCaptureCoverage(manualRecord)
         return (decision, still)
@@ -503,13 +518,19 @@ final class CaptureRuntimeViewModel: ObservableObject {
     }
 
     func requestManualCapture(captureID: String = UUID().uuidString, monotonicTimestamp: TimeInterval = ProcessInfo.processInfo.systemUptime) async -> (decision: ManualCaptureDecision, still: AcceptedStill?) {
+        // One capture at a time: the next one must read the state the previous one committed.
+        guard !manualCaptureInFlight else { return (ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: ["capture_in_flight"]), nil) }
+        manualCaptureInFlight = true
+        defer { manualCaptureInFlight = false }
         guard let layout = m04SessionLayout, let stateData = try? Data(contentsOf: layout.state), let state = try? JSONDecoder().decode(PersistedSessionState.self, from: stateData) else {
-            let decision = ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: ["session_not_ready"])
-            manualCaptureDecision = decision
-            return (decision, nil)
+            return (publishManualBlock(["session_not_ready"]), nil)
         }
         guard let evaluation = m04Evaluation else {
             return (evaluateManualCapture(monotonicTimestamp: monotonicTimestamp, cameraReady: false, sessionReady: false, sourceIntegrityReady: false, metadataReady: false, poseEvidenceReady: false), nil)
+        }
+        let evidenceAge = monotonicTimestamp - evaluation.input.monotonicTimestamp
+        guard evidenceAge.isFinite, evidenceAge <= CaptureRuntimeViewModel.maximumLiveEvidenceAge else {
+            return (publishManualBlock(["live_frame_stale"]), nil)
         }
         let record = AcceptedCaptureRecord(captureID: captureID, sequence: state.nextSequence, sourceFilename: "\(captureID).heic", metadataFilename: "\(captureID).json")
         // The committed state advances with the accepted capture (same transaction).
@@ -518,12 +539,28 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let cameraReady = captureAdmissionService != nil && cameraRecoveryState != .denied && cameraRecoveryState != .unavailable && cameraRecoveryState != .failed && cameraRecoveryState != .blocked
         do {
             let nextData = try JSONEncoder().encode(next)
-            return try await captureAndPersistManual(captureID: captureID, monotonicTimestamp: monotonicTimestamp, cameraReady: cameraReady, sessionReady: state.sessionID == layout.sessionID, sourceIntegrityReady: evaluation.input.frame.isAvailable, metadataReady: true, poseEvidenceReady: poseReady, record: record, metadata: Data(), state: nextData, store: ScanSessionStore(layout: layout), poses: PoseBuffer(), motion: MotionBuffer(), photoMetadata: AcceptedPhotoMetadataStore(sourceRoot: layout.images, metadataURL: layout.photoMetadata))
+            return try await captureAndPersistManual(captureID: captureID, monotonicTimestamp: monotonicTimestamp, cameraReady: cameraReady, sessionReady: state.sessionID == layout.sessionID, sourceIntegrityReady: evaluation.input.frame.isAvailable, metadataReady: true, poseEvidenceReady: poseReady, record: record, metadata: Data(), state: nextData, store: ScanSessionStore(layout: layout), poses: PoseBuffer(), motion: MotionBuffer(), photoLayout: layout)
         } catch {
-            let decision = ManualCaptureDecision(allowed: false, warnings: manualCaptureDecision?.warnings ?? [], blockingReasons: ["capture_persist_failed"])
-            manualCaptureDecision = decision
-            return (decision, nil)
+            return (publishManualBlock(["capture_persist_failed"]), nil)
         }
+    }
+
+    private func publishManualBlock(_ reasons: [String]) -> ManualCaptureDecision {
+        let decision = ManualCaptureDecision(allowed: false, warnings: [], blockingReasons: reasons)
+        manualCaptureDecision = decision
+        return decision
+    }
+
+    /// Ends live capture for a session that was finalized or discarded: no further candidate
+    /// logs, context writes or captures may land in it.
+    func endActiveSession(sessionID: String) {
+        guard m04SessionLayout?.sessionID == sessionID else { return }
+        stopLiveCandidateLoop()
+        m04CoverageActive = false
+        m04SessionLayout = nil
+        m04QualityLogStore = nil
+        m04Evaluation = nil
+        manualCaptureDecision = nil
     }
 
     // MARK: Live candidate loop
@@ -534,10 +571,9 @@ final class CaptureRuntimeViewModel: ObservableObject {
         stopLiveCandidateLoop()
         guard liveFrameSource != nil else { return }
         liveCandidateTask = Task { [weak self] in
-            var sequence = 0
             while !Task.isCancelled {
                 guard let model = self else { return }
-                if await model.analyzeLiveCandidateFrame(sequence: sequence) != nil { sequence += 1 }
+                await model.analyzeLiveCandidateFrame()
                 try? await Task.sleep(nanoseconds: CaptureRuntimeViewModel.liveCandidateIntervalNanoseconds)
             }
         }
@@ -557,8 +593,10 @@ final class CaptureRuntimeViewModel: ObservableObject {
     /// One live-loop tick: the current camera frame, bound to its AR pose in the
     /// ARFrame timestamp domain, goes through the production analyzeM04Candidate entry.
     @discardableResult
-    func analyzeLiveCandidateFrame(sequence: Int) async -> M04CandidateQualityEvaluation? {
+    func analyzeLiveCandidateFrame() async -> M04CandidateQualityEvaluation? {
         guard m04CoverageActive, let layout = m04SessionLayout, let live = liveFrameSource?() else { return nil }
+        let sequence = liveCandidateSequence
+        liveCandidateSequence += 1
         let candidateID = UUID().uuidString
         let pose = capturePoseSource?().bind(captureID: candidateID, timestamp: live.timestamp)
         return await analyzeM04Candidate(sessionID: layout.sessionID, captureID: candidateID, sequence: sequence, monotonicTimestamp: live.timestamp, frame: live.frame, pose: pose)
@@ -817,7 +855,20 @@ struct ContentView: View {
     @State private var showHistory = false
     @State private var showARPreview = false
     @State private var turntableAngleText = "0"
-    @StateObject private var runtime = CaptureRuntimeViewModel()
+    @StateObject private var runtime: CaptureRuntimeViewModel
+    /// Layout-test seam: receives the Manual Capture button frame in window coordinates.
+    private let onManualCaptureFrame: (@MainActor (CGRect) -> Void)?
+
+    init() {
+        _runtime = StateObject(wrappedValue: CaptureRuntimeViewModel())
+        onManualCaptureFrame = nil
+    }
+
+    /// Hosts an already-configured runtime (layout tests); production uses `init()`.
+    init(runtime: CaptureRuntimeViewModel, onManualCaptureFrame: (@MainActor (CGRect) -> Void)? = nil) {
+        _runtime = StateObject(wrappedValue: runtime)
+        self.onManualCaptureFrame = onManualCaptureFrame
+    }
 
     var body: some View {
         NavigationStack {
@@ -924,7 +975,13 @@ struct ContentView: View {
                             Task { _ = await runtime.requestManualCapture() }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(!runtime.admitCapture())
+                        .disabled(!runtime.admitCapture() || runtime.manualCaptureInFlight)
+                        .accessibilityIdentifier("manualCaptureButton")
+                        .background(GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { onManualCaptureFrame?(proxy.frame(in: .global)) }
+                                .onChange(of: proxy.frame(in: .global)) { _, frame in onManualCaptureFrame?(frame) }
+                        })
                         if let manual = runtime.manualCaptureDecision {
                             ForEach(manual.warnings, id: \.self) { Text("Manual warning: \($0)") }
                             ForEach(manual.blockingReasons, id: \.self) { Text("Manual blocked: \(ContentView.manualBlockHint($0))") }
@@ -974,12 +1031,13 @@ struct ContentView: View {
                 Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.configureM04QualityRuntime(preset: preset, layout: layout); runtime.startLiveCandidateLoop(); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))); scanStartError = nil } catch { scanStartError = "Scan could not start: \(error.localizedDescription)" } }
                 showNewScan = false
             } } }
-            .sheet(isPresented: $showHistory) { NavigationStack { LocalScanHistoryView(root: ContentView.sessionRoot) } }
+            .sheet(isPresented: $showHistory) { NavigationStack { LocalScanHistoryView(root: ContentView.sessionRoot, onFinalized: { sessionID in runtime.endActiveSession(sessionID: sessionID) }) } }
             .sheet(isPresented: $showARPreview) { NavigationStack { ARPreviewEntryView() } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
                 if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.configureM04QualityRuntime(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout); runtime.startLiveCandidateLoop(); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
+                runtime.endActiveSession(sessionID: candidate.id)
                 Task { let plan = SessionDeletionPlan(root: ContentView.sessionRoot, candidate: candidate); _ = try? await SafeSessionDeleter().deleteDetailed(plan: plan, confirmed: true) }
                 showResume = false
             }) } }
@@ -1004,6 +1062,8 @@ struct ContentView: View {
         case "session_not_ready": return "no active scan — tap New Scan first (session_not_ready)"
         case "health_hard_stop": return "device health stop (thermal/battery/storage) (health_hard_stop)"
         case "capture_persist_failed": return "photo could not be saved to the scan (capture_persist_failed)"
+        case "live_frame_stale": return "camera evidence is out of date — keep the camera on the package for a moment and try again (live_frame_stale)"
+        case "capture_in_flight": return "previous photo is still being saved — wait for it to finish (capture_in_flight)"
         default: return reason
         }
     }

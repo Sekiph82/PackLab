@@ -15,6 +15,9 @@ import AVFoundation
 #if canImport(CoreVideo)
 import CoreVideo
 #endif
+#if canImport(SwiftUI) && canImport(UIKit)
+import SwiftUI
+#endif
 #if canImport(AVFoundation) && canImport(CoreGraphics)
 import CoreGraphics
 
@@ -116,6 +119,12 @@ private func makeJPEGFixture(width: Int, height: Int) -> Data? {
     guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, "public.jpeg" as CFString, 1, nil) else { return nil }
     CGImageDestinationAddImage(destination, image, nil)
     return CGImageDestinationFinalize(destination) ? data as Data : nil
+}
+
+/// Receives the Manual Capture button frame reported by the hosted ContentView.
+@MainActor
+private final class ButtonFrameRecorder {
+    var frame: CGRect?
 }
 
 private actor CountingStillPhotoBackend: StillPhotoBackend {
@@ -3162,25 +3171,51 @@ final class PackLabCaptureTests: XCTestCase {
         let liveFrame = LiveQualityFrameSampler.qualityFrame(from: checker)
         vm.bindLiveCandidateSources(frame: { (frame: liveFrame, timestamp: 19.9) }, poses: { poseSnapshot })
 
-        let tick = await vm.analyzeLiveCandidateFrame(sequence: 0)
-        let evaluation = try XCTUnwrap(tick)
+        // The real loop ticks (first tick runs immediately); bounded wait of 2 s.
+        vm.startLiveCandidateLoop()
+        for _ in 0..<40 where vm.m04Evaluation == nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        vm.stopLiveCandidateLoop()
+        let evaluation = try XCTUnwrap(vm.m04Evaluation, "live loop never analyzed the injected frame")
         XCTAssertTrue(evaluation.input.frame.isAvailable)
         XCTAssertEqual(evaluation.input.pose?.aligned.status, "available")
         XCTAssertEqual(evaluation.quality.metrics.framing.band, .unavailable)
+        // Candidate sequence keeps increasing across loop restarts.
+        let nextTick = await vm.analyzeLiveCandidateFrame()
+        let nextEvaluation = try XCTUnwrap(nextTick)
+        XCTAssertGreaterThan(nextEvaluation.input.sequence, evaluation.input.sequence)
 
-        let outcome = await vm.requestManualCapture(captureID: "manual-1", monotonicTimestamp: 20.0)
-        XCTAssertTrue(outcome.decision.allowed, "\(outcome.decision.blockingReasons)")
-        XCTAssertTrue(outcome.decision.warnings.contains("framing_object_region_unavailable"))
-        XCTAssertNotNil(outcome.still)
-        let persisted = try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: layout.photoRecords.appendingPathComponent("manual-1.json")))
-        XCTAssertEqual(persisted.poseBinding?.aligned.status, "available")
-        XCTAssertEqual(persisted.manualAudit?.allowed, true)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("manual-1.heic").path))
+        // Evidence older than 2 s (uptime domain) is refused and nothing is written.
+        let stale = await vm.requestManualCapture(captureID: "stale", monotonicTimestamp: 19.9 + 2.5)
+        XCTAssertEqual(stale.decision.blockingReasons, ["live_frame_stale"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: layout.photoRecords.appendingPathComponent("stale.json").path))
+
+        // Two overlapping taps: one runs, the other is refused (or, if the first already
+        // finished, both commit with distinct sequences). Never a duplicate sequence.
+        async let firstTap = vm.requestManualCapture(captureID: "manual-1", monotonicTimestamp: 20.0)
+        async let secondTap = vm.requestManualCapture(captureID: "manual-2", monotonicTimestamp: 20.0)
+        let taps = await [(id: "manual-1", outcome: firstTap), (id: "manual-2", outcome: secondTap)]
+        let allowedTaps = taps.filter { $0.outcome.decision.allowed }
+        let refusedTaps = taps.filter { $0.outcome.decision.blockingReasons == ["capture_in_flight"] }
+        XCTAssertTrue((allowedTaps.count == 1 && refusedTaps.count == 1) || allowedTaps.count == 2, "\(taps.map { $0.outcome.decision.blockingReasons })")
+        XCTAssertTrue(allowedTaps.allSatisfy { $0.outcome.still != nil })
+        XCTAssertTrue(allowedTaps.allSatisfy { $0.outcome.decision.warnings.contains("framing_object_region_unavailable") })
+        XCTAssertFalse(vm.manualCaptureInFlight)
+
+        // A later sequential capture reads the state the previous capture committed.
+        let third = await vm.requestManualCapture(captureID: "manual-3", monotonicTimestamp: 20.0)
+        XCTAssertTrue(third.decision.allowed, "\(third.decision.blockingReasons)")
+        let acceptedIDs = allowedTaps.map(\.id) + ["manual-3"]
         let state = try JSONDecoder().decode(PersistedSessionState.self, from: Data(contentsOf: layout.state))
-        XCTAssertEqual(state.nextSequence, 1)
-        XCTAssertEqual(state.acceptedIDs, ["manual-1"])
+        XCTAssertEqual(state.nextSequence, acceptedIDs.count)
+        XCTAssertEqual(Set(state.acceptedIDs), Set(acceptedIDs))
+        XCTAssertEqual(state.acceptedIDs.count, acceptedIDs.count)
+        let records = try FileManager.default.contentsOfDirectory(at: layout.photoRecords, includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }.map { try JSONDecoder().decode(AcceptedCaptureRecord.self, from: Data(contentsOf: $0)) }
+        XCTAssertEqual(records.map(\.sequence).sorted(), Array(0..<acceptedIDs.count))
+        XCTAssertEqual(records.first { $0.captureID == "manual-3" }?.sequence, acceptedIDs.count - 1)
+        XCTAssertTrue(records.allSatisfy { $0.poseBinding?.aligned.status == "available" && $0.manualAudit?.allowed == true })
+        for id in acceptedIDs { XCTAssertTrue(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("\(id).heic").path)) }
         let photos = try JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: Data(contentsOf: layout.photoMetadata))
-        XCTAssertEqual(photos.photos.map(\.imagePath), ["images/manual-1.heic"])
+        XCTAssertEqual(Set(photos.photos.map(\.imagePath)), Set(acceptedIDs.map { "images/\($0).heic" }))
         XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "middle", azimuthIndex: 4)])
 
         let destination = root.appendingPathComponent("exports/e2e-manual.packscan")
@@ -3189,7 +3224,51 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
         let history = await LocalScanHistoryStore(root: root).load()
         XCTAssertEqual(history.first { $0.id == draft.sessionID }?.exportState, "exported")
-        vm.stopLiveCandidateLoop()
+
+        // Finalize ends the live session: nothing more can be captured into it.
+        vm.endActiveSession(sessionID: draft.sessionID)
+        XCTAssertFalse(vm.m04CoverageActive)
+        let afterFinalize = await vm.requestManualCapture(captureID: "after-finalize", monotonicTimestamp: 20.0)
+        XCTAssertEqual(afterFinalize.decision.blockingReasons, ["session_not_ready"])
+    }
+
+    /// M2: gallery delete and retake keep metadata/photos.json bound to the records.
+    func testGalleryDeleteAndRetakeKeepPhotoMetadataFinalizable() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "gallery-photos")
+        let session = ScanSessionStore(layout: layout)
+        try await session.create(NewScanDraft(sessionID: "gallery-photos", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        let landscape = try XCTUnwrap(makeJPEGFixture(width: 8, height: 6))
+        let photoStore = AcceptedPhotoMetadataStore(sourceRoot: layout.images, metadataURL: layout.photoMetadata)
+        let lens = CameraLensIdentity(identifier: "test", position: .back, kind: .wideAngle)
+        for (index, id) in ["a", "b"].enumerated() {
+            let record = AcceptedCaptureRecord(captureID: id, sequence: index, sourceFilename: "\(id).heic", metadataFilename: "\(id).json")
+            let state = PersistedSessionState(sessionID: "gallery-photos", nextSequence: index + 1, epoch: 0, acceptedIDs: Array(["a", "b"].prefix(index + 1)))
+            try await session.storeAcceptedCapture(source: landscape, record: record, metadata: try JSONEncoder().encode(record), state: try JSONEncoder().encode(state))
+            let dimensions = CaptureDimensions(width: 8, height: 6)
+            let source = try OriginalSourceRecord.fromSource(captureID: id, filename: "\(id).heic", dimensions: dimensions, orientation: "landscape", bytes: landscape)
+            let metadata = PhotoCaptureMetadata(photoID: id, imagePath: "images/\(id).heic", sequence: index, originalFilename: "\(id).heic", pixelDimensions: dimensions, orientation: "landscape", lensIdentity: lens, focalLengthMM: SourceMeasurement(status: .unavailable), exposureSeconds: SourceMeasurement(status: .unavailable), iso: SourceMeasurement(status: .unavailable), whiteBalanceKelvin: SourceMeasurement(status: .unavailable), captureTimestamp: Date(timeIntervalSince1970: 0))
+            try await photoStore.appendForCommittedSource(metadata: metadata, source: source, bytes: landscape)
+        }
+        func photoPaths() throws -> [String] { try JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: Data(contentsOf: layout.photoMetadata)).photos.map(\.imagePath).sorted() }
+        let gallery = SessionGalleryStore(layout: layout)
+
+        try await gallery.delete(id: "a", confirmed: true)
+        XCTAssertEqual(try photoPaths(), ["images/b.heic"])
+        let afterDelete = try await ProductionScanFinalizeAction(root: root).finalize(sessionID: "gallery-photos", destination: root.appendingPathComponent("exports/after-delete.packscan"))
+        XCTAssertEqual(afterDelete.state, .exported)
+
+        let portrait = try XCTUnwrap(makeJPEGFixture(width: 6, height: 8))
+        let replacement = AcceptedCaptureRecord(captureID: "c", sequence: 2, sourceFilename: "c.heic", metadataFilename: "c.json")
+        try await gallery.retake(replacing: "b", source: portrait, record: replacement, metadata: try JSONEncoder().encode(replacement))
+        let document = try JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: Data(contentsOf: layout.photoMetadata))
+        XCTAssertEqual(document.photos.map(\.imagePath), ["images/c.heic"])
+        XCTAssertEqual(document.photos.first?.pixelDimensions, CaptureDimensions(width: 6, height: 8))
+        XCTAssertEqual(document.photos.first?.orientation.value, .portrait)
+        XCTAssertEqual(document.photos.first?.focalLengthMM.status, .unavailable)
+        let afterRetake = try await ProductionScanFinalizeAction(root: root).finalize(sessionID: "gallery-photos", destination: root.appendingPathComponent("exports/after-retake.packscan"))
+        XCTAssertEqual(afterRetake.state, .exported)
     }
 
     @MainActor
@@ -3206,7 +3285,7 @@ final class PackLabCaptureTests: XCTestCase {
         await vm.bindStillCaptureBackend(backend)
         // No production camera frame source is bound (Simulator): the loop and tick are no-ops.
         vm.startLiveCandidateLoop()
-        let tick = await vm.analyzeLiveCandidateFrame(sequence: 0)
+        let tick = await vm.analyzeLiveCandidateFrame()
         XCTAssertNil(tick)
         let blocked = await vm.requestManualCapture(captureID: "no-frame-capture")
         XCTAssertFalse(blocked.decision.allowed)
@@ -3219,6 +3298,61 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: layout.photoRecords.appendingPathComponent("no-frame-capture.json").path))
         vm.stopLiveCandidateLoop()
     }
+
+    #if canImport(SwiftUI) && canImport(UIKit)
+    /// Layout evidence: the real ContentView, hosted in a window on the Simulator's scene with
+    /// coverage active, keeps Manual Capture fully inside the safe area. Screenshots are kept
+    /// as attachments for visual review (Simulator rendering, not a device photo).
+    @MainActor
+    func testMainScreenKeepsManualCaptureButtonInsideSafeAreaWithCoverageActive() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let layout = SessionStorageLayout(root: root, sessionID: "layout-proof")
+        try await ScanSessionStore(layout: layout).create(NewScanDraft(sessionID: "layout-proof", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()), automaticallyPoll: false)
+        vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let recorder = ButtonFrameRecorder()
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = UIHostingController(rootView: ContentView(runtime: vm, onManualCaptureFrame: { frame in recorder.frame = frame }))
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        for _ in 0..<40 where recorder.frame == nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        window.layoutIfNeeded()
+        let frame = try XCTUnwrap(recorder.frame, "Manual Capture button was never laid out")
+        let safeArea = window.bounds.inset(by: window.safeAreaInsets)
+        XCTAssertTrue(vm.m04CoverageActive)
+        XCTAssertGreaterThan(frame.width, 0)
+        XCTAssertGreaterThan(frame.height, 0)
+        XCTAssertTrue(safeArea.contains(frame), "Manual Capture frame \(frame) is not inside the safe area \(safeArea) of window \(window.bounds)")
+        attachSnapshot(of: window, named: "main-screen-coverage-active")
+        window.isHidden = true
+        window.rootViewController = nil
+        await vm.stop()
+
+        for (name, view) in [("new-scan-wizard", AnyView(NavigationStack { NewScanWizard(onStart: { _ in }) })), ("scan-history", AnyView(NavigationStack { LocalScanHistoryView(root: root) }))] {
+            let sheetWindow = UIWindow(windowScene: scene)
+            sheetWindow.rootViewController = UIHostingController(rootView: view)
+            sheetWindow.makeKeyAndVisible()
+            try await Task.sleep(nanoseconds: 300_000_000)
+            attachSnapshot(of: sheetWindow, named: name)
+            sheetWindow.isHidden = true
+            sheetWindow.rootViewController = nil
+        }
+    }
+
+    @MainActor
+    private func attachSnapshot(of window: UIWindow, named name: String) {
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in _ = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+        let png = image.pngData() ?? Data()
+        XCTAssertFalse(png.isEmpty, "snapshot \(name) is empty")
+        let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+    #endif
 
     func testPL0111MattePresetIsVersionedConfigDrivenAndPersisted() async throws {
         let preset = PackagingPresetCatalog.preset(for: .matteHDPE)
