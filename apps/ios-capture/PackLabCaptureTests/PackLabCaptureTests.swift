@@ -121,6 +121,11 @@ private func makeJPEGFixture(width: Int, height: Int) -> Data? {
     return CGImageDestinationFinalize(destination) ? data as Data : nil
 }
 
+/// Hot device, low storage and low battery at once: the longest health warning capsule.
+private struct WarningDeviceHealthProvider: DeviceHealthProvider {
+    func snapshot() -> DeviceHealthSnapshot { DeviceHealthSnapshot(thermal: .serious, availableStorageBytes: 600 * 1024 * 1024, batteryLevel: 0.05, batteryStateAvailable: true) }
+}
+
 /// Receives named element frames reported by the hosted ContentView.
 @MainActor
 private final class LayoutFrameRecorder {
@@ -3369,17 +3374,23 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertNotEqual(vm.m04Instruction, .setObjectCenter)
         // The crosshair (full-screen centre) must stay visible: no panel may cover it.
         let crosshairZone = CGRect(x: window.bounds.midX - 30, y: window.bounds.midY - 30, width: 60, height: 60)
+        let top = try XCTUnwrap(recorder.frames["topOverlay"], "Top overlay was never laid out")
         let bottom = try XCTUnwrap(recorder.frames["bottomControls"], "Bottom controls were never laid out")
-        XCTAssertFalse(dial.intersects(crosshairZone), "guidance panel \(dial) covers the crosshair \(crosshairZone)")
+        XCTAssertGreaterThan(top.height, 100)
+        XCTAssertGreaterThan(bottom.height, 100)
+        XCTAssertFalse(top.intersects(crosshairZone), "top overlay \(top) covers the crosshair \(crosshairZone)")
         XCTAssertFalse(bottom.intersects(crosshairZone), "bottom controls \(bottom) cover the crosshair \(crosshairZone)")
+        XCTAssertTrue(top.insetBy(dx: -1, dy: -1).contains(dial), "guidance panel \(dial) is not fully visible in the top overlay \(top)")
+        XCTAssertTrue(bottom.insetBy(dx: -1, dy: -1).contains(frame), "Manual Capture \(frame) is not inside the bottom controls \(bottom)")
         attachSnapshot(of: window, named: "main-screen-coverage-active")
         window.isHidden = true
         window.rootViewController = nil
         await vm.stop()
 
         // Device worst case before the center is set (iPhone report): the long set-center
-        // instruction plus the longest rejection message must not cover the crosshair either.
-        let unsetVM = CaptureRuntimeViewModel(trackingService: SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal)]), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()), automaticallyPoll: false)
+        // instruction, the longest rejection message and a three-line health warning
+        // (hot device, low storage, low battery) must not cover the crosshair either.
+        let unsetVM = CaptureRuntimeViewModel(trackingService: SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal)]), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: WarningDeviceHealthProvider()), automaticallyPoll: false)
         unsetVM.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
         unsetVM.bindObjectCenterSources(center: { nil }, worldIdentity: { "layout-world" })
         let unsetResult = await unsetVM.setObjectCenterFromScreenCenter()
@@ -3388,19 +3399,23 @@ final class PackLabCaptureTests: XCTestCase {
         _ = await unsetVM.analyzeM04Candidate(sessionID: "layout-proof", captureID: "layout-unset", sequence: 0, monotonicTimestamp: ProcessInfo.processInfo.systemUptime, frame: frame64)
         _ = await unsetVM.requestManualCapture()
         XCTAssertTrue(unsetVM.manualCaptureDecision?.blockingReasons.contains("object_center_unset") ?? false)
+        await unsetVM.start()
+        XCTAssertNotNil(unsetVM.healthMessage, "the worst case needs the health warning on screen")
         let unsetRecorder = LayoutFrameRecorder()
         let unsetWindow = UIWindow(windowScene: scene)
         unsetWindow.rootViewController = UIHostingController(rootView: ContentView(runtime: unsetVM, onLayoutFrame: { key, frame in unsetRecorder.frames[key] = frame }))
         unsetWindow.makeKeyAndVisible()
         unsetWindow.layoutIfNeeded()
-        for _ in 0..<40 where unsetRecorder.frames["bottomControls"] == nil || unsetRecorder.frames["guidanceDial"] == nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        for _ in 0..<40 where unsetRecorder.frames["bottomControls"] == nil || unsetRecorder.frames["guidanceDial"] == nil || unsetRecorder.frames["topOverlay"] == nil { try await Task.sleep(nanoseconds: 50_000_000) }
         try await Task.sleep(nanoseconds: 300_000_000)
         unsetWindow.layoutIfNeeded()
         XCTAssertEqual(unsetVM.m04Instruction, .setObjectCenter)
         let unsetDial = try XCTUnwrap(unsetRecorder.frames["guidanceDial"])
         let unsetBottom = try XCTUnwrap(unsetRecorder.frames["bottomControls"])
+        let unsetTop = try XCTUnwrap(unsetRecorder.frames["topOverlay"])
         let unsetSafe = unsetWindow.bounds.inset(by: unsetWindow.safeAreaInsets)
-        XCTAssertFalse(unsetDial.intersects(crosshairZone), "unset: guidance panel \(unsetDial) covers the crosshair \(crosshairZone)")
+        XCTAssertFalse(unsetTop.intersects(crosshairZone), "unset: top overlay \(unsetTop) covers the crosshair \(crosshairZone)")
+        XCTAssertTrue(unsetTop.insetBy(dx: -1, dy: -1).contains(unsetDial), "unset: guidance panel \(unsetDial) is not fully visible in the top overlay \(unsetTop)")
         XCTAssertFalse(unsetBottom.intersects(crosshairZone), "unset: bottom controls \(unsetBottom) cover the crosshair \(crosshairZone)")
         XCTAssertTrue(unsetSafe.contains(unsetDial), "unset: guidance panel \(unsetDial) outside safe area \(unsetSafe)")
         XCTAssertTrue(unsetSafe.contains(unsetBottom), "unset: bottom controls \(unsetBottom) outside safe area \(unsetSafe)")

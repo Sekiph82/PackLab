@@ -1662,7 +1662,7 @@ public struct OrbitGuidanceDial: View {
                     context.stroke(Path(ellipseIn: CGRect(x: dot.x - 6, y: dot.y - 6, width: 12, height: 12)), with: .color(.black), lineWidth: 2)
                 }
             }
-            .frame(width: 120, height: 120)
+            .frame(width: 100, height: 100)
             .accessibilityLabel("Orbit dial")
             VStack(spacing: 4) {
                 ForEach(Array(snapshot.configuration.rings.reversed())) { ring in

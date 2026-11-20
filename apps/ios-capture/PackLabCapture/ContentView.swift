@@ -1102,33 +1102,15 @@ struct ContentView: View {
                         .allowsHitTesting(false).accessibilityHidden(true)
                 }
 
-                VStack {
-                    if let healthMessage = runtime.healthMessage {
-                        Text(healthMessage).font(.caption).multilineTextAlignment(.center)
-                            .padding(8).background(.black.opacity(0.72), in: Capsule()).foregroundStyle(.white).padding(.top)
-                    }
-                    if let scanStartError {
-                        Text(scanStartError).font(.caption).multilineTextAlignment(.center)
-                            .padding(8).background(.red.opacity(0.8), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
-                            .onTapGesture { self.scanStartError = nil }
-                            .accessibilityHint("Tap to dismiss")
-                    }
-                    if !runtime.cameraRecoveryMessage.isEmpty {
+                // The crosshair sits at the full-screen centre (raycast point). The top and bottom
+                // overlays are each limited to their half of the screen minus a clear band, so no
+                // health warning, long message or coverage readout can ever cover the crosshair.
+                GeometryReader { geo in
+                    let clearBand: CGFloat = 40
+                    let middle = geo.size.height / 2
+                    VStack(spacing: 0) {
+                        ScrollView {
                         VStack(spacing: 6) {
-                            Text(runtime.cameraRecoveryMessage).font(.caption).multilineTextAlignment(.center)
-                            if runtime.cameraRecoveryState == .blocked || runtime.cameraRecoveryState == .failed {
-                                Button("Retry camera") { runtime.retryCamera() }.buttonStyle(.borderedProminent)
-                            }
-                        }
-                        .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
-                    }
-                    // Camera-control readout is diagnostic; it pushed the guidance panel over the crosshair on device.
-                    if showPoseDebug || !orbitGuidanceActive {
-                    Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
-                    }
-                    if showPoseDebug || !orbitGuidanceActive, let controlNote = runtime.controls.state.message {
-                        Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
-                    }
                     if orbitGuidanceActive {
                         // Primary guidance: where to stand and what to do next.
                         VStack(spacing: 6) {
@@ -1148,13 +1130,40 @@ struct ContentView: View {
                         .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
                         .background(frameReporter("guidanceDial"))
                     }
-                    // Keep the screen centre free: the crosshair there is what "Set object center" aims with.
-                    Spacer(minLength: 64)
-                    if runtime.m04CoverageActive {
+                    if let healthMessage = runtime.healthMessage {
+                        Text(healthMessage).font(.caption).multilineTextAlignment(.center)
+                            .padding(8).background(.black.opacity(0.72), in: Capsule()).foregroundStyle(.white).padding(.top)
+                    }
+                    if let scanStartError {
+                        Text(scanStartError).font(.caption).multilineTextAlignment(.center)
+                            .padding(8).background(.red.opacity(0.8), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
+                            .onTapGesture { self.scanStartError = nil }
+                            .accessibilityHint("Tap to dismiss")
+                    }
+                    if !runtime.cameraRecoveryMessage.isEmpty {
                         VStack(spacing: 6) {
-                        // Coverage detail can exceed the screen height; keep it in a bounded scroll
-                        // area so the Manual Capture button below stays visible on an iPhone. The grid
-                        // the operator walks by comes first; diagnostic readouts follow.
+                            Text(runtime.cameraRecoveryMessage).font(.caption).multilineTextAlignment(.center)
+                            if runtime.cameraRecoveryState == .blocked || runtime.cameraRecoveryState == .failed {
+                                Button("Retry camera") { runtime.retryCamera() }.buttonStyle(.borderedProminent)
+                            }
+                        }
+                        .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
+                    }
+                    if showPoseDebug || !orbitGuidanceActive {
+                    Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
+                    }
+                    if showPoseDebug || !orbitGuidanceActive, let controlNote = runtime.controls.state.message {
+                        Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
+                    }
+                        }
+                        }
+                        .scrollBounceBehavior(.basedOnSize)
+                        .frame(height: max(0, middle - clearBand - geo.safeAreaInsets.top), alignment: .top)
+                        .background(frameReporter("topOverlay"))
+                        Spacer(minLength: 2 * clearBand)
+                        VStack(spacing: 6) {
+                    if runtime.m04CoverageActive {
+                        // Coverage detail scrolls inside whatever room is left above the buttons.
                         ScrollView {
                         VStack(spacing: 4) {
                         CoverageGridView(model: CoverageViewModel(snapshot: runtime.m04Coverage, targeted: runtime.m04CoverageTarget))
@@ -1221,7 +1230,14 @@ struct ContentView: View {
                         }
                         }
                         }
-                        .frame(maxHeight: 110)
+                        .scrollBounceBehavior(.basedOnSize)
+                        if let manual = runtime.manualCaptureDecision, !manual.blockingReasons.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(manual.blockingReasons, id: \.self) { Text("Manual blocked: \(ContentView.manualBlockHint($0))") }
+                            }
+                            .font(.caption).foregroundStyle(.white)
+                            .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).padding(.horizontal)
+                        }
                         HStack(spacing: 12) {
                             if orbitGuidanceActive {
                                 Button(runtime.m04ObjectCenter == nil ? "Set object center" : "Reset center") {
@@ -1239,22 +1255,11 @@ struct ContentView: View {
                             .accessibilityIdentifier("manualCaptureButton")
                             .background(frameReporter("manualCapture"))
                         }
-                        // Only blocking reasons stay under the button, on a dark plate readable over the camera.
-                        if let manual = runtime.manualCaptureDecision, !manual.blockingReasons.isEmpty {
-                            VStack(alignment: .leading, spacing: 2) {
-                                ForEach(manual.blockingReasons, id: \.self) { Text("Manual blocked: \(ContentView.manualBlockHint($0))") }
-                            }
-                            .font(.caption).foregroundStyle(.white)
-                            .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).padding(.horizontal)
-                        }
                         if let toast = runtime.captureToast {
                             Text(toast.text).font(.callout).foregroundStyle(.white).multilineTextAlignment(.center)
                                 .padding(10).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
                                 .accessibilityIdentifier("captureToast")
                         }
-                        }
-                        .padding(.bottom, 8)
-                        .background(frameReporter("bottomControls"))
                     }
                     if runtime.tracking.poseEvidenceEligible == false {
                         Text(runtime.tracking.message).font(.caption)
@@ -1263,7 +1268,14 @@ struct ContentView: View {
                         Text("Tap New Scan to start a scan").font(.headline)
                             .padding(8).background(.black.opacity(0.65), in: Capsule()).foregroundStyle(.white).padding()
                     }
+                        }
+                        .frame(height: max(0, middle - clearBand - geo.safeAreaInsets.bottom), alignment: .bottom)
+                        .background(frameReporter("bottomControls"))
+                    }
+                    .padding(.top, geo.safeAreaInsets.top)
+                    .padding(.bottom, geo.safeAreaInsets.bottom)
                 }
+                .ignoresSafeArea(.container)
 
                 if showPoseDebug {
                     VStack(alignment: .leading, spacing: 4) {
