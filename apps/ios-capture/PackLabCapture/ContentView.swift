@@ -933,6 +933,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         bindLiveCandidateSources(frame: { [weak replay] in replay?.liveFrame() }, poses: { [weak replay] in replay?.poseBuffer ?? PoseBuffer() })
         bindObjectCenterSources(center: { [weak replay] in replay?.raycastBasePlane() }, worldIdentity: { [weak replay] in replay?.worldIdentity })
         updateCameraRecovery(state: .running, message: "")
+        replay.renderPreview()
     }
 
     #if canImport(ARKit) && canImport(UIKit) && canImport(AVFoundation)

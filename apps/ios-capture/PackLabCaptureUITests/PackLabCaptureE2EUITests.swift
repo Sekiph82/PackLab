@@ -69,7 +69,12 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         nameField.typeText(name)
         shot("\(name)-wizard")
         tap(app.buttons["Start"], "Start")
-        tap(app.buttons["Continue"], "Continue protocol")
+        // The protocol Form is lazy: scroll until its Continue button is materialised.
+        let proceed = app.buttons["Continue"]
+        XCTAssertTrue(app.staticTexts["Capture protocol"].waitForExistence(timeout: 10))
+        for _ in 0..<10 where !proceed.exists { app.swipeUp() }
+        shot("\(name)-protocol")
+        tap(proceed, "Continue protocol")
         let center = app.buttons["setObjectCenterButton"]
         XCTAssertTrue(center.waitForExistence(timeout: 20), "scan did not start")
         shot("\(name)-started")

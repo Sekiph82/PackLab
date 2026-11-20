@@ -70,6 +70,12 @@ public final class UITestReplaySource: ObservableObject, ARTrackingService, Time
         let radius = Self.orbitRadius
         cameraPosition = [center[0] + radius * sin(azimuth), center[1] + radius * tan(elevation), center[2] - radius * cos(azimuth)]
         lookAt = center
+        renderPreview()
+    }
+
+    /// Shows the current synthetic view even before a scan's live loop runs.
+    func renderPreview() {
+        preview = ReplayRenderer.render(camera: transform, width: 240, height: 180).cgImage()
     }
 
     private func recordPose(at timestamp: TimeInterval) -> PoseSample {
@@ -261,7 +267,7 @@ struct ReplayCameraPreview: View {
             Color.black
             if let image = source.preview { Image(decorative: image, scale: 1).resizable().scaledToFill() }
             Text("UI-test replay camera: synthetic rendered package").font(.caption2.bold()).foregroundStyle(.yellow)
-                .padding(4).background(.black.opacity(0.6)).padding(.bottom, 2)
+                .padding(4).background(.black.opacity(0.6)).padding(.bottom, 24)
         }
         .clipped()
     }
