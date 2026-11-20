@@ -263,13 +263,14 @@ enum ReplayScene {
 struct ReplayCameraPreview: View {
     @ObservedObject var source: UITestReplaySource
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            Color.black
-            if let image = source.preview { Image(decorative: image, scale: 1).resizable().scaledToFill() }
-            Text("UI-test replay camera: synthetic rendered package").font(.caption2.bold()).foregroundStyle(.yellow)
-                .padding(4).background(.black.opacity(0.6)).padding(.bottom, 24)
-        }
-        .clipped()
+        // Overlays never change the layout size, so a filled image cannot widen the screen.
+        Color.black
+            .overlay { if let image = source.preview { Image(decorative: image, scale: 1).resizable().scaledToFill() } }
+            .overlay(alignment: .bottomLeading) {
+                Text("UI-test replay camera: synthetic rendered package").font(.caption2.bold()).foregroundStyle(.yellow)
+                    .padding(4).background(.black.opacity(0.6)).padding(.bottom, 24)
+            }
+            .clipped()
     }
 }
 #endif
