@@ -299,7 +299,7 @@ def test_idle_lan_peer_cannot_block_pairing_or_stop(tmp_path: Path) -> None:
     identity = create_test_tls_identity(tmp_path / "tls")
     receiver = PackLabReceiver(tmp_path, receiver_id="idle-receiver", tls_identity=identity)
     receiver.start()
-    idle = socket.create_connection(("127.0.0.1", receiver.port))
+    idle = socket.create_connection(("127.0.0.1", receiver.port), timeout=10)
     try:
         started = time.monotonic()
         token, _ = _pair(receiver, identity)
