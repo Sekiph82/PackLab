@@ -278,6 +278,15 @@ class LabelsView(QWidget):
         if automatic and key == self._loaded_project_key:
             return  # autosave/revision bump of the same selection: keep the labels
         self._loaded_project_key = key
+        if isinstance(source, bytes):
+            family = (json.loads(source).get("package_family_workflow") or {}).get("family_label")
+            if family:  # Package Families revision (PL-0459): not a single-revolve jar/bottle
+                self.status.setText(
+                    "Labels currently support Measure & Design jar/bottle revisions; this "
+                    f"{family} model isn't supported yet. Select the container revision "
+                    "(Edit > Undo) or open a jar/bottle Design Model."
+                )
+                return
         part = key.removeprefix("design-model:")[:16] if isinstance(source, bytes) else ""
         self._run(
             lambda: (

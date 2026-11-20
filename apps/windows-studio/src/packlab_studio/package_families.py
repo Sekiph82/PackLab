@@ -710,6 +710,14 @@ class FamilyPart:
     operation: DesignOperation
     representation: CadBrepRepresentationRevision
     preview: CadPreviewMeshRevision
+    # How the BREP was derived from the operation (core does not record it in the BREP
+    # revision fields): "revolve", "loft_ruled" or "loft_ruled+parametric_handle_cut".
+    build_mode: str = "revolve"
+
+
+# Every family loft is built with straight rulings (see cad_brep.loft_design_model_to_brep).
+LOFT_MODE = "loft_ruled"
+HANDLE_CUT_MODE = LOFT_MODE + "+parametric_handle_cut"
 
 
 @dataclass(frozen=True)
@@ -784,7 +792,9 @@ class FamilyDesign:
                 {
                     "name": item.name,
                     "operation_id": item.operation.operation_id,
+                    "build_mode": item.build_mode,
                     "brep_revision_id": item.representation.revision_id,
+                    "brep_geometry_sha256": item.representation.geometry_sha256,
                     "closure_component": item.is_cap,
                 }
                 for item in self.parts
@@ -865,8 +875,10 @@ def _realize(
                 )
                 operation = create_loft_operation(model, inputs)
                 representation = loft_design_model_to_brep(model, inputs, operation, ruled=True)
+                mode = LOFT_MODE
                 sections.extend(section for _f, _z, section in part.sections)
                 if part.handle_feature_id is not None:
+                    mode = HANDLE_CUT_MODE
                     cut = cut_parametric_handle_opening(
                         model, representation, part.handle_feature_id
                     )
@@ -882,6 +894,7 @@ def _realize(
                     operation,
                     representation,
                     tessellate_brep_preview(model, representation),
+                    "revolve" if isinstance(part, _Revolve) else mode,
                 )
             )
         document = serialize_design_model(
@@ -1026,7 +1039,7 @@ def fit_jerrycan_on_scan_master(
         )
     except ValueError as error:
         raise PackageFamilyError(f"core refused the jerrycan BREP: {error}") from error
-    part = FamilyPart("body", False, fit.operation, representation, preview)
+    part = FamilyPart("body", False, fit.operation, representation, preview, LOFT_MODE)
     return FamilyDesign(
         "jerrycan",
         "fitted to the selected Scan Master",
@@ -1570,18 +1583,26 @@ def load_family_document(document: Mapping[str, Any]) -> FamilyDesign:
         )
         representation = loft_design_model_to_brep(model, inputs, loft, ruled=True)
         part = FamilyPart(
-            "body", False, loft, representation, tessellate_brep_preview(model, representation)
+            "body",
+            False,
+            loft,
+            representation,
+            tessellate_brep_preview(model, representation),
+            LOFT_MODE,
         )
-        return FamilyDesign(
-            family,
-            preset,
-            parameters,
-            model,
-            (part,),
-            str(document["design_document"]).encode("utf-8"),
-            history,
-            None,
-            extra,
+        return _verified_reload(
+            FamilyDesign(
+                family,
+                preset,
+                parameters,
+                model,
+                (part,),
+                str(document["design_document"]).encode("utf-8"),
+                history,
+                None,
+                extra,
+            ),
+            workflow,
         )
     container = model if family == "closure" else None
     spec = _spec_for(family, parameters, project_id=model.project_id, container=container)
@@ -1608,14 +1629,42 @@ def load_family_document(document: Mapping[str, Any]) -> FamilyDesign:
                 for p in spec.parts
             ),
         )
-    design = _realize(family, preset, parameters, spec, model, history, extra)
+    return _verified_reload(
+        _realize(family, preset, parameters, spec, model, history, extra), workflow
+    )
+
+
+def _verified_reload(design: FamilyDesign, workflow: Mapping[str, Any]) -> FamilyDesign:
+    """Refuse a reopen whose re-derived parts differ from the saved ones.
+
+    Operation ids alone are blind to the loft mode and to cut tool geometry, so each part's
+    build mode and exact BREP revision id (which includes the geometry digest) must match.
+    """
     stored = {
-        str(item.get("operation_id"))
+        str(item.get("name")): (
+            item.get("operation_id"),
+            item.get("build_mode"),
+            item.get("brep_revision_id"),
+        )
         for item in workflow.get("parts", [])
         if isinstance(item, Mapping)
     }
-    if stored != {item.operation.operation_id for item in design.parts}:
-        raise PackageFamilyError("family geometry no longer reproduces the persisted operations")
+    rebuilt = {
+        item.name: (
+            item.operation.operation_id,
+            item.build_mode,
+            item.representation.revision_id,
+        )
+        for item in design.parts
+    }
+    if stored != rebuilt:
+        changed = sorted(
+            name for name in set(stored) | set(rebuilt) if stored.get(name) != rebuilt.get(name)
+        )
+        raise PackageFamilyError(
+            "family geometry no longer reproduces the saved revision (operation, build mode "
+            f"or BREP digest differ for: {', '.join(changed)}); not opened as the same model"
+        )
     return design
 
 

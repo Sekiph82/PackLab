@@ -282,7 +282,8 @@ def cut_parametric_handle_opening(
     points = value.get("profile_xz") if isinstance(value, dict) else None
     if (
         not isinstance(body, str)
-        or body not in {item.feature_id for item in model.features}
+        or body
+        not in {item.feature_id for item in model.features if item.feature_kind is FeatureKind.BODY}
         or not isinstance(points, list)
         or len(points) < 3
         or any(

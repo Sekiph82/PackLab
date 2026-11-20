@@ -44,7 +44,13 @@ def _feature(kind: FeatureKind, key: str) -> DesignModelFeatureReference:
     return DesignModelFeatureReference(stable_feature_id("block", kind, key), "block", kind, key)
 
 
-def _block(*, widths: tuple[float, ...], heights: tuple[float, ...], handle: bool = True):
+def _block(
+    *,
+    widths: tuple[float, ...],
+    heights: tuple[float, ...],
+    handle: bool = True,
+    body_is_opening: bool = False,
+):
     """Rectangular loft centred on x = y = 0 (40 deep) with an optional handle opening."""
     root = create_standalone_design_geometry_root(
         project_id="0d6b5b12-18f4-4e8a-9d0d-62fe7116212a",
@@ -64,7 +70,9 @@ def _block(*, widths: tuple[float, ...], heights: tuple[float, ...], handle: boo
         DesignModelParameter(
             PARAMETRIC_HANDLE_OPENING_PREFIX + opening.feature_id,
             {
-                "body_feature_id": sections_features[0].feature_id,
+                "body_feature_id": (
+                    opening.feature_id if body_is_opening else sections_features[0].feature_id
+                ),
                 "profile_xz": [[-10.0, 60.0], [10.0, 60.0], [10.0, 80.0], [-10.0, 80.0]],
             },
             ParameterType.OBJECT,
@@ -153,3 +161,12 @@ def test_parametric_handle_opening_is_refused_for_captured_models() -> None:
     body = revolve_design_model_to_brep(model, profile, operation)
     with pytest.raises(CadBooleanError, match="requires_standalone_design_geometry"):
         cut_parametric_handle_opening(model, body, model.features[0].feature_id)
+
+
+def test_parametric_handle_opening_requires_a_body_feature_parent() -> None:
+    model, inputs, operation, opening = _block(
+        widths=(100.0, 100.0), heights=(0.0, 100.0), body_is_opening=True
+    )
+    body = loft_design_model_to_brep(model, inputs, operation, ruled=True)
+    with pytest.raises(CadBooleanError, match="parameters_invalid"):
+        cut_parametric_handle_opening(model, body, opening)

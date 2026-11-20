@@ -119,6 +119,12 @@ def test_standalone_family_create_edit_save_reopen_export(
     assert record["scan_master_revision_id"] is None
     assert record["standalone_root_revision_id"] == root.revision_id
     assert document["package_family_workflow"]["family"] == family
+    labels = window.route_stack.views[Route.LABELS]
+    labels.use_project_model()
+    assert "Labels currently support Measure & Design jar/bottle revisions" in (
+        labels.status.text()
+    ), labels.status.text()
+    assert pf.FAMILIES[family] in labels.status.text()
 
     view.design = None
     view.open_button.click()
@@ -224,24 +230,18 @@ def test_closure_on_captured_jar_assembly_visibility_and_replacement(window, tmp
     assert record["scan_master_revision_id"] == scan_master_id
     assert document["package_family_workflow"]["assembly"]["thread_compatibility_claimed"] is False
 
-    # Replacement runs the core mating-reference + replace chain; either it succeeds with an
-    # undoable history, or core refuses with its reason (never a silent change).
+    # The synthetic scene's Scan Master is a noisy object mesh (the real test-333 scan is
+    # refused with section_insufficient_points): core must refuse it and nothing changes. Dense
+    # scan is covered by test_closure_replacement_undo_redo_through_the_controller.
     before = view.design.model.revision_id
     view.spins["cap_diameter"].setValue(view.spins["cap_diameter"].value() + 2.0)
     view.replace_button.click()
-    if view.status.text().startswith("Replace closure:"):
-        assert view.design.model.revision_id != before
-        assert view.undo_button.isEnabled()
-        assert view.design.extra["closure_replacement"]["scan_master_mutated"] is False
-        view.undo_button.click()
-        assert view.redo_button.isEnabled(), view.status.text()
-        restored = view.design.model
-        assert {
-            item.feature_id for item in restored.features if item.feature_kind is FeatureKind.CAP
-        } == {cap_feature}
-    else:
-        assert "refused" in view.status.text(), view.status.text()
-        assert view.design.model.revision_id == before
+    assert "core mating references refused: neck_section_quality_invalid" in (view.status.text()), (
+        view.status.text()
+    )
+    assert view.design.model.revision_id == before
+    assert pf.current_cap(view.design)[0] == cap_feature
+    assert not view.undo_button.isEnabled()
 
     steps = _export(window, tmp_path, "cap", "step")
     assert steps and steps[0].read_bytes().startswith(b"ISO-10303-21")
@@ -398,3 +398,62 @@ def test_closure_replacement_undo_redo_through_the_controller(window, tmp_path) 
     record, document = manager.selected_design_model()
     assert record["revision_id"] == view.design.model.revision_id
     assert pf.load_family_document(document).model == view.design.model
+
+
+def test_reload_refuses_a_different_loft_mode_or_brep(window, tmp_path) -> None:
+    from packlab_core.cad_brep import loft_design_model_to_brep
+    from packlab_core.design_operations import LoftSectionInput
+
+    window.new_project(tmp_path / "project", "Reload")
+    manager = window.project_manager
+    design = pf.create_standalone(
+        "jerrycan",
+        pf.default_parameters("jerrycan"),
+        project_id=manager.current.project_id,
+        preset="5 L jerrycan",
+        actor_id="owner",
+    )
+    document = design.as_dict()
+    parts = {item["name"]: item for item in document["package_family_workflow"]["parts"]}
+    assert parts["body"]["build_mode"] == "loft_ruled+parametric_handle_cut"
+    assert parts["spout"]["build_mode"] == "revolve"
+    body = design.part("body")
+    assert parts["body"]["brep_geometry_sha256"] == body.representation.geometry_sha256
+    assert pf.load_family_document(document).model == design.model
+
+    # A smooth (non-ruled) loft of the same operation is a different BREP, same operation id.
+    smooth = loft_design_model_to_brep(
+        design.model,
+        tuple(
+            LoftSectionInput(feature_id, section, z)
+            for feature_id, z, section in zip(
+                body.operation.parent_feature_ids,
+                body.operation.section_positions,
+                _sections(design, body.operation.input_ids),
+                strict=True,
+            )
+        ),
+        body.operation,
+    )
+    assert smooth.revision_id != body.representation.revision_id
+
+    for key, value in (
+        ("build_mode", "loft_smooth"),
+        ("brep_revision_id", smooth.revision_id),
+    ):
+        tampered = json.loads(json.dumps(document))
+        for item in tampered["package_family_workflow"]["parts"]:
+            if item["name"] == "body":
+                item[key] = value
+        with pytest.raises(pf.PackageFamilyError, match="body.*not opened as the same model"):
+            pf.load_family_document(tampered)
+
+
+def _sections(design, section_ids):
+    from packlab_core.design_serialization import deserialize_design_model
+
+    sections = {
+        item.section_id: item
+        for item in deserialize_design_model(design.design_document).cross_sections
+    }
+    return tuple(sections[section_id] for section_id in section_ids)

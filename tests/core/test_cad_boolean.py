@@ -69,6 +69,28 @@ def test_handle_opening_cut_is_deterministic_and_feature_linked() -> None:
     assert _shape_for_handle(parent.shape_handle) is original
     assert model.as_dict() == original_model
 
+    # Through-cut (PL-0459 review M1): before the Bnd_Box order fix the tool started at
+    # x = 0 - 0.1 * (ymax - xmin) and only shaved a ~1e-3 sliver; the opening (y 1.2-1.8,
+    # z 2.3-3.7) must now be removed across the whole body (x 0-1), volume 0.6*1.4*1.0.
+    gprop = importlib.import_module("OCP.GProp")
+    brep_gprop = importlib.import_module("OCP.BRepGProp")
+    classifier = importlib.import_module("OCP.BRepClass3d")
+    top_abs = importlib.import_module("OCP.TopAbs")
+    gp = importlib.import_module("OCP.gp")
+
+    def volume(shape) -> float:
+        props = gprop.GProp_GProps()
+        brep_gprop.BRepGProp.VolumeProperties_s(shape, props)
+        return props.Mass()
+
+    cut_shape = _shape_for_handle(first.representation.shape_handle)
+    assert volume(original) - volume(cut_shape) == pytest.approx(0.6 * 1.4 * 1.0, rel=1e-6)
+    for x in (0.02, 0.5, 0.98):
+        state = classifier.BRepClass3d_SolidClassifier(cut_shape, gp.gp_Pnt(x, 1.5, 3.0), 1e-7)
+        assert state.State() == top_abs.TopAbs_OUT
+    outside = classifier.BRepClass3d_SolidClassifier(cut_shape, gp.gp_Pnt(0.5, 3.0, 3.0), 1e-7)
+    assert outside.State() == top_abs.TopAbs_IN
+
 
 def test_grip_indent_cut_uses_explicit_profile_depth_and_side() -> None:
     scan, base_model, body = _indent_inputs()
