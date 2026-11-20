@@ -242,3 +242,37 @@ def test_marker_scale_without_markers_points_to_manual(tmp_path) -> None:
     isolation = md.isolate_object(model, cameras)
     with pytest.raises(md.MeasureDesignError, match="manual reference"):
         md.estimate_marker_scale(model, isolation, cameras, images, "camera-test")
+
+
+def test_build_next_step_and_latest_project_build_feed_measure_design(window, tmp_path) -> None:
+    from PySide6.QtWidgets import QPushButton
+
+    from packlab_studio.build_model import BuildModelView, BuildResult
+
+    metadata = window.new_project(tmp_path / "project", "Synthetic jar")
+    view = window.route_stack.views[Route.MEASURE_DESIGN]
+    view.latest_button.click()
+    assert view.model is None and "Build model first" in view.status.text()
+    # A build workspace in the project (layout written by BuildModelController).
+    workspace = tmp_path / "project" / "working" / "reconstruction" / "r1" / "outputs"
+    model_path = _scene(workspace.parent / "scene-root")
+    (workspace / "mvs").mkdir(parents=True)
+    import shutil
+
+    shutil.copytree(model_path.parent.parent / "dense", workspace / "dense")
+    for item in model_path.parent.iterdir():
+        shutil.copy(item, workspace / "mvs" / item.name)
+    built = workspace / "mvs" / "scene_dense.ply"
+    assert md.latest_built_model(tmp_path / "project") == built
+    builds = window.route_stack.views[Route.RECONSTRUCTION]
+    assert isinstance(builds, BuildModelView)
+    builds.track("job-1", "capture-1")
+    builds.show_result(BuildResult("job-1", "capture-1", "succeeded", "Built.", model_path=built))
+    step = next(
+        b for b in builds.findChildren(QPushButton) if b.text() == "Object-only, scale and measure"
+    )
+    step.click()
+    assert window.navigation.current_route is Route.MEASURE_DESIGN
+    assert view.model is not None and view.model.path == built
+    assert "8 COLMAP cameras" in view.results.text()
+    assert metadata.project_id == window.project_manager.current.project_id

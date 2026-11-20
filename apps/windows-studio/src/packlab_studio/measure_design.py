@@ -189,11 +189,31 @@ def load_model(path: Path) -> LoadedModel:
 def companion_mesh_path(model_path: Path) -> Path | None:
     """OpenMVS writes the mesh beside the dense cloud; promotion needs triangles."""
 
-    for name in ("scene_dense_mesh.ply", "scene_textured.obj", "scene_mesh.ply"):
+    for name in (
+        "scene_dense_mesh.ply",
+        "scene_refined.ply",
+        "scene_textured.obj",
+        "scene_mesh.ply",
+    ):
         candidate = Path(model_path).with_name(name)
         if candidate.is_file() and candidate != Path(model_path):
             return candidate
     return None
+
+
+def latest_built_model(project_root: Path) -> Path | None:
+    """Newest Build-model output in a project (dense cloud, else textured mesh)."""
+
+    builds = Path(project_root) / "working" / "reconstruction"
+    if not builds.is_dir():
+        return None
+    candidates = [
+        path
+        for pattern in ("*/outputs/mvs/scene_dense.ply", "*/outputs/mvs/scene_textured.obj")
+        for path in builds.glob(pattern)
+        if path.is_file()
+    ]
+    return max(candidates, key=lambda path: path.stat().st_mtime, default=None)
 
 
 # ---------------------------------------------------------------- COLMAP cameras

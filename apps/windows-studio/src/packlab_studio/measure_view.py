@@ -96,6 +96,9 @@ class MeasureDesignView(QWidget):
             return widget
 
         self.open_button = button("Open built model…", "open", self.open_model)
+        self.latest_button = button(
+            "Use latest project build", "latest", lambda: self.use_latest_build()
+        )
         self.isolate_button = button("1. Isolate object", "isolate", self.isolate)
         self.bar_mm = QDoubleSpinBox()
         self.bar_mm.setRange(80.0, 120.0)
@@ -162,6 +165,7 @@ class MeasureDesignView(QWidget):
         column = QVBoxLayout(controls)
         for widget in (
             self.open_button,
+            self.latest_button,
             self.isolate_button,
             scale_box,
             self.measure_button,
@@ -232,6 +236,19 @@ class MeasureDesignView(QWidget):
         chosen = self._choose_file(self)
         if chosen:
             self.load(Path(chosen))
+
+    def use_latest_build(self, path: Path | None = None) -> bool:
+        """Load ``path`` (a just-finished build) or the newest build in the open project."""
+
+        layout = getattr(self.project_manager, "layout", None)
+        if path is None and layout is not None:
+            path = md.latest_built_model(layout.root)
+        if path is None:
+            self.status.setText("No built model in this project yet: run Build model first.")
+            return False
+        if self.model is not None and self.model.path == Path(path):
+            return True
+        return self.load(Path(path))
 
     def load(self, path: Path) -> bool:
         def action() -> str:
