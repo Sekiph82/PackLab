@@ -59,6 +59,14 @@ GUARDED_UPLOADS = (
         "Preserve failed XCTest diagnostics for one day",
         "1",
     ),
+    (
+        ".github/workflows/packlab-capture-macos.yml",
+        "capture-e2e",
+        "guard_e2e_screenshots",
+        "Guard end-to-end screenshot artifact inputs",
+        "Preserve XCUITest end-to-end screenshots",
+        "3",
+    ),
 )
 
 

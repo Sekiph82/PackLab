@@ -153,3 +153,34 @@ def test_import_packscan_file_uses_same_inbox(monkeypatch, tmp_path, repo_root) 
     finally:
         window.close()
         app.processEvents()
+
+
+def test_paired_devices_are_listed_and_revoke_unpairs(monkeypatch, tmp_path) -> None:
+    app, window, view = _window(monkeypatch, tmp_path)
+    try:
+        view.receive_button.click()
+        assert view.offer is not None and view.devices_list.count() == 0
+        offer = view.offer
+        paired = _call(
+            f"https://{offer.host}:{offer.port}/v1/pair",
+            body=json.dumps(
+                {
+                    "offer": json.loads(offer.qr_payload()),
+                    "pairing_code": offer.pairing_code,
+                    "tls_certificate_fingerprint": offer.tls_certificate_fingerprint,
+                    "device_name": "iPhone17,3",
+                }
+            ).encode(),
+        )
+        view._tick()
+        assert view.devices_list.count() == 1
+        assert view.devices_list.item(0).text().startswith("iPhone17,3")
+        view.devices_list.setCurrentRow(0)
+        view.revoke_button.click()
+        assert view.devices_list.count() == 0 and "Revoked iPhone17,3" in view.status_label.text()
+        session = view.session
+        assert session is not None
+        assert not session.receiver.devices.is_active(str(paired["device_id"]))
+    finally:
+        window.close()
+        app.processEvents()

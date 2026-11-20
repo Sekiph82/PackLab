@@ -622,6 +622,14 @@ class ProjectManager:
         self._record_selection("active_design_model_revision_id", previous, revision_id)
         return record
 
+    def has_design_model_authority(self) -> bool:
+        """True once any Design Model revision was persisted through project authority."""
+
+        if self.layout is None or self.metadata is None:
+            return False
+        _, state = self._read_authority(self.layout)
+        return bool(state.get("design_model_revisions"))
+
     def _standalone_root_id(self, document: dict[str, Any]) -> str | None:
         """Verified ADR-0005 root id of a model-only revision, else ``None``.
 

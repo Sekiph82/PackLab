@@ -7,6 +7,7 @@ import tempfile
 import threading
 from collections.abc import Callable, Sequence
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +36,10 @@ from packlab_core.engine_probe import (
 
 from .build_model import SUPPORTED_COLMAP_VERSIONS, BuildModelView
 from .capture_inbox import CaptureInboxView
+from .design_workbench import DesignWorkbench
 from .engine_config import discover_engines
 from .engineering_export import EngineeringExportView
+from .labels_view import LabelsView
 from .mask_correction import MaskCorrectionView
 from .measure_view import MeasureDesignView
 from .model_viewer import ModelViewerView
@@ -55,6 +58,7 @@ class Route(StrEnum):
     SETTINGS = "settings"
     MODEL_VIEWER = "model-viewer"
     MEASURE_DESIGN = "measure-design"
+    LABELS = "labels"
     PACKAGE_FAMILIES = "package-families"
 
 
@@ -306,6 +310,12 @@ class NavigationPanel(QWidget):
 
 RouteFactory = Callable[[dict[str, Any]], QWidget]
 
+
+def _project_root(project_manager: Any) -> Path | None:
+    layout = getattr(project_manager, "layout", None)
+    return layout.root if layout is not None else None
+
+
 # One widget factory per route; each receives the RouteStack keyword services (missing
 # services are None). New routes: add a Route member and one entry here.
 ROUTE_FACTORIES: dict[Route, RouteFactory] = {
@@ -326,6 +336,12 @@ ROUTE_FACTORIES: dict[Route, RouteFactory] = {
     Route.SETTINGS: lambda s: SettingsView(),
     Route.MODEL_VIEWER: lambda s: ModelViewerView(),
     Route.MEASURE_DESIGN: lambda s: MeasureDesignView(s.get("project_manager")),
+    Route.LABELS: lambda s: LabelsView(
+        s.get("design_workbench") or DesignWorkbench(),
+        job_manager=s.get("job_manager"),
+        project_root=partial(_project_root, s.get("project_manager")),
+        project_manager=s.get("project_manager"),
+    ),
     Route.PACKAGE_FAMILIES: lambda s: PackageFamiliesView(s.get("project_manager")),
 }
 

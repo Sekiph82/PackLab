@@ -27,6 +27,7 @@ from .autosave import AutosaveService
 from .branding import application_icon
 from .build_model import BuildBackend, BuildModelController, BuildModelView, BuildResult
 from .capture_inbox import CaptureInboxView
+from .design_workbench import DesignWorkbench
 from .diagnostics import DiagnosticBundle, DiagnosticsBundleService
 from .engineering_export import (
     DesignModelExportSource,
@@ -36,6 +37,7 @@ from .engineering_export import (
 )
 from .history import Operation
 from .jobs import JobManager
+from .labels_view import install_design_workbench
 from .measure_view import MeasureDesignView
 from .model_viewer import ModelViewerView
 from .navigation import (
@@ -213,8 +215,13 @@ class StudioMainWindow(QMainWindow):
                 transfer_root / "transfer-inbox", tls_root=transfer_root / "transfer-tls"
             )
         self.navigation_panel = NavigationPanel()
+        # One active Design Model for Labels, Exports and the library (PL-0448/0449/0460).
+        self.design_workbench = DesignWorkbench()
+        if design_model_export_source_provider is None:
+            design_model_export_source_provider = self.design_workbench.export_source
         self._fallback_design_export = design_model_export_source_provider
         self.route_stack = RouteStack(
+            design_workbench=self.design_workbench,
             ingest_controller=ingest_controller,
             receiver=receiver,
             receiver_session_factory=receiver_session_factory,
@@ -248,6 +255,8 @@ class StudioMainWindow(QMainWindow):
         families = self.route_stack.views[Route.PACKAGE_FAMILIES]
         if isinstance(families, PackageFamiliesView):
             families.export_requested.connect(self._export_family_part)
+            # A Design Model opened for Labels takes the Exports page back from the family.
+            self.design_workbench.changed.connect(families.yield_export)
         self.navigation_panel.route_requested.connect(self.navigation.navigate)
         self.navigation.route_changed.connect(
             lambda value: self.route_stack.show_route(Route(value))
@@ -261,6 +270,7 @@ class StudioMainWindow(QMainWindow):
         splitter.addWidget(self.route_stack)
         splitter.setStretchFactor(1, 1)
         self.setCentralWidget(splitter)
+        install_design_workbench(self)
         self.workspace = WorkspaceManager(self, job_manager=self.job_manager)
         self.navigation.set_project_context(self.project_manager)
         self._sync_project_state()

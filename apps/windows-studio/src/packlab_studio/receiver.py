@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from packlab_core.pairing import PairingOffer, PairingStore
+from packlab_core.pairing import DeviceRegistry, PairingOffer, PairingStore
 from packlab_core.transfer_protocol import (
     CompletionAcknowledgement,
     TransferErrorEnvelope,
@@ -98,7 +98,11 @@ class PackLabReceiver:
         self.tls_identity = tls_identity
         self._pin = certificate_fingerprint or (tls_identity.fingerprint if tls_identity else None)
         self.pairings = PairingStore()
-        self.authenticator = PairingAuthenticator(self.pairings, clock=__import__("time").time)
+        # Paired phones survive restarts; only secret hashes live in this private root.
+        self.devices = DeviceRegistry(self.root / "paired-devices.json")
+        self.authenticator = PairingAuthenticator(
+            self.pairings, clock=__import__("time").time, devices=self.devices
+        )
         self.transfers = ResumableTransferStore(self.root / "transfers")
         self.inbox = self.root / "capture_inbox"
         self.ingest = (
@@ -132,13 +136,44 @@ class PackLabReceiver:
             ttl_seconds=ttl_seconds,
         )
 
-    def pair(self, offer: PairingOffer, *, code: str, certificate_fingerprint: str):
+    def pair(
+        self,
+        offer: PairingOffer,
+        *,
+        code: str,
+        certificate_fingerprint: str,
+        device_name: str = "iPhone",
+    ):
         return self.authenticator.authenticate_pairing(
             offer,
             receiver_instance_id=self.receiver_id,
             pairing_code=code,
             certificate_fingerprint_value=certificate_fingerprint,
+            device_name=device_name,
         )
+
+    def open_device_session(self, value: dict[str, object]):
+        """Authenticate a paired device (``POST /v1/session``) and issue a session token."""
+        if value.get("protocol") != "packlab-transfer" or value.get("protocol_version") != "1":
+            raise TransferProtocolError("unsupported_version", "session protocol is not supported")
+        fields = ("receiver_instance_id", "device_id", "device_secret", "nonce")
+        if any(not isinstance(value.get(key), str) for key in fields):
+            raise TransferProtocolError("bad_request", "device session request is incomplete")
+        timestamp = value.get("timestamp")
+        if isinstance(timestamp, bool) or not isinstance(timestamp, int | float):
+            raise TransferProtocolError("bad_request", "device session timestamp is required")
+        return self.authenticator.authenticate_device(
+            receiver_instance_id=str(value["receiver_instance_id"]),
+            expected_receiver_instance_id=self.receiver_id,
+            device_id=str(value["device_id"]),
+            device_secret=str(value["device_secret"]),
+            nonce=str(value["nonce"]),
+            timestamp=float(timestamp),
+            certificate_fingerprint_value=self._pin or "",
+        )
+
+    def revoke_device(self, device_id: str) -> bool:
+        return self.authenticator.revoke_device(device_id)
 
     def start(self) -> None:
         if self._server is not None:
@@ -185,7 +220,13 @@ class PackLabReceiver:
                     raise TransferProtocolError(
                         "bad_request", "pairing code and certificate fingerprint are required"
                     )
-                credential = receiver.pair(offer, code=code, certificate_fingerprint=fingerprint)
+                name = body.get("device_name")
+                credential = receiver.pair(
+                    offer,
+                    code=code,
+                    certificate_fingerprint=fingerprint,
+                    device_name=name if isinstance(name, str) else "iPhone",
+                )
                 self._json(
                     HTTPStatus.OK,
                     {
@@ -193,6 +234,24 @@ class PackLabReceiver:
                         "protocol": "packlab-transfer",
                         "protocol_version": "1",
                         "receiver_instance_id": credential.receiver_instance_id,
+                        "session_token": credential.token,
+                        "expires_at": credential.expires_at,
+                        "tls_certificate_fingerprint": credential.certificate_fingerprint,
+                        "device_id": credential.device_id,
+                        "device_secret": credential.device_secret,
+                    },
+                )
+
+            def _session(self) -> None:
+                credential = receiver.open_device_session(self._body())
+                self._json(
+                    HTTPStatus.OK,
+                    {
+                        "message": "session_acknowledgement",
+                        "protocol": "packlab-transfer",
+                        "protocol_version": "1",
+                        "receiver_instance_id": credential.receiver_instance_id,
+                        "device_id": credential.device_id,
                         "session_token": credential.token,
                         "expires_at": credential.expires_at,
                         "tls_certificate_fingerprint": credential.certificate_fingerprint,
@@ -224,6 +283,8 @@ class PackLabReceiver:
                 try:
                     if self.path == "/v1/pair":
                         self._pair()
+                    elif self.path == "/v1/session":
+                        self._session()
                     else:
                         self._auth()
                         if self.path == "/v1/transfers":

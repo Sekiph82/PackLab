@@ -347,6 +347,9 @@ class PackageFamiliesView(QWidget):
         self.design_changed.emit()
         self._sync()
 
+    def yield_export(self) -> None:
+        self.export_active = False
+
     def export_source(self) -> DesignModelExportSource | None:
         design = self.design
         if design is None or not self.export_active:

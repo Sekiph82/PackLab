@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(ImageIO)
+import ImageIO
+#endif
 
 public enum CaptureModeID: String, Codable, Sendable, CaseIterable { case freehand, guidedOrbit = "guided_orbit", turntable }
 public enum PackageType: String, Codable, Sendable, CaseIterable { case bottle, jar, jerrycan, tube, sachet, other }
@@ -55,6 +58,12 @@ public struct SessionStorageLayout: Sendable, Equatable {
     public var temporary: URL { sessionRoot.appendingPathComponent("tmp", isDirectory: true) }
     public var galleryAudit: URL { sessionRoot.appendingPathComponent("gallery-audit.json") }
     public var finalization: URL { sessionRoot.appendingPathComponent("finalization.json") }
+    /// A session folder is recognised by its own layout (metadata, state, images or records), so
+    /// sibling folders under the root such as `exports/` (finalized packages) are never listed as
+    /// sessions. A session whose metadata is damaged still has state/images and stays visible.
+    public func hasSessionStructure(fileManager: FileManager = .default) -> Bool {
+        [metadata, state, images, photoRecords].contains { fileManager.fileExists(atPath: $0.path) }
+    }
 }
 
 public enum SessionStorageError: Error, Sendable, Equatable { case invalidID, duplicateID, interruptedWrite, missingRecord }
@@ -509,6 +518,7 @@ public actor SessionDiscoveryService {
         for directory in directories where directory.hasDirectoryPath {
             let id = directory.lastPathComponent
             let layout = SessionStorageLayout(root: root, sessionID: id)
+            guard layout.hasSessionStructure(fileManager: fileManager) else { continue }
             let draft = (try? Data(contentsOf: layout.metadata)).flatMap { try? JSONDecoder().decode(NewScanDraft.self, from: $0) }
             let decodedState = (try? Data(contentsOf: layout.state)).flatMap { try? JSONDecoder().decode(PersistedSessionState.self, from: $0) }
             var state = decodedState
@@ -681,11 +691,12 @@ public actor LocalScanHistoryStore {
     public func load() -> [ScanHistoryEntry] {
         guard let directories = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) else { return [] }
         let index = ScanHistoryIndex()
-        return index.sorted(directories.filter { $0.hasDirectoryPath }.map { directory in
+        let sessions = directories.filter { $0.hasDirectoryPath && SessionStorageLayout(root: root, sessionID: $0.lastPathComponent).hasSessionStructure(fileManager: fileManager) }
+        return index.sorted(sessions.map { directory in
             let id = directory.lastPathComponent
             let layout = SessionStorageLayout(root: root, sessionID: id)
             guard let metadata = try? Data(contentsOf: layout.metadata), let draft = try? JSONDecoder().decode(NewScanDraft.self, from: metadata) else { return index.degraded(id: id, reason: "corrupt_metadata") }
-            let preview = (try? fileManager.contentsOfDirectory(at: layout.previews, includingPropertiesForKeys: nil).first { $0.pathExtension.lowercased() == "jpg" || $0.pathExtension.lowercased() == "jpeg" })
+            let preview = previewThumbnail(layout: layout)
             let finalizationURL = directory.appendingPathComponent("finalization.json")
             let finalizationData = try? Data(contentsOf: finalizationURL)
             let finalization = finalizationData.flatMap { try? JSONDecoder().decode(SessionFinalizationRecord.self, from: $0) }
@@ -700,6 +711,26 @@ public actor LocalScanHistoryStore {
             }
             return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: finalization.state.rawValue)
         })
+    }
+
+    /// The history thumbnail: an existing `previews/*.jpg`, otherwise one derived (downsampled,
+    /// never replacing the source) from the session's first accepted photo. Nil only when the
+    /// session has no decodable accepted photo yet.
+    private func previewThumbnail(layout: SessionStorageLayout) -> URL? {
+        if let existing = (try? fileManager.contentsOfDirectory(at: layout.previews, includingPropertiesForKeys: nil))?.first(where: { ["jpg", "jpeg"].contains($0.pathExtension.lowercased()) }) { return existing }
+        #if canImport(ImageIO)
+        guard let first = SessionPhotoIndex.items(layout: layout).first, let source = CGImageSourceCreateWithURL(first.sourceURL as CFURL, nil) else { return nil }
+        let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 240]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        // Same name as SourceIntegrity.derivativePath, so deleting that photo removes it too.
+        let target = layout.previews.appendingPathComponent("\(first.id)-thumbnail.jpg")
+        try? fileManager.createDirectory(at: layout.previews, withIntermediateDirectories: true)
+        guard let destination = CGImageDestinationCreateWithURL(target as CFURL, "public.jpeg" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        return CGImageDestinationFinalize(destination) ? target : nil
+        #else
+        return nil
+        #endif
     }
 }
 
@@ -945,6 +976,8 @@ public struct SessionResumeView: View {
 }
 
 public struct LocalScanHistoryView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var sync = PairedSyncService.shared
     @State private var entries: [ScanHistoryEntry] = []
     @State private var showShare = false
     @State private var transferSelection: FinalizedTransferSelection?
@@ -956,31 +989,56 @@ public struct LocalScanHistoryView: View {
     public init(root: URL, onFinalized: (@MainActor (String) -> Void)? = nil) { store = LocalScanHistoryStore(root: root); self.onFinalized = onFinalized }
     public var body: some View {
         List(entries) { entry in
-            HStack {
-                if let path = entry.previewPath, let image = UIImage(contentsOfFile: path) { Image(uiImage: image).resizable().scaledToFit().frame(width: 64, height: 64) }
-                else { Image(systemName: "exclamationmark.triangle").frame(width: 64, height: 64) }
-                VStack(alignment: .leading) { Text(entry.packageName); Text(entry.exportState).font(.caption); if let reason = entry.degradedReason { Text(reason).foregroundStyle(.orange).font(.caption2) } }
-                // Read-only view of the accepted photos kept in the app's session folder.
-                Button("View photos") { photoSession = PhotoSessionSelection(id: entry.id) }.buttonStyle(.borderless)
-                if entry.exportState == SessionFinalizationState.exported.rawValue {
-                    // Borderless so each button in this List row handles only its own tap.
-                    Button("Share") { presentShare(for: entry) }.buttonStyle(.borderless)
-                    Button("Send to PackLab") { presentTransfer(for: entry) }.buttonStyle(.borderless)
-                } else if entry.exportState == SessionFinalizationState.inProgress.rawValue {
-                    Button("Finalize") {
-                        Task {
-                            do {
-                                _ = try await ProductionScanFinalizeAction(root: store.rootURL).finalize(sessionID: entry.id)
-                                onFinalized?(entry.id)
-                                entries = await store.load()
-                            } catch FinalizationError.invalidManifest {
-                                finalizationMessage = "Finalize failed: no accepted photos yet. Take photos with Manual Capture first."
-                            } catch { finalizationMessage = "Finalize failed: \(error)" }
+            // Two lines: thumbnail + name/status on top, actions below, so nothing is squeezed.
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 12) {
+                    Group {
+                        if let path = entry.previewPath, let image = UIImage(contentsOfFile: path) { Image(uiImage: image).resizable().scaledToFill() }
+                        else { Image(systemName: entry.degradedReason == nil ? "photo" : "exclamationmark.triangle").font(.title2).foregroundStyle(.secondary) }
+                    }
+                    .frame(width: 56, height: 56).background(Color.gray.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 6))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.packageName).font(.headline)
+                        Text(LocalScanHistoryView.stateText(entry.exportState)).font(.subheadline).foregroundStyle(.secondary)
+                        if let reason = entry.degradedReason { Text("Problem: \(reason.replacingOccurrences(of: "_", with: " "))").foregroundStyle(.orange).font(.caption) }
+                        // PL-0452 delivery status: queued / sending x% / delivered / failed + reason.
+                        if let item = sync.items[entry.id] {
+                            Text(item.statusText).font(.caption).foregroundStyle(item.state == .failed ? Color.red : Color.secondary)
+                                .accessibilityIdentifier("syncStatus.\(entry.packageName)")
                         }
                     }
-                    .buttonStyle(.borderless)
                 }
+                HStack(spacing: 18) {
+                    // Read-only view of the accepted photos kept in the app's session folder.
+                    Button("View photos") { photoSession = PhotoSessionSelection(id: entry.id) }.buttonStyle(.borderless)
+                    if entry.exportState == SessionFinalizationState.exported.rawValue {
+                        // Borderless so each button in this List row handles only its own tap.
+                        Button("Share") { presentShare(for: entry) }.buttonStyle(.borderless)
+                        // Paired once: queue for automatic delivery; otherwise pair first.
+                        Button("Send to PackLab") {
+                            if let record = finalizationRecord(for: entry), sync.enqueue(record) { return }
+                            presentTransfer(for: entry)
+                        }.buttonStyle(.borderless)
+                    } else if entry.exportState == SessionFinalizationState.inProgress.rawValue {
+                        Button("Finalize") {
+                            Task {
+                                do {
+                                    let record = try await ProductionScanFinalizeAction(root: store.rootURL).finalize(sessionID: entry.id)
+                                    onFinalized?(entry.id)
+                                    // Paired phones deliver every finalized scan without further taps.
+                                    sync.enqueue(record)
+                                    entries = await store.load()
+                                } catch FinalizationError.invalidManifest {
+                                    finalizationMessage = "Finalize failed: no accepted photos yet. Take photos with Manual Capture first."
+                                } catch { finalizationMessage = "Finalize failed: \(error)" }
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .font(.subheadline).lineLimit(1)
             }
+            .padding(.vertical, 4)
         }.task { entries = await store.load() }
             .sheet(isPresented: $showShare) { if let share = shareCoordinator.activeShare { PackScanShareSheet(share: share) { completed in shareCoordinator.activityFinished(completed: completed); showShare = false } } }
             .sheet(item: $photoSession) { selection in NavigationStack { SessionPhotoGridView(layout: SessionStorageLayout(root: store.rootURL, sessionID: selection.id)) } }
@@ -991,6 +1049,19 @@ public struct LocalScanHistoryView: View {
                 }
             }
             .navigationTitle("Scan History")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+    }
+    static func stateText(_ state: String) -> String {
+        switch state {
+        case SessionFinalizationState.exported.rawValue: return "Finalized"
+        case SessionFinalizationState.inProgress.rawValue: return "In progress"
+        default: return state.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+    private func finalizationRecord(for entry: ScanHistoryEntry) -> SessionFinalizationRecord? {
+        let layout = SessionStorageLayout(root: store.rootURL, sessionID: entry.id)
+        guard let data = try? Data(contentsOf: layout.finalization) else { return nil }
+        return try? JSONDecoder().decode(SessionFinalizationRecord.self, from: data)
     }
     private func presentShare(for entry: ScanHistoryEntry) {
         let layout = SessionStorageLayout(root: store.rootURL, sessionID: entry.id)

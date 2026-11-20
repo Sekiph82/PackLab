@@ -868,6 +868,7 @@ class BuildModelView(QWidget):
         for text, route in (
             ("Object-only, scale and measure", "measure-design"),
             ("Design Model / Scan Master", "measure-design"),
+            ("Labels", "labels"),
             ("Export", "exports"),
         ):
             button = QPushButton(text, self)

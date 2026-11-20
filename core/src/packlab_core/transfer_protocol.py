@@ -34,6 +34,8 @@ class TransferErrorCode(StrEnum):
     WRONG_PIN = "wrong_pin"
     EXPIRED_PAIRING = "expired_pairing"
     REPLAYED_PAIRING = "replayed_pairing"
+    REPLAYED_REQUEST = "replayed_request"
+    DEVICE_REVOKED = "device_revoked"
     UNKNOWN_TRANSFER = "unknown_transfer"
     CONFLICTING_CHUNK = "conflicting_chunk"
     OUT_OF_ORDER = "out_of_order"
