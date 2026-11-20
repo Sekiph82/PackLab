@@ -34,6 +34,7 @@ LICENSE_NAME = re.compile(r"(?:license|licence|copying|notice|copyright)", re.IG
 BUILD_REVISION = re.compile(r"^[0-9a-f]{40}$")
 SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+ENGINE_BUNDLE_RECORD = "packlab-engine-bundle.json"
 
 
 def canonical_json(path: Path, value: object) -> None:
@@ -746,6 +747,31 @@ def _validate_source_delivery(
         return {}, set(), False
 
 
+def engine_bundle_files(stage_root: Path, project_root: Path) -> dict[str, dict[str, str]]:
+    """Map staged ``engines/`` files to their pinned engine component (PL-0444).
+
+    Returns nothing (every engine file stays unresolved) unless the staged record's
+    engines exactly equal the repository's pinned engine bundle manifest.
+    """
+
+    record_path = stage_root / "engines" / ENGINE_BUNDLE_RECORD
+    if not record_path.is_file():
+        return {}
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (project_root / "tools" / "packaging" / "engine_bundle_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    def identity(engines: list[dict[str, Any]]) -> set[tuple[str, ...]]:
+        return {(e["id"], e["component_id"], e["version"], e["archive_sha256"]) for e in engines}
+
+    if identity(record.get("engines", [])) != identity(manifest["engines"]):
+        return {}
+    return {("engines/" + item["relative_path"]).casefold(): item for item in record["files"]}
+
+
 def build_inventory(
     stage_root: Path,
     toc_path: Path,
@@ -856,6 +882,7 @@ def build_inventory(
             raise ValueError("An OCP Python extension is staged without controlled provenance")
     if controlled_ocp and set(staged_ocp) != set(controlled_ocp):
         raise ValueError("The controlled OCP manifest and exact staged native files differ")
+    engine_files = engine_bundle_files(stage_root, project_root)
     records: list[dict[str, Any]] = []
     package_owners: set[str] = set()
     unresolved_items: set[str] = set()
@@ -900,6 +927,19 @@ def build_inventory(
         if source_record is not None:
             owner_ids.update(source_record["component_ids"])
             mapping_evidence = "revision_bound_corresponding_source_manifest_and_file_sha256"
+        elif toc_key.startswith("engines/"):
+            engine_item = engine_files.get(toc_key)
+            if toc_key == f"engines/{ENGINE_BUNDLE_RECORD}" and engine_files:
+                owner_ids.add("packlab-application")
+                mapping_evidence = "packlab_generated_engine_bundle_record"
+            elif engine_item is not None and sha256_file(path) == engine_item["sha256"]:
+                owner_ids.add(engine_item["component_id"])
+                mapping_evidence = "pinned_engine_bundle_archive_member_sha256"
+            else:
+                unresolved_reason = (
+                    "The staged engine file is absent from the pinned engine bundle record "
+                    "or its sha256 differs."
+                )
         elif relative.startswith("COMPLIANCE/"):
             owner_ids.add("packlab-generated-runtime-evidence")
             mapping_evidence = "revision_bound_compliance_evidence"
@@ -1180,6 +1220,9 @@ def build_inventory(
         )
         for license_file in component["notice_files"]:
             notices_lines.append(f"  {license_file}")
+        source_evidence = component.get("source_evidence")
+        if isinstance(source_evidence, dict) and source_evidence.get("url"):
+            notices_lines.append(f"  Corresponding source: {source_evidence['url']}")
         if component["unresolved_reason"]:
             notices_lines.append(f"  UNRESOLVED: {component['unresolved_reason']}")
         notices_lines.append("")

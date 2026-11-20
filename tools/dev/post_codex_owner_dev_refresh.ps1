@@ -13,6 +13,14 @@ if ($AllowPublishedCommit) {
 $sha = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $sha -notmatch '^[0-9a-f]{40}$') { throw 'Could not resolve exact published source HEAD.' }
 $ownerRoot = Join-Path ([Environment]::GetFolderPath('DesktopDirectory')) 'PackLab\OwnerDev'
+# PL-0444: stage pinned COLMAP/OpenMVS into OwnerDev\engines (shared by every runtime
+# release; Studio resolves it as source "bundled"). Archives are cached outside Git and
+# sha256-verified; a failure only leaves engines unresolved, Studio still deploys.
+$engineCache = Join-Path $env:LOCALAPPDATA 'PackLab\engine-bundle-cache'
+Push-Location -LiteralPath $root
+try { & uv run --locked python -m tools.packaging.engine_bundle --cache $engineCache --dest (Join-Path $ownerRoot 'engines') }
+finally { Pop-Location }
+if ($LASTEXITCODE -ne 0) { Write-Warning 'Engine bundle staging failed; PackLab Studio will report COLMAP/OpenMVS as missing.' }
 $deployArgs = @{ RepositoryRoot = $root; OwnerRoot = $ownerRoot }
 if ($AllowPublishedCommit) { $deployArgs.AllowPublishedCommit = $true }
 $runtimeOutput = @(& (Join-Path $PSScriptRoot 'update_owner_dev_runtime.ps1') @deployArgs)
