@@ -1122,15 +1122,18 @@ struct ContentView: View {
                         }
                         .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
                     }
+                    // Camera-control readout is diagnostic; it pushed the guidance panel over the crosshair on device.
+                    if showPoseDebug || !orbitGuidanceActive {
                     Text("Focus: \(runtime.controls.state.focus.rawValue) · Exposure: \(runtime.controls.state.exposure.rawValue) · WB: \(runtime.controls.state.whiteBalance.rawValue)").font(.caption2).foregroundStyle(.white).padding(.top, 4)
-                    if let controlNote = runtime.controls.state.message {
+                    }
+                    if showPoseDebug || !orbitGuidanceActive, let controlNote = runtime.controls.state.message {
                         Text(controlNote).font(.caption2).foregroundStyle(.white.opacity(0.8)).multilineTextAlignment(.center).padding(.horizontal)
                     }
                     if orbitGuidanceActive {
                         // Primary guidance: where to stand and what to do next.
                         VStack(spacing: 6) {
                             OrbitGuidanceDial(snapshot: runtime.m04Coverage, target: runtime.m04CoverageTarget, current: runtime.m04LiveObservation)
-                            Text(runtime.m04Instruction.text).font(.callout.weight(.semibold)).multilineTextAlignment(.center)
+                            Text(runtime.m04Instruction.text).font(.callout.weight(.semibold)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
                             HStack(spacing: 8) {
                                 Button("−") { runtime.adjustPackageHeight(byCentimeters: -1) }.buttonStyle(.bordered).tint(.white)
                                 Text("Package height \(Int((runtime.packageHeightMeters * 100).rounded())) cm\(runtime.packageHeightSource == "operator_entered" ? "" : " (type default)")").font(.caption.monospacedDigit())
@@ -1139,19 +1142,23 @@ struct ContentView: View {
                             if let previous = runtime.m04PreviousWorldCoverage {
                                 Text("Earlier AR session: \(previous.capturedSectors.count) wedges (not counted)").font(.caption2)
                             }
-                            if let message = runtime.objectCenterMessage { Text(message).font(.caption2).multilineTextAlignment(.center) }
+                            if let message = runtime.objectCenterMessage { Text(message).font(.caption2).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true) }
                         }
                         .foregroundStyle(.white)
                         .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
                         .background(frameReporter("guidanceDial"))
                     }
+                    // Keep the screen centre free: the crosshair there is what "Set object center" aims with.
+                    Spacer(minLength: 64)
                     if runtime.m04CoverageActive {
+                        VStack(spacing: 6) {
                         // Coverage detail can exceed the screen height; keep it in a bounded scroll
                         // area so the Manual Capture button below stays visible on an iPhone. The grid
                         // the operator walks by comes first; diagnostic readouts follow.
                         ScrollView {
                         VStack(spacing: 4) {
                         CoverageGridView(model: CoverageViewModel(snapshot: runtime.m04Coverage, targeted: runtime.m04CoverageTarget))
+                            .foregroundStyle(.white)
                             .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
                             .padding(.horizontal, 8)
                         VStack(alignment: .leading, spacing: 2) {
@@ -1214,7 +1221,7 @@ struct ContentView: View {
                         }
                         }
                         }
-                        .frame(maxHeight: 160)
+                        .frame(maxHeight: 110)
                         HStack(spacing: 12) {
                             if orbitGuidanceActive {
                                 Button(runtime.m04ObjectCenter == nil ? "Set object center" : "Reset center") {
@@ -1245,13 +1252,15 @@ struct ContentView: View {
                                 .padding(10).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal)
                                 .accessibilityIdentifier("captureToast")
                         }
+                        }
+                        .padding(.bottom, 8)
+                        .background(frameReporter("bottomControls"))
                     }
-                    Spacer()
                     if runtime.tracking.poseEvidenceEligible == false {
                         Text(runtime.tracking.message).font(.caption)
                             .padding(8).background(.black.opacity(0.65), in: Capsule()).foregroundStyle(.white).padding()
-                    } else {
-                        Text(runtime.m04CoverageActive ? "Use Manual Capture to take photos" : "Tap New Scan to start a scan").font(.headline)
+                    } else if !runtime.m04CoverageActive {
+                        Text("Tap New Scan to start a scan").font(.headline)
                             .padding(8).background(.black.opacity(0.65), in: Capsule()).foregroundStyle(.white).padding()
                     }
                 }

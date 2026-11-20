@@ -3367,10 +3367,47 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertLessThan(dial.maxY, frame.minY, "the dial sits above the capture button")
         XCTAssertEqual(vm.m04LiveObservation?.sector, CoverageSector(ringID: "middle", azimuthIndex: 6))
         XCTAssertNotEqual(vm.m04Instruction, .setObjectCenter)
+        // The crosshair (full-screen centre) must stay visible: no panel may cover it.
+        let crosshairZone = CGRect(x: window.bounds.midX - 30, y: window.bounds.midY - 30, width: 60, height: 60)
+        let bottom = try XCTUnwrap(recorder.frames["bottomControls"], "Bottom controls were never laid out")
+        XCTAssertFalse(dial.intersects(crosshairZone), "guidance panel \(dial) covers the crosshair \(crosshairZone)")
+        XCTAssertFalse(bottom.intersects(crosshairZone), "bottom controls \(bottom) cover the crosshair \(crosshairZone)")
         attachSnapshot(of: window, named: "main-screen-coverage-active")
         window.isHidden = true
         window.rootViewController = nil
         await vm.stop()
+
+        // Device worst case before the center is set (iPhone report): the long set-center
+        // instruction plus the longest rejection message must not cover the crosshair either.
+        let unsetVM = CaptureRuntimeViewModel(trackingService: SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal)]), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()), automaticallyPoll: false)
+        unsetVM.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
+        unsetVM.bindObjectCenterSources(center: { nil }, worldIdentity: { "layout-world" })
+        let unsetResult = await unsetVM.setObjectCenterFromScreenCenter()
+        XCTAssertFalse(unsetResult)
+        XCTAssertTrue(unsetVM.objectCenterMessage?.hasPrefix("No table surface found") ?? false)
+        _ = await unsetVM.analyzeM04Candidate(sessionID: "layout-proof", captureID: "layout-unset", sequence: 0, monotonicTimestamp: ProcessInfo.processInfo.systemUptime, frame: frame64)
+        _ = await unsetVM.requestManualCapture()
+        XCTAssertTrue(unsetVM.manualCaptureDecision?.blockingReasons.contains("object_center_unset") ?? false)
+        let unsetRecorder = LayoutFrameRecorder()
+        let unsetWindow = UIWindow(windowScene: scene)
+        unsetWindow.rootViewController = UIHostingController(rootView: ContentView(runtime: unsetVM, onLayoutFrame: { key, frame in unsetRecorder.frames[key] = frame }))
+        unsetWindow.makeKeyAndVisible()
+        unsetWindow.layoutIfNeeded()
+        for _ in 0..<40 where unsetRecorder.frames["bottomControls"] == nil || unsetRecorder.frames["guidanceDial"] == nil { try await Task.sleep(nanoseconds: 50_000_000) }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        unsetWindow.layoutIfNeeded()
+        XCTAssertEqual(unsetVM.m04Instruction, .setObjectCenter)
+        let unsetDial = try XCTUnwrap(unsetRecorder.frames["guidanceDial"])
+        let unsetBottom = try XCTUnwrap(unsetRecorder.frames["bottomControls"])
+        let unsetSafe = unsetWindow.bounds.inset(by: unsetWindow.safeAreaInsets)
+        XCTAssertFalse(unsetDial.intersects(crosshairZone), "unset: guidance panel \(unsetDial) covers the crosshair \(crosshairZone)")
+        XCTAssertFalse(unsetBottom.intersects(crosshairZone), "unset: bottom controls \(unsetBottom) cover the crosshair \(crosshairZone)")
+        XCTAssertTrue(unsetSafe.contains(unsetDial), "unset: guidance panel \(unsetDial) outside safe area \(unsetSafe)")
+        XCTAssertTrue(unsetSafe.contains(unsetBottom), "unset: bottom controls \(unsetBottom) outside safe area \(unsetSafe)")
+        attachSnapshot(of: unsetWindow, named: "main-screen-center-unset")
+        unsetWindow.isHidden = true
+        unsetWindow.rootViewController = nil
+        await unsetVM.stop()
 
         for (name, view) in [("new-scan-wizard", AnyView(NavigationStack { NewScanWizard(onStart: { _ in }) })), ("scan-history", AnyView(NavigationStack { LocalScanHistoryView(root: root) }))] {
             let sheetWindow = UIWindow(windowScene: scene)
