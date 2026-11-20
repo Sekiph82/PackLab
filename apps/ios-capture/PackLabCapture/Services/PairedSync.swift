@@ -178,6 +178,10 @@ public final class PairedSyncService: ObservableObject {
             DeviceCredentialStore.remove()
             update(id, failure: code == "device_revoked" ? "this phone was unpaired in PackLab Studio — pair again" : "PackLab no longer knows this phone — pair again", terminal: true)
             return
+        } catch URLSessionTransferError.clockSkew(let seconds) {
+            // Still retried with backoff (fixing the clock heals it), but never shown as "not reachable".
+            update(id, failure: Self.clockSkewReason(seconds), terminal: false)
+            return
         } catch {
             update(id, failure: "PackLab not reachable (\(Self.describe(error)))", terminal: false)
             return
@@ -219,6 +223,13 @@ public final class PairedSyncService: ObservableObject {
         guard let data = try? JSONEncoder().encode(ordered) else { return }
         try? FileManager.default.createDirectory(at: queueURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: queueURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    nonisolated static func clockSkewReason(_ seconds: Int?) -> String {
+        let advice = "set Settings > General > Date & Time to Set Automatically"
+        guard let seconds else { return "phone clock is off — \(advice)" }
+        let minutes = max(1, (abs(seconds) + 30) / 60)
+        return "phone clock is \(minutes) min \(seconds > 0 ? "ahead of" : "behind") PackLab — \(advice)"
     }
 
     private static func describe(_ error: any Error) -> String {

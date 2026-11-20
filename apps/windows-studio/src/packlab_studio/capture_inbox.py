@@ -81,6 +81,8 @@ class CaptureInboxView(QWidget):
         self.pairing_label.setWordWrap(True)
         self.status_label = QLabel("", self)
         self.status_label.setWordWrap(True)
+        # Shows phone-supplied device names: never interpret them as rich text.
+        self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.inbox_list = QListWidget(self)
         self.inbox_list.setObjectName("packlab.capture-inbox.list")
         # Phones paired once send later scans automatically; Revoke unpairs one.

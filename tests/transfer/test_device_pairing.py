@@ -237,3 +237,72 @@ def test_https_pair_then_device_session_uploads_without_a_new_code(tmp_path: Pat
             restarted.stop()
     finally:
         receiver.stop()
+
+
+def test_expired_sessions_are_pruned_and_last_seen_is_persisted_coarsely(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = [1000.0]
+    registry = DeviceRegistry(tmp_path / "paired-devices.json", clock=lambda: now[0])
+    authenticator, credential = _paired(now, registry)
+    assert credential.device_id and credential.device_secret
+    writes: list[float] = []
+    original = registry._persist
+    monkeypatch.setattr(registry, "_persist", lambda: (writes.append(now[0]), original()))
+
+    for step in range(20):  # one session every 5 s for 100 s
+        now[0] = 1001.0 + 5 * step
+        _session(authenticator, credential.device_id, credential.device_secret, now[0])
+    # TTL 30 s: only the sessions opened in the last 30 s remain in memory.
+    assert len(authenticator._sessions) <= 7
+    # last_seen moves (and the file is rewritten) at most once per 60 s, not per session.
+    assert writes == [1001.0, 1061.0]
+    assert registry.devices()[0].last_seen_at == 1061.0
+
+
+def test_revoke_device_is_safe_while_server_threads_open_sessions() -> None:
+    import threading
+
+    now = [1000.0]
+    authenticator, credential = _paired(now, DeviceRegistry(clock=lambda: now[0]))
+    assert credential.device_id and credential.device_secret
+    others = [authenticator.devices.register(f"phone-{i}") for i in range(4)]
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    def open_sessions(device_id: str, secret: str) -> None:
+        try:
+            while not stop.is_set():
+                _session(authenticator, device_id, secret, now[0])
+        except BaseException as error:  # noqa: BLE001 - surfaced by the assert below
+            errors.append(error)
+
+    threads = [
+        threading.Thread(target=open_sessions, args=(device.device_id, secret))
+        for device, secret in others
+    ]
+    for thread in threads:
+        thread.start()
+    try:
+        for _ in range(200):
+            authenticator.revoke_device(credential.device_id)
+    finally:
+        stop.set()
+        for thread in threads:
+            thread.join()
+    assert errors == []
+    with pytest.raises(TransferProtocolError):
+        authenticator.require_session(
+            receiver_instance_id="r",
+            token=credential.token,
+            certificate_fingerprint_value="pin",
+        )
+
+
+def test_device_name_is_stripped_of_control_characters_and_length_limited() -> None:
+    registry = DeviceRegistry(clock=lambda: 1.0)
+    device, _ = registry.register("<b>Evil</b>\x00‮\r\n\tPhone" + "x" * 200)
+    assert "\x00" not in device.device_name and "‮" not in device.device_name
+    assert "\n" not in device.device_name and len(device.device_name) <= 64
+    assert device.device_name.startswith("<b>Evil</b> Phone")
+    assert registry.register("\x01\x02  ")[0].device_name == "iPhone"

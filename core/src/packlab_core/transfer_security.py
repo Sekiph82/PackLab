@@ -8,6 +8,7 @@ import os
 import secrets
 import ssl
 import subprocess
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -200,6 +201,15 @@ class PairingAuthenticator:
         self.devices = devices if devices is not None else DeviceRegistry(clock=clock)
         # token sha256 -> (receiver, expires_at, pin, pairing_id or "", device_id or "")
         self._sessions: dict[str, tuple[str, float, str, str, str]] = {}
+        # Server threads add sessions while the Qt thread revokes devices.
+        self._sessions_lock = threading.Lock()
+
+    def _add_session(self, token: str, record: tuple[str, float, str, str, str]) -> None:
+        now = self._clock()
+        with self._sessions_lock:
+            # Prune expired tokens so a chatty paired device cannot grow the table.
+            self._sessions = {k: v for k, v in self._sessions.items() if v[1] > now}
+            self._sessions[_token_key(token)] = record
 
     def authenticate_pairing(
         self,
@@ -220,12 +230,15 @@ class PairingAuthenticator:
         device, device_secret = self.devices.register(device_name)
         token = secrets.token_urlsafe(32)
         expires_at = min(self._clock() + self._session_ttl, offer.expires_at + self._session_ttl)
-        self._sessions[_token_key(token)] = (
-            identity.receiver_instance_id,
-            expires_at,
-            identity.tls_certificate_fingerprint,
-            offer.pairing_id,
-            device.device_id,
+        self._add_session(
+            token,
+            (
+                identity.receiver_instance_id,
+                expires_at,
+                identity.tls_certificate_fingerprint,
+                offer.pairing_id,
+                device.device_id,
+            ),
         )
         return SessionCredential(
             identity.receiver_instance_id,
@@ -257,12 +270,15 @@ class PairingAuthenticator:
         )
         token = secrets.token_urlsafe(32)
         expires_at = self._clock() + self._session_ttl
-        self._sessions[_token_key(token)] = (
-            expected_receiver_instance_id,
-            expires_at,
-            certificate_fingerprint_value,
-            "",
-            device.device_id,
+        self._add_session(
+            token,
+            (
+                expected_receiver_instance_id,
+                expires_at,
+                certificate_fingerprint_value,
+                "",
+                device.device_id,
+            ),
         )
         return SessionCredential(
             expected_receiver_instance_id,
@@ -275,9 +291,10 @@ class PairingAuthenticator:
     def revoke_device(self, device_id: str) -> bool:
         """Unpair a device and end every session it holds."""
         revoked = self.devices.revoke(device_id)
-        self._sessions = {
-            key: value for key, value in self._sessions.items() if value[4] != device_id
-        }
+        with self._sessions_lock:
+            self._sessions = {
+                key: value for key, value in self._sessions.items() if value[4] != device_id
+            }
         return revoked
 
     def require_session(
@@ -290,17 +307,20 @@ class PairingAuthenticator:
     ) -> None:
         if transport != REQUIRED_TRANSPORT:
             raise TransferProtocolError(TransferErrorCode.INSECURE_TRANSPORT, "HTTPS is required")
-        record = self._sessions.get(_token_key(token))
+        with self._sessions_lock:
+            record = self._sessions.get(_token_key(token))
         if record is None:
             raise TransferProtocolError(TransferErrorCode.UNPAIRED, "session credential is unknown")
         expected_receiver, expires_at, expected_pin, _, device_id = record
         if self._clock() >= expires_at:
-            self._sessions.pop(_token_key(token), None)
+            with self._sessions_lock:
+                self._sessions.pop(_token_key(token), None)
             raise TransferProtocolError(
                 TransferErrorCode.EXPIRED_PAIRING, "session credential has expired"
             )
         if device_id and not self.devices.is_active(device_id):
-            self._sessions.pop(_token_key(token), None)
+            with self._sessions_lock:
+                self._sessions.pop(_token_key(token), None)
             raise TransferProtocolError(
                 TransferErrorCode.DEVICE_REVOKED, "this device was unpaired in PackLab Studio"
             )
@@ -314,7 +334,8 @@ class PairingAuthenticator:
             )
 
     def revoke(self, credential: SessionCredential) -> None:
-        self._sessions.pop(_token_key(credential.token), None)
+        with self._sessions_lock:
+            self._sessions.pop(_token_key(credential.token), None)
 
 
 def _token_key(token: str) -> str:
