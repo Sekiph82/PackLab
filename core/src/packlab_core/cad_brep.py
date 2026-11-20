@@ -140,8 +140,12 @@ class CadBrepRepresentationRevision:
                 {
                     "method": "uniform_axial_samples_closed_to_revolve_axis",
                     "sample_count": self.profile_sample_count,
-                    "straight_run_tolerance": self.straight_run_tolerance,
                 }
+                | (
+                    {"straight_run_tolerance": self.straight_run_tolerance}
+                    if self.straight_run_tolerance is not None
+                    else {}
+                )
                 if self.profile_sample_count is not None
                 else None
             ),
