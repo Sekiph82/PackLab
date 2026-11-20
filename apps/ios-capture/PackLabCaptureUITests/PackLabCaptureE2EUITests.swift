@@ -88,6 +88,11 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         let toast = app.staticTexts["captureToast"]
         for wedge in 1...16 {
             tap(app.buttons["replayNextPoseButton"], "next pose \(wedge)")
+            if !hold.waitForExistence(timeout: 8) {
+                // Diagnostic + one retry: record what guidance shows, then move again.
+                shot("\(name)-no-hold-\(wedge)")
+                tap(app.buttons["replayNextPoseButton"], "next pose \(wedge) retry")
+            }
             XCTAssertTrue(hold.waitForExistence(timeout: 15), "guidance did not say hold at wedge \(wedge)")
             tap(app.buttons["manualCaptureButton"], "Manual Capture \(wedge)")
             waitForLabel(toast, containing: "(\(wedge)/16)", timeout: 30)
