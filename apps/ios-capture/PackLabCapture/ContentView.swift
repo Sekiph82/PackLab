@@ -1220,7 +1220,8 @@ struct ContentView: View {
                                 Button(runtime.m04ObjectCenter == nil ? "Set object center" : "Reset center") {
                                     Task { await runtime.setObjectCenterFromScreenCenter() }
                                 }
-                                .buttonStyle(.bordered).tint(.white)
+                                // Filled orange (matches the crosshair): a white bordered button vanishes over the white A4 mat.
+                                .buttonStyle(.borderedProminent).tint(.orange)
                                 .accessibilityIdentifier("setObjectCenterButton")
                             }
                             Button("Manual Capture") {
