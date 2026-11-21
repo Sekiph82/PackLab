@@ -206,13 +206,19 @@ class PackLabReceiver:
 
             def _auth(self) -> str:
                 token = self.headers.get("Authorization", "")
-                if not token.startswith("Bearer "):
-                    raise TransferProtocolError("unpaired", "authorization is required")
-                return receiver.authenticator.require_session(
-                    receiver_instance_id=receiver.receiver_id,
-                    token=token[7:],
-                    certificate_fingerprint_value=receiver._pin or "",
-                )
+                try:
+                    if not token.startswith("Bearer "):
+                        raise TransferProtocolError("unpaired", "authorization is required")
+                    return receiver.authenticator.require_session(
+                        receiver_instance_id=receiver.receiver_id,
+                        token=token[7:],
+                        certificate_fingerprint_value=receiver._pin or "",
+                    )
+                except TransferProtocolError:
+                    # Refused before the body was read: drain it (bounded) so the 400
+                    # reaches the peer instead of a Windows TCP reset.
+                    self._reject_oversized(int(self.headers.get("Content-Length", "0")))
+                    raise
 
             def _pair(self) -> None:
                 body = self._body()
