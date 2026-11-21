@@ -48,6 +48,7 @@ public final class UITestReplaySource: ObservableObject, ARTrackingService, Time
             for url in contents { try? fileManager.removeItem(at: url) }
         }
         DeviceCredentialStore.remove()
+        UserDefaults.standard.removeObject(forKey: RemoteCaptureController.allowedKey)
         ReceiverReconnectIdentityStore().remove()
         SenderTransferIdentityStore().remove()
     }

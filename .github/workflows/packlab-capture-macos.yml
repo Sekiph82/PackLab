@@ -16,6 +16,7 @@ on:
       - 'core/src/packlab_core/transfer_protocol.py'
       - 'apps/windows-studio/src/packlab_studio/receiver.py'
       - 'apps/windows-studio/src/packlab_studio/receiver_session.py'
+      - 'apps/windows-studio/src/packlab_studio/remote_control.py'
   push:
     branches: [main]
     paths:
@@ -31,6 +32,7 @@ on:
       - 'core/src/packlab_core/transfer_protocol.py'
       - 'apps/windows-studio/src/packlab_studio/receiver.py'
       - 'apps/windows-studio/src/packlab_studio/receiver_session.py'
+      - 'apps/windows-studio/src/packlab_studio/remote_control.py'
   workflow_dispatch:
     inputs:
       focused_group:
@@ -606,7 +608,7 @@ jobs:
           failed="$(printf '%s' "$safe_summary" | jq -r '.failedTests // 0')"
           skipped="$(printf '%s' "$safe_summary" | jq -r '.skippedTests // 0')"
           case "$FOCUSED_GROUP" in
-            all) expected=237 ;;
+            all) expected=240 ;;
             recovery_all) expected=25 ;;
             pl0119_finalization_failures) expected=1 ;;
             session_integrity) expected=7 ;;
@@ -748,8 +750,8 @@ jobs:
           set -euo pipefail
           python -m pip install --quiet "cryptography==45.0.7" "jsonschema==4.26.0"
           root="$RUNNER_TEMP/packlab-e2e-receiver"
-          mkdir -p "$root"
-          nohup python tools/ci/ios_e2e_receiver.py serve --root "$root" --offer-file "$RUNNER_TEMP/packlab-e2e-offer.json" --port 8443 > "$RUNNER_TEMP/packlab-e2e-receiver.log" 2>&1 &
+          mkdir -p "$root" "$RUNNER_TEMP/packlab-e2e-control"
+          nohup python tools/ci/ios_e2e_receiver.py serve --root "$root" --offer-file "$RUNNER_TEMP/packlab-e2e-offer.json" --control-dir "$RUNNER_TEMP/packlab-e2e-control" --port 8443 > "$RUNNER_TEMP/packlab-e2e-receiver.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/packlab-e2e-receiver.pid"
           # First import of fresh native wheels on macOS runners can take tens of seconds.
           for _ in $(seq 1 180); do test -s "$RUNNER_TEMP/packlab-e2e-offer.json" && break; sleep 1; done
@@ -761,7 +763,7 @@ jobs:
         run: |
           set -euo pipefail
           # Default Simulator signing (ad hoc, no Apple account) so the app has a Keychain.
-          TEST_RUNNER_PACKLAB_E2E_OFFER_FILE="$RUNNER_TEMP/packlab-e2e-offer.json" xcodebuild test \
+          TEST_RUNNER_PACKLAB_E2E_OFFER_FILE="$RUNNER_TEMP/packlab-e2e-offer.json" TEST_RUNNER_PACKLAB_E2E_CONTROL_DIR="$RUNNER_TEMP/packlab-e2e-control" xcodebuild test \
             -project "$PROJECT" \
             -scheme PackLabCaptureE2E \
             -destination "$DESTINATION" \
@@ -776,7 +778,7 @@ jobs:
           set -euo pipefail
           kill "$(cat "$RUNNER_TEMP/packlab-e2e-receiver.pid")" || true
           cat "$RUNNER_TEMP/packlab-e2e-receiver.log"
-          python tools/ci/ios_e2e_receiver.py verify --root "$RUNNER_TEMP/packlab-e2e-receiver" --expected-scans 2 --expected-images 16 | tee -a "$GITHUB_STEP_SUMMARY"
+          python tools/ci/ios_e2e_receiver.py verify --root "$RUNNER_TEMP/packlab-e2e-receiver" --expected-scans 2 --expected-images 16 --expected-remote-captures 3 | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Guard end-to-end screenshot artifact inputs
         id: guard_e2e_screenshots

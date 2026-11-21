@@ -31,6 +31,7 @@ from .ingest import ImportResult, ImportService
 from .ingest_index import IngestIndex
 from .quarantine import QuarantineStore
 from .raw_store import RawEvidenceStore
+from .remote_control import MAX_STATUS_BYTES, POLL_TIMEOUT_SECONDS, RemoteControlHub
 from .transfer_store import ReceiverTransferState, ResumableTransferStore
 
 
@@ -104,6 +105,10 @@ class PackLabReceiver:
             self.pairings, clock=__import__("time").time, devices=self.devices
         )
         self.transfers = ResumableTransferStore(self.root / "transfers")
+        # PL-0429: one-shot capture requests the paired phone long-polls for.
+        self.control = RemoteControlHub(
+            is_active=self.devices.is_active, log_path=self.root / "remote-control-log.jsonl"
+        )
         self.inbox = self.root / "capture_inbox"
         self.ingest = (
             ImportService(quarantine=QuarantineStore(self.root / "quarantine"))
@@ -173,13 +178,16 @@ class PackLabReceiver:
         )
 
     def revoke_device(self, device_id: str) -> bool:
-        return self.authenticator.revoke_device(device_id)
+        revoked = self.authenticator.revoke_device(device_id)
+        self.control.forget(device_id)
+        return revoked
 
     def start(self) -> None:
         if self._server is not None:
             return
         if self.tls_identity is None:
             raise ReceiverError("HTTPS TLS identity is required")
+        self.control.reopen()
         receiver = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -196,15 +204,21 @@ class PackLabReceiver:
                 self.end_headers()
                 self.wfile.write(body)
 
-            def _auth(self) -> None:
+            def _auth(self) -> str:
                 token = self.headers.get("Authorization", "")
-                if not token.startswith("Bearer "):
-                    raise TransferProtocolError("unpaired", "authorization is required")
-                receiver.authenticator.require_session(
-                    receiver_instance_id=receiver.receiver_id,
-                    token=token[7:],
-                    certificate_fingerprint_value=receiver._pin or "",
-                )
+                try:
+                    if not token.startswith("Bearer "):
+                        raise TransferProtocolError("unpaired", "authorization is required")
+                    return receiver.authenticator.require_session(
+                        receiver_instance_id=receiver.receiver_id,
+                        token=token[7:],
+                        certificate_fingerprint_value=receiver._pin or "",
+                    )
+                except TransferProtocolError:
+                    # Refused before the body was read: drain it (bounded) so the 400
+                    # reaches the peer instead of a Windows TCP reset.
+                    self._reject_oversized(int(self.headers.get("Content-Length", "0")))
+                    raise
 
             def _pair(self) -> None:
                 body = self._body()
@@ -269,9 +283,9 @@ class PackLabReceiver:
                         break
                     remaining -= len(data)
 
-            def _body(self) -> dict[str, object]:
+            def _body(self, limit: int = MAX_JSON_BODY_BYTES) -> dict[str, object]:
                 length = int(self.headers.get("Content-Length", "0"))
-                if length < 0 or length > MAX_JSON_BODY_BYTES:
+                if length < 0 or length > limit:
                     self._reject_oversized(length)
                     raise TransferProtocolError("bad_request", "request body is too large")
                 value = json.loads(self.rfile.read(length).decode("utf-8"))
@@ -286,8 +300,18 @@ class PackLabReceiver:
                     elif self.path == "/v1/session":
                         self._session()
                     else:
-                        self._auth()
-                        if self.path == "/v1/transfers":
+                        device_id = self._auth()
+                        if self.path == "/v1/control/status":
+                            if not device_id:
+                                raise TransferProtocolError("unpaired", "device session required")
+                            status = receiver.control.report(
+                                device_id, self._body(MAX_STATUS_BYTES)
+                            )
+                            self._json(
+                                HTTPStatus.OK,
+                                {"message": "status_acknowledgement", "scan": status.scan_name},
+                            )
+                        elif self.path == "/v1/transfers":
                             self._json(
                                 HTTPStatus.CREATED,
                                 receiver.create_transfer(self._body(), token_authenticated=True)
@@ -348,9 +372,19 @@ class PackLabReceiver:
 
             def do_GET(self) -> None:
                 try:
-                    self._auth()
+                    device_id = self._auth()
                     parsed = urlparse(self.path)
-                    if parsed.path.startswith("/v1/transfers/"):
+                    if parsed.path == "/v1/control/next":
+                        if not device_id:
+                            raise TransferProtocolError("unpaired", "device session required")
+                        command = receiver.control.next_command(device_id, POLL_TIMEOUT_SECONDS)
+                        if command is None:
+                            self.send_response(HTTPStatus.NO_CONTENT)
+                            self.send_header("Content-Length", "0")
+                            self.end_headers()
+                        else:
+                            self._json(HTTPStatus.OK, command)
+                    elif parsed.path.startswith("/v1/transfers/"):
                         transfer_id = parsed.path.split("/")[3]
                         self._json(
                             HTTPStatus.OK,
@@ -378,6 +412,7 @@ class PackLabReceiver:
     def stop(self) -> None:
         if self._server is None:
             return
+        self.control.close()  # wake long-polling phones so they see the receiver go away
         self._server.shutdown()
         self._server.server_close()
         if self._thread:
