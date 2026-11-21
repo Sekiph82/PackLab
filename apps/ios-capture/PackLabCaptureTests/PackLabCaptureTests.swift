@@ -184,6 +184,9 @@ private final class FakeProductionTransferClient: @unchecked Sendable, Productio
     func status(transferID: String) async throws -> TransferStatusMessage { calls.append("status:\(transferID)"); return TransferStatusMessage(transferID: transferID, confirmedBytes: statusValue.confirmedBytes, totalBytes: statusValue.totalBytes, state: statusValue.state, packageSHA256: statusValue.packageSHA256, nextOffset: statusValue.nextOffset) }
 }
 
+/// PL-0429 test state shared with @MainActor (hence Sendable) controller closures.
+@MainActor private final class RemoteTestBox { var performed: [String] = []; var snapshot: RemoteScanSnapshot? }
+
 private final class StubTransferURLProtocol: URLProtocol {
     nonisolated(unsafe) static var handler: (@Sendable (URLRequest) -> (Int, Data))?
     /// Extra response headers (e.g. the receiver's HTTP `Date`).
@@ -4357,11 +4360,11 @@ final class PackLabCaptureTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suite) }
         let controller = RemoteCaptureController(defaults: defaults, credential: { nil })
         XCTAssertFalse(controller.enabled, "remote capture is off by default")
-        var performed: [String] = []
-        var snapshot: RemoteScanSnapshot?
-        controller.scan = { snapshot }
+        // @MainActor closures are Sendable: shared test state lives in a main-actor box.
+        let box = RemoteTestBox()
+        controller.scan = { box.snapshot }
         controller.perform = { command in
-            performed.append(command.commandID)
+            box.performed.append(command.commandID)
             return RemoteCommandResult(commandID: command.commandID, action: command.action, outcome: .refused, reasons: ["object_not_in_view", "Not A Code"], message: "point the camera at the package")
         }
         let capture = RemoteCommand(commandID: String(repeating: "a", count: 32), action: .capture, expiresInMs: 9000)
@@ -4371,7 +4374,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: RemoteCaptureController.allowedKey))
         let noScan = await controller.handle(capture)
         XCTAssertEqual(noScan.reasons, ["no_active_scan"])
-        snapshot = RemoteScanSnapshot(scanName: "Bottle", coverageCaptured: 2, coverageTotal: 16, instruction: "Hold here — tap Manual Capture")
+        box.snapshot = RemoteScanSnapshot(scanName: "Bottle", coverageCaptured: 2, coverageTotal: 16, instruction: "Hold here — tap Manual Capture")
         let expired = await controller.handle(RemoteCommand(commandID: String(repeating: "b", count: 32), action: .capture, expiresInMs: 0))
         XCTAssertEqual(expired.reasons, ["command_expired"])
         let refused = await controller.handle(capture)
@@ -4380,7 +4383,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(refused.summary, "PackLab remote capture refused: point the camera at the package")
         let replayed = await controller.handle(capture)
         XCTAssertEqual(replayed.reasons, ["replayed_command"])
-        XCTAssertEqual(performed, [capture.commandID], "only one request ever reached the capture path")
+        XCTAssertEqual(box.performed, [capture.commandID], "only one request ever reached the capture path")
         XCTAssertEqual(controller.lastResult, replayed)
         XCTAssertEqual(controller.currentStatus.coverageCaptured, 2)
         XCTAssertTrue(controller.currentStatus.scanActive && controller.currentStatus.controlEnabled)
