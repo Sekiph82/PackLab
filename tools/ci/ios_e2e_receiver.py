@@ -6,6 +6,8 @@ the XCUITest to type into the app's manual pairing form. ``verify`` checks what
 arrived: every received package passes ``validate_packscan``, the import reports
 show the expected image count, and exactly one device was paired (the second
 scan therefore travelled on the long-lived device credential, not a new code).
+PL-0429: with ``--control-dir`` it also stands in for Studio's Remote capture buttons, and
+``verify --expected-remote-captures`` checks the receiver's remote-control log.
 Runner-temp data only; nothing here is written to the repository.
 """
 
@@ -24,6 +26,7 @@ sys.path[:0] = [str(REPO / "core/src"), str(REPO / "apps/windows-studio/src")]
 
 from packlab_core.packscan import validate_packscan  # noqa: E402
 from packlab_studio.receiver_session import ReceiverSession  # noqa: E402
+from packlab_studio.remote_control import RemoteControlError  # noqa: E402
 
 OFFER_TTL_SECONDS = 900
 REFRESH_BELOW_SECONDS = 300
@@ -41,7 +44,39 @@ def _write_offer(session: ReceiverSession, path: Path) -> float:
     return offer.expires_at
 
 
-def serve(root: Path, offer_file: Path, port: int) -> int:
+REMOTE_REQUEST_WAIT_SECONDS = 30
+
+
+def _relay_remote_requests(session: ReceiverSession, control_dir: Path) -> None:
+    """PL-0429 Studio stand-in: the XCUITest drops ``<id>.request`` (an action name) when it
+    wants PackLab to press Capture now / Finish scan; this issues it exactly as the Studio
+    button does (``RemoteControlHub.issue``) and answers ``<id>.issued`` or ``<id>.failed``."""
+    for request in sorted(control_dir.glob("*.request")):
+        action = request.read_text("utf-8").strip()
+        connected = [
+            device.device_id
+            for device in session.paired_devices()
+            if session.receiver.control.connected(device.device_id)
+        ]
+        error = "device_not_connected"
+        if len(connected) == 1:
+            try:
+                command = session.receiver.control.issue(connected[0], action)
+            except RemoteControlError as failure:
+                error = failure.code
+            else:
+                request.with_suffix(".issued").write_text(command.command_id, "utf-8")
+                request.unlink()
+                print(f"remote {action} issued as {command.command_id}", flush=True)
+                continue
+        # The phone may still be opening its session; retry until the request is old.
+        if time.time() - request.stat().st_mtime > REMOTE_REQUEST_WAIT_SECONDS:
+            request.with_suffix(".failed").write_text(error, "utf-8")
+            request.unlink()
+            print(f"remote {action} failed: {error}", flush=True)
+
+
+def serve(root: Path, offer_file: Path, port: int, control_dir: Path | None = None) -> int:
     session = ReceiverSession(
         root,
         tls_root=root / "tls",
@@ -63,13 +98,41 @@ def serve(root: Path, offer_file: Path, port: int) -> int:
         while not stop:
             if expires_at - time.time() < REFRESH_BELOW_SECONDS:
                 expires_at = _write_offer(session, offer_file)
-            time.sleep(1)
+            if control_dir is not None:
+                _relay_remote_requests(session, control_dir)
+            time.sleep(0.2)
     finally:
         session.stop()
     return 0
 
 
-def verify(root: Path, expected_scans: int, expected_images: int) -> int:
+def _verify_remote(root: Path, captures: int) -> list[str]:
+    """PL-0429: the receiver's control log must show the phone's own outcomes for every
+    remote request: ``captures`` accepted captures, one gate refusal and one finish."""
+    path = root / "remote-control-log.jsonl"
+    log = (
+        [json.loads(line) for line in path.read_text("utf-8").splitlines()] if path.exists() else []
+    )
+    results = [entry for entry in log if entry["event"] == "result"]
+    for entry in results:
+        print(f"remote result: {entry['action']} -> {entry['outcome']} {entry.get('reasons', [])}")
+    issued = {entry["command_id"] for entry in log if entry["event"] == "issued"}
+    delivered = {entry["command_id"] for entry in log if entry["event"] == "delivered"}
+    failures = []
+    if not {entry["command_id"] for entry in results} <= delivered <= issued:
+        failures.append("a remote result does not belong to a command Studio issued")
+    outcomes = [(entry["action"], entry["outcome"]) for entry in results]
+    if outcomes.count(("capture", "captured")) != captures:
+        failures.append(f"expected {captures} remote captures, log shows {outcomes}")
+    refused = [entry for entry in results if entry["outcome"] == "refused"]
+    if len(refused) != 1 or not refused[0].get("reasons"):
+        failures.append(f"expected exactly one gate refusal with its reasons, got {refused}")
+    if outcomes.count(("finish", "finished")) != 1:
+        failures.append(f"expected one remote finish, log shows {outcomes}")
+    return failures
+
+
+def verify(root: Path, expected_scans: int, expected_images: int, remote_captures: int = 0) -> int:
     failures: list[str] = []
     packages = sorted((root / "capture_inbox").glob("*.packscan"))
     for package in packages:
@@ -122,6 +185,8 @@ def verify(root: Path, expected_scans: int, expected_images: int) -> int:
         failures.append(
             "the paired device never opened a device session (second scan did not use it)"
         )
+    if remote_captures:
+        failures.extend(_verify_remote(root, remote_captures))
     for failure in failures:
         print(f"FAIL: {failure}", file=sys.stderr)
     return 1 if failures else 0
@@ -134,14 +199,18 @@ def main() -> int:
     serve_parser.add_argument("--root", type=Path, required=True)
     serve_parser.add_argument("--offer-file", type=Path, required=True)
     serve_parser.add_argument("--port", type=int, default=8443)
+    serve_parser.add_argument("--control-dir", type=Path)
     verify_parser = commands.add_parser("verify")
     verify_parser.add_argument("--root", type=Path, required=True)
     verify_parser.add_argument("--expected-scans", type=int, required=True)
     verify_parser.add_argument("--expected-images", type=int, required=True)
+    verify_parser.add_argument("--expected-remote-captures", type=int, default=0)
     args = parser.parse_args()
     if args.command == "serve":
-        return serve(args.root, args.offer_file, args.port)
-    return verify(args.root, args.expected_scans, args.expected_images)
+        return serve(args.root, args.offer_file, args.port, args.control_dir)
+    return verify(
+        args.root, args.expected_scans, args.expected_images, args.expected_remote_captures
+    )
 
 
 if __name__ == "__main__":

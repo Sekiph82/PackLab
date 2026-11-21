@@ -304,7 +304,8 @@ class PairingAuthenticator:
         token: str,
         certificate_fingerprint_value: str,
         transport: str = REQUIRED_TRANSPORT,
-    ) -> None:
+    ) -> str:
+        """Validate a session token; returns its paired device id ("" if none)."""
         if transport != REQUIRED_TRANSPORT:
             raise TransferProtocolError(TransferErrorCode.INSECURE_TRANSPORT, "HTTPS is required")
         with self._sessions_lock:
@@ -332,6 +333,7 @@ class PairingAuthenticator:
             raise TransferProtocolError(
                 TransferErrorCode.WRONG_PIN, "certificate fingerprint does not match"
             )
+        return device_id
 
     def revoke(self, credential: SessionCredential) -> None:
         with self._sessions_lock:

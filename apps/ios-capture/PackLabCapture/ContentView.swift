@@ -581,14 +581,23 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let coveredBefore = m04Coverage.capturedSectors.count
         let outcome = await performManualCapture(captureID: captureID, monotonicTimestamp: monotonicTimestamp)
         let coveredAfter = m04Coverage.capturedSectors.count
-        // The count shows required-ring wedges only, matching missingSectors (optional rings excluded).
-        let requiredRings = Set(m04Coverage.configuration.rings.filter(\.required).map(\.id))
-        let requiredCovered = m04Coverage.capturedSectors.filter { requiredRings.contains($0.ringID) }.count
+        let coverage = requiredCoverage
         let observation = m04Coverage.observations.last { $0.captureID == captureID }
         let hint = outcome.decision.blockingReasons.first.map { ContentView.manualBlockHint($0) }
-        showCaptureToast(CaptureToast.text(decision: outcome.decision, saved: outcome.still != nil, observation: observation, newlyCovered: coveredAfter > coveredBefore, capturedCount: requiredCovered, totalCount: requiredCovered + m04Coverage.missingSectors.count, blockHint: hint, orbit: m04ActivePreset.id != .turntable))
+        showCaptureToast(CaptureToast.text(decision: outcome.decision, saved: outcome.still != nil, observation: observation, newlyCovered: coveredAfter > coveredBefore, capturedCount: coverage.captured, totalCount: coverage.total, blockHint: hint, orbit: m04ActivePreset.id != .turntable))
         return outcome
     }
+
+    /// Required-ring wedges only, matching missingSectors (optional rings excluded).
+    var requiredCoverage: (captured: Int, total: Int) {
+        let requiredRings = Set(m04Coverage.configuration.rings.filter(\.required).map(\.id))
+        let captured = m04Coverage.capturedSectors.filter { requiredRings.contains($0.ringID) }.count
+        return (captured, captured + m04Coverage.missingSectors.count)
+    }
+
+    /// PL-0429: name of the scan being captured (shown to PackLab Studio) and its session.
+    var activeScanName: String?
+    var activeSessionID: String? { m04SessionLayout?.sessionID }
 
     private func performManualCapture(captureID: String, monotonicTimestamp: TimeInterval) async -> (decision: ManualCaptureDecision, still: AcceptedStill?) {
         guard let layout = m04SessionLayout, let stateData = try? Data(contentsOf: layout.state), let state = try? JSONDecoder().decode(PersistedSessionState.self, from: stateData) else {
@@ -1094,6 +1103,7 @@ struct ContentView: View {
     /// Global midY of the full window (crosshair / raycast point), measured outside the safe area.
     @State private var windowMidY: CGFloat = 0
     @StateObject private var runtime: CaptureRuntimeViewModel
+    @ObservedObject private var remote = RemoteCaptureController.shared
     /// Layout-test seam: receives named element frames ("manualCapture", "guidanceDial") in
     /// window coordinates.
     private let onLayoutFrame: (@MainActor (String, CGRect) -> Void)?
@@ -1210,6 +1220,11 @@ struct ContentView: View {
                         }
                         .padding(8).background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
                     }
+                    if remote.enabled, let last = remote.lastResult {
+                        Text(last.summary).font(.caption).multilineTextAlignment(.center)
+                            .padding(6).background(.purple.opacity(0.8), in: RoundedRectangle(cornerRadius: 8)).foregroundStyle(.white).padding(.horizontal)
+                            .accessibilityIdentifier("remoteControlLastResult")
+                    }
                     if runtime.m04CoverageActive {
                         // Coverage detail scrolls inside whatever room is left above the buttons.
                         ScrollView {
@@ -1279,6 +1294,12 @@ struct ContentView: View {
                         }
                         }
                         .scrollBounceBehavior(.basedOnSize)
+                        if remote.enabled {
+                            // Always visible while PackLab may trigger captures; tapping it stops control.
+                            Button("PackLab remote capture on (\(remote.connection)) — tap to stop") { remote.enabled = false }
+                                .font(.caption2).buttonStyle(.borderedProminent).tint(.purple)
+                                .accessibilityIdentifier("remoteControlIndicator")
+                        }
                         if let manual = runtime.manualCaptureDecision, !manual.blockingReasons.isEmpty {
                             VStack(alignment: .leading, spacing: 2) {
                                 ForEach(manual.blockingReasons, id: \.self) { Text("Manual blocked: \(ContentView.manualBlockHint($0))") }
@@ -1357,6 +1378,8 @@ struct ContentView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button("History", systemImage: "clock") { showHistory = true }
+                        // PL-0429: off by default; the paired PackLab may then request captures.
+                        Button(remote.enabled ? "Stop PackLab remote capture" : "Allow PackLab to trigger captures", systemImage: "dot.radiowaves.left.and.right") { remote.enabled.toggle() }
                         Button("Protocol", systemImage: "list.bullet.rectangle") { showActiveProtocol = true }
                         if ARPreviewFeatureFlag.isEnabled() {
                             Button("AR Preview", systemImage: "arkit") { showARPreview = true }
@@ -1370,13 +1393,13 @@ struct ContentView: View {
                 }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission, readiness: runtime.newScanReadiness) { draft in
-                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.beginScan(preset: preset, layout: layout, packageType: draft.packageType); runtime.startLiveCandidateLoop(); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))); scanStartError = nil } catch { scanStartError = "Scan could not start: \(error.localizedDescription)" } }
+                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.beginScan(preset: preset, layout: layout, packageType: draft.packageType); runtime.activeScanName = draft.packageName; runtime.startLiveCandidateLoop(); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))); scanStartError = nil } catch { scanStartError = "Scan could not start: \(error.localizedDescription)" } }
                 showNewScan = false
             } } }
             .sheet(isPresented: $showHistory) { NavigationStack { LocalScanHistoryView(root: ContentView.sessionRoot, onFinalized: { sessionID in runtime.endActiveSession(sessionID: sessionID) }) } }
             .sheet(isPresented: $showARPreview) { NavigationStack { ARPreviewEntryView() } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
-                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.beginScan(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout, packageType: draft.packageType); runtime.startLiveCandidateLoop(); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage); runtime.restoreObjectCenter(context.objectCenter, previousWorldCoverage: context.previousWorldCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
+                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.beginScan(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout, packageType: draft.packageType); runtime.activeScanName = draft.packageName; runtime.startLiveCandidateLoop(); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage); runtime.restoreObjectCenter(context.objectCenter, previousWorldCoverage: context.previousWorldCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
                 runtime.endActiveSession(sessionID: candidate.id)
@@ -1398,8 +1421,45 @@ struct ContentView: View {
                 }
                 // Deliver finalized scans still queued from an earlier launch.
                 PairedSyncService.shared.kick()
+                bindRemoteCapture()
                 await runtime.start(); let candidates = await SessionDiscoveryService(root: ContentView.sessionRoot).discover(); showResume = !candidates.isEmpty }
         }
+    }
+
+    /// PL-0429: a PackLab request is exactly a Manual Capture tap (every gate applies) or a
+    /// History Finalize, with the refusal reasons sent back to Studio.
+    private func bindRemoteCapture() {
+        let model = runtime
+        remote.scan = {
+            guard model.m04CoverageActive, let name = model.activeScanName else { return nil }
+            let coverage = model.requiredCoverage
+            return RemoteScanSnapshot(scanName: name, coverageCaptured: coverage.captured, coverageTotal: coverage.total, instruction: model.m04Instruction.text)
+        }
+        remote.perform = { command in
+            switch command.action {
+            case .capture:
+                // Same admission as the (then disabled) Manual Capture button.
+                guard model.admitCapture() else { return .refused(command, "health_hard_stop", ContentView.manualBlockHint("health_hard_stop")) }
+                let outcome = await model.requestManualCapture()
+                if outcome.still != nil { return RemoteCommandResult(commandID: command.commandID, action: .capture, outcome: .captured, message: "photo accepted") }
+                let reasons = outcome.decision.blockingReasons
+                return RemoteCommandResult(commandID: command.commandID, action: .capture, outcome: reasons.isEmpty ? .failed : .refused, reasons: reasons, message: reasons.first.map { ContentView.manualBlockHint($0) } ?? "the photo was not saved")
+            case .finish:
+                guard let sessionID = model.activeSessionID else { return .refused(command, "no_active_scan", "no scan is active on the phone") }
+                do {
+                    let record = try await ProductionScanFinalizeAction(root: ContentView.sessionRoot).finalize(sessionID: sessionID)
+                    model.endActiveSession(sessionID: sessionID)
+                    // Paired phones deliver every finalized scan without further taps.
+                    PairedSyncService.shared.enqueue(record)
+                    return RemoteCommandResult(commandID: command.commandID, action: .finish, outcome: .finished, message: "scan finalized")
+                } catch FinalizationError.invalidManifest {
+                    return .refused(command, "no_accepted_photos", "no accepted photos yet")
+                } catch {
+                    return RemoteCommandResult(commandID: command.commandID, action: .finish, outcome: .failed, reasons: ["finalize_failed"], message: "finalize failed")
+                }
+            }
+        }
+        remote.start()
     }
 
     static func manualBlockHint(_ reason: String) -> String {

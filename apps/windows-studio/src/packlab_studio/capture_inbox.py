@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from packlab_core.pairing import PairingOffer
 
 from .receiver_session import InboxEntry, ReceiverSession
+from .remote_control import RemoteControlError
 
 
 def qr_pixmap(payload: str, *, scale: int = 5) -> QPixmap:
@@ -91,6 +92,18 @@ class CaptureInboxView(QWidget):
         self.devices_list.setMaximumHeight(90)
         self.revoke_button = QPushButton("Revoke", self)
         self.revoke_button.clicked.connect(self.revoke_selected_device)
+        # PL-0429: a connected paired phone can be asked to capture / finish its scan.
+        self.remote_label = QLabel("", self)
+        self.remote_label.setObjectName("packlab.capture-inbox.remote")
+        self.remote_label.setWordWrap(True)
+        self.remote_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.capture_now_button = QPushButton("Capture now", self)
+        self.finish_scan_button = QPushButton("Finish scan", self)
+        self.capture_now_button.setEnabled(False)
+        self.finish_scan_button.setEnabled(False)
+        self.capture_now_button.clicked.connect(lambda: self.remote_command("capture"))
+        self.finish_scan_button.clicked.connect(lambda: self.remote_command("finish"))
+        self._remote_device: str | None = None
         self.build_button = QPushButton("Build model", self)
         self.build_button.setObjectName("packlab.capture-inbox.build")
         self.build_button.setEnabled(False)
@@ -115,6 +128,12 @@ class CaptureInboxView(QWidget):
         devices_row.addWidget(self.devices_list, 1)
         devices_row.addWidget(self.revoke_button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(devices_row)
+        layout.addWidget(QLabel("Remote capture"))
+        remote_row = QHBoxLayout()
+        remote_row.addWidget(self.remote_label, 1)
+        remote_row.addWidget(self.capture_now_button, 0, Qt.AlignmentFlag.AlignTop)
+        remote_row.addWidget(self.finish_scan_button, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(remote_row)
         layout.addWidget(QLabel("Received scans"))
         layout.addWidget(self.inbox_list, 1)
         build_row = QHBoxLayout()
@@ -192,6 +211,7 @@ class CaptureInboxView(QWidget):
         self.receive_button.setEnabled(True)
         self.new_code_button.setEnabled(False)
         self.stop_button.setEnabled(False)
+        self.refresh_remote()
 
     def new_code(self) -> None:
         session = self.session
@@ -235,6 +255,56 @@ class CaptureInboxView(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, device.device_id)
             self.devices_list.addItem(item)
 
+    def refresh_remote(self) -> None:
+        """Live status the selected (or only) paired phone pushes while it polls."""
+        session = self.session
+        item = self.devices_list.currentItem()
+        if item is None and self.devices_list.count() == 1:
+            item = self.devices_list.item(0)
+        self._remote_device = None if item is None else str(item.data(Qt.ItemDataRole.UserRole))
+        ready = False
+        if session is None or not session.running or self._remote_device is None:
+            text = "Start receiving and select a paired phone to control its capture."
+        elif not session.receiver.control.connected(self._remote_device):
+            text = (
+                "Phone not connected. On the iPhone start a scan and turn on "
+                "Allow PackLab to trigger captures."
+            )
+        else:
+            status = session.receiver.control.status(self._remote_device)
+            if status is None or not status.scan_active:
+                text = "Phone connected, no active scan."
+            elif not status.control_enabled:
+                text = f"{status.scan_name}: remote capture is turned off on the phone."
+            else:
+                ready = True
+                text = (
+                    f"{status.scan_name}  |  coverage {status.coverage_captured}/"
+                    f"{status.coverage_total}  |  {status.instruction}"
+                )
+            last = None if status is None else status.last_result
+            if last is not None:
+                reasons = f" ({', '.join(last.reasons)})" if last.reasons else ""
+                text += f"\nLast {last.action}: {last.outcome}{reasons} {last.message}".rstrip()
+        self.remote_label.setText(text)
+        self.capture_now_button.setEnabled(ready)
+        self.finish_scan_button.setEnabled(ready)
+
+    def remote_command(self, action: str) -> None:
+        session = self.session
+        if session is None or self._remote_device is None:
+            return
+        try:
+            session.receiver.control.issue(self._remote_device, action)
+        except RemoteControlError as error:
+            self.status_label.setText(f"Remote {action} not sent: {error.code}")
+            return
+        self.status_label.setText(
+            "Capture request sent; the phone still checks every capture gate."
+            if action == "capture"
+            else "Finish request sent to the phone."
+        )
+
     def revoke_selected_device(self) -> None:
         session = self.session
         item = self.devices_list.currentItem()
@@ -249,6 +319,7 @@ class CaptureInboxView(QWidget):
         if session is None:
             return
         self.refresh_devices()
+        self.refresh_remote()
         try:
             records: list[object] = list(session.index_records())
         except Exception as error:

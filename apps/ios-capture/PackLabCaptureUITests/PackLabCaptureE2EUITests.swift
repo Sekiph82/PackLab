@@ -4,7 +4,9 @@ import XCTest
 /// by the synthetic replay source (-PackLabUITestReplay), talks to a real PackLab Studio
 /// receiver started by CI. Two full guided 16-wedge scans: the first pairs with a one-time
 /// code typed into the manual pairing form, the second is delivered automatically after
-/// Finalize with no pairing step. The receiver-side check (validate_packscan, import report
+/// Finalize with no pairing step; PL-0429: in the second scan PackLab Studio (the CI receiver's
+/// RemoteControlHub) presses Capture now (refused once by a gate, then 3 wedges) and Finish
+/// scan. The receiver-side check (validate_packscan, import report
 /// image counts, exactly one paired device) runs in the CI step after this test.
 @MainActor
 final class PackLabCaptureE2EUITests: XCTestCase {
@@ -44,10 +46,17 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         shot("history-scan1-delivered")
         tap(app.buttons["Close"], "Close history")
 
-        // Second scan: Finalize alone delivers it; no pairing form appears.
-        try guidedScan(named: "Replay scan 2")
+        // Second scan, partly driven from PackLab Studio (PL-0429): the operator allows remote
+        // capture, Studio's Capture now is refused once by a production gate (no object
+        // center), then captures 3 wedges, and Studio's Finish scan finalizes it; the finalized
+        // scan is delivered automatically with no pairing step.
+        tap(app.buttons["More actions"], "More")
+        tap(app.buttons["Allow PackLab to trigger captures"], "Allow PackLab to trigger captures")
+        try guidedScan(named: "Replay scan 2", remoteWedges: 3)
+        try requestFromStudio("finish")
+        waitForLabel(app.staticTexts["remoteControlLastResult"], equal: "PackLab remote finish: finished", timeout: 60)
+        shot("scan2-finished-by-packlab-studio")
         openHistory()
-        tap(app.buttons["Finalize"], "Finalize scan 2")
         let status = app.staticTexts["syncStatus.Replay scan 2"]
         XCTAssertTrue(status.waitForExistence(timeout: 60), "scan 2 was not queued for automatic delivery")
         shot("scan2-queued-\(status.label)")
@@ -61,7 +70,9 @@ final class PackLabCaptureE2EUITests: XCTestCase {
 
     // MARK: Steps
 
-    private func guidedScan(named name: String) throws {
+    /// `remoteWedges` > 0: PackLab Studio (the CI receiver) presses Capture now for the first
+    /// wedges instead of the Manual Capture tap, after one request refused by the center gate.
+    private func guidedScan(named name: String, remoteWedges: Int = 0) throws {
         tap(app.buttons["New Scan"], "New Scan")
         let nameField = app.textFields["Package name"]
         XCTAssertTrue(nameField.waitForExistence(timeout: 10))
@@ -78,6 +89,18 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         let center = app.buttons["setObjectCenterButton"]
         XCTAssertTrue(center.waitForExistence(timeout: 20), "scan did not start")
         shot("\(name)-started")
+        let lastRemote = app.staticTexts["remoteControlLastResult"]
+        if remoteWedges > 0 {
+            let indicator = app.buttons["remoteControlIndicator"]
+            XCTAssertTrue(indicator.waitForExistence(timeout: 20), "remote capture indicator is not shown")
+            waitForLabel(indicator, containing: "connected to PackLab", timeout: 60)
+            shot("\(name)-remote-connected")
+            // No object center yet: the phone's gate refuses Studio exactly like a tap.
+            try requestFromStudio("capture")
+            waitForLabel(lastRemote, containing: "refused", timeout: 30)
+            XCTAssertTrue(lastRemote.label.contains("(object_center_unset)"), lastRemote.label)
+            shot("\(name)-remote-capture-refused-by-gate")
+        }
         // Aim the crosshair at the package base first (the replay camera may still be at
         // the previous scan's last orbit position).
         tap(app.buttons["replayNextPoseButton"], "aim at package base")
@@ -94,11 +117,13 @@ final class PackLabCaptureE2EUITests: XCTestCase {
                 tap(app.buttons["replayNextPoseButton"], "next pose \(wedge) retry")
             }
             XCTAssertTrue(hold.waitForExistence(timeout: 15), "guidance did not say hold at wedge \(wedge)")
-            tap(app.buttons["manualCaptureButton"], "Manual Capture \(wedge)")
+            let remote = wedge <= remoteWedges
+            if remote { try requestFromStudio("capture") } else { tap(app.buttons["manualCaptureButton"], "Manual Capture \(wedge)") }
             // The 2 s toast can be missed by a slow accessibility snapshot; the persistent
             // coverage summary is the evidence that this wedge was captured.
             waitForLabel(coverage, containing: wedge == 16 ? "Coverage complete" : "; \(16 - wedge) sectors missing", timeout: 30)
-            shot("\(name)-capture-\(wedge)")
+            if remote { waitForLabel(lastRemote, equal: "PackLab remote capture: captured", timeout: 10) }
+            shot("\(name)-\(remote ? "remote-" : "")capture-\(wedge)")
         }
         XCTAssertTrue(app.staticTexts["All positions covered — finish the scan in History"].waitForExistence(timeout: 10))
         shot("\(name)-all-covered")
@@ -120,6 +145,23 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         let path = try XCTUnwrap(ProcessInfo.processInfo.environment["PACKLAB_E2E_OFFER_FILE"], "PACKLAB_E2E_OFFER_FILE is not set")
         let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any])
         return Offer(host: try XCTUnwrap(object["host"] as? String), port: try XCTUnwrap(object["port"] as? Int), receiverInstanceID: try XCTUnwrap(object["receiver_instance_id"] as? String), pairingID: try XCTUnwrap(object["pairing_id"] as? String), fingerprint: try XCTUnwrap(object["tls_certificate_fingerprint"] as? String), code: try XCTUnwrap(object["pairing_code"] as? String))
+    }
+
+    /// Presses Capture now / Finish scan in "PackLab Studio": the CI receiver (same process as
+    /// the real RemoteControlHub) picks up this request file and issues the one-shot command
+    /// the phone receives on its long-poll. Returns once Studio has issued it.
+    private func requestFromStudio(_ action: String) throws {
+        let directory = URL(fileURLWithPath: try XCTUnwrap(ProcessInfo.processInfo.environment["PACKLAB_E2E_CONTROL_DIR"], "PACKLAB_E2E_CONTROL_DIR is not set"))
+        let id = UUID().uuidString
+        try Data(action.utf8).write(to: directory.appendingPathComponent("\(id).request"), options: .atomic)
+        let issued = directory.appendingPathComponent("\(id).issued"), failed = directory.appendingPathComponent("\(id).failed")
+        let deadline = Date().addingTimeInterval(45)
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: issued.path) { return }
+            if let reason = try? String(contentsOf: failed, encoding: .utf8) { XCTFail("Studio could not issue \(action): \(reason)"); return }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTFail("Studio did not issue \(action) within 45 s")
     }
 
     private func tap(_ element: XCUIElement, _ what: String) {

@@ -238,3 +238,217 @@ public final class PairedSyncService: ObservableObject {
         return String(describing: error)
     }
 }
+
+// MARK: - PL-0429 remote capture control
+
+public enum RemoteAction: String, Codable, Sendable { case capture, finish }
+public enum RemoteOutcome: String, Codable, Sendable { case captured, refused, finished, failed }
+
+/// One-shot request from the paired PackLab Studio, delivered on the phone's own long-poll.
+public struct RemoteCommand: Codable, Sendable, Equatable {
+    public let commandID: String
+    public let action: RemoteAction
+    public let expiresInMs: Int
+    enum CodingKeys: String, CodingKey { case commandID = "command_id", action, expiresInMs = "expires_in_ms" }
+    public init(commandID: String, action: RemoteAction, expiresInMs: Int) { self.commandID = commandID; self.action = action; self.expiresInMs = expiresInMs }
+}
+
+public struct RemoteCommandResult: Codable, Sendable, Equatable {
+    public let commandID: String
+    public let action: RemoteAction
+    public let outcome: RemoteOutcome
+    public let reasons: [String]
+    public let message: String
+    enum CodingKeys: String, CodingKey { case commandID = "command_id", action, outcome, reasons, message }
+    /// Reasons are the receiver's `^[a-z0-9_]{1,64}$` codes (at most 8); text is bounded.
+    public init(commandID: String, action: RemoteAction, outcome: RemoteOutcome, reasons: [String] = [], message: String = "") {
+        self.commandID = commandID; self.action = action; self.outcome = outcome
+        self.reasons = Array(reasons.filter(RemoteControlStatus.isReasonCode).prefix(8))
+        self.message = RemoteControlStatus.clip(message, 256)
+    }
+    public static func refused(_ command: RemoteCommand, _ reason: String, _ message: String) -> RemoteCommandResult {
+        RemoteCommandResult(commandID: command.commandID, action: command.action, outcome: .refused, reasons: [reason], message: message)
+    }
+    /// One line for the phone screen.
+    public var summary: String {
+        let what = action == .capture ? "PackLab remote capture" : "PackLab remote finish"
+        switch outcome {
+        case .captured, .finished: return "\(what): \(outcome.rawValue)"
+        case .refused, .failed: return "\(what) \(outcome.rawValue): \(message.isEmpty ? reasons.joined(separator: ", ") : message)"
+        }
+    }
+}
+
+/// What the phone shows Studio about the active scan (nil when no scan is active).
+public struct RemoteScanSnapshot: Sendable, Equatable {
+    public let scanName: String
+    public let coverageCaptured: Int
+    public let coverageTotal: Int
+    public let instruction: String
+    public init(scanName: String, coverageCaptured: Int, coverageTotal: Int, instruction: String) { self.scanName = scanName; self.coverageCaptured = coverageCaptured; self.coverageTotal = coverageTotal; self.instruction = instruction }
+}
+
+/// `POST /v1/control/status` body: no image stream, no measurements, bounded under 4 KB.
+public struct RemoteControlStatus: Codable, Sendable, Equatable {
+    public let scanActive: Bool
+    public let controlEnabled: Bool
+    public let scanName: String
+    public let coverageCaptured: Int
+    public let coverageTotal: Int
+    public let instruction: String
+    public let lastResult: RemoteCommandResult?
+    enum CodingKeys: String, CodingKey { case scanActive = "scan_active", controlEnabled = "control_enabled", scanName = "scan_name", coverageCaptured = "coverage_captured", coverageTotal = "coverage_total", instruction, lastResult = "last_result" }
+    public init(controlEnabled: Bool, scan: RemoteScanSnapshot?, lastResult: RemoteCommandResult?) {
+        scanActive = scan != nil; self.controlEnabled = controlEnabled
+        scanName = Self.clip(scan?.scanName ?? "", 128)
+        coverageCaptured = min(1000, max(0, scan?.coverageCaptured ?? 0))
+        coverageTotal = min(1000, max(0, scan?.coverageTotal ?? 0))
+        instruction = Self.clip(scan?.instruction ?? "", 256)
+        self.lastResult = lastResult
+    }
+    /// The receiver counts Unicode scalars, so clip by scalars (not grapheme clusters).
+    static func clip(_ text: String, _ limit: Int) -> String {
+        var scalars = String.UnicodeScalarView()
+        scalars.append(contentsOf: text.unicodeScalars.prefix(limit))
+        return String(scalars)
+    }
+    private static let reasonBytes = Set("abcdefghijklmnopqrstuvwxyz0123456789_".utf8)
+    static func isReasonCode(_ reason: String) -> Bool {
+        !reason.isEmpty && reason.utf8.count <= 64 && reason.utf8.allSatisfy { reasonBytes.contains($0) }
+    }
+}
+
+/// PL-0429: lets the paired PackLab Studio request Manual Capture or Finalize while a scan is
+/// active and the operator allowed it ("Allow PackLab to trigger captures", default off). The
+/// phone always initiates: it long-polls the paired receiver over the pinned TLS channel with
+/// a device session; Studio never connects to the phone. A request runs the normal Manual
+/// Capture path with every production gate, so Studio is refused exactly like a tap.
+@MainActor
+public final class RemoteCaptureController: ObservableObject {
+    public static let shared = RemoteCaptureController()
+    public nonisolated static let allowedKey = "packlab.remoteCaptureAllowed"
+    @Published public var enabled: Bool { didSet { defaults.set(enabled, forKey: Self.allowedKey) } }
+    @Published public private(set) var connection = "off"
+    @Published public private(set) var lastResult: RemoteCommandResult?
+    /// The active scan, or nil when none (bound by the capture screen).
+    public var scan: @MainActor () -> RemoteScanSnapshot? = { nil }
+    /// Runs an accepted request through the production capture / finalize path.
+    public var perform: @MainActor (RemoteCommand) async -> RemoteCommandResult = { RemoteCommandResult.refused($0, "not_ready", "the capture screen is not ready") }
+    private let defaults: UserDefaults
+    private let credential: @MainActor () -> DeviceCredential?
+    private var executed: [String] = []
+    private var poller: URLSessionTransferClient?
+    private var statusClient: URLSessionTransferClient?
+    private var lastPosted: RemoteControlStatus?
+    private var pushing = false
+    private var loops: [Task<Void, Never>] = []
+
+    public init(defaults: UserDefaults = .standard, credential: @escaping @MainActor () -> DeviceCredential? = { DeviceCredentialStore.load() }) {
+        self.defaults = defaults
+        self.credential = credential
+        _enabled = Published(initialValue: defaults.bool(forKey: Self.allowedKey))
+    }
+
+    public var currentStatus: RemoteControlStatus { RemoteControlStatus(controlEnabled: enabled, scan: scan(), lastResult: lastResult) }
+
+    /// Checks one delivered request on the phone side, then runs it. Disabled control, no
+    /// active scan, an expired or an already handled request never touch the camera.
+    @discardableResult
+    public func handle(_ command: RemoteCommand) async -> RemoteCommandResult {
+        let result: RemoteCommandResult
+        if executed.contains(command.commandID) {
+            result = .refused(command, "replayed_command", "this request was already handled")
+        } else if !enabled {
+            result = .refused(command, "remote_control_disabled", "remote capture is turned off on the phone")
+        } else if command.expiresInMs <= 0 {
+            result = .refused(command, "command_expired", "the request expired before it reached the phone")
+        } else if scan() == nil {
+            result = .refused(command, "no_active_scan", "no scan is active on the phone")
+        } else {
+            executed.append(command.commandID)
+            if executed.count > 64 { executed.removeFirst() }
+            result = await perform(command)
+        }
+        lastResult = result
+        return result
+    }
+
+    /// Starts the poll and status loops once per app run; both stay off the network unless
+    /// control is allowed, a scan is active and the phone is paired.
+    public func start() {
+        guard loops.isEmpty else { return }
+        loops.append(Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let pause = await self.cycle()
+                if pause > 0 { try? await Task.sleep(nanoseconds: UInt64(pause) * 1_000_000_000) }
+            }
+        })
+        // Live status (coverage, instruction) between polls, sent only when it changed.
+        loops.append(Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard let self else { return }
+                if self.poller != nil { try? await self.pushStatus() }
+            }
+        })
+    }
+
+    /// One long-poll round; seconds to pause before the next.
+    func cycle() async -> Int {
+        guard enabled, scan() != nil, let credential = credential() else {
+            // Tell Studio once that control ended (switched off or scan finished).
+            if let statusClient, lastPosted != nil { try? await statusClient.postRemoteStatus(currentStatus) }
+            poller = nil; statusClient = nil; lastPosted = nil
+            connection = enabled ? "waiting for a scan on a paired phone" : "off"
+            return 1
+        }
+        do {
+            if poller == nil {
+                let fresh = URLSessionTransferClient(identity: credential.receiver)
+                try await fresh.openDeviceSession(credential)
+                poller = fresh
+                statusClient = URLSessionTransferClient(identity: credential.receiver, sessionToken: fresh.currentSessionToken)
+                lastPosted = nil
+            }
+            guard let client = poller else { return 1 }
+            try await pushStatus()
+            connection = "connected to PackLab"
+            if let command = try await client.nextRemoteCommand() {
+                await handle(command)
+                try await pushStatus()
+            }
+            return 0
+        } catch URLSessionTransferError.server(let code) where code == "device_revoked" {
+            // Revoke in Studio ends control; the operator must pair again.
+            poller = nil; statusClient = nil; lastPosted = nil
+            enabled = false
+            connection = "this phone was unpaired in PackLab Studio"
+            return 1
+        } catch {
+            // Expired session token, receiver stopped or network loss: reconnect with a fresh session.
+            poller = nil; statusClient = nil; lastPosted = nil
+            connection = "PackLab not reachable — retrying"
+            return 3
+        }
+    }
+
+    private func pushStatus() async throws {
+        let status = currentStatus
+        // One push at a time; a skipped change goes out on the next 1 s status tick.
+        guard !pushing, status != lastPosted, let statusClient else { return }
+        pushing = true
+        defer { pushing = false }
+        lastPosted = status
+        do {
+            try await statusClient.postRemoteStatus(status)
+        } catch URLSessionTransferError.server("unknown_command") {
+            // Studio restarted and no longer knows that request: drop the stale result.
+            lastResult = nil
+            lastPosted = nil
+        } catch {
+            lastPosted = nil
+            throw error
+        }
+    }
+}

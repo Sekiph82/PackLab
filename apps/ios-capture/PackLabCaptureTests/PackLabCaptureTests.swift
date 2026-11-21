@@ -4348,6 +4348,96 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(PairedSyncService.clockSkewReason(nil), "phone clock is off — set Settings > General > Date & Time to Set Automatically")
     }
 
+    /// PL-0429: a remote request reaches the capture path only when the operator allowed it,
+    /// a scan is active and the request is fresh and new; otherwise it is refused unexecuted.
+    @MainActor
+    func testPL0429RemoteCommandGatesOnThePhone() async throws {
+        let suite = "pl0429-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let controller = RemoteCaptureController(defaults: defaults, credential: { nil })
+        XCTAssertFalse(controller.enabled, "remote capture is off by default")
+        var performed: [String] = []
+        var snapshot: RemoteScanSnapshot?
+        controller.scan = { snapshot }
+        controller.perform = { command in
+            performed.append(command.commandID)
+            return RemoteCommandResult(commandID: command.commandID, action: command.action, outcome: .refused, reasons: ["object_not_in_view", "Not A Code"], message: "point the camera at the package")
+        }
+        let capture = RemoteCommand(commandID: String(repeating: "a", count: 32), action: .capture, expiresInMs: 9000)
+        let disabled = await controller.handle(capture)
+        XCTAssertEqual(disabled.reasons, ["remote_control_disabled"])
+        controller.enabled = true
+        XCTAssertTrue(defaults.bool(forKey: RemoteCaptureController.allowedKey))
+        let noScan = await controller.handle(capture)
+        XCTAssertEqual(noScan.reasons, ["no_active_scan"])
+        snapshot = RemoteScanSnapshot(scanName: "Bottle", coverageCaptured: 2, coverageTotal: 16, instruction: "Hold here — tap Manual Capture")
+        let expired = await controller.handle(RemoteCommand(commandID: String(repeating: "b", count: 32), action: .capture, expiresInMs: 0))
+        XCTAssertEqual(expired.reasons, ["command_expired"])
+        let refused = await controller.handle(capture)
+        XCTAssertEqual(refused.outcome, .refused)
+        XCTAssertEqual(refused.reasons, ["object_not_in_view"], "only receiver-safe reason codes are sent")
+        XCTAssertEqual(refused.summary, "PackLab remote capture refused: point the camera at the package")
+        let replayed = await controller.handle(capture)
+        XCTAssertEqual(replayed.reasons, ["replayed_command"])
+        XCTAssertEqual(performed, [capture.commandID], "only one request ever reached the capture path")
+        XCTAssertEqual(controller.lastResult, replayed)
+        XCTAssertEqual(controller.currentStatus.coverageCaptured, 2)
+        XCTAssertTrue(controller.currentStatus.scanActive && controller.currentStatus.controlEnabled)
+    }
+
+    /// PL-0429: the status body matches the receiver's strict snake_case contract and bounds.
+    func testPL0429StatusWireIsBoundedSnakeCase() throws {
+        let long = String(repeating: "é", count: 400)
+        let result = RemoteCommandResult(commandID: String(repeating: "c", count: 32), action: .finish, outcome: .finished, reasons: Array(repeating: "ok", count: 12), message: long)
+        let status = RemoteControlStatus(controlEnabled: true, scan: RemoteScanSnapshot(scanName: long, coverageCaptured: 5000, coverageTotal: 16, instruction: long), lastResult: result)
+        let data = try JSONEncoder().encode(status)
+        XCTAssertLessThanOrEqual(data.count, 4096)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), ["scan_active", "control_enabled", "scan_name", "coverage_captured", "coverage_total", "instruction", "last_result"])
+        XCTAssertEqual((object["scan_name"] as? String)?.unicodeScalars.count, 128)
+        XCTAssertEqual((object["instruction"] as? String)?.unicodeScalars.count, 256)
+        XCTAssertEqual(object["coverage_captured"] as? Int, 1000)
+        let last = try XCTUnwrap(object["last_result"] as? [String: Any])
+        XCTAssertEqual(Set(last.keys), ["command_id", "action", "outcome", "reasons", "message"])
+        XCTAssertEqual((last["reasons"] as? [String])?.count, 8)
+        XCTAssertEqual(last["outcome"] as? String, "finished")
+        let idle = try JSONSerialization.jsonObject(with: JSONEncoder().encode(RemoteControlStatus(controlEnabled: false, scan: nil, lastResult: nil))) as? [String: Any]
+        XCTAssertEqual(idle?["scan_active"] as? Bool, false)
+        XCTAssertNil(idle?["last_result"], "no result is omitted, which the receiver accepts")
+    }
+
+    /// PL-0429: the long-poll returns nil on 204, decodes a command, refuses an unknown action,
+    /// and both control calls carry the device session token.
+    func testPL0429LongPollAndStatusTransport() async throws {
+        let receiver = ReceiverReconnectIdentity(receiverInstanceID: "r", host: "127.0.0.1", port: 8443, tlsCertificateFingerprint: String(repeating: "b", count: 64))
+        let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [StubTransferURLProtocol.self]
+        defer { StubTransferURLProtocol.handler = nil }
+        let client = URLSessionTransferClient(identity: receiver, sessionToken: "tok", session: URLSession(configuration: configuration))
+        StubTransferURLProtocol.handler = { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+            XCTAssertEqual(request.url?.path, "/v1/control/next")
+            XCTAssertEqual(request.httpMethod, "GET")
+            return (204, Data())
+        }
+        let none = try await client.nextRemoteCommand()
+        XCTAssertNil(none)
+        StubTransferURLProtocol.handler = { _ in (200, Data(#"{"action":"capture","command_id":"0123456789abcdef0123456789abcdef","expires_in_ms":9990,"message":"remote_command"}"#.utf8)) }
+        let command = try await client.nextRemoteCommand()
+        XCTAssertEqual(command, RemoteCommand(commandID: "0123456789abcdef0123456789abcdef", action: .capture, expiresInMs: 9990))
+        StubTransferURLProtocol.handler = { _ in (200, Data(#"{"action":"format_disk","command_id":"0123456789abcdef0123456789abcdef","expires_in_ms":9990}"#.utf8)) }
+        do { _ = try await client.nextRemoteCommand(); XCTFail("unknown action must not decode") } catch is DecodingError {}
+        StubTransferURLProtocol.handler = { request in
+            XCTAssertEqual(request.url?.path, "/v1/control/status")
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer tok")
+            return (400, Data(#"{"error_code":"device_revoked"}"#.utf8))
+        }
+        do { try await client.postRemoteStatus(RemoteControlStatus(controlEnabled: true, scan: nil, lastResult: nil)); XCTFail("revoked must throw") } catch let error as URLSessionTransferError {
+            XCTAssertEqual(error, .server("device_revoked"))
+        }
+    }
+
 }
 
 #endif

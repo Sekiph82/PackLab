@@ -107,6 +107,20 @@ public final class URLSessionTransferClient: NSObject, ProductionTransferClient,
         guard let object = try JSONSerialization.jsonObject(with: response) as? [String: Any], let token = object["session_token"] as? String, object["receiver_instance_id"] as? String == identity.receiverInstanceID else { throw URLSessionTransferError.invalidResponse }
         activeToken = token
     }
+    /// PL-0429: the device session token, so a sibling client can push status beside the long-poll.
+    public var currentSessionToken: String? { activeToken }
+
+    /// PL-0429 long-poll: the next remote command from the paired PackLab, or nil when the
+    /// receiver's wait ends without one (HTTP 204).
+    public func nextRemoteCommand() async throws -> RemoteCommand? {
+        let data = try await send(path: "/v1/control/next", method: "GET", body: nil, token: activeToken)
+        return data.isEmpty ? nil : try JSONDecoder().decode(RemoteCommand.self, from: data)
+    }
+
+    public func postRemoteStatus(_ status: RemoteControlStatus) async throws {
+        _ = try await send(path: "/v1/control/status", method: "POST", body: try JSONEncoder().encode(status), token: activeToken)
+    }
+
     /// Below the receiver's 300 s window, leaving slack for the Date header's 1 s resolution and latency.
     static let clockSkewThresholdSeconds = 240
     private static func httpDate(_ value: String?) -> Date? {

@@ -186,3 +186,74 @@ def test_paired_devices_are_listed_and_revoke_unpairs(monkeypatch, tmp_path) -> 
     finally:
         window.close()
         app.processEvents()
+
+
+def test_remote_capture_panel_sends_commands_and_shows_phone_status(monkeypatch, tmp_path) -> None:
+    """PL-0429: Studio queues Capture now / Finish scan for a polling phone; revoke ends it."""
+    app, window, view = _window(monkeypatch, tmp_path)
+    try:
+        view.receive_button.click()
+        offer = view.offer
+        assert offer is not None
+        assert not view.capture_now_button.isEnabled()
+        base = f"https://{offer.host}:{offer.port}"
+        paired = _call(
+            f"{base}/v1/pair",
+            body=json.dumps(
+                {
+                    "offer": json.loads(offer.qr_payload()),
+                    "pairing_code": offer.pairing_code,
+                    "tls_certificate_fingerprint": offer.tls_certificate_fingerprint,
+                    "device_name": "iPhone17,3",
+                }
+            ).encode(),
+        )
+        device_id = str(paired["device_id"])
+        token = str(paired["session_token"])
+        view._tick()
+        assert "not connected" in view.remote_label.text()
+        session = view.session
+        assert session is not None
+        control = session.receiver.control
+        control.next_command(device_id, timeout=0)  # the phone polled once
+        status = {
+            "scan_active": True,
+            "control_enabled": True,
+            "scan_name": "Bottle <b>1</b>",
+            "coverage_captured": 2,
+            "coverage_total": 16,
+            "instruction": "Hold here — tap Manual Capture",
+            "last_result": None,
+        }
+        _call(f"{base}/v1/control/status", token=token, body=json.dumps(status).encode())
+        view._tick()
+        assert "Bottle <b>1</b>  |  coverage 2/16  |  Hold here" in view.remote_label.text()
+        assert view.remote_label.textFormat() == Qt.TextFormat.PlainText
+        assert view.capture_now_button.isEnabled() and view.finish_scan_button.isEnabled()
+        view.capture_now_button.click()
+        assert "still checks every capture gate" in view.status_label.text()
+        view.capture_now_button.click()  # a second click while the first is pending
+        assert "command_pending" in view.status_label.text()
+        command = control.next_command(device_id, timeout=0)
+        assert command is not None and command["action"] == "capture"
+        status["last_result"] = {
+            "command_id": command["command_id"],
+            "action": "capture",
+            "outcome": "refused",
+            "reasons": ["object_not_in_view"],
+            "message": "point the camera at the package",
+        }
+        control.report(device_id, status)
+        view._tick()
+        assert "Last capture: refused (object_not_in_view)" in view.remote_label.text()
+        view.finish_scan_button.click()
+        finish = control.next_command(device_id, timeout=0)
+        assert finish is not None and finish["action"] == "finish"
+        view.devices_list.setCurrentRow(0)
+        view.revoke_button.click()
+        view._tick()
+        assert not view.capture_now_button.isEnabled()
+        assert control.status(device_id) is None
+    finally:
+        window.close()
+        app.processEvents()
