@@ -377,6 +377,7 @@ def test_command_plan_fixes_colmap_seeds_and_mapper_threads(monkeypatch, tmp_pat
         return args[args.index(name) + 1]
 
     assert option("feature-extraction", "--default_random_seed") == "0"
+    assert option("feature-extraction", "--FeatureExtraction.num_threads") == "1"
     assert option("matching", "--TwoViewGeometry.random_seed") == "0"
     assert option("sparse-mapping", "--Mapper.random_seed") == "0"
     assert option("sparse-mapping", "--Mapper.num_threads") == "1"

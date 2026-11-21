@@ -63,15 +63,20 @@ COPY_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 # The command plan uses COLMAP 4.x option names (FeatureExtraction.*, FeatureMatching.*);
 # 4.2.1 is the version it was verified with (Test-333) and the one PL-0444 bundles.
 SUPPORTED_COLMAP_VERSIONS = ("4.2.1",)
-# PL-0463 reproducibility: fixed COLMAP seeds (RANSAC + mapper sampling), a single-threaded
-# mapper (multi-threaded bundle adjustment sums in a varying order) and images processed in
-# sorted name order. OpenMVS 2.4.0 has no seed option and stays multi-threaded (single-
-# threaded densify is ~16x slower); its residual run-to-run spread is documented, not hidden.
+# PL-0463 reproducibility: fixed COLMAP seeds (RANSAC + mapper sampling), single-threaded
+# feature extraction (COLMAP 4.2.1 numbers images in completion order otherwise; measured
+# +25 s on Test-333, then keypoints and descriptors are bit-identical), a single-threaded
+# mapper (threaded bundle adjustment sums in a varying order) and sorted image order.
+# Not fixed, documented instead: CPU matching uses an approximate (FAISS) index whose matches
+# differ run to run (the exact brute-force matcher took 704 s instead of 38 s), and OpenMVS
+# 2.4.0 has no seed option (densify of one identical scene gave 167,891 vs 168,892 points).
 RANDOM_SEED = 0
+EXTRACTION_THREADS = 1
 MAPPER_THREADS = 1
 OPENMVS_THREADS = 0  # 0 = all cores
 DETERMINISM: dict[str, object] = {
     "colmap_random_seed": RANDOM_SEED,
+    "colmap_extraction_threads": EXTRACTION_THREADS,
     "colmap_mapper_threads": MAPPER_THREADS,
     "openmvs_max_threads": OPENMVS_THREADS,
     "image_order": "sorted_working_name",
@@ -397,6 +402,8 @@ class ColmapOpenMvsBackend:
                         str(MAX_IMAGE_SIZE),
                         "--default_random_seed",
                         str(RANDOM_SEED),
+                        "--FeatureExtraction.num_threads",
+                        str(EXTRACTION_THREADS),
                     ),
                     w,
                 )
