@@ -937,20 +937,13 @@ def measure(frame: Frame, model: LoadedModel, isolation: Isolation) -> Measureme
     slices = _slice_diameters(points, height)
     if not slices:
         raise MeasureDesignError("too few wall points to measure diameters")
-    # Body = widest slice between 10 % and 80 % of the height, each slice judged by the median
-    # of itself and its neighbours: the base contact band (mat bleed) and one-slice spikes
-    # moved the max body diameter by up to 8 mm between rebuilds of one jar (PL-0462).
-    smoothed = [
-        float(np.median([s[1] for s in slices[max(0, i - 1) : i + 2]])) for i in range(len(slices))
-    ]
     body_index = max(
-        range(len(slices)),
-        key=lambda i: smoothed[i] if 0.1 * height <= slices[i][0] < 0.8 * height else -1,
+        range(len(slices)), key=lambda i: slices[i][1] if slices[i][0] < 0.8 * height else -1
     )
     top_band = [s for s in slices if 0.82 * height <= s[0] < 0.97 * height]
     values: list[tuple[str, float, float]] = [
         ("height", height, plane_noise_mm),
-        ("max_body_diameter", smoothed[body_index], slices[body_index][2]),
+        ("max_body_diameter", slices[body_index][1], slices[body_index][2]),
     ]
     notes: list[str] = []
     if top_band:
@@ -959,7 +952,7 @@ def measure(frame: Frame, model: LoadedModel, isolation: Isolation) -> Measureme
         between = [s for s in slices if slices[body_index][0] < s[0] < top_band[0][0]]
         if between:
             neck = min(between, key=lambda s: s[1])
-            if neck[1] < 0.92 * min(lid, smoothed[body_index]):
+            if neck[1] < 0.92 * min(lid, slices[body_index][1]):
                 values.append(("neck_diameter", neck[1], neck[2]))
             else:
                 notes.append("no neck: no slice narrower than 92% of body and lid")
@@ -1198,23 +1191,30 @@ OWNER_REVIEW_MAX_AXIS_CV = 0.05
 OWNER_REVIEW_MIN_ANGULAR_COVERAGE = 0.60
 OWNER_REVIEW_MAX_SECTION_CV = 0.45
 # PL-0462 roundness evidence. The vertical axis is a seeded least-median-of-squares circle
-# fit to the side band (15-85 % of height: no base contact band, no lid face), so a few
-# stray points or a footprint-centre bias of ~2 mm no longer decide the gate. The CV is then
-# measured per 10 % slice over the outer-wall radius of each observed 10-degree bin (90th
-# percentile), dropping a fixed worst 5 % of bins; a slice counts only with >= 25 % of the
-# circumference (9 of 36 bins) observed. A bin is evidence only with >= 2 vertices: a single
+# fit to the side band (15-85 % of height: no base contact band, no lid face), so a
+# footprint-centre bias of ~2 mm no longer decides the gate; the fit is bounded (below).
+# The CV is then measured per 10 % slice over ALL slice points about that axis, untrimmed
+# (as on origin/main, so the gate is never weaker than the axis-centred one when the axis is
+# unchanged); a slice counts only with >= 25 % of the circumference (9 of 36 bins of 10
+# degrees) observed. A bin is evidence only with >= 2 vertices: a single
 # vertex per bin on a barely photographed wall is reconstruction noise, and judging it made
 # rebuilds of one capture pass or fail at random. At least 4 of the 5 body slices (15-75 %
 # of height) must be judged: with 3, the verdict hinged on whether one marginal slice reached
 # 9 bins (8 real test-333 builds: 2-3 judged slices, never the upper body).
 ROUNDNESS_METHOD = (
-    "lmeds_vertical_axis_side_band_15_85_outer_wall_bins_min2_trim05_cov025_slices4_v2"
+    "lmeds_bounded_vertical_axis_side_band_15_85_all_points_untrimmed_min2_cov025_slices4_v3"
 )
 ROUNDNESS_SEED = 0
-ROUNDNESS_TRIM = 0.05
 ROUNDNESS_MIN_SLICE_COVERAGE = 0.25
 ROUNDNESS_MIN_SLICES = 4
 ROUNDNESS_MIN_BIN_VERTICES = 2
+# The fitted axis may only correct the measured-axis bias (2-3 mm on test-333). A circle
+# further off, of a different size, or not backed by most side points means the wall is not
+# one circle (e.g. a 40-60 % arc of an oval fits a circle 12-15 mm off-axis): then the CV is
+# measured about the measured axis itself, as before PL-0462.
+ROUNDNESS_MAX_AXIS_SHIFT = 0.10  # of the measured side radius
+ROUNDNESS_MAX_RADIUS_CHANGE = 0.10  # relative to the measured side radius
+ROUNDNESS_MIN_AXIS_INLIERS = 0.60
 SIDE_RECAPTURE_ADVICE = (
     "The side of the package is not covered well enough — take more photos from the side "
     "at middle height, all the way around, then rebuild."
@@ -1226,16 +1226,16 @@ class AxisRoundness:
     method: str
     axis_xy_mm: tuple[float, float]  # fitted axis relative to the Scan Master z axis
     radius_mm: float
-    radial_cv: float  # worst trimmed slice CV about the fitted axis
+    radial_cv: float  # worst slice CV about the (bounded) axis, all points, untrimmed
     slices_used: int
     slices_total: int
     axis_inlier_fraction: float  # side-band points within 3 robust sigma of the circle
+    axis_source: str = "fitted_circle"  # or "measured_axis" when the fit is out of bounds
 
     def as_dict(self) -> dict[str, object]:
         return {
             "method": self.method,
             "seed": ROUNDNESS_SEED,
-            "trim_fraction": ROUNDNESS_TRIM,
             "min_slice_coverage": ROUNDNESS_MIN_SLICE_COVERAGE,
             "min_bin_vertices": ROUNDNESS_MIN_BIN_VERTICES,
             "min_slices": ROUNDNESS_MIN_SLICES,
@@ -1245,6 +1245,10 @@ class AxisRoundness:
             "slices_used": self.slices_used,
             "slices_total": self.slices_total,
             "axis_inlier_fraction": round(self.axis_inlier_fraction, 4),
+            "axis_source": self.axis_source,
+            "max_axis_shift": ROUNDNESS_MAX_AXIS_SHIFT,
+            "max_radius_change": ROUNDNESS_MAX_RADIUS_CHANGE,
+            "min_axis_inliers": ROUNDNESS_MIN_AXIS_INLIERS,
         }
 
 
@@ -1297,6 +1301,14 @@ def robust_axis_roundness(mesh: TriangleMeshData) -> AxisRoundness:
     if len(band) < 8:
         return AxisRoundness(ROUNDNESS_METHOD, (0.0, 0.0), 0.0, math.inf, 0, 5, 0.0)
     centre, radius, inlier_fraction = _robust_circle(band)
+    measured = float(np.median(np.linalg.norm(band, axis=1)))
+    source = "fitted_circle"
+    if (
+        float(np.linalg.norm(centre)) > ROUNDNESS_MAX_AXIS_SHIFT * measured
+        or abs(radius - measured) > ROUNDNESS_MAX_RADIUS_CHANGE * measured
+        or inlier_fraction < ROUNDNESS_MIN_AXIS_INLIERS
+    ):
+        centre, radius, source = np.zeros(2), measured, "measured_axis"
     worst, used = 0.0, 0
     for low in np.linspace(0.15, 0.75, 5) * top:
         ring = vertices[(vertices[:, 2] >= low) & (vertices[:, 2] < low + 0.1 * top), :2] - centre
@@ -1308,12 +1320,7 @@ def robust_axis_roundness(mesh: TriangleMeshData) -> AxisRoundness:
         if len(occupied) / 36 < ROUNDNESS_MIN_SLICE_COVERAGE:
             continue
         radial = np.linalg.norm(ring, axis=1)
-        # Outer wall per 10-degree bin: a lid step face or a mesh sheet inside the jar is not
-        # the wall; an oval, dent or bulge changes the outer radius with angle and still counts.
-        outer = np.array([np.percentile(radial[bins == b], 90) for b in occupied])
-        residual = np.abs(outer - np.median(outer))
-        kept = outer[residual <= np.quantile(residual, 1 - ROUNDNESS_TRIM)]
-        worst = max(worst, float(np.std(kept) / np.mean(kept)))
+        worst = max(worst, float(np.std(radial) / np.mean(radial)))
         used += 1
     return AxisRoundness(
         ROUNDNESS_METHOD,
@@ -1323,6 +1330,7 @@ def robust_axis_roundness(mesh: TriangleMeshData) -> AxisRoundness:
         used,
         5,
         inlier_fraction,
+        source,
     )
 
 

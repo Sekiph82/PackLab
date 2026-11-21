@@ -71,7 +71,7 @@ SUPPORTED_COLMAP_VERSIONS = ("4.2.1",)
 # matching uses an approximate (FAISS) index that is not guaranteed repeatable (one standalone
 # repeat differed; the exact brute-force matcher took 704 s instead of 38 s), and OpenMVS
 # 2.4.0 has no seed option (densify of one identical scene gave 167,891 vs 168,892 points).
-RANDOM_SEED = 0
+RANDOM_SEED = 0  # --default_random_seed 0 is COLMAP's default; passed so the plan records it
 EXTRACTION_THREADS = 1
 MAPPER_THREADS = 1
 OPENMVS_THREADS = 0  # 0 = all cores
