@@ -47,7 +47,8 @@ public final class UITestReplaySource: ObservableObject, ARTrackingService, Time
             guard let root = fileManager.urls(for: directory, in: .userDomainMask).first, let contents = try? fileManager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) else { continue }
             for url in contents { try? fileManager.removeItem(at: url) }
         }
-        DeviceCredentialStore.remove()        ReceiverReconnectIdentityStore().remove()
+        DeviceCredentialStore.remove()
+        ReceiverReconnectIdentityStore().remove()
         SenderTransferIdentityStore().remove()
     }
 
