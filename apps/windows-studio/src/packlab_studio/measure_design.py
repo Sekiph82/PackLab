@@ -475,8 +475,22 @@ def isolate_object(model: LoadedModel, cameras: tuple[CameraPose, ...] = ()) -> 
         + x_axis * (np.percentile(u, 1) + np.percentile(u, 99)) / 2
         + y_axis * (np.percentile(v, 1) + np.percentile(v, 99)) / 2
     )
-    radius = float(np.percentile(radial(cluster, center), 99))
     top = float(np.percentile(cluster @ normal + offset, 99.5))
+    # A partly observed side wall biases that midpoint toward the seen side (2-3 mm on
+    # test-333), so prefer a robust circle through the side band when the wall is round.
+    side = (cluster @ normal + offset >= 0.15 * top) & (cluster @ normal + offset < 0.85 * top)
+    if side.sum() >= 30:
+        uv = np.c_[(cluster[side] - foot) @ x_axis, (cluster[side] - foot) @ y_axis]
+        circle, circle_radius, fraction = _robust_circle(uv)
+        fitted = foot + x_axis * circle[0] + y_axis * circle[1]
+        footprint = float(np.percentile(radial(cluster, center), 99))
+        shift = float(np.linalg.norm(fitted - center))
+        if fraction >= 0.6 and shift <= 0.15 * footprint and circle_radius <= 1.2 * footprint:
+            center = fitted
+            notes.append(f"axis from a robust side-wall circle ({fraction:.0%} inliers)")
+        else:
+            notes.append("axis from the footprint extent (side wall not a clear circle)")
+    radius = float(np.percentile(radial(cluster, center), 99))
     isolation = Isolation(
         normal,
         offset,
@@ -923,13 +937,20 @@ def measure(frame: Frame, model: LoadedModel, isolation: Isolation) -> Measureme
     slices = _slice_diameters(points, height)
     if not slices:
         raise MeasureDesignError("too few wall points to measure diameters")
+    # Body = widest slice between 10 % and 80 % of the height, each slice judged by the median
+    # of itself and its neighbours: the base contact band (mat bleed) and one-slice spikes
+    # moved the max body diameter by up to 8 mm between rebuilds of one jar (PL-0462).
+    smoothed = [
+        float(np.median([s[1] for s in slices[max(0, i - 1) : i + 2]])) for i in range(len(slices))
+    ]
     body_index = max(
-        range(len(slices)), key=lambda i: slices[i][1] if slices[i][0] < 0.8 * height else -1
+        range(len(slices)),
+        key=lambda i: smoothed[i] if 0.1 * height <= slices[i][0] < 0.8 * height else -1,
     )
     top_band = [s for s in slices if 0.82 * height <= s[0] < 0.97 * height]
     values: list[tuple[str, float, float]] = [
         ("height", height, plane_noise_mm),
-        ("max_body_diameter", slices[body_index][1], slices[body_index][2]),
+        ("max_body_diameter", smoothed[body_index], slices[body_index][2]),
     ]
     notes: list[str] = []
     if top_band:
@@ -938,7 +959,7 @@ def measure(frame: Frame, model: LoadedModel, isolation: Isolation) -> Measureme
         between = [s for s in slices if slices[body_index][0] < s[0] < top_band[0][0]]
         if between:
             neck = min(between, key=lambda s: s[1])
-            if neck[1] < 0.92 * min(lid, slices[body_index][1]):
+            if neck[1] < 0.92 * min(lid, smoothed[body_index]):
                 values.append(("neck_diameter", neck[1], neck[2]))
             else:
                 notes.append("no neck: no slice narrower than 92% of body and lid")
@@ -1179,9 +1200,10 @@ OWNER_REVIEW_MAX_SECTION_CV = 0.45
 # PL-0462 roundness evidence. The vertical axis is a seeded least-median-of-squares circle
 # fit to the side band (15-85 % of height: no base contact band, no lid face), so a few
 # stray points or a footprint-centre bias of ~2 mm no longer decide the gate. The CV is then
-# measured per 10 % slice on ALL slice points except a fixed worst 5 % of radial residuals;
-# a slice counts only with >= 25 % of the circumference (9 of 36 bins of 10 deg) observed.
-ROUNDNESS_METHOD = "lmeds_vertical_axis_side_band_15_85_slices_trim05_cov025_v1"
+# measured per 10 % slice over the outer-wall radius of each observed 10-degree bin (90th
+# percentile), dropping a fixed worst 5 % of bins; a slice counts only with >= 25 % of the
+# circumference (9 of 36 bins) observed.
+ROUNDNESS_METHOD = "lmeds_vertical_axis_side_band_15_85_outer_wall_bins_trim05_cov025_v1"
 ROUNDNESS_SEED = 0
 ROUNDNESS_TRIM = 0.05
 ROUNDNESS_MIN_SLICE_COVERAGE = 0.25
@@ -1231,12 +1253,9 @@ def _circle_through(points: np.ndarray) -> np.ndarray | None:
     )
 
 
-def robust_axis_roundness(mesh: TriangleMeshData) -> AxisRoundness:
-    vertices = np.asarray(mesh.vertices, dtype=np.float64)
-    top = float(vertices[:, 2].max())
-    band = vertices[(vertices[:, 2] >= 0.15 * top) & (vertices[:, 2] < 0.85 * top), :2]
-    if len(band) < 8:
-        return AxisRoundness(ROUNDNESS_METHOD, (0.0, 0.0), 0.0, math.inf, 0, 5, 0.0)
+def _robust_circle(band: np.ndarray) -> tuple[np.ndarray, float, float]:
+    """Seeded least-median-of-squares circle + Kasa refit: (centre, radius, inlier fraction)."""
+
     rng = np.random.default_rng(ROUNDNESS_SEED)
     search = band[rng.choice(len(band), min(len(band), 5000), replace=False)]
     centre, best = np.zeros(2), math.inf
@@ -1259,18 +1278,31 @@ def robust_axis_roundness(mesh: TriangleMeshData) -> AxisRoundness:
         rcond=None,
     )[0]
     centre = solution[:2]
-    radius = math.sqrt(max(float(solution[2] + centre @ centre), 0.0))
+    return centre, math.sqrt(max(float(solution[2] + centre @ centre), 0.0)), float(inliers.mean())
+
+
+def robust_axis_roundness(mesh: TriangleMeshData) -> AxisRoundness:
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    top = float(vertices[:, 2].max())
+    band = vertices[(vertices[:, 2] >= 0.15 * top) & (vertices[:, 2] < 0.85 * top), :2]
+    if len(band) < 8:
+        return AxisRoundness(ROUNDNESS_METHOD, (0.0, 0.0), 0.0, math.inf, 0, 5, 0.0)
+    centre, radius, inlier_fraction = _robust_circle(band)
     worst, used = 0.0, 0
     for low in np.linspace(0.15, 0.75, 5) * top:
         ring = vertices[(vertices[:, 2] >= low) & (vertices[:, 2] < low + 0.1 * top), :2] - centre
         if len(ring) < 8:
             continue
         bins = np.floor((np.arctan2(ring[:, 1], ring[:, 0]) + math.pi) / math.tau * 36) % 36
-        if len(np.unique(bins)) / 36 < ROUNDNESS_MIN_SLICE_COVERAGE:
+        occupied = np.unique(bins)
+        if len(occupied) / 36 < ROUNDNESS_MIN_SLICE_COVERAGE:
             continue
         radial = np.linalg.norm(ring, axis=1)
-        residual = np.abs(radial - np.median(radial))
-        kept = radial[residual <= np.quantile(residual, 1 - ROUNDNESS_TRIM)]
+        # Outer wall per 10-degree bin: a lid step face or a mesh sheet inside the jar is not
+        # the wall; an oval, dent or bulge changes the outer radius with angle and still counts.
+        outer = np.array([np.percentile(radial[bins == b], 90) for b in occupied])
+        residual = np.abs(outer - np.median(outer))
+        kept = outer[residual <= np.quantile(residual, 1 - ROUNDNESS_TRIM)]
         worst = max(worst, float(np.std(kept) / np.mean(kept)))
         used += 1
     return AxisRoundness(
@@ -1280,7 +1312,7 @@ def robust_axis_roundness(mesh: TriangleMeshData) -> AxisRoundness:
         worst if used else math.inf,
         used,
         5,
-        float(inliers.mean()),
+        inlier_fraction,
     )
 
 

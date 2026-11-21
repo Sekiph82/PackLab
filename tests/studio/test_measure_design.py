@@ -330,10 +330,14 @@ def _ring_scan_master(
     centre: tuple[float, float] = (0.0, 0.0),
     noise: float = 0.0,
     outliers: int = 0,
+    inward: int = 0,
+    dent: float = 0.0,
     seed: int = 1,
 ):
     """Synthetic straight jar wall (40 mm tall); optional off-axis centre, radial noise
-    (mm, 1 sigma) and stray vertices pushed 4-6 mm outward (lid lip / background bleed)."""
+    (mm, 1 sigma), stray vertices pushed 4-6 mm outward (lid lip / background bleed) and
+    vertices pulled 6-10 mm inward (a mesh sheet inside the jar, a lid step face); ``dent``
+    pulls a 60-degree sector of the whole wall inward (a genuinely non-round package)."""
 
     from packlab_core.geometry_adapter import TriangleMeshData
     from packlab_core.reconstruction import ScaleState
@@ -345,10 +349,16 @@ def _ring_scan_master(
     bump = rng.normal(0.0, noise, 33 * (count + 1)) if noise else np.zeros(33 * (count + 1))
     if outliers:
         bump[rng.choice(len(bump), outliers, replace=False)] += rng.uniform(4.0, 6.0, outliers)
+    if inward:
+        bump[rng.choice(len(bump), inward, replace=False)] -= rng.uniform(6.0, 10.0, inward)
+
+    def sector(i: int) -> float:
+        return dent if 0.5 <= arc * i / count < 0.5 + math.pi / 3 else 0.0
+
     vertices = [
         (
-            centre[0] + (radius_x + bump[k]) * math.cos(arc * i / count),
-            centre[1] + (radius_y + bump[k]) * math.sin(arc * i / count),
+            centre[0] + (radius_x + bump[k] - sector(i)) * math.cos(arc * i / count),
+            centre[1] + (radius_y + bump[k] - sector(i)) * math.sin(arc * i / count),
             z,
         )
         for k, (z, i) in enumerate(
@@ -405,8 +415,9 @@ def test_owner_review_policy_has_fixed_bounds_and_refuses_outside_them() -> None
 
 
 def test_roundness_gate_is_robust_on_noisy_partial_off_axis_jars() -> None:
-    """PL-0462: a real-looking wall (2/3 seen, 0.3 mm noise, 2% stray points, axis 2.5 mm off
-    the measured centre) fits repeatably; the 0.05 gate itself is unchanged."""
+    """PL-0462: a real-looking wall (2/3 seen, 0.3 mm noise, 2% stray points outside and 3%
+    inside the wall, axis 2.5 mm off the measured centre) fits repeatably; the 0.05 gate
+    itself is unchanged."""
 
     assert md.OWNER_REVIEW_MAX_AXIS_CV == 0.05
     jar = _ring_scan_master(
@@ -416,6 +427,7 @@ def test_roundness_gate_is_robust_on_noisy_partial_off_axis_jars() -> None:
         centre=(2.5, -0.5),
         noise=0.3,
         outliers=40,
+        inward=60,
     )
     # The old origin-centred CV fails this jar; the robust axis recovers the true centre.
     vertices = np.asarray(jar.mesh.vertices)
@@ -427,7 +439,7 @@ def test_roundness_gate_is_robust_on_noisy_partial_off_axis_jars() -> None:
     assert math.dist(roundness.axis_xy_mm, (2.5, -0.5)) < 0.3
     assert abs(roundness.radius_mm - 36.0) < 0.3
     assert roundness.radial_cv < 0.02 and roundness.slices_used == 5
-    assert 0.9 < roundness.axis_inlier_fraction < 1.0  # the stray points are not inliers
+    assert 0.85 < roundness.axis_inlier_fraction < 0.98  # the stray points are not inliers
     first = md.fit_design_model(jar, actor_id="owner", owner_review=True)
     second = md.fit_design_model(jar, actor_id="owner", owner_review=True)
     assert (first.height, first.diameter) == (second.height, second.diameter)
@@ -439,6 +451,13 @@ def test_roundness_gate_is_robust_on_noisy_partial_off_axis_jars() -> None:
     with pytest.raises(md.MeasureDesignError, match="not round about the measured axis") as error:
         md.fit_design_model(oval, actor_id="owner", owner_review=True)
     assert "take more photos from the side at middle height" in str(error.value)
+    # A wall with a real 6 mm dent over 60 degrees is refused too (outer wall, not trimmed away).
+    dented = _ring_scan_master(
+        radius_x=36.0, radius_y=36.0, arc=math.tau * 2 / 3, noise=0.3, dent=6.0
+    )
+    assert md.robust_axis_roundness(dented.mesh).radial_cv > 0.05
+    with pytest.raises(md.MeasureDesignError, match="not round about the measured axis"):
+        md.fit_design_model(dented, actor_id="owner", owner_review=True)
     # A sliver of wall (1/8 of the ring) cannot be judged at all.
     sliver = _ring_scan_master(radius_x=36.0, radius_y=36.0, arc=math.tau / 8, noise=0.3)
     with pytest.raises(md.MeasureDesignError, match="cannot judge roundness") as error:
