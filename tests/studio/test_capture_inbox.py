@@ -246,6 +246,12 @@ def test_remote_capture_panel_sends_commands_and_shows_phone_status(monkeypatch,
         control.report(device_id, status)
         view._tick()
         assert "Last capture: refused (object_not_in_view)" in view.remote_label.text()
+        asked: list[str] = []
+        view._confirm = lambda _parent, text: asked.append(text) or False
+        view.finish_scan_button.click()  # declined: nothing is sent
+        assert len(asked) == 1 and "Finish the scan" in asked[0]
+        assert control.next_command(device_id, timeout=0) is None
+        view._confirm = lambda _parent, _text: True
         view.finish_scan_button.click()
         finish = control.next_command(device_id, timeout=0)
         assert finish is not None and finish["action"] == "finish"

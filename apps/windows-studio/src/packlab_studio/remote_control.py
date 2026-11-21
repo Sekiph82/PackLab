@@ -11,6 +11,7 @@ here carries measurement, scale or Scan Master authority.
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import time
@@ -30,6 +31,10 @@ POLL_TIMEOUT_SECONDS = 25.0
 #: A phone counts as connected while it polled within this window (poll <= 25 s).
 CONNECTED_WITHIN_SECONDS = 40.0
 MAX_STATUS_BYTES = 4096
+#: Waiting long-polls across all devices (each holds a receiver thread up to 25 s).
+MAX_ACTIVE_POLLS = 16
+#: remote-control-log.jsonl rotates to .jsonl.1 at this size.
+MAX_LOG_BYTES = 1024 * 1024
 _REASON = re.compile(r"^[a-z0-9_]{1,64}$")
 _COMMAND_ID = re.compile(r"^[0-9a-f]{32}$")
 _STATUS_KEYS = {
@@ -166,16 +171,37 @@ class RemoteControlHub:
         self._status: dict[str, DeviceControlStatus] = {}
         self._last_poll: dict[str, float] = {}
         self._closed = False
+        # Long-polls: the newest poll per device wins; all devices share a small cap.
+        self._poll_generation: dict[str, int] = {}
+        self._active_polls = 0
         self.log: deque[dict[str, object]] = deque(maxlen=256)
+        self._unwritten: list[dict[str, object]] = []
+        self._file_lock = threading.Lock()
 
     def _record(self, event: str, device_id: str, **fields: object) -> None:
+        """Called under the hub lock; the file write happens later in ``_flush``."""
         entry: dict[str, object] = {"at": time.time(), "event": event, "device_id": device_id}
         entry.update(fields)
         self.log.append(entry)
         if self._log_path is not None:
-            self._log_path.parent.mkdir(parents=True, exist_ok=True)
-            with self._log_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+            self._unwritten.append(entry)
+
+    def _flush(self) -> None:
+        """Append recorded entries outside the hub lock, rotating at MAX_LOG_BYTES."""
+        if self._log_path is None:
+            return
+        with self._cond:
+            entries, self._unwritten = self._unwritten, []
+        if not entries:
+            return
+        with self._file_lock:
+            path = self._log_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists() and path.stat().st_size >= MAX_LOG_BYTES:
+                # ponytail: one rotated file; bounded at about 2 x MAX_LOG_BYTES on disk.
+                os.replace(path, path.with_name(path.name + ".1"))
+            with path.open("a", encoding="utf-8") as handle:
+                handle.writelines(json.dumps(entry, sort_keys=True) + "\n" for entry in entries)
 
     def connected(self, device_id: str) -> bool:
         with self._cond:
@@ -187,6 +213,31 @@ class RemoteControlHub:
             return self._status.get(device_id)
 
     def issue(self, device_id: str, action: str) -> RemoteCommand:
+        try:
+            return self._issue(device_id, action)
+        finally:
+            self._flush()
+
+    def next_command(
+        self, device_id: str, timeout: float = POLL_TIMEOUT_SECONDS
+    ) -> dict[str, object] | None:
+        """Long-poll: the next unexpired command for this device (consumed once), or None.
+
+        A newer poll from the same device ends this one with None (204); at most
+        MAX_ACTIVE_POLLS polls wait at once across all devices (``too_many_polls``).
+        """
+        try:
+            return self._next_command(device_id, timeout)
+        finally:
+            self._flush()
+
+    def report(self, device_id: str, value: dict[str, object]) -> DeviceControlStatus:
+        try:
+            return self._report(device_id, value)
+        finally:
+            self._flush()
+
+    def _issue(self, device_id: str, action: str) -> RemoteCommand:
         if action not in ACTIONS:
             raise RemoteControlError("bad_request", "unknown remote action")
         with self._cond:
@@ -208,39 +259,50 @@ class RemoteControlHub:
             self._cond.notify_all()
             return command
 
-    def next_command(
-        self, device_id: str, timeout: float = POLL_TIMEOUT_SECONDS
-    ) -> dict[str, object] | None:
-        """Long-poll: the next unexpired command for this device (consumed once), or None."""
+    def _next_command(self, device_id: str, timeout: float) -> dict[str, object] | None:
         with self._cond:
-            deadline = self._clock() + timeout
-            self._last_poll[device_id] = self._clock()
-            while True:
-                now = self._clock()
-                if not self._is_active(device_id):
-                    self._pending.pop(device_id, None)
-                    raise RemoteControlError("device_revoked", "device is not paired")
-                if self._closed:
-                    return None
-                command = self._pending.pop(device_id, None)
-                if command is not None and command.expires_at <= now:
-                    self._record("expired", device_id, command_id=command.command_id)
-                    command = None
-                if command is not None:
-                    self._delivered[command.command_id] = (command, None)
-                    while len(self._delivered) > 256:
-                        self._delivered.popitem(last=False)
-                    self._record("delivered", device_id, command_id=command.command_id)
-                    self._last_poll[device_id] = now
-                    return command.wire(now)
-                if now >= deadline:
-                    self._last_poll[device_id] = now
-                    return None
-                pending = self._pending.get(device_id)
-                wake = deadline if pending is None else min(deadline, pending.expires_at)
-                self._cond.wait(max(0.01, wake - now))
+            if self._active_polls >= MAX_ACTIVE_POLLS:
+                raise RemoteControlError("too_many_polls", "too many phones are waiting")
+            generation = self._poll_generation.get(device_id, 0) + 1
+            self._poll_generation[device_id] = generation
+            self._cond.notify_all()  # supersede this device's older poll
+            self._active_polls += 1
+            try:
+                return self._wait_for_command(device_id, timeout, generation)
+            finally:
+                self._active_polls -= 1
 
-    def report(self, device_id: str, value: dict[str, object]) -> DeviceControlStatus:
+    def _wait_for_command(
+        self, device_id: str, timeout: float, generation: int
+    ) -> dict[str, object] | None:
+        deadline = self._clock() + timeout
+        self._last_poll[device_id] = self._clock()
+        while True:
+            now = self._clock()
+            if not self._is_active(device_id):
+                self._pending.pop(device_id, None)
+                raise RemoteControlError("device_revoked", "device is not paired")
+            if self._closed or self._poll_generation.get(device_id) != generation:
+                return None
+            command = self._pending.pop(device_id, None)
+            if command is not None and command.expires_at <= now:
+                self._record("expired", device_id, command_id=command.command_id)
+                command = None
+            if command is not None:
+                self._delivered[command.command_id] = (command, None)
+                while len(self._delivered) > 256:
+                    self._delivered.popitem(last=False)
+                self._record("delivered", device_id, command_id=command.command_id)
+                self._last_poll[device_id] = now
+                return command.wire(now)
+            if now >= deadline:
+                self._last_poll[device_id] = now
+                return None
+            pending = self._pending.get(device_id)
+            wake = deadline if pending is None else min(deadline, pending.expires_at)
+            self._cond.wait(max(0.01, wake - now))
+
+    def _report(self, device_id: str, value: dict[str, object]) -> DeviceControlStatus:
         with self._cond:
             status = parse_status(value, received_at=self._clock())
             result = status.last_result

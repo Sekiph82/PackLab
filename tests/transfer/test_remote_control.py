@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 from tests.transfer.test_loopback_receiver import _context, _identity_or_skip, _pair
 
 import packlab_studio.receiver as receiver_module
+import packlab_studio.remote_control as remote_control
 from packlab_studio.receiver import PackLabReceiver
 from packlab_studio.remote_control import (
     COMMAND_TTL_SECONDS,
@@ -207,3 +209,57 @@ def test_command_expires_after_ten_seconds(tmp_path: Path) -> None:
     assert hub.issue("d", "capture").action == "capture"
     with pytest.raises(RemoteControlError, match="bad_request"):
         hub.issue("d", "shutdown")
+
+
+def _wait_for_polls(hub: RemoteControlHub, count: int) -> None:
+    for _ in range(500):
+        if hub._active_polls >= count:
+            return
+        time.sleep(0.01)
+    raise AssertionError("poll did not start")
+
+
+def test_newer_poll_supersedes_older_and_polls_are_capped(monkeypatch) -> None:
+    hub = RemoteControlHub(is_active=lambda _: True)
+    results: list[object] = []
+    first = threading.Thread(target=lambda: results.append(hub.next_command("d", timeout=20)))
+    first.start()
+    _wait_for_polls(hub, 1)
+    # A second poll from the same phone ends the first with "no command" (204) at once.
+    second = threading.Thread(target=lambda: results.append(hub.next_command("d", timeout=20)))
+    second.start()
+    first.join(timeout=5)
+    assert not first.is_alive() and results == [None]
+    # Only the newest poll receives the command.
+    command = hub.issue("d", "capture")
+    second.join(timeout=5)
+    assert isinstance(results[1], dict) and results[1]["command_id"] == command.command_id
+    monkeypatch.setattr(remote_control, "MAX_ACTIVE_POLLS", 1)
+    waiting = threading.Thread(target=lambda: hub.next_command("other", timeout=1))
+    waiting.start()
+    _wait_for_polls(hub, 1)
+    with pytest.raises(RemoteControlError, match="too_many_polls"):
+        hub.next_command("d", timeout=0)
+    waiting.join(timeout=5)
+
+
+def test_control_log_rotates_and_is_written_outside_the_lock(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(remote_control, "MAX_LOG_BYTES", 200)
+    log = tmp_path / "remote-control-log.jsonl"
+    hub = RemoteControlHub(is_active=lambda _: True, log_path=log)
+    hub.next_command("d", timeout=0)
+    real_open = Path.open
+
+    def guarded_open(self, *args, **kwargs):
+        assert not hub._cond._is_owned(), "log written while holding the hub lock"
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", guarded_open)
+    for _ in range(6):
+        command = hub.issue("d", "capture")
+        delivered = hub.next_command("d", timeout=0)
+        assert delivered is not None and delivered["command_id"] == command.command_id
+    rotated = tmp_path / "remote-control-log.jsonl.1"
+    assert rotated.exists() and log.exists()
+    assert log.stat().st_size < 400 and rotated.stat().st_size < 400
+    assert not list(tmp_path.glob("*.jsonl.2"))

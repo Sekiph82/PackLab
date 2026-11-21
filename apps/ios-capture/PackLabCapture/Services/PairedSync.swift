@@ -326,15 +326,14 @@ public struct RemoteControlStatus: Codable, Sendable, Equatable {
 @MainActor
 public final class RemoteCaptureController: ObservableObject {
     public static let shared = RemoteCaptureController()
-    public nonisolated static let allowedKey = "packlab.remoteCaptureAllowed"
-    @Published public var enabled: Bool { didSet { defaults.set(enabled, forKey: Self.allowedKey) } }
+    /// Never persisted: every app launch starts with remote capture off (security review LOW-3).
+    @Published public var enabled = false
     @Published public private(set) var connection = "off"
     @Published public private(set) var lastResult: RemoteCommandResult?
     /// The active scan, or nil when none (bound by the capture screen).
     public var scan: @MainActor () -> RemoteScanSnapshot? = { nil }
     /// Runs an accepted request through the production capture / finalize path.
     public var perform: @MainActor (RemoteCommand) async -> RemoteCommandResult = { RemoteCommandResult.refused($0, "not_ready", "the capture screen is not ready") }
-    private let defaults: UserDefaults
     private let credential: @MainActor () -> DeviceCredential?
     private var executed: [String] = []
     private var poller: URLSessionTransferClient?
@@ -343,10 +342,8 @@ public final class RemoteCaptureController: ObservableObject {
     private var pushing = false
     private var loops: [Task<Void, Never>] = []
 
-    public init(defaults: UserDefaults = .standard, credential: @escaping @MainActor () -> DeviceCredential? = { DeviceCredentialStore.load() }) {
-        self.defaults = defaults
+    public init(credential: @escaping @MainActor () -> DeviceCredential? = { DeviceCredentialStore.load() }) {
         self.credential = credential
-        _enabled = Published(initialValue: defaults.bool(forKey: Self.allowedKey))
     }
 
     public var currentStatus: RemoteControlStatus { RemoteControlStatus(controlEnabled: enabled, scan: scan(), lastResult: lastResult) }
