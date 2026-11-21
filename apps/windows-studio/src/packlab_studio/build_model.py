@@ -67,8 +67,9 @@ SUPPORTED_COLMAP_VERSIONS = ("4.2.1",)
 # feature extraction (COLMAP 4.2.1 numbers images in completion order otherwise; measured
 # +25 s on Test-333, then keypoints and descriptors are bit-identical), a single-threaded
 # mapper (threaded bundle adjustment sums in a varying order) and sorted image order.
-# Not fixed, documented instead: CPU matching uses an approximate (FAISS) index whose matches
-# differ run to run (the exact brute-force matcher took 704 s instead of 38 s), and OpenMVS
+# Three Test-333 builds then gave bit-identical sparse models. Not fixed, documented: CPU
+# matching uses an approximate (FAISS) index that is not guaranteed repeatable (one standalone
+# repeat differed; the exact brute-force matcher took 704 s instead of 38 s), and OpenMVS
 # 2.4.0 has no seed option (densify of one identical scene gave 167,891 vs 168,892 points).
 RANDOM_SEED = 0
 EXTRACTION_THREADS = 1
