@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -60,6 +61,10 @@ class CaptureInboxView(QWidget):
             lambda parent: QFileDialog.getOpenFileName(
                 parent, "Import PackScan", "", "PackScan packages (*.packscan)"
             )[0]
+        )
+        # Test seam: Finish scan closes the phone's scan, so it asks first.
+        self._confirm: Callable[[QWidget, str], bool] = lambda parent, text: (
+            QMessageBox.question(parent, "Finish scan", text) == QMessageBox.StandardButton.Yes
         )
         self.offer: PairingOffer | None = None
         self._shown_records: list[object] | None = None
@@ -293,6 +298,10 @@ class CaptureInboxView(QWidget):
     def remote_command(self, action: str) -> None:
         session = self.session
         if session is None or self._remote_device is None:
+            return
+        if action == "finish" and not self._confirm(
+            self, "Finish the scan on the phone now? It is finalized and sent to PackLab."
+        ):
             return
         try:
             session.receiver.control.issue(self._remote_device, action)

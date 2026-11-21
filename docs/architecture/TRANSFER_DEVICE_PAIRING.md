@@ -48,7 +48,7 @@ forget the stored pairing and stop retrying; Send to PackLab then pairs again.
 ## Remote capture control (PL-0429)
 
 Same trust model, phone-initiated: while a scan is active and the operator chose
-More > Allow PackLab to trigger captures (default off, an on-screen purple indicator stops
+More > Allow PackLab to trigger captures (off at every app launch, an on-screen purple indicator stops
 it), the phone long-polls `GET /v1/control/next` and pushes `POST /v1/control/status` with
 its device session token. Studio's Capture Inbox > Remote capture shows the pushed status
 and offers Capture now / Finish scan; each is a one-shot command (10 s expiry, one pending

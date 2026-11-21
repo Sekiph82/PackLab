@@ -4355,10 +4355,7 @@ final class PackLabCaptureTests: XCTestCase {
     /// a scan is active and the request is fresh and new; otherwise it is refused unexecuted.
     @MainActor
     func testPL0429RemoteCommandGatesOnThePhone() async throws {
-        let suite = "pl0429-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let controller = RemoteCaptureController(defaults: defaults, credential: { nil })
+        let controller = RemoteCaptureController(credential: { nil })
         XCTAssertFalse(controller.enabled, "remote capture is off by default")
         // @MainActor closures are Sendable: shared test state lives in a main-actor box.
         let box = RemoteTestBox()
@@ -4371,7 +4368,8 @@ final class PackLabCaptureTests: XCTestCase {
         let disabled = await controller.handle(capture)
         XCTAssertEqual(disabled.reasons, ["remote_control_disabled"])
         controller.enabled = true
-        XCTAssertTrue(defaults.bool(forKey: RemoteCaptureController.allowedKey))
+        // Launch reset: a fresh controller (next app launch) starts off again, nothing persisted.
+        XCTAssertFalse(RemoteCaptureController(credential: { nil }).enabled)
         let noScan = await controller.handle(capture)
         XCTAssertEqual(noScan.reasons, ["no_active_scan"])
         box.snapshot = RemoteScanSnapshot(scanName: "Bottle", coverageCaptured: 2, coverageTotal: 16, instruction: "Hold here — tap Manual Capture")
