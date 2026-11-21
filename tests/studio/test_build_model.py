@@ -316,6 +316,70 @@ def test_real_command_plan_is_a_valid_orchestration_plan(tmp_path) -> None:
     stages = backend.stages(tmp_path, "working/reconstruction/r1", {})
     assert tuple(stage.stage_id for stage in stages) == STAGE_ORDER
     assert all(stage.configuration["max_image_size"] == 2000 for stage in stages)
+    # PL-0463: seeds and thread counts are part of every stage's recorded configuration.
+    assert all(
+        stage.configuration[key] == value
+        for stage in stages
+        for key, value in build_model.DETERMINISM.items()
+    )
+
+
+def test_command_plan_fixes_colmap_seeds_and_mapper_threads(monkeypatch, tmp_path) -> None:
+    backend = ColmapOpenMvsBackend(
+        tmp_path / "colmap.exe",
+        {
+            key: tmp_path / f"{key}.exe"
+            for key in (
+                "interface_colmap",
+                "densify_point_cloud",
+                "reconstruct_mesh",
+                "refine_mesh",
+                "texture_mesh",
+            )
+        },
+        ffmpeg=None,
+    )
+    asset = "working/reconstruction/r1"
+    commands: dict[str, list[tuple[str, ...]]] = {}
+
+    def record(stage_id, planned, cancel):
+        commands[stage_id] = [tuple(args) for args, _cwd in planned]
+        return ReconstructionStageResult(stage_id, StageStatus.FAILED, 1, 0.0, "", "")
+
+    monkeypatch.setattr(build_model, "_run_commands", record)
+    copied: list[str] = []
+    monkeypatch.setattr(build_model.shutil, "copyfile", lambda s, d: copied.append(Path(s).name))
+    context = type(
+        "Context",
+        (),
+        {
+            "cancel": None,
+            "job": type(
+                "Job",
+                (),
+                {
+                    "inputs": type(
+                        "Inputs",
+                        (),
+                        {"image_asset_ids": tuple(f"{asset}/inputs/{n}.jpg" for n in "bac")},
+                    )
+                },
+            ),
+        },
+    )
+    stages = {stage.stage_id: stage for stage in backend.stages(tmp_path, asset, {})}
+    for stage_id in ("feature-extraction", "matching", "sparse-mapping"):
+        stages[stage_id].execute(context)  # type: ignore[arg-type]
+    assert copied == ["a.jpg", "b.jpg", "c.jpg"]  # sorted, not package order
+
+    def option(stage_id: str, name: str) -> str:
+        args = commands[stage_id][-1]
+        return args[args.index(name) + 1]
+
+    assert option("feature-extraction", "--default_random_seed") == "0"
+    assert option("matching", "--TwoViewGeometry.random_seed") == "0"
+    assert option("sparse-mapping", "--Mapper.random_seed") == "0"
+    assert option("sparse-mapping", "--Mapper.num_threads") == "1"
 
 
 def _second_package(path: Path, repo_root: Path) -> Path:

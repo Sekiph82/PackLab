@@ -1,6 +1,6 @@
 """Measure & Design glue: built model -> object-only -> scale/upright -> mm -> Scan Master -> Design Model.
 
-Geometry primitives come from already-installed libraries (open3d plane RANSAC and DBSCAN,
+Geometry primitives come from already-installed libraries (seeded numpy plane RANSAC, open3d DBSCAN,
 OpenCV through ``calibration.marker_detection``). Every authority decision stays in core:
 marker scale (``estimate_reconstruction_scale`` + ``create_scale_provenance``), dimensions
 (``measure_bounding_dimensions``), uncertainty (``propagate_measurement_uncertainty``), the
@@ -107,7 +107,7 @@ from packlab_core.scan_master_profile import extract_scan_master_vertical_profil
 
 from .scan_master_promotion import ScanMasterPromotionRequest
 
-ISOLATION_METHOD = "camera_lookat_base_plane_ransac_dbscan_cylinder_v1"
+ISOLATION_METHOD = "camera_lookat_base_plane_seeded_ransac_dbscan_cylinder_v2"
 TARGET_FRAME = "packlab_right_handed_x_right_y_front_z_up_v1"
 # A4 PackLab mat (assets/calibration/a4-packlab-calibration-mat.svg v1.0.1): AprilTag 36h11
 # IDs 0-3, nominal outer black square 40 mm, 100 mm reference bar for print checks.
@@ -364,6 +364,41 @@ class Isolation:
         )
 
 
+PLANE_RANSAC_SEED = 7
+PLANE_RANSAC_ITERATIONS = 2000
+
+
+def _fit_plane(points: np.ndarray, tolerance: float) -> tuple[np.ndarray, float, np.ndarray]:
+    """Seeded 3-point RANSAC plane + least-squares refit on its inliers.
+
+    Replaces open3d ``segment_plane``, whose multi-threaded sampling gave a different plane on
+    each run of the same file (PL-0462). Same input -> same plane, bit for bit.
+    """
+
+    rng = np.random.default_rng(PLANE_RANSAC_SEED)
+    samples = points[rng.integers(0, len(points), (PLANE_RANSAC_ITERATIONS, 3))]
+    normals = np.cross(samples[:, 1] - samples[:, 0], samples[:, 2] - samples[:, 0])
+    lengths = np.linalg.norm(normals, axis=1)
+    valid = lengths > 1e-12
+    normals, samples = normals[valid] / lengths[valid, None], samples[valid]
+    offsets = -np.einsum("ij,ij->i", normals, samples[:, 0])
+    best_count, best = -1, 0
+    for start in range(0, len(normals), 100):  # 100 planes x N points per batch
+        counts = (
+            np.abs(points @ normals[start : start + 100].T + offsets[start : start + 100])
+            < tolerance
+        ).sum(axis=0)
+        index = int(np.argmax(counts))
+        if counts[index] > best_count:
+            best_count, best = int(counts[index]), start + index
+    inliers = np.nonzero(np.abs(points @ normals[best] + offsets[best]) < tolerance)[0]
+    if len(inliers) < 3:
+        return normals[best], float(offsets[best]), inliers
+    centroid = points[inliers].mean(axis=0)
+    normal = np.linalg.svd(points[inliers] - centroid, full_matrices=False)[2][2]
+    return normal, float(-normal @ centroid), inliers
+
+
 def isolate_object(model: LoadedModel, cameras: tuple[CameraPose, ...] = ()) -> Isolation:
     """Base plane + cluster above the plane nearest the object centre.
 
@@ -388,16 +423,10 @@ def isolate_object(model: LoadedModel, cameras: tuple[CameraPose, ...] = ()) -> 
     near = np.nonzero(np.linalg.norm(points - anchor, axis=1) < 0.6 * scale)[0]
     if len(near) < 50:
         near = np.arange(len(points))
-    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points[near]))
     tolerance = 0.005 * scale
-    o3d.utility.random.seed(7)
-    plane, inliers = cloud.segment_plane(tolerance, 3, 2000)
+    normal, offset, inliers = _fit_plane(points[near], tolerance)
     if len(inliers) < 30:
         raise MeasureDesignError("no support plane (table/mat) found under the object")
-    normal = np.asarray(plane[:3], dtype=np.float64)
-    offset = float(plane[3])
-    length = float(np.linalg.norm(normal))
-    normal, offset = normal / length, offset / length
     heights = points[near] @ normal + offset
     if cameras:
         up_vote = float(np.median([c.center @ normal + offset for c in cameras]))
@@ -1142,25 +1171,117 @@ class DesignState:
 
 
 # Owner review may relax the core revolve policy only to these fixed bounds; the policy
-# is hashed into the recommendation id. A scan must still be round about the measured
-# axis (axis-centred radial CV <= 5 %); partial rings drag core's centroid-based CV up.
+# is hashed into the recommendation id. A scan must still be round about its axis
+# (radial CV <= 5 %); partial rings drag core's centroid-based CV up.
 OWNER_REVIEW_MAX_AXIS_CV = 0.05
 OWNER_REVIEW_MIN_ANGULAR_COVERAGE = 0.60
 OWNER_REVIEW_MAX_SECTION_CV = 0.45
+# PL-0462 roundness evidence. The vertical axis is a seeded least-median-of-squares circle
+# fit to the side band (15-85 % of height: no base contact band, no lid face), so a few
+# stray points or a footprint-centre bias of ~2 mm no longer decide the gate. The CV is then
+# measured per 10 % slice on ALL slice points except a fixed worst 5 % of radial residuals;
+# a slice counts only with >= 25 % of the circumference (9 of 36 bins of 10 deg) observed.
+ROUNDNESS_METHOD = "lmeds_vertical_axis_side_band_15_85_slices_trim05_cov025_v1"
+ROUNDNESS_SEED = 0
+ROUNDNESS_TRIM = 0.05
+ROUNDNESS_MIN_SLICE_COVERAGE = 0.25
+ROUNDNESS_MIN_SLICES = 3
+SIDE_RECAPTURE_ADVICE = (
+    "The side of the package is not covered well enough — take more photos from the side "
+    "at middle height, all the way around, then rebuild."
+)
 
 
-def axis_radial_cv(mesh: TriangleMeshData) -> float:
-    """Worst radial CV about the z axis over body slices (15-85% of height)."""
+@dataclass(frozen=True)
+class AxisRoundness:
+    method: str
+    axis_xy_mm: tuple[float, float]  # fitted axis relative to the Scan Master z axis
+    radius_mm: float
+    radial_cv: float  # worst trimmed slice CV about the fitted axis
+    slices_used: int
+    slices_total: int
+    axis_inlier_fraction: float  # side-band points within 3 robust sigma of the circle
 
-    vertices = np.asarray(mesh.vertices)
-    radial = np.linalg.norm(vertices[:, :2], axis=1)
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "method": self.method,
+            "seed": ROUNDNESS_SEED,
+            "trim_fraction": ROUNDNESS_TRIM,
+            "min_slice_coverage": ROUNDNESS_MIN_SLICE_COVERAGE,
+            "axis_xy_mm": [round(value, 4) for value in self.axis_xy_mm],
+            "radius_mm": round(self.radius_mm, 4),
+            "radial_cv": round(self.radial_cv, 5),
+            "slices_used": self.slices_used,
+            "slices_total": self.slices_total,
+            "axis_inlier_fraction": round(self.axis_inlier_fraction, 4),
+        }
+
+
+def _circle_through(points: np.ndarray) -> np.ndarray | None:
+    (ax, ay), (bx, by), (cx, cy) = points
+    d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    if abs(d) < 1e-12:
+        return None
+    a, b, c = ax * ax + ay * ay, bx * bx + by * by, cx * cx + cy * cy
+    return np.array(
+        [
+            (a * (by - cy) + b * (cy - ay) + c * (ay - by)) / d,
+            (a * (cx - bx) + b * (ax - cx) + c * (bx - ax)) / d,
+        ]
+    )
+
+
+def robust_axis_roundness(mesh: TriangleMeshData) -> AxisRoundness:
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
     top = float(vertices[:, 2].max())
-    worst = 0.0
+    band = vertices[(vertices[:, 2] >= 0.15 * top) & (vertices[:, 2] < 0.85 * top), :2]
+    if len(band) < 8:
+        return AxisRoundness(ROUNDNESS_METHOD, (0.0, 0.0), 0.0, math.inf, 0, 5, 0.0)
+    rng = np.random.default_rng(ROUNDNESS_SEED)
+    search = band[rng.choice(len(band), min(len(band), 5000), replace=False)]
+    centre, best = np.zeros(2), math.inf
+    for _ in range(500):  # least median of squares over 3-point circles
+        candidate = _circle_through(search[rng.choice(len(search), 3, replace=False)])
+        if candidate is None:
+            continue
+        radii = np.linalg.norm(search - candidate, axis=1)
+        median = float(np.median(np.abs(radii - np.median(radii))))
+        if median < best:
+            centre, best = candidate, median
+    radii = np.linalg.norm(band - centre, axis=1)
+    inliers = np.abs(radii - np.median(radii)) <= max(
+        3 * 1.4826 * best, 0.002 * float(np.median(radii))
+    )
+    # Least-squares (Kasa) refit on the inliers.
+    solution = np.linalg.lstsq(
+        np.c_[2 * band[inliers], np.ones(int(inliers.sum()))],
+        (band[inliers] ** 2).sum(axis=1),
+        rcond=None,
+    )[0]
+    centre = solution[:2]
+    radius = math.sqrt(max(float(solution[2] + centre @ centre), 0.0))
+    worst, used = 0.0, 0
     for low in np.linspace(0.15, 0.75, 5) * top:
-        ring = radial[(vertices[:, 2] >= low) & (vertices[:, 2] < low + 0.1 * top)]
-        if len(ring) >= 8:
-            worst = max(worst, float(np.std(ring) / np.mean(ring)))
-    return worst
+        ring = vertices[(vertices[:, 2] >= low) & (vertices[:, 2] < low + 0.1 * top), :2] - centre
+        if len(ring) < 8:
+            continue
+        bins = np.floor((np.arctan2(ring[:, 1], ring[:, 0]) + math.pi) / math.tau * 36) % 36
+        if len(np.unique(bins)) / 36 < ROUNDNESS_MIN_SLICE_COVERAGE:
+            continue
+        radial = np.linalg.norm(ring, axis=1)
+        residual = np.abs(radial - np.median(radial))
+        kept = radial[residual <= np.quantile(residual, 1 - ROUNDNESS_TRIM)]
+        worst = max(worst, float(np.std(kept) / np.mean(kept)))
+        used += 1
+    return AxisRoundness(
+        ROUNDNESS_METHOD,
+        (float(centre[0]), float(centre[1])),
+        radius,
+        worst if used else math.inf,
+        used,
+        5,
+        float(inliers.mean()),
+    )
 
 
 def fit_design_model(
@@ -1249,21 +1370,32 @@ def fit_design_model(
         # Core section CV is centred on each section's centroid, which a partial ring drags
         # off-axis. Allow an owner-reviewed, recorded policy only when the scan really is round
         # about the measured axis.
-        axis_cv = axis_radial_cv(scan_master.mesh)
-        sections = strategy.section_evidence
-        if axis_cv > OWNER_REVIEW_MAX_AXIS_CV or len(sections) < 3:
+        roundness = robust_axis_roundness(scan_master.mesh)
+        if roundness.slices_used < ROUNDNESS_MIN_SLICES:
             raise MeasureDesignError(
-                f"not round about the measured axis (radial CV {axis_cv:.3f}); recapture"
+                f"cannot judge roundness: only {roundness.slices_used} of "
+                f"{roundness.slices_total} side slices show at least a quarter of the "
+                f"circumference. {SIDE_RECAPTURE_ADVICE}"
+            )
+        if roundness.radial_cv > OWNER_REVIEW_MAX_AXIS_CV or len(strategy.section_evidence) < 3:
+            raise MeasureDesignError(
+                f"not round about the measured axis (radial CV {roundness.radial_cv:.3f} > "
+                f"{OWNER_REVIEW_MAX_AXIS_CV} on the side wall, "
+                f"{roundness.axis_inlier_fraction:.0%} of side points on one circle). "
+                "Either the package is not round, or "
+                + SIDE_RECAPTURE_ADVICE[0].lower()
+                + SIDE_RECAPTURE_ADVICE[1:]
             )
         policy = FittingStrategyPolicy(
             minimum_angular_coverage=OWNER_REVIEW_MIN_ANGULAR_COVERAGE,
             maximum_axisymmetric_radial_cv=OWNER_REVIEW_MAX_SECTION_CV,
         )
+        evidence = json.dumps(roundness.as_dict(), sort_keys=True, separators=(",", ":"))
         strategy = recommend_fitting_strategy(
             scan_master,
             expected_scan_master_revision_id=scan_master.revision_id,
             actor_id=actor_id,
-            reason=f"Owner-reviewed revolve policy; axis-centred radial CV {axis_cv:.3f}.",
+            reason=f"Owner-reviewed revolve policy; roundness {evidence}.",
             created_at_utc=created,
             policy=policy,
             upright_axis=PrincipalAxis.Z,
@@ -1271,15 +1403,26 @@ def fit_design_model(
         notes.append(
             f"owner-reviewed strategy policy: angular coverage >= "
             f"{policy.minimum_angular_coverage}, section CV <= "
-            f"{policy.maximum_axisymmetric_radial_cv} (axis-centred radial CV {axis_cv:.3f})"
+            f"{policy.maximum_axisymmetric_radial_cv} (radial CV {roundness.radial_cv:.3f} "
+            f"about a robust axis {math.hypot(*roundness.axis_xy_mm):.1f} mm from the "
+            f"measured centre, {roundness.slices_used}/{roundness.slices_total} side slices, "
+            f"{roundness.axis_inlier_fraction:.0%} axis inliers; {roundness.method})"
         )
     if strategy.strategy is not FittingStrategy.AXISYMMETRIC_REVOLVE:
+        sections = strategy.section_evidence
+        worst = (
+            f" Worst side section: {min(s.angular_coverage for s in sections):.0%} of the "
+            f"circumference seen, section CV "
+            f"{max(s.radial_coefficient_of_variation for s in sections):.2f}."
+            if sections
+            else ""
+        )
         raise MeasureDesignError(
             f"core fitting strategy is {strategy.strategy.value} "
             f"({', '.join(strategy.uncertainty_codes)}). "
             + (
                 f"Exceeds the owner-review bounds (coverage >= {OWNER_REVIEW_MIN_ANGULAR_COVERAGE},"
-                f" section CV <= {OWNER_REVIEW_MAX_SECTION_CV}); recapture."
+                f" section CV <= {OWNER_REVIEW_MAX_SECTION_CV}).{worst} {SIDE_RECAPTURE_ADVICE}"
                 if owner_review
                 else "Tick owner review to accept a partial scan as round, or recapture."
             )

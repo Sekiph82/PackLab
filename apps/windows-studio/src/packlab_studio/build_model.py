@@ -63,6 +63,19 @@ COPY_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 # The command plan uses COLMAP 4.x option names (FeatureExtraction.*, FeatureMatching.*);
 # 4.2.1 is the version it was verified with (Test-333) and the one PL-0444 bundles.
 SUPPORTED_COLMAP_VERSIONS = ("4.2.1",)
+# PL-0463 reproducibility: fixed COLMAP seeds (RANSAC + mapper sampling), a single-threaded
+# mapper (multi-threaded bundle adjustment sums in a varying order) and images processed in
+# sorted name order. OpenMVS 2.4.0 has no seed option and stays multi-threaded (single-
+# threaded densify is ~16x slower); its residual run-to-run spread is documented, not hidden.
+RANDOM_SEED = 0
+MAPPER_THREADS = 1
+OPENMVS_THREADS = 0  # 0 = all cores
+DETERMINISM: dict[str, object] = {
+    "colmap_random_seed": RANDOM_SEED,
+    "colmap_mapper_threads": MAPPER_THREADS,
+    "openmvs_max_threads": OPENMVS_THREADS,
+    "image_order": "sorted_working_name",
+}
 _COLMAP_VERSION = re.compile(r"COLMAP (\d+\.\d+\.\d+)")
 
 
@@ -346,10 +359,13 @@ class ColmapOpenMvsBackend:
         def features(context: ReconstructionStageContext) -> ReconstructionStageExecution:
             images.mkdir(parents=True, exist_ok=True)
             commands: list[tuple[Sequence[str], Path]] = []
-            sources = [
-                w / Path(item).relative_to(workspace_asset)
-                for item in context.job.inputs.image_asset_ids
-            ]
+            sources = sorted(
+                (
+                    w / Path(item).relative_to(workspace_asset)
+                    for item in context.job.inputs.image_asset_ids
+                ),
+                key=working_image_name,
+            )
             for source in sources:
                 suffix = source.suffix.lower()
                 if suffix in HEIC_SUFFIXES:
@@ -379,6 +395,8 @@ class ColmapOpenMvsBackend:
                         "0",
                         "--FeatureExtraction.max_image_size",
                         str(MAX_IMAGE_SIZE),
+                        "--default_random_seed",
+                        str(RANDOM_SEED),
                     ),
                     w,
                 )
@@ -399,6 +417,10 @@ class ColmapOpenMvsBackend:
                             str(database),
                             "--FeatureMatching.use_gpu",
                             "0",
+                            "--default_random_seed",
+                            str(RANDOM_SEED),
+                            "--TwoViewGeometry.random_seed",
+                            str(RANDOM_SEED),
                         ),
                         w,
                     )
@@ -422,6 +444,12 @@ class ColmapOpenMvsBackend:
                             str(images),
                             "--output_path",
                             str(sparse),
+                            "--default_random_seed",
+                            str(RANDOM_SEED),
+                            "--Mapper.random_seed",
+                            str(RANDOM_SEED),
+                            "--Mapper.num_threads",
+                            str(MAPPER_THREADS),
                         ),
                         w,
                     )
@@ -492,7 +520,7 @@ class ColmapOpenMvsBackend:
                             "--resolution-level",
                             "1",
                             "--max-threads",
-                            "0",
+                            str(OPENMVS_THREADS),
                         ),
                         mvs,
                     )
@@ -531,7 +559,7 @@ class ColmapOpenMvsBackend:
                             "--scales",
                             "1",
                             "--max-threads",
-                            "0",
+                            str(OPENMVS_THREADS),
                         ),
                         mvs,
                     )
@@ -563,7 +591,9 @@ class ColmapOpenMvsBackend:
             return done("texture-mesh", result, {"textured_mesh": mvs / "scene_textured.obj"})
 
         executors = (features, matching, mapping, conversion, densify, mesh, refine, texture)
-        return _definitions(executors, {"preset": BUILD_PRESET, "max_image_size": MAX_IMAGE_SIZE})
+        return _definitions(
+            executors, {"preset": BUILD_PRESET, "max_image_size": MAX_IMAGE_SIZE, **DETERMINISM}
+        )
 
 
 def _definitions(
@@ -767,7 +797,7 @@ class BuildModelController(QObject):
                     metadata.revision,
                     working_set.inputs,
                     ReconstructionBackendId.COLMAP_OPENMVS,
-                    configuration={"preset": BUILD_PRESET, "capture_id": capture_id},
+                    configuration={"preset": BUILD_PRESET, "capture_id": capture_id, **DETERMINISM},
                     requested_capabilities=(
                         ReconstructionCapability.SPARSE,
                         ReconstructionCapability.DENSE,
@@ -778,7 +808,7 @@ class BuildModelController(QObject):
                 workspace.relative_path,
                 provenance,
                 stages,
-                configuration={"preset": BUILD_PRESET},
+                configuration={"preset": BUILD_PRESET, **DETERMINISM},
             )
             execution = ReconstructionExecutionService(jobs, workspaces).execute(
                 job_id, workspace, request, cancel=token

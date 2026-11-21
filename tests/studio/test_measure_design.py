@@ -322,17 +322,38 @@ def test_unverified_mat_print_can_never_promote_to_metric_verified(tmp_path) -> 
         promote_scale_provenance(manual.provenance, evidence)
 
 
-def _ring_scan_master(*, radius_x: float, radius_y: float, arc: float):
+def _ring_scan_master(
+    *,
+    radius_x: float,
+    radius_y: float,
+    arc: float,
+    centre: tuple[float, float] = (0.0, 0.0),
+    noise: float = 0.0,
+    outliers: int = 0,
+    seed: int = 1,
+):
+    """Synthetic straight jar wall (40 mm tall); optional off-axis centre, radial noise
+    (mm, 1 sigma) and stray vertices pushed 4-6 mm outward (lid lip / background bleed)."""
+
     from packlab_core.geometry_adapter import TriangleMeshData
     from packlab_core.reconstruction import ScaleState
     from packlab_core.scan_master import ScanMasterRevision, mesh_sha256
 
     count = 64
     levels = [index * 1.25 for index in range(33)]  # 40 mm tall straight jar
+    rng = np.random.default_rng(seed)
+    bump = rng.normal(0.0, noise, 33 * (count + 1)) if noise else np.zeros(33 * (count + 1))
+    if outliers:
+        bump[rng.choice(len(bump), outliers, replace=False)] += rng.uniform(4.0, 6.0, outliers)
     vertices = [
-        (radius_x * math.cos(arc * i / count), radius_y * math.sin(arc * i / count), z)
-        for z in levels
-        for i in range(count + (0 if arc >= math.tau else 1))
+        (
+            centre[0] + (radius_x + bump[k]) * math.cos(arc * i / count),
+            centre[1] + (radius_y + bump[k]) * math.sin(arc * i / count),
+            z,
+        )
+        for k, (z, i) in enumerate(
+            (z, i) for z in levels for i in range(count + (0 if arc >= math.tau else 1))
+        )
     ]
     ring = count + (0 if arc >= math.tau else 1)
     faces = []
@@ -381,6 +402,64 @@ def test_owner_review_policy_has_fixed_bounds_and_refuses_outside_them() -> None
         md.fit_design_model(half, actor_id="owner", owner_review=True)
     assert md.OWNER_REVIEW_MIN_ANGULAR_COVERAGE == 0.60
     assert md.OWNER_REVIEW_MAX_SECTION_CV == 0.45
+
+
+def test_roundness_gate_is_robust_on_noisy_partial_off_axis_jars() -> None:
+    """PL-0462: a real-looking wall (2/3 seen, 0.3 mm noise, 2% stray points, axis 2.5 mm off
+    the measured centre) fits repeatably; the 0.05 gate itself is unchanged."""
+
+    assert md.OWNER_REVIEW_MAX_AXIS_CV == 0.05
+    jar = _ring_scan_master(
+        radius_x=36.0,
+        radius_y=36.0,
+        arc=math.tau * 2 / 3,
+        centre=(2.5, -0.5),
+        noise=0.3,
+        outliers=40,
+    )
+    # The old origin-centred CV fails this jar; the robust axis recovers the true centre.
+    vertices = np.asarray(jar.mesh.vertices)
+    body = vertices[(vertices[:, 2] >= 6) & (vertices[:, 2] < 34)]
+    radial = np.linalg.norm(body[:, :2], axis=1)
+    assert np.std(radial) / np.mean(radial) > 0.05
+    roundness = md.robust_axis_roundness(jar.mesh)
+    assert roundness == md.robust_axis_roundness(jar.mesh)  # seeded: same input, same answer
+    assert math.dist(roundness.axis_xy_mm, (2.5, -0.5)) < 0.3
+    assert abs(roundness.radius_mm - 36.0) < 0.3
+    assert roundness.radial_cv < 0.02 and roundness.slices_used == 5
+    assert 0.9 < roundness.axis_inlier_fraction < 1.0  # the stray points are not inliers
+    first = md.fit_design_model(jar, actor_id="owner", owner_review=True)
+    second = md.fit_design_model(jar, actor_id="owner", owner_review=True)
+    assert (first.height, first.diameter) == (second.height, second.diameter)
+    assert roundness.method in first.notes[-1] and "axis inliers" in first.notes[-1]
+    # A noisy partial OVAL is still refused, with the recapture advice in plain language.
+    oval = _ring_scan_master(
+        radius_x=40.0, radius_y=31.0, arc=math.tau * 2 / 3, centre=(2.5, -0.5), noise=0.3
+    )
+    with pytest.raises(md.MeasureDesignError, match="not round about the measured axis") as error:
+        md.fit_design_model(oval, actor_id="owner", owner_review=True)
+    assert "take more photos from the side at middle height" in str(error.value)
+    # A sliver of wall (1/8 of the ring) cannot be judged at all.
+    sliver = _ring_scan_master(radius_x=36.0, radius_y=36.0, arc=math.tau / 8, noise=0.3)
+    with pytest.raises(md.MeasureDesignError, match="cannot judge roundness") as error:
+        md.fit_design_model(sliver, actor_id="owner", owner_review=True)
+    assert "take more photos from the side" in str(error.value)
+
+
+def test_support_plane_fit_is_seeded_and_repeatable() -> None:
+    """PL-0462: open3d's threaded segment_plane gave a different plane per run of one file."""
+
+    rng = np.random.default_rng(3)
+    table = np.c_[rng.uniform(-1, 1, (4000, 2)), rng.normal(0.0, 0.001, 4000)]
+    clutter = rng.uniform(-1, 1, (1500, 3)) * [0.3, 0.3, 0.5] + [0, 0, 0.3]
+    rotation = np.array([[1.0, 0.0, 0.0], [0.0, 0.8, -0.6], [0.0, 0.6, 0.8]])  # local z -> up
+    points = np.vstack([table, clutter]) @ rotation
+    normal, offset, inliers = md._fit_plane(points, 0.004)
+    again = md._fit_plane(points, 0.004)
+    assert np.array_equal(normal, again[0]) and offset == again[1]
+    assert np.array_equal(inliers, again[2])
+    assert abs(abs(normal @ np.array([0.0, 0.6, 0.8])) - 1.0) < 1e-4
+    assert len(inliers) >= 3900
 
 
 # ---------------------------------------------------------------- PL-0447 / PL-0456
