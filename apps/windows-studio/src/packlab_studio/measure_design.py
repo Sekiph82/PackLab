@@ -1202,12 +1202,19 @@ OWNER_REVIEW_MAX_SECTION_CV = 0.45
 # stray points or a footprint-centre bias of ~2 mm no longer decide the gate. The CV is then
 # measured per 10 % slice over the outer-wall radius of each observed 10-degree bin (90th
 # percentile), dropping a fixed worst 5 % of bins; a slice counts only with >= 25 % of the
-# circumference (9 of 36 bins) observed.
-ROUNDNESS_METHOD = "lmeds_vertical_axis_side_band_15_85_outer_wall_bins_trim05_cov025_v1"
+# circumference (9 of 36 bins) observed. A bin is evidence only with >= 2 vertices: a single
+# vertex per bin on a barely photographed wall is reconstruction noise, and judging it made
+# rebuilds of one capture pass or fail at random. At least 4 of the 5 body slices (15-75 %
+# of height) must be judged: with 3, the verdict hinged on whether one marginal slice reached
+# 9 bins (8 real test-333 builds: 2-3 judged slices, never the upper body).
+ROUNDNESS_METHOD = (
+    "lmeds_vertical_axis_side_band_15_85_outer_wall_bins_min2_trim05_cov025_slices4_v2"
+)
 ROUNDNESS_SEED = 0
 ROUNDNESS_TRIM = 0.05
 ROUNDNESS_MIN_SLICE_COVERAGE = 0.25
-ROUNDNESS_MIN_SLICES = 3
+ROUNDNESS_MIN_SLICES = 4
+ROUNDNESS_MIN_BIN_VERTICES = 2
 SIDE_RECAPTURE_ADVICE = (
     "The side of the package is not covered well enough — take more photos from the side "
     "at middle height, all the way around, then rebuild."
@@ -1230,6 +1237,8 @@ class AxisRoundness:
             "seed": ROUNDNESS_SEED,
             "trim_fraction": ROUNDNESS_TRIM,
             "min_slice_coverage": ROUNDNESS_MIN_SLICE_COVERAGE,
+            "min_bin_vertices": ROUNDNESS_MIN_BIN_VERTICES,
+            "min_slices": ROUNDNESS_MIN_SLICES,
             "axis_xy_mm": [round(value, 4) for value in self.axis_xy_mm],
             "radius_mm": round(self.radius_mm, 4),
             "radial_cv": round(self.radial_cv, 5),
@@ -1294,7 +1303,8 @@ def robust_axis_roundness(mesh: TriangleMeshData) -> AxisRoundness:
         if len(ring) < 8:
             continue
         bins = np.floor((np.arctan2(ring[:, 1], ring[:, 0]) + math.pi) / math.tau * 36) % 36
-        occupied = np.unique(bins)
+        occupied, counts = np.unique(bins, return_counts=True)
+        occupied = occupied[counts >= ROUNDNESS_MIN_BIN_VERTICES]
         if len(occupied) / 36 < ROUNDNESS_MIN_SLICE_COVERAGE:
             continue
         radial = np.linalg.norm(ring, axis=1)
@@ -1405,9 +1415,10 @@ def fit_design_model(
         roundness = robust_axis_roundness(scan_master.mesh)
         if roundness.slices_used < ROUNDNESS_MIN_SLICES:
             raise MeasureDesignError(
-                f"cannot judge roundness: only {roundness.slices_used} of "
+                f"cannot judge roundness — only {roundness.slices_used} of "
                 f"{roundness.slices_total} side slices show at least a quarter of the "
-                f"circumference. {SIDE_RECAPTURE_ADVICE}"
+                f"circumference with >= {ROUNDNESS_MIN_BIN_VERTICES} points per 10° step. "
+                f"{SIDE_RECAPTURE_ADVICE}"
             )
         if roundness.radial_cv > OWNER_REVIEW_MAX_AXIS_CV or len(strategy.section_evidence) < 3:
             raise MeasureDesignError(

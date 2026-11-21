@@ -465,6 +465,23 @@ def test_roundness_gate_is_robust_on_noisy_partial_off_axis_jars() -> None:
     assert "take more photos from the side" in str(error.value)
 
 
+def test_single_vertex_bins_are_not_roundness_evidence() -> None:
+    """PL-0462: a wall seen as one vertex per 10-degree bin (the test-333 rebuilds) cannot be
+    judged, so rebuilds of one capture give the same refusal instead of a random verdict."""
+
+    from packlab_core.geometry_adapter import TriangleMeshData
+
+    rng = np.random.default_rng(5)
+    vertices = [(0.0, 0.0, 40.0)] + [
+        (36 * math.cos(a), 36 * math.sin(a), z)
+        for z in np.arange(0.5, 40, 4.0)  # one ring per 4 mm slice
+        for a in np.radians(np.arange(5, 240, 10)) + rng.normal(0, 0.01, 24)
+    ]
+    sparse = md.robust_axis_roundness(TriangleMeshData(tuple(vertices), ((0, 1, 2),)))
+    assert sparse.slices_used == 0 and sparse.method == md.ROUNDNESS_METHOD
+    assert "min2" in md.ROUNDNESS_METHOD
+
+
 def test_support_plane_fit_is_seeded_and_repeatable() -> None:
     """PL-0462: open3d's threaded segment_plane gave a different plane per run of one file."""
 
