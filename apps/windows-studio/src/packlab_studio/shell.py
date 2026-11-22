@@ -10,7 +10,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSettings, QStandardPaths, Qt, QTimer
+from PySide6.QtCore import QByteArray, QPoint, QSettings, QStandardPaths, Qt, QTimer
 from PySide6.QtGui import QActionGroup, QCloseEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
@@ -62,7 +62,13 @@ from .packaging_library_browser import (
     PackagingLibraryBrowserService,
     ProjectPreviewResolution,
 )
-from .preferences import PreferencesStore, WindowPreferences
+from .preferences import (
+    DEFAULT_GEOMETRY,
+    PreferencesStore,
+    WindowPreferences,
+    documents_folder,
+    sanitize_geometry,
+)
 from .project import ProjectManager
 from .receiver_session import ReceiverSession
 from .recovery import RecoveryItem, RecoveryManager, RecoveryStatus
@@ -79,6 +85,24 @@ _POINTER_LABELS = {
     "active_scan_master_revision_id": "Scan Master",
 }
 _RECOVERY_LABELS = {AUTOSAVE_DRAFT_JOB: "Unsaved Design Model edits (autosaved draft)"}
+# Restored geometry is the client area; keep room for the title bar and frame on screen (F5).
+_FRAME_TOP, _FRAME_EDGE = 40, 8
+_OPEN_PROJECT_HELP = (
+    "Choose File > Open Project… and pick the project folder (the one that contains "
+    "raw, working and .packlab-layout.json). If the folder is on a removable or network "
+    "drive, connect it first."
+)
+
+
+def project_display_name(root: str | Path) -> str:
+    """The project name from working/project.json; the folder name when unreadable (F6)."""
+
+    try:
+        value = json.loads((Path(root) / "working" / "project.json").read_text(encoding="utf-8"))
+        name = value.get("name") if isinstance(value, dict) else None
+    except (OSError, ValueError):
+        name = None
+    return name if isinstance(name, str) and name.strip() else Path(root).name or str(root)
 
 
 class RecoveryDialog(QDialog):
@@ -204,6 +228,8 @@ class StudioMainWindow(QMainWindow):
         self.recovery_items: tuple[RecoveryItem, ...] = ()
         self.recovery_dialog: RecoveryDialog | None = None
         self.portability_dialog: QMessageBox | None = None
+        self.error_dialog: QMessageBox | None = None
+        self._restored_geometry = DEFAULT_GEOMETRY
         self._recovery_project: str | None = None
         self.autosave_timer = QTimer(self)
         self.autosave_timer.setSingleShot(True)
@@ -317,10 +343,10 @@ class StudioMainWindow(QMainWindow):
     def _build_menus(self) -> None:
         # Injectable choosers keep the menu actions testable offscreen.
         self.choose_new_project_path: Callable[[], str] = lambda: QFileDialog.getSaveFileName(
-            self, "New project folder", str(Path.home()), "PackLab project folder (*)"
+            self, "New project folder", str(self.dialog_folder()), "PackLab project folder (*)"
         )[0]
         self.choose_open_project_path: Callable[[], str] = lambda: QFileDialog.getExistingDirectory(
-            self, "Open PackLab project"
+            self, "Open PackLab project", str(self.dialog_folder())
         )
         file_menu = self.menuBar().addMenu("&File")
         file_menu.setObjectName("packlab.menu.file")
@@ -329,6 +355,7 @@ class StudioMainWindow(QMainWindow):
             "&Open Project…", self._open_project_from_menu
         )
         self.recent_menu = file_menu.addMenu("Open &Recent")
+        self.recent_menu.setToolTipsVisible(True)
         self.close_project_action = file_menu.addAction(
             "&Close Project", self._close_project_from_menu
         )
@@ -409,7 +436,9 @@ class StudioMainWindow(QMainWindow):
         self.redo_action.setEnabled(self.project_manager.can_redo())
         self.recent_menu.clear()
         for item in self.recent_projects():
-            action = self.recent_menu.addAction(item)
+            action = self.recent_menu.addAction(project_display_name(item))
+            action.setToolTip(item)
+            action.setStatusTip(item)
             action.triggered.connect(partial(self._open_project_path, item))
         self.recent_menu.setEnabled(not self.recent_menu.isEmpty())
         name = None if self.project_manager.current is None else self.project_manager.current.name
@@ -419,19 +448,56 @@ class StudioMainWindow(QMainWindow):
     def _menu_status(self, text: str) -> None:
         self.statusBar().showMessage(text, 15000)
 
+    def dialog_folder(self) -> Path:
+        """Start folder for project dialogs: beside the open project, the last used folder,
+        else Documents/PackLab; never the bare user home with its dot-folders (F15)."""
+
+        layout = self.project_manager.layout
+        if layout is not None:
+            return layout.root.parent
+        if self._settings is not None:
+            last = str(self._settings.value("dialogs/last_folder", "") or "")
+            if last and Path(last).is_dir():
+                return Path(last)
+        return documents_folder()
+
+    def _remember_folder(self, chosen: str) -> None:
+        if self._settings is not None:
+            self._settings.setValue("dialogs/last_folder", str(Path(chosen).parent))
+
+    def show_error(self, title: str, reason: str, next_step: str) -> QMessageBox:
+        """A visible, non-blocking error with the reason and what to do next (F4)."""
+
+        box = QMessageBox(self)
+        box.setObjectName("packlab.dialog.error")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(title)
+        box.setText(reason)
+        box.setInformativeText(next_step)
+        box.open()
+        self.error_dialog = box
+        return box
+
     def _new_project_from_menu(self) -> None:
         chosen = self.choose_new_project_path()
         if not chosen:
             return
+        self._remember_folder(chosen)
         try:
             self.new_project(chosen, Path(chosen).name)
             self._menu_status(tr("Created project {path}").format(path=chosen))
         except Exception as error:
             self._menu_status(tr("New project failed: {error}").format(error=error))
+            self.show_error(
+                "New project failed",
+                f"PackLab could not create a project in\n{chosen}\n\nReason: {error}",
+                "Choose an empty folder you can write to, for example Documents\\PackLab.",
+            )
 
     def _open_project_from_menu(self) -> None:
         chosen = self.choose_open_project_path()
         if chosen:
+            self._remember_folder(chosen)
             self._open_project_path(chosen)
 
     def _open_project_path(self, path: str) -> None:
@@ -440,6 +506,11 @@ class StudioMainWindow(QMainWindow):
             self._menu_status(tr("Opened project {path}").format(path=path))
         except Exception as error:
             self._menu_status(tr("Open project failed: {error}").format(error=error))
+            self.show_error(
+                "Project could not be opened",
+                f"PackLab could not open\n{path}\n\nReason: {error}",
+                _OPEN_PROJECT_HELP,
+            )
 
     def _close_project_from_menu(self) -> None:
         try:
@@ -629,8 +700,13 @@ class StudioMainWindow(QMainWindow):
                 return self.project_manager.open_project(root)
             root.parent.mkdir(parents=True, exist_ok=True)
             return self.project_manager.new_project(root, "My scans")
-        except Exception as error:  # surfaced in the inbox; Studio stays usable
+        except Exception as error:  # surfaced in the inbox and a dialog; Studio stays usable
             self._inbox_note(f"Default project unavailable: {error}")
+            self.show_error(
+                "Your scans project could not be opened",
+                f"PackLab could not open its default project\n{root}\n\nReason: {error}",
+                _OPEN_PROJECT_HELP,
+            )
             return None
 
     def _inbox_note(self, text: str) -> None:
@@ -675,8 +751,18 @@ class StudioMainWindow(QMainWindow):
         if self.preferences is None:
             self.navigation_panel.select_route(Route.LIBRARY)
             return
-        saved = self.preferences.load(bounds=self._available_work_area or self._current_work_area())
-        self.setGeometry(*saved.geometry)
+        saved = self.preferences.load()
+        area = self._available_work_area or self._current_work_area(saved.geometry)
+        if area is not None:
+            ax, ay, aw, ah = area
+            area = (
+                ax + _FRAME_EDGE,
+                ay + _FRAME_TOP,
+                aw - 2 * _FRAME_EDGE,
+                ah - _FRAME_TOP - _FRAME_EDGE,
+            )
+        self._restored_geometry = sanitize_geometry(saved.geometry, bounds=area)
+        self.setGeometry(*self._restored_geometry)
         if saved.maximized:
             self.showMaximized()
         if saved.fullscreen:
@@ -700,16 +786,21 @@ class StudioMainWindow(QMainWindow):
             ):
                 dock.setFloating(False)
 
-    def _current_work_area(self) -> tuple[int, int, int, int] | None:
-        screens = QGuiApplication.screens()
-        if not screens:
+    def _current_work_area(
+        self, geometry: tuple[int, int, int, int]
+    ) -> tuple[int, int, int, int] | None:
+        """Available area of the screen holding the saved window centre, else the primary one.
+
+        One screen, not the union bounding box: in mixed multi-monitor layouts the union
+        contains regions no screen shows, which put title bars off-screen (F5)."""
+
+        x, y, width, height = geometry
+        screen = QGuiApplication.screenAt(QPoint(x + width // 2, y + height // 2))
+        screen = screen or QGuiApplication.primaryScreen()
+        if screen is None:
             return None
-        geometries = [screen.availableGeometry() for screen in screens]
-        left = min(rect.left() for rect in geometries)
-        top = min(rect.top() for rect in geometries)
-        right = max(rect.right() for rect in geometries)
-        bottom = max(rect.bottom() for rect in geometries)
-        return left, top, right - left + 1, bottom - top + 1
+        rect = screen.availableGeometry()
+        return rect.x(), rect.y(), rect.width(), rect.height()
 
     def _design_export_source(self) -> DesignModelExportSource | None:
         """Exports page Design Model: the active package-family part, else the fallback."""
@@ -852,9 +943,21 @@ class StudioMainWindow(QMainWindow):
         self.project_manager.close(allow_active_jobs=self._shutdown_requested)
         if self.preferences is not None:
             state = self.saveState().toBase64().toStdString()
+            # Normal (un-maximized) client geometry: x()/y() are the frame origin and drifted
+            # the window up by a title bar each restart; the maximized size is no restore size.
+            normal = (
+                self.normalGeometry()
+                if self.isMaximized() or self.isFullScreen()
+                else self.geometry()
+            )
+            geometry = (
+                (normal.x(), normal.y(), normal.width(), normal.height())
+                if normal.isValid()  # invalid when maximized before the first show
+                else self._restored_geometry
+            )
             self.preferences.save(
                 WindowPreferences(
-                    geometry=(self.x(), self.y(), self.width(), self.height()),
+                    geometry=geometry,
                     maximized=self.isMaximized(),
                     fullscreen=self.isFullScreen(),
                     dock_state=state,

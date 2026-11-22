@@ -44,13 +44,27 @@ def sanitize_geometry(
         return DEFAULT_GEOMETRY
     width = max(640, min(width, 10000))
     height = max(480, min(height, 10000))
-    if bounds is not None:
+    if bounds is not None:  # the whole window, title bar and close button included, fits (F5)
         bx, by, bw, bh = bounds
         width = min(width, max(640, bw))
         height = min(height, max(480, bh))
-        x = min(max(x, bx), bx + max(0, bw - 80))
-        y = min(max(y, by), by + max(0, bh - 80))
+        x = min(max(x, bx), bx + max(0, bw - width))
+        y = min(max(y, by), by + max(0, bh - height))
     return x, y, width, height
+
+
+def documents_folder() -> Path:
+    """Documents/PackLab (created): the start folder for file dialogs without a project (F15)."""
+
+    from PySide6.QtCore import QStandardPaths
+
+    documents = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DocumentsLocation)
+    folder = Path(documents or Path.home() / "Documents") / "PackLab"
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return Path(documents) if documents else Path.home()
+    return folder
 
 
 class PreferencesStore:

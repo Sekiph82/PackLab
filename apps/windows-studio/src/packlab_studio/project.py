@@ -879,7 +879,7 @@ class ProjectManager:
         except ProjectError:
             raise
         except (OSError, ValueError, ProjectLayoutError) as error:
-            raise ProjectError("project cannot be opened") from error
+            raise ProjectError(f"project cannot be opened: {error}") from error
         self.close()
         self.layout = layout
         self.metadata = metadata
