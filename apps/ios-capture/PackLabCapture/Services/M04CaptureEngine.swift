@@ -1754,13 +1754,14 @@ public struct OrbitGuidanceDial: View {
             }
             .frame(width: 100, height: 100)
             .accessibilityLabel("Orbit dial")
-            VStack(spacing: 4) {
+            // Five height chips must fit beside the 100 pt dial.
+            VStack(spacing: 2) {
                 ForEach(Array(snapshot.configuration.rings.reversed())) { ring in
                     let isTarget = ring.id == target?.ringID
                     let isCurrent = ring.id == current?.sector?.ringID
                     Text(ring.id)
                         .font(.caption2.weight(isTarget ? .bold : .regular))
-                        .frame(width: 58, height: 24)
+                        .frame(width: 58, height: 17)
                         .background((isTarget ? Color.blue : Color.gray.opacity(0.35)), in: RoundedRectangle(cornerRadius: 5))
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(isCurrent ? Color.white : Color.clear, lineWidth: 2))
                         // Optional rings (e.g. lower) are dimmed: they never block completion.

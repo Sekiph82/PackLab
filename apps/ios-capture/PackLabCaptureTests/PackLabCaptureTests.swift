@@ -2680,24 +2680,28 @@ final class PackLabCaptureTests: XCTestCase {
     }
 
     func testPL0105NearDuplicateDetectionPreservesUsefulParallaxAndFailsSafeWithoutPose() {
+        // Duplicate rules are tested on the previous single middle ring (elevation 0 in range).
+        let legacy = OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15)])
         let base = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
         let accepted = DuplicateEvidence(captureID: "accepted", pose: base, visualSignature: [1, 2, 3])
-        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", pose: base, visualSignature: [1, 2, 3]), accepted: [accepted])
+        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", pose: base, visualSignature: [1, 2, 3]), accepted: [accepted], configuration: legacy)
         XCTAssertTrue(duplicate.isDuplicate)
         let parallax = PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: 0.2, y: 0, z: -1).values, tracking: .normal)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "parallax", pose: parallax), accepted: [accepted]).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "parallax", pose: parallax), accepted: [accepted], configuration: legacy).isDuplicate)
         let stale = PoseSample(timestamp: 3, transform: base.transform, tracking: .limited)
-        XCTAssertEqual(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "stale", pose: stale), accepted: [accepted]).reasonCode, "duplicate_pose_unavailable")
+        XCTAssertEqual(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "stale", pose: stale), accepted: [accepted], configuration: legacy).reasonCode, "duplicate_pose_unavailable")
     }
 
     func testPL0105AcceptedPoseBindingDuplicateDecisionFeedsAutoGate() {
+        // Duplicate rules are tested on the previous single middle ring (elevation 0 in range).
+        let legacy = OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15)])
         let base = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
         let binding = acceptedPoseBinding(captureID: "accepted", pose: base)
-        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: acceptedPoseBinding(captureID: "candidate", pose: base), visualSignature: [1, 2, 3]), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding, visualSignature: [1, 2, 3])])
+        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: acceptedPoseBinding(captureID: "candidate", pose: base), visualSignature: [1, 2, 3]), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding, visualSignature: [1, 2, 3])], configuration: legacy)
         XCTAssertTrue(duplicate.isDuplicate)
         XCTAssertEqual(duplicate.reasonCode, "near_duplicate_candidate")
         let stale = PoseCaptureBinding(captureID: "candidate", captureTimestamp: 1, aligned: AlignedPose(sample: nil, delta: 1, status: "stale"))
-        let useful = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: stale), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding)])
+        let useful = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: stale), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding)], configuration: legacy)
         XCTAssertFalse(useful.isDuplicate)
         XCTAssertEqual(useful.reasonCode, "duplicate_pose_unavailable")
         let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
@@ -2714,30 +2718,32 @@ final class PackLabCaptureTests: XCTestCase {
     }
 
     func testPL0105DuplicateDetectorProvesTranslationElevationAndSignatureBoundaries() {
+        // Duplicate rules are tested on the previous single middle ring (elevation 0 in range).
+        let legacy = OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15)])
         let basePose = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
         let accepted = DuplicateEvidence(captureID: "accepted", pose: basePose, visualSignature: [0, 0, 0, 0])
 
         let translationPolicy = DuplicatePolicy(maximumTranslationMeters: 0.04, maximumElevationDifference: 0, maximumSignatureDistance: 0)
         let atTranslation = PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: 0.04, y: 0, z: -1).values, tracking: .normal)
         let pastTranslation = PoseSample(timestamp: 3, transform: CoordinateTransform.translation(x: 0.040001, y: 0, z: -1).values, tracking: .normal)
-        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "translation-at", pose: atTranslation), accepted: [accepted], policy: translationPolicy).isDuplicate)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "translation-past", pose: pastTranslation), accepted: [accepted], policy: translationPolicy).isDuplicate)
+        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "translation-at", pose: atTranslation), accepted: [accepted], configuration: legacy, policy: translationPolicy).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "translation-past", pose: pastTranslation), accepted: [accepted], configuration: legacy, policy: translationPolicy).isDuplicate)
 
         let elevationPolicy = DuplicatePolicy(maximumTranslationMeters: 1, maximumElevationDifference: 4, maximumSignatureDistance: 0)
         let atElevation = PoseSample(timestamp: 4, transform: CoordinateTransform.translation(x: 0, y: tan(4 * Double.pi / 180), z: -1).values, tracking: .normal)
         let pastElevation = PoseSample(timestamp: 5, transform: CoordinateTransform.translation(x: 0, y: tan(4.0001 * Double.pi / 180), z: -1).values, tracking: .normal)
-        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-at", pose: atElevation), accepted: [accepted], policy: elevationPolicy).isDuplicate)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-past", pose: pastElevation), accepted: [accepted], policy: elevationPolicy).isDuplicate)
+        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-at", pose: atElevation), accepted: [accepted], configuration: legacy, policy: elevationPolicy).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-past", pose: pastElevation), accepted: [accepted], configuration: legacy, policy: elevationPolicy).isDuplicate)
 
         let sameAzimuthUseful = PoseSample(timestamp: 6, transform: CoordinateTransform.translation(x: 0, y: tan(5 * Double.pi / 180), z: -1).values, tracking: .normal)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-useful", pose: sameAzimuthUseful), accepted: [accepted], policy: translationPolicy).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-useful", pose: sameAzimuthUseful), accepted: [accepted], configuration: legacy, policy: translationPolicy).isDuplicate)
 
         let signaturePolicy = DuplicatePolicy(maximumTranslationMeters: 0, maximumElevationDifference: 0, maximumSignatureDistance: 2)
         let signaturePose = PoseSample(timestamp: 6, transform: CoordinateTransform.translation(x: 0.001, y: 0, z: -1).values, tracking: .normal)
         let signatureAt = DuplicateEvidence(captureID: "signature-at", pose: signaturePose, visualSignature: [0, 0, 1, 1])
         let signaturePast = DuplicateEvidence(captureID: "signature-past", pose: signaturePose, visualSignature: [0, 1, 1, 1])
-        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: signatureAt, accepted: [accepted], policy: signaturePolicy).isDuplicate)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: signaturePast, accepted: [accepted], policy: signaturePolicy).isDuplicate)
+        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: signatureAt, accepted: [accepted], configuration: legacy, policy: signaturePolicy).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: signaturePast, accepted: [accepted], configuration: legacy, policy: signaturePolicy).isDuplicate)
     }
 
     func testPL0106StandardBottleCompletionRequiresEveryConfiguredRing() {
