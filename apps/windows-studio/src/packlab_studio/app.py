@@ -12,7 +12,7 @@ import traceback
 from collections.abc import Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QCoreApplication, QStandardPaths
+from PySide6.QtCore import QCoreApplication, QStandardPaths, QTimer
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .branding import application_icon, set_windows_app_user_model_id
@@ -211,6 +211,7 @@ def run(argv: Sequence[str] | None = None) -> int:
         window.show()
         if not build_smoke:
             publish_instance_window(window)
+            QTimer.singleShot(0, window.resume_paired_receiver)
         if build_smoke:
             app.processEvents()
             from .build_smoke import run_frozen_capability_smoke

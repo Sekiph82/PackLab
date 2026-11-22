@@ -270,6 +270,8 @@ def test_receiver_starts_at_launch_only_when_a_phone_is_paired(monkeypatch, tmp_
     app, window, view = _window(monkeypatch, tmp_path)
     try:
         app.processEvents()
+        assert view._session is None  # a plain window never creates the receiver session
+        window.resume_paired_receiver()
         assert not view.timer.isActive() and view.receive_button.isEnabled()  # nobody paired
         view.receive_button.click()
         offer = view.offer
@@ -291,8 +293,15 @@ def test_receiver_starts_at_launch_only_when_a_phone_is_paired(monkeypatch, tmp_
     app, window, view = _window(monkeypatch, tmp_path)
     try:
         app.processEvents()
+        assert view._session is None  # still nothing until the launch path asks
+        window.resume_paired_receiver()
         assert view.timer.isActive() and not view.receive_button.isEnabled()
-        assert view.session is not None and view.session.paired_devices()
+        assert view.session is not None and view.session.running
+        assert view.offer is None  # no pairing code is issued unless the owner asks
+        view._tick()
+        assert view.offer is None
     finally:
         window.close()
         app.processEvents()
+    view.resume_for_paired_devices()  # after shutdown: never restarts
+    assert view.session is not None and not view.session.running

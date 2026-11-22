@@ -269,10 +269,6 @@ class StudioMainWindow(QMainWindow):
             self.job_manager, self.project_manager, backend=build_backend
         )
         self._wire_build_model()
-        inbox_view = self.route_stack.views[Route.CAPTURE_INBOX]
-        if isinstance(inbox_view, CaptureInboxView):
-            # Pair once: a paired phone must be able to send without opening this page.
-            QTimer.singleShot(0, inbox_view.resume_for_paired_devices)
         measure = self.route_stack.views[Route.MEASURE_DESIGN]
         if self.scan_master_request_provider is None and isinstance(measure, MeasureDesignView):
             # Editor > Promote uses the cleaned object selection from Measure & Design.
@@ -603,6 +599,15 @@ class StudioMainWindow(QMainWindow):
                     else None
                 )
             )
+
+    def resume_paired_receiver(self) -> None:
+        """Pair once: a paired phone can send without the owner opening Capture Inbox.
+
+        Called only from the real launch path (app.run), never for test/smoke windows.
+        """
+        inbox = self.route_stack.views[Route.CAPTURE_INBOX]
+        if isinstance(inbox, CaptureInboxView):
+            inbox.resume_for_paired_devices()
 
     def ensure_project(self):
         """Open (or create on first run) the per-user default project; no dialog needed."""

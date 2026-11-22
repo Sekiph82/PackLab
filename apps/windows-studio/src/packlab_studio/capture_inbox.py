@@ -150,7 +150,7 @@ class CaptureInboxView(QWidget):
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self._tick)
-        self.receive_button.clicked.connect(self.start_receiving)
+        self.receive_button.clicked.connect(lambda: self.start_receiving())
         self.new_code_button.clicked.connect(self.new_code)
         self.stop_button.clicked.connect(self.stop_receiving)
         self.import_button.clicked.connect(self.import_file)
@@ -196,9 +196,9 @@ class CaptureInboxView(QWidget):
         except Exception:
             return  # unreadable device store: stay stopped, the page still offers Receive
         if paired:
-            self.start_receiving()
+            self.start_receiving(issue_code=False)
 
-    def start_receiving(self) -> None:
+    def start_receiving(self, issue_code: bool = True) -> None:
         session = self.session
         if session is None:
             return
@@ -214,7 +214,12 @@ class CaptureInboxView(QWidget):
             f"Listening on {session.lan_host}:{session.port}. If Windows asks, allow "
             "PackLab on private networks."
         )
-        self.new_code()
+        if issue_code:
+            self.new_code()
+        else:  # auto-start for paired phones: no pairing code until the owner asks
+            self.pairing_label.setText(
+                "Paired phones can send now. Press New code to pair another."
+            )
         self.timer.start()
 
     def stop_receiving(self) -> None:
