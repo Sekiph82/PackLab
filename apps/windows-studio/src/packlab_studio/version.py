@@ -43,6 +43,26 @@ class VersionReport:
     manifest_revision: str | None = None
 
 
+# <runtime>/apps/windows-studio/src/packlab_studio/version.py -> <runtime>/owner-dev-runtime.json
+_PARENTS = Path(__file__).resolve().parents
+OWNERDEV_RUNTIME_MANIFEST = (_PARENTS[4] if len(_PARENTS) > 4 else _PARENTS[-1]) / (
+    "owner-dev-runtime.json"
+)
+
+
+def _ownerdev_source_commit() -> str:
+    """OwnerDev source runtimes carry the deployed commit in owner-dev-runtime.json."""
+
+    try:
+        manifest = json.loads(OWNERDEV_RUNTIME_MANIFEST.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        manifest = None
+    commit = manifest.get("source_commit") if isinstance(manifest, dict) else None
+    if not isinstance(commit, str):
+        commit = os.environ.get("PACKLAB_OWNERDEV_SOURCE_SHA", "unknown")
+    return commit
+
+
 def current_build_info() -> BuildInfo:
     from PySide6 import __version__ as qt_version
 
@@ -55,8 +75,10 @@ def current_build_info() -> BuildInfo:
         except (OSError, json.JSONDecodeError):
             provenance = None
         revision = (
-            provenance.get("PACKLAB_BUILD_REVISION") if isinstance(provenance, dict) else "unknown"
+            provenance.get("PACKLAB_BUILD_REVISION") if isinstance(provenance, dict) else None
         )
+    if revision is None:
+        revision = _ownerdev_source_commit()
     if not isinstance(revision, str):
         revision = "unknown"
     if not revision.isalnum() and revision != "unknown":

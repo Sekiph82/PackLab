@@ -43,7 +43,11 @@ class ProjectLayout:
         target.mkdir(parents=True, exist_ok=True)
         for directory in _DIRECTORIES:
             (target / directory).mkdir()
-        marker = {"format": "packlab-project-layout", "schema_version": LAYOUT_SCHEMA_VERSION, "directories": list(_DIRECTORIES)}
+        marker = {
+            "format": "packlab-project-layout",
+            "schema_version": LAYOUT_SCHEMA_VERSION,
+            "directories": list(_DIRECTORIES),
+        }
         cls._atomic_json(target / ".packlab-layout.json", marker)
         return cls(target)
 
@@ -58,7 +62,10 @@ class ProjectLayout:
             value = json.loads(self.marker_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, OSError, ValueError) as error:
             raise ProjectLayoutError("project layout marker is missing or corrupt") from error
-        if value.get("schema_version") != LAYOUT_SCHEMA_VERSION or tuple(value.get("directories", ())) != _DIRECTORIES:
+        if (
+            value.get("schema_version") != LAYOUT_SCHEMA_VERSION
+            or tuple(value.get("directories", ())) != _DIRECTORIES
+        ):
             raise ProjectLayoutError("unsupported project layout schema")
         missing = [directory for directory in _DIRECTORIES if not (self.root / directory).is_dir()]
         if missing:
@@ -69,16 +76,26 @@ class ProjectLayout:
             raise ProjectLayoutError(f"unknown project area: {area}")
         if relative == "":
             return self.root / area
+        # Lexical containment: safe_relative_path already rejects absolute and ".." parts, so
+        # root/area/safe cannot leave the area by name. Path.resolve() is deliberately not used:
+        # redirected AppData (MSIX), OneDrive and junctions above the project resolve the file
+        # and the area into different trees and made valid projects unopenable (F2).
         safe = safe_relative_path(relative)
-        candidate = (self.root / area / safe).resolve(strict=False)
-        area_root = (self.root / area).resolve()
-        if os.path.commonpath((str(area_root), str(candidate))) != str(area_root):
-            raise ProjectLayoutError("project path escapes its area")
+        area_root = Path(os.path.abspath(self.root / area))  # absolute, links not followed
+        candidate = area_root / safe
+        # The only remaining escape is a link inside the area; reject existing ones explicitly.
+        current = area_root
+        for part in safe.parts:
+            current = current / part
+            if current.is_symlink() or current.is_junction():
+                raise ProjectLayoutError("project path escapes its area through a link")
         return candidate
 
     @staticmethod
     def _atomic_json(target: Path, value: object) -> None:
-        fd, temporary_name = tempfile.mkstemp(prefix=f".{target.name}-", suffix=".tmp", dir=target.parent)
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f".{target.name}-", suffix=".tmp", dir=target.parent
+        )
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
                 json.dump(value, handle, sort_keys=True, separators=(",", ":"))

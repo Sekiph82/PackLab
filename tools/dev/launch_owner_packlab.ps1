@@ -44,6 +44,8 @@ try {
         $child.Refresh()
         if ($child.HasExited) {
             $exitCode = $child.ExitCode
+            # Exit 3 = PackLab was already running; that window was brought to the front.
+            if ($exitCode -eq 3) { exit 0 }
             $diagnostic = @(
                 'PackLab OWNER DEV child exited during the startup stability window.'
                 "timestamp_utc=$([DateTime]::UtcNow.ToString('o'))"

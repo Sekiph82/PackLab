@@ -182,23 +182,18 @@ def engine_rows(*, probe: bool = False) -> list[str]:
         line += (
             f" | {record.executable}" if record.executable is not None else f" | {record.detail}"
         )
-        if (
-            probe
-            and record.executable is not None
-            and record.engine_id
-            in {
-                "colmap",
-                "openmvs.interface_colmap",
-            }
-        ):
+        # Every OpenMVS tool prints the same "OpenMVS x64 vX.Y" banner on -h (F11).
+        if probe and record.executable is not None:
             try:
                 result = (
                     probe_colmap(record.executable, runner=_probe_runner)
                     if record.engine_id == "colmap"
                     else probe_openmvs(record.executable, runner=_probe_runner)
                 )
-                version = result.version.text if result.version else "unknown"
-                line += f" | version {version} ({result.status.value})"
+                if result.version is None:
+                    line += f" | version not reported ({result.status.value})"
+                else:
+                    line += f" | version {result.version.text} ({result.status.value})"
                 if record.engine_id == "colmap" and result.status is EngineProbeStatus.UNSUPPORTED:
                     line += " | Build model needs COLMAP " + ", ".join(SUPPORTED_COLMAP_VERSIONS)
             except Exception as error:  # a broken engine must not break Settings

@@ -67,6 +67,6 @@ def _record_startup_failure() -> None:
 
 
 _exit_code = main()
-if _exit_code:
+if _exit_code and _exit_code != 3:  # 3: already running, the existing window was focused
     _record_startup_failure()
 raise SystemExit(_exit_code)

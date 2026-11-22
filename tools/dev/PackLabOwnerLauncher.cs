@@ -15,6 +15,8 @@ internal static class PackLabOwnerLauncher
     private const string RuntimeId = "__PACKLAB_RUNTIME_ID__";
     private const string OwnerRoot = "__PACKLAB_OWNER_ROOT__";
     private const int StartupStabilitySeconds = 10;
+    // PackLab was already running; it brought its window to the front and this launch ends.
+    private const int AlreadyRunningExitCode = 3;
 
     [STAThread]
     private static int Main()
@@ -78,6 +80,7 @@ internal static class PackLabOwnerLauncher
                     if (child.WaitForExit(200))
                     {
                         int exitCode = child.ExitCode;
+                        if (exitCode == AlreadyRunningExitCode) return 0;
                         if (exitCode != 0)
                             return ReportEarlyChildExit(startupLog, deployedSha, studioVersion, exitCode,
                                 "The OWNER DEV Python launcher exited with a nonzero code.");
