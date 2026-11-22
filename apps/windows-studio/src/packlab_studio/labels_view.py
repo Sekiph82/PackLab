@@ -32,7 +32,6 @@ from packlab_core.label_zone import LabelZoneBoundary, LabelZoneKind
 from .design_workbench import (
     DESIGN_DOCUMENT_SUFFIX,
     DesignWorkbench,
-    DesignWorkbenchError,
     LabelZoneEntry,
     LabelZoneSuggestion,
     MockupJob,
@@ -60,8 +59,8 @@ PART_CHOICES = (
     ("body", "Body"),
     ("assembled", "Assembled"),
 )
-TOP_DISC = "top"  # closure top: no core planar-disc zone yet, refused with a reason
-# Zone kinds per part: closure skirt = wrap; body side wall = wrap / front / back panels.
+TOP_DISC = "top"  # closure top: flat disc/annulus zone (core LabelZoneKind.TOP)
+# Zone kinds per part: closure skirt = wrap, top = disc; body side wall = wrap/front/back.
 PART_KINDS: dict[str | None, tuple[tuple[str, str], ...]] = {
     None: (("wrap", "Wrap"), ("front", "Front"), ("back", "Back")),
     "body": (("wrap", "Wrap (side wall)"), ("front", "Front"), ("back", "Back")),
@@ -174,6 +173,22 @@ class LabelsView(QWidget):
         zone_form.addRow("Kind", self.kind)
         zone_form.addRow("Variant", self.variant)
         zone_form.addRow("Placement (0..1)", boundary_row)
+        # Top disc (closure top): radii in mm and artwork rotation about the axis.
+        self.disc_outer = self._spin("disc-outer", 0.0, 1000.0, " mm", "0 = whole top face")
+        self.disc_inner = self._spin("disc-inner", 0.0, 1000.0, " mm", "0 = no hole")
+        self.disc_rotation = self._spin("disc-rotation", -360.0, 360.0, " deg", "")
+        self.disc_row = QWidget(self)
+        disc_layout = QHBoxLayout(self.disc_row)
+        disc_layout.setContentsMargins(0, 0, 0, 0)
+        for label, spin in (
+            ("Outer", self.disc_outer),
+            ("Inner", self.disc_inner),
+            ("Rotation", self.disc_rotation),
+        ):
+            disc_layout.addWidget(QLabel(label, self))
+            disc_layout.addWidget(spin, 1)
+        zone_form.addRow("Top disc", self.disc_row)
+        self._sync_kind_widgets()
         buttons = QHBoxLayout()
         buttons.addWidget(self.suggest_button)
         buttons.addWidget(self.add_zone_button)
@@ -384,10 +399,18 @@ class LabelsView(QWidget):
             if self.suggestion is None or self.suggestion.kind is not kind:
                 self.suggestion = self.workbench.suggest_label_zone(kind)
             boundary = LabelZoneBoundary(*(self.boundary[name].value() for name in self.boundary))
+            disc: dict[str, Any] = {}
+            if kind is LabelZoneKind.TOP:  # 0 = whole top face / the face's own hole
+                disc = {
+                    "disc_outer_radius_mm": self.disc_outer.value() or None,
+                    "disc_inner_radius_mm": self.disc_inner.value() or None,
+                    "disc_rotation_degrees": self.disc_rotation.value(),
+                }
             entry = self.workbench.add_label_zone(
                 self.suggestion,
-                boundary=boundary,
+                boundary=None if disc else boundary,
                 variant_id=self.variant.text().strip() or None,
+                **disc,
             )
             self.zones.setCurrentRow(len(self.workbench.labels) - 1)
             self.variant.clear()
@@ -476,15 +499,7 @@ class LabelsView(QWidget):
 
     # ------------------------------------------------------------------ project parts (PL-0487)
     def _zone_kind(self) -> LabelZoneKind:
-        value = self.kind.currentData()
-        if value == TOP_DISC:
-            raise DesignWorkbenchError(
-                tr(
-                    "Top-disc labels need a flat round label zone, which PackLab's label "
-                    "geometry does not support yet; use a wrap label on the closure skirt."
-                )
-            )
-        return LabelZoneKind(value)
+        return LabelZoneKind(self.kind.currentData())
 
     def _set_kinds(self, part: str | None) -> None:
         self.kind.blockSignals(True)
@@ -493,6 +508,8 @@ class LabelsView(QWidget):
             self.kind.addItem(tr(text), value)
         self.kind.blockSignals(False)
         self.suggestion = None
+        if hasattr(self, "disc_row"):
+            self._sync_kind_widgets()
 
     def show_part(self, part: str | None) -> None:
         """Follow the Scene selection: work on that part's Design Model and labels."""
@@ -781,11 +798,30 @@ class LabelsView(QWidget):
             )
         self.status.setText(f"Mockup rendered: {job.root / 'renders' / 'standard_views'}")
 
+    def _spin(
+        self, name: str, low: float, high: float, suffix: str, special: str
+    ) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox(self)
+        spin.setObjectName(f"packlab.labels.{name}")
+        spin.setRange(low, high)
+        spin.setDecimals(2)
+        spin.setSuffix(suffix)
+        if special:
+            spin.setSpecialValueText(special)
+        return spin
+
     def _kind_changed(self, _index: int) -> None:
         self.suggestion = None
+        self._sync_kind_widgets()
         self.status.setText(
             f"{self.kind.currentText()} label: Suggest zone, adjust the placement, then Add."
         )
+
+    def _sync_kind_widgets(self) -> None:
+        top = self.kind.currentData() == TOP_DISC
+        self.disc_row.setEnabled(top)
+        for spin in self.boundary.values():
+            spin.setEnabled(not top)  # a top label is a centred disc: radii set its size
 
     def _material_changed(self, _index: int) -> None:
         value = self.material.currentData()

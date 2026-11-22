@@ -25,6 +25,7 @@ from .reconstruction import ScaleState
 LABEL_METRIC_SURFACE_BINDING_CONTRACT = "packlab.label-metric-surface-binding.v1"
 LABEL_DIELINE_CONTRACT = "packlab.label-dieline-revision.v1"
 _TOLERANCE = 1e-7
+MAPPING_MODES = frozenset({"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC"})
 
 
 class LabelMetricSurfaceBindingError(ValueError):
@@ -50,7 +51,7 @@ class LabelMetricSurfaceBinding:
     limitations: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if self.mapping_mode not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP"}:
+        if self.mapping_mode not in MAPPING_MODES:
             raise LabelMetricSurfaceBindingError("label_metric_mapping_mode_unsupported")
         if (
             self.host_width_mm_unverified <= 0.0
@@ -232,10 +233,24 @@ def create_label_metric_surface_binding(
     placement: LabelZonePlacementRevision,
     analysis: CadLabelSurfaceAnalysis,
     analysis_region_id: str,
+    *,
+    disc_inner_radius_mm: float | None = None,
+    disc_rotation_degrees: float = 0.0,
 ) -> LabelMetricSurfaceBinding:
-    """Bind one selected analysis region to its exact planar or cylindrical BREP face."""
+    """Bind one selected analysis region to its exact planar or cylindrical BREP face.
+
+    TOP zones bind a planar circular face centred on the revolve axis (a closure top). The
+    zone boundary must be a square centred on the axis in the host face's square
+    (side = 2 x face radius); its span sets the label's outer radius. ``disc_inner_radius_mm``
+    (default: the face's own hole, 0 for a full disc) makes an annulus and
+    ``disc_rotation_degrees`` turns the artwork about +Z. Other kinds refuse both.
+    """
     _validate_inputs(model, representation, placement, analysis)
     zone = placement.label_zone
+    if zone.zone_kind is not LabelZoneKind.TOP and (
+        disc_inner_radius_mm is not None or disc_rotation_degrees != 0.0
+    ):
+        raise LabelMetricSurfaceBindingError("label_metric_disc_parameters_wrong_zone_kind")
     if (
         model.scale_state is not ScaleState.METRIC_UNVERIFIED
         or model.coordinate_unit != "mm_unverified"
@@ -298,6 +313,13 @@ def create_label_metric_surface_binding(
             raise LabelMetricSurfaceBindingError("label_metric_cylindrical_host_required")
         width, height, parameters = _cylindrical_wrap(face)
         mapping_mode = "CYLINDRICAL_WRAP"
+    elif zone.zone_kind is LabelZoneKind.TOP:
+        if surface_type != "GeomAbs_Plane":
+            raise LabelMetricSurfaceBindingError("label_metric_planar_host_required")
+        width, height, parameters = _planar_disc(
+            face, placement, disc_inner_radius_mm, disc_rotation_degrees
+        )
+        mapping_mode = "PLANAR_DISC"
     else:
         raise LabelMetricSurfaceBindingError("label_metric_zone_kind_unsupported")
 
@@ -398,6 +420,11 @@ def create_label_dieline(
         )
     elif binding.mapping_mode == "CYLINDRICAL_WRAP":
         vertices = ((u0 * w, v0 * h), (u1 * w, v0 * h), (u1 * w, v1 * h), (u0 * w, v1 * h))
+    elif binding.mapping_mode == "PLANAR_DISC":
+        # Square around the disc, centred on the axis; the outline itself is a circle (and
+        # an inner circle for an annulus) with the radii in the mapping parameters.
+        outer = disc_radii(binding)[0]
+        vertices = ((-outer, -outer), (outer, -outer), (outer, outer), (-outer, outer))
     else:
         raise LabelMetricSurfaceBindingError("label_metric_mapping_mode_unsupported")
     if not all(math.isfinite(value) for point in vertices for value in point):
@@ -455,6 +482,10 @@ def create_label_dieline_print_intent(
     bleed = _nonnegative_mm(bleed_mm_unverified, "bleed")
     if safe_margin * 2.0 >= min(dieline.width, dieline.height):
         raise LabelMetricSurfaceBindingError("label_dieline_safe_margin_consumes_boundary")
+    if dieline.mapping_mode == "PLANAR_DISC":
+        disc_outer, disc_inner = disc_radii(dieline.binding)
+        if disc_inner > 0.0 and safe_margin * 2.0 >= disc_outer - disc_inner:
+            raise LabelMetricSurfaceBindingError("label_dieline_safe_margin_consumes_boundary")
     x_min, y_min, x_max, y_max = dieline.extents
     safe = _rectangle_boundary(
         x_min + safe_margin,
@@ -673,6 +704,122 @@ def _cylindrical_wrap(face: Any) -> tuple[float, float, tuple[tuple[str, float |
     )
 
 
+def disc_radii(binding: LabelMetricSurfaceBinding) -> tuple[float, float]:
+    """(outer, inner) label radius in mm_unverified of a PLANAR_DISC binding."""
+    if binding.mapping_mode != "PLANAR_DISC":
+        raise LabelMetricSurfaceBindingError("label_metric_disc_binding_required")
+    parameters = dict(binding.mapping_parameters)
+    return (
+        float(parameters["label_outer_radius_mm_unverified"]),
+        float(parameters["label_inner_radius_mm_unverified"]),
+    )
+
+
+def disc_binding_options(binding: LabelMetricSurfaceBinding) -> dict[str, float]:
+    """Keyword arguments that re-create a binding (disc inner radius and rotation)."""
+    if binding.mapping_mode != "PLANAR_DISC":
+        return {}
+    parameters = dict(binding.mapping_parameters)
+    return {
+        "disc_inner_radius_mm": float(parameters["label_inner_radius_mm_unverified"]),
+        "disc_rotation_degrees": float(parameters["rotation_degrees"]),
+    }
+
+
+def _planar_disc(
+    face: Any,
+    placement: LabelZonePlacementRevision,
+    inner_radius_mm: float | None,
+    rotation_degrees: float,
+) -> tuple[float, float, tuple[tuple[str, float | str], ...]]:
+    """Host square + label radii of a planar circular face facing +Z, centred on the axis."""
+    modules = _ocp_modules()
+    topabs = modules["topabs"]
+    adaptor = modules["adaptor"].BRepAdaptor_Surface(face, True)
+    plane = adaptor.Plane()
+    axis = plane.Axis().Direction()
+    nx, ny, nz = float(axis.X()), float(axis.Y()), float(axis.Z())
+    if not plane.Direct():  # left-handed frame: the surface normal is X x Y = -axis
+        nx, ny, nz = -nx, -ny, -nz
+    if face.Orientation() == topabs.TopAbs_REVERSED:
+        nx, ny, nz = -nx, -ny, -nz
+    if abs(nx) > _TOLERANCE or abs(ny) > _TOLERANCE or abs(nz - 1.0) > _TOLERANCE:
+        raise LabelMetricSurfaceBindingError("label_metric_disc_must_face_up")
+    topods = modules["topods"].TopoDS
+    radii: list[float] = []
+    plane_z: float | None = None
+    for wire in _explore(face, topabs.TopAbs_WIRE, modules["topexp"].TopExp_Explorer):
+        wire_radii = set()
+        for edge in _explore(wire, topabs.TopAbs_EDGE, modules["topexp"].TopExp_Explorer):
+            curve = modules["adaptor"].BRepAdaptor_Curve(topods.Edge(edge))
+            kind = getattr(curve.GetType(), "name", str(curve.GetType()).split(".")[-1])
+            if kind != "GeomAbs_Circle":
+                raise LabelMetricSurfaceBindingError("label_metric_disc_trim_must_be_circles")
+            circle = curve.Circle()
+            centre = circle.Location()
+            cx, cy, cz = float(centre.X()), float(centre.Y()), float(centre.Z())
+            if abs(cx) > _TOLERANCE or abs(cy) > _TOLERANCE:
+                raise LabelMetricSurfaceBindingError("label_metric_disc_not_on_axis")
+            if plane_z is not None and abs(cz - plane_z) > _TOLERANCE:
+                raise LabelMetricSurfaceBindingError("label_metric_disc_trim_must_be_circles")
+            plane_z = cz
+            wire_radii.add(round(float(circle.Radius()), 9))
+        if len(wire_radii) != 1:
+            raise LabelMetricSurfaceBindingError("label_metric_disc_trim_must_be_circles")
+        radii.append(wire_radii.pop())
+    if plane_z is None or len(radii) not in (1, 2) or len(set(radii)) != len(radii):
+        raise LabelMetricSurfaceBindingError("label_metric_disc_trim_must_be_circles")
+    host_outer = max(radii)
+    host_inner = min(radii) if len(radii) == 2 else 0.0
+    if host_outer <= _TOLERANCE or not math.isfinite(host_outer):
+        raise LabelMetricSurfaceBindingError("label_metric_disc_dimensions_degenerate")
+    b = placement.boundary
+    span = b.u_max - b.u_min
+    if (
+        abs(b.u_min + b.u_max - 1.0) > 1e-9
+        or abs(b.v_min + b.v_max - 1.0) > 1e-9
+        or abs(span - (b.v_max - b.v_min)) > 1e-9
+    ):
+        raise LabelMetricSurfaceBindingError("label_metric_disc_boundary_must_be_centred_square")
+    outer = host_outer * span
+    if inner_radius_mm is None:
+        inner = host_inner
+    elif (
+        isinstance(inner_radius_mm, bool)
+        or not isinstance(inner_radius_mm, (int, float))
+        or not math.isfinite(inner_radius_mm)
+    ):
+        raise LabelMetricSurfaceBindingError("label_metric_disc_radius_out_of_range")
+    else:
+        inner = float(inner_radius_mm)
+    if not host_inner - _TOLERANCE <= inner < outer - _TOLERANCE:
+        raise LabelMetricSurfaceBindingError("label_metric_disc_radius_out_of_range")
+    if (
+        isinstance(rotation_degrees, bool)
+        or not isinstance(rotation_degrees, (int, float))
+        or not math.isfinite(rotation_degrees)
+    ):
+        raise LabelMetricSurfaceBindingError("label_metric_disc_rotation_invalid")
+    rotation = float(rotation_degrees) % 360.0
+    return (
+        2.0 * host_outer,
+        2.0 * host_outer,
+        (
+            ("frame", "PACKLAB_TOP_DISC"),
+            ("axis", "Z"),
+            ("plane_z_mm_unverified", plane_z),
+            ("host_outer_radius_mm_unverified", host_outer),
+            ("host_inner_radius_mm_unverified", host_inner),
+            ("label_outer_radius_mm_unverified", outer),
+            ("label_inner_radius_mm_unverified", max(inner, 0.0)),
+            ("rotation_degrees", rotation),
+            ("u_axis", "-X"),
+            ("v_axis", "-Y"),
+            ("projection", "PLANAR_TOP_VIEW"),
+        ),
+    )
+
+
 def _ocp_modules() -> dict[str, Any]:
     return {
         "adaptor": importlib.import_module("OCP.BRepAdaptor"),
@@ -821,4 +968,6 @@ __all__ = [
     "create_label_dieline",
     "create_label_dieline_print_intent",
     "create_label_metric_surface_binding",
+    "disc_binding_options",
+    "disc_radii",
 ]

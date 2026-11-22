@@ -93,6 +93,7 @@ from packlab_core.label_metric_surface_binding import (
     create_label_dieline,
     create_label_dieline_print_intent,
     create_label_metric_surface_binding,
+    disc_binding_options,
     map_label_artwork_to_metric_surface,
 )
 from packlab_core.label_zone import LabelZoneBoundary, LabelZoneKind, create_label_zone
@@ -132,16 +133,19 @@ _TARGET_NORMAL = {
     LabelZoneKind.FRONT: (0.0, 1.0, 0.0),
     LabelZoneKind.BACK: (0.0, -1.0, 0.0),
     LabelZoneKind.WRAP: (0.0, 1.0, 0.0),
+    LabelZoneKind.TOP: (0.0, 0.0, 1.0),
 }
 _HOST_SURFACE = {
     LabelZoneKind.FRONT: "GeomAbs_Plane",
     LabelZoneKind.BACK: "GeomAbs_Plane",
     LabelZoneKind.WRAP: "GeomAbs_Cylinder",
+    LabelZoneKind.TOP: "GeomAbs_Plane",
 }
 _DEFAULT_BOUNDARY = {
     LabelZoneKind.FRONT: LabelZoneBoundary(0.1, 0.15, 0.9, 0.85),
     LabelZoneKind.BACK: LabelZoneBoundary(0.1, 0.15, 0.9, 0.85),
     LabelZoneKind.WRAP: LabelZoneBoundary(0.0, 0.1, 1.0, 0.9),
+    LabelZoneKind.TOP: LabelZoneBoundary(0.0, 0.0, 1.0, 1.0),  # the whole top disc
 }
 
 
@@ -619,6 +623,7 @@ class DesignWorkbench(QObject):
                     "placement_revision_id": entry.placement.revision_id,
                     "metric_binding_revision_id": entry.metric_binding.revision_id,
                     "size_mm_unverified": [width, height],
+                    "disc": disc_binding_options(entry.metric_binding) or None,
                     "artwork": artwork,
                 }
             )
@@ -650,10 +655,13 @@ class DesignWorkbench(QObject):
                 boundary = LabelZoneBoundary(
                     **{key: float(item["boundary"][key]) for key in _BOUNDARY_KEYS}
                 )
+                disc = item.get("disc") if kind is LabelZoneKind.TOP else None
                 entry = self.add_label_zone(
                     self.suggest_label_zone(kind),
-                    boundary=boundary,
+                    boundary=boundary,  # a top label's boundary carries its outer radius
                     variant_id=str(item["variant_id"]),
+                    disc_inner_radius_mm=None if not disc else float(disc["disc_inner_radius_mm"]),
+                    disc_rotation_degrees=0.0 if not disc else float(disc["disc_rotation_degrees"]),
                 )
                 artwork = item.get("artwork")
                 if artwork is not None:
@@ -715,6 +723,10 @@ class DesignWorkbench(QObject):
             )
         ]
         if not candidates:
+            if kind is LabelZoneKind.TOP:
+                raise DesignWorkbenchError(
+                    "No flat round top face facing up on this Design Model for a top label."
+                )
             if kind is LabelZoneKind.WRAP:
                 raise DesignWorkbenchError(
                     "No curvature-safe cylindrical face for a wrap label on this Design Model."
@@ -729,6 +741,8 @@ class DesignWorkbench(QObject):
         def rank(item: CadLabelSurfaceCandidate) -> tuple[float, int, float]:
             heights = [point[2] for point in item.support_points]
             span = max(heights) - min(heights) if kind is LabelZoneKind.WRAP else 0.0
+            if kind is LabelZoneKind.TOP:  # the topmost up-facing face (closure top)
+                return (-round(item.center[2], 6), len(item.rejection_reasons), 0.0)
             return (-round(span, 6), len(item.rejection_reasons), round(item.center[2], 6))
 
         candidate = min(candidates, key=rank)
@@ -741,11 +755,58 @@ class DesignWorkbench(QObject):
         boundary: LabelZoneBoundary | None = None,
         variant_id: str | None = None,
         actor_id: str = "studio-user",
+        disc_outer_radius_mm: float | None = None,
+        disc_inner_radius_mm: float | None = None,
+        disc_rotation_degrees: float = 0.0,
     ) -> LabelZoneEntry:
+        """Add a zone; TOP zones take outer/inner radius (mm) and artwork rotation (deg)."""
         session = self.require_session()
         if suggestion.analysis.source_design_model_revision_id != session.model.revision_id:
             raise DesignWorkbenchError("The suggestion belongs to another Design Model.")
         chosen = boundary or suggestion.boundary
+        options: dict[str, Any] = {}
+        if suggestion.kind is LabelZoneKind.TOP:
+            options = {
+                "disc_inner_radius_mm": disc_inner_radius_mm,
+                "disc_rotation_degrees": disc_rotation_degrees,
+            }
+            chosen = boundary or LabelZoneBoundary(0.0, 0.0, 1.0, 1.0)
+            if disc_outer_radius_mm is not None:
+                host = self._top_host_radius(suggestion)
+                if not 0.0 < disc_outer_radius_mm <= host + 1e-9:
+                    raise DesignWorkbenchError(
+                        f"Top label outer radius must be above 0 and at most the top face "
+                        f"radius {host:.2f} mm."
+                    )
+                half = min(disc_outer_radius_mm / host, 1.0) / 2.0
+                chosen = LabelZoneBoundary(0.5 - half, 0.5 - half, 0.5 + half, 0.5 + half)
+        elif disc_outer_radius_mm is not None or disc_inner_radius_mm is not None:
+            raise DesignWorkbenchError("Disc radii apply to top labels only.")
+        entry = self._new_entry(suggestion, chosen, actor_id, options)
+        variant = variant_id or suggestion.kind.value
+        if any(item.variant_id == variant for item in self.labels):
+            raise DesignWorkbenchError(f"A label variant named {variant!r} already exists.")
+        entry.variant_id = variant
+        self.labels.append(entry)
+        self.changed.emit()
+        return entry
+
+    def _top_host_radius(self, suggestion: LabelZoneSuggestion) -> float:
+        entry = self._new_entry(
+            suggestion, LabelZoneBoundary(0.0, 0.0, 1.0, 1.0), "studio-user", {}
+        )
+        return float(
+            dict(entry.metric_binding.mapping_parameters)["host_outer_radius_mm_unverified"]
+        )
+
+    def _new_entry(
+        self,
+        suggestion: LabelZoneSuggestion,
+        chosen: LabelZoneBoundary,
+        actor_id: str,
+        options: dict[str, Any],
+    ) -> LabelZoneEntry:
+        session = self.require_session()
         zone = create_label_zone(
             session.model,
             session.label_representation,
@@ -767,14 +828,11 @@ class DesignWorkbench(QObject):
             placement,
             suggestion.analysis,
             suggestion.candidate.analysis_region_id,
+            **options,
         )
-        variant = variant_id or suggestion.kind.value
-        if any(item.variant_id == variant for item in self.labels):
-            raise DesignWorkbenchError(f"A label variant named {variant!r} already exists.")
-        entry = LabelZoneEntry(suggestion.kind, variant, placement, suggestion.analysis, binding)
-        self.labels.append(entry)
-        self.changed.emit()
-        return entry
+        return LabelZoneEntry(
+            suggestion.kind, suggestion.kind.value, placement, suggestion.analysis, binding
+        )
 
     def import_artwork(
         self, entry: LabelZoneEntry, source: str | Path | bytes, *, fit_mode: str = "CONTAIN"
@@ -1059,6 +1117,27 @@ def label_preview_points(
         points = np.column_stack(
             [cx + radius * np.sin(theta), cy + radius * np.cos(theta), z0 + t * (z1 - z0)]
         )
+    elif geometry["mode"] == "PLANAR_DISC":
+        host = float(geometry["host_outer_radius_mm_unverified"])
+        u_axis = np.asarray(geometry["u_axis"], dtype=float)
+        v_axis = np.asarray(geometry["v_axis"], dtype=float)
+        bounds = geometry.get(
+            "drawn_rect_normalized_uv", geometry["placement_boundary_normalized_uv"]
+        )
+        zone_u = bounds[0] + s * (bounds[2] - bounds[0])
+        zone_v = bounds[1] + t * (bounds[3] - bounds[1])
+        offsets = 2.0 * host * np.column_stack([zone_u - 0.5, zone_v - 0.5])
+        distance = np.hypot(offsets[:, 0], offsets[:, 1])
+        inside = (distance <= float(geometry["outer_radius_mm_unverified"])) & (
+            distance >= float(geometry["inner_radius_mm_unverified"])
+        )
+        points = (
+            np.asarray(geometry["center_mm_unverified"], dtype=float)
+            + offsets[:, :1] * u_axis
+            + offsets[:, 1:] * v_axis
+            + np.array([0.0, 0.0, lift])
+        )
+        s, t, points = s[inside], t[inside], points[inside]
     else:
         corners = np.asarray(geometry["zone_corners_mm_unverified"], dtype=float)
         normal = np.asarray(geometry["surface_normal"], dtype=float)

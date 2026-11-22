@@ -770,6 +770,9 @@ def _viewer_orientation(overlay):
     (Z x outward normal) and image rows (top-left origin) must run downward.
     """
     geometry = overlay["geometry"]
+    if overlay["mapping_mode"] == "PLANAR_DISC":
+        # Top label: columns run along the zone u axis, rows (top-left origin) against v.
+        return False, True
     if overlay["mapping_mode"] == "PLANAR_RECTANGULAR":
         u_axis = [float(c) for c in geometry["u_axis"]]
         v_axis = [float(c) for c in geometry["v_axis"]]
@@ -863,6 +866,42 @@ def _create_overlay(overlay, root, base_matrix):
         for index in range(segments):
             start = index * 2
             faces.append((start, start + 2, start + 3, start + 1))
+    elif mode == "PLANAR_DISC":
+        import math as _math
+        from mathutils import Vector
+        host = float(geometry["host_outer_radius_mm_unverified"])
+        outer = float(geometry["outer_radius_mm_unverified"])
+        inner = float(geometry["inner_radius_mm_unverified"])
+        center = [float(c) for c in geometry["center_mm_unverified"]]
+        u_axis = [float(c) for c in geometry["u_axis"]]
+        v_axis = [float(c) for c in geometry["v_axis"]]
+        if [float(c) for c in geometry["surface_normal"]] != [0.0, 0.0, 1.0] or not (
+            0.0 <= inner < outer <= host
+        ):
+            raise ValueError("scene_disc_overlay_geometry_invalid")
+        lift = float(overlay["renderer_only_offset_mm_unverified"])
+        segments = 96
+
+        def disc_vertex(u, v):
+            x = center[0] + (u - 0.5) * 2.0 * host * u_axis[0] + (v - 0.5) * 2.0 * host * v_axis[0]
+            y = center[1] + (u - 0.5) * 2.0 * host * u_axis[1] + (v - 0.5) * 2.0 * host * v_axis[1]
+            verts.append(tuple(base_matrix @ Vector((x, y, center[2] + lift))))
+            uv_coords.append((u, v))
+
+        # Rings in zone uv (host square), so the radii are exact at the vertices.
+        rings = [inner, outer] if inner > 0.0 else [0.0, outer]
+        for radius in rings:
+            count = 1 if radius == 0.0 else segments
+            for index in range(count):
+                phi = 2.0 * _math.pi * index / segments
+                disc_vertex(0.5 + radius * _math.cos(phi) / (2.0 * host), 0.5 + radius * _math.sin(phi) / (2.0 * host))
+        if inner > 0.0:
+            for index in range(segments):
+                nxt = (index + 1) % segments
+                faces.append((index, nxt, segments + nxt, segments + index))
+        else:
+            for index in range(segments):
+                faces.append((0, 1 + index, 1 + (index + 1) % segments))
     else:
         raise ValueError("scene_overlay_mapping_unsupported")
     mesh = bpy.data.meshes.new("PackLabOverlayMesh_" + str(overlay["zone_id"]))
@@ -947,7 +986,7 @@ def _build_scene(root, body, assets, scene, result_relative, package_revision_id
     overlay_facts = []
     assets_by_path = {item["project_relative_path"]: item for item in assets}
     for overlay in scene.get("overlays", []):
-        if overlay.get("mapping_mode") not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP"}:
+        if overlay.get("mapping_mode") not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC"}:
             raise ValueError("scene_overlay_mapping_unsupported")
         offset = overlay.get("renderer_only_offset_mm_unverified")
         if isinstance(offset, bool) or not isinstance(offset, (int, float)) or float(offset) != 0.001:

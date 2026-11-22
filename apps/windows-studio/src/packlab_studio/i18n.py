@@ -529,7 +529,6 @@ TURKISH: dict[str, str] = {
     "Re-apply labels to the new Design Model": "Etiketleri yeni Tasarım Modeline yeniden uygula",
     "The Blender mockup renders one Design Model at a time: select Body or Closure to render each part. Assembled shows both parts with their labels below.": "Blender maketi aynı anda tek bir Tasarım Modeli işler: her parçayı işlemek için Gövde veya Kapak seçin. Kapaklı ambalaj, iki parçayı etiketleriyle birlikte aşağıda gösterir.",
     "Assembled preview: Body + Closure Design Models, mm_unverified; visual only.": "Kapaklı önizleme: Gövde + Kapak Tasarım Modelleri, mm_unverified (ölçü henüz doğrulanmadı); yalnızca görsel.",
-    "Top-disc labels need a flat round label zone, which PackLab's label geometry does not support yet; use a wrap label on the closure skirt.": "Üst disk etiketi düz yuvarlak bir etiket alanı gerektirir; PackLab etiket geometrisi bunu henüz desteklemiyor. Kapak eteğinde sarmal etiket kullanın.",
     "Open a project with Body and Closure parts first.": "Önce Gövde ve Kapak parçaları olan bir proje açın.",
     "{part}: {count} label(s) restored on Design Model {revision}.": "{part}: {count} etiket Tasarım Modeli {revision} üzerine geri yüklendi.",
     "Saved in the project ({part} labels, Design Model {revision}).": "Projeye kaydedildi ({part} etiketleri, Tasarım Modeli {revision}).",
@@ -543,4 +542,9 @@ TURKISH: dict[str, str] = {
     "Assembled: Body and Closure with {count} label(s), closure seated by assembly {revision}.": "Kapaklı ambalaj: Gövde ve Kapak, {count} etiketle; kapak {revision} montajıyla oturtuldu.",
     " and the {part} Design Model": " ve {part} Tasarım Modeli",
     "Not saved in the project: the open Design Model is not the {part} Design Model.": "Projeye kaydedilmedi: açık Tasarım Modeli {part} Tasarım Modeli değil.",
+    "Outer": "Dış",
+    "Inner": "İç",
+    "Rotation": "Döndürme",
+    "0 = whole top face": "0 = tüm üst yüzey",
+    "0 = no hole": "0 = delik yok",
 }

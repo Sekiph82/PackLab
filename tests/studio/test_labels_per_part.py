@@ -101,6 +101,17 @@ def _add_wrap(labels, variant: str, *, v_min: float = 0.1, v_max: float = 0.9) -
     assert f"Added {variant}" in labels.status.text(), labels.status.text()
 
 
+def _add_top(labels, variant: str) -> None:
+    labels.kind.setCurrentIndex(labels.kind.findData("top"))
+    assert labels.disc_row.isEnabled() and not labels.boundary["u_min"].isEnabled()
+    labels.disc_outer.setValue(40.0)
+    labels.disc_inner.setValue(10.0)
+    labels.disc_rotation.setValue(30.0)
+    labels.variant.setText(variant)
+    labels.add_zone_button.click()
+    assert f"Added {variant}" in labels.status.text(), labels.status.text()
+
+
 def _project(app, tmp_path):
     window = _window(tmp_path)
     window.new_project(tmp_path / "jar", "Jar")
@@ -143,14 +154,18 @@ def test_each_part_has_its_own_design_model_labels_and_reopens(app, tmp_path) ->
         labels.show_part("closure")
         assert labels.workbench.session.model.revision_id == closure
         assert [labels.kind.itemData(i) for i in range(labels.kind.count())] == ["wrap", "top"]
-        labels.kind.setCurrentIndex(labels.kind.findData("top"))
-        labels.suggest_button.click()
-        assert "Top-disc labels" in labels.status.text()
         assert manager.part_labels("closure") is None
+        _add_top(labels, "top-print")
+        labels.import_button.click()
+        assert labels.workbench.labels[0].size_mm == pytest.approx((80.0, 80.0))
         _add_wrap(labels, "skirt")
-        width, height = labels.workbench.labels[0].size_mm
+        width, height = labels.workbench.labels[1].size_mm
         assert height <= 15.0 and width == pytest.approx(np.pi * 90.0, rel=1e-3)
-        assert manager.part_labels("closure")["design_model_revision_id"] == closure
+        document = manager.part_labels("closure")
+        assert document["design_model_revision_id"] == closure
+        top = document["labels"][0]
+        assert top["kind"] == "top" and top["artwork"] is not None
+        assert top["disc"] == {"disc_inner_radius_mm": 10.0, "disc_rotation_degrees": 30.0}
 
         labels.show_part("body")  # switching back restores the body labels from the project
         assert [entry.variant_id for entry in labels.workbench.labels] == ["body-wrap"]
@@ -172,8 +187,12 @@ def test_each_part_has_its_own_design_model_labels_and_reopens(app, tmp_path) ->
         reopened.open_project(tmp_path / "jar")
         view = reopened.route_stack.views[Route.LABELS]
         view.show_part("closure")
-        assert [entry.variant_id for entry in view.workbench.labels] == ["skirt"]
-        assert "1 label(s) restored" in view.status.text(), view.status.text()
+        assert [entry.variant_id for entry in view.workbench.labels] == ["top-print", "skirt"]
+        assert "2 label(s) restored" in view.status.text(), view.status.text()
+        restored = dict(view.workbench.labels[0].metric_binding.mapping_parameters)
+        assert restored["label_outer_radius_mm_unverified"] == pytest.approx(40.0)
+        assert restored["label_inner_radius_mm_unverified"] == pytest.approx(10.0)
+        assert restored["rotation_degrees"] == pytest.approx(30.0)
         view.show_part(None)  # project mode: the project's current Design Model again
         assert view.workbench.session.model.revision_id == closure
         assert view.workbench.labels == []
@@ -221,6 +240,8 @@ def test_assembled_shows_both_parts_labels_with_the_placement(app, tmp_path) -> 
         labels.show_part("closure")
         _add_wrap(labels, "skirt")
         labels.import_button.click()
+        _add_top(labels, "top-print")
+        labels.import_button.click()
 
         labels.placement_provider = _placement()
         labels.show_part("assembled")
@@ -228,7 +249,17 @@ def test_assembled_shows_both_parts_labels_with_the_placement(app, tmp_path) -> 
         assert not labels.render_button.isEnabled()
         assert "one Design Model at a time" in labels.status.text()
         shown = {object_id: geometry for object_id, _kind, geometry in labels.assembled_geometry}
-        assert set(shown) == {"body", "closure", "body-label-0", "closure-label-0"}
+        assert set(shown) == {
+            "body",
+            "closure",
+            "body-label-0",
+            "closure-label-0",
+            "closure-label-1",
+        }
+        top = np.asarray(shown["closure-label-1"].points)  # closure top print, seated
+        assert np.allclose(top[:, 1], SEAT_MM + 15.0 + 0.2)
+        top_radius = np.hypot(top[:, 0], top[:, 2])
+        assert top_radius.max() <= 40.0 + 1e-6 and top_radius.min() >= 10.0 - 1e-6
         # viewer is y-up: y = Design Model z (mm). Closure seated at the placement height,
         # coaxial with the body (xy offset of the placement dropped).
         closure_y = np.asarray(shown["closure"].vertices)[:, 1]
@@ -249,7 +280,7 @@ def test_assembled_shows_both_parts_labels_with_the_placement(app, tmp_path) -> 
         labels.show_part("assembled")
         ids = {object_id for object_id, _kind, _geometry in labels.assembled_geometry}
         assert "body-label-1" in ids
-        assert "3 label(s)" in labels.status.text()
+        assert "4 label(s)" in labels.status.text()
     finally:
         window.close()
         app.processEvents()
