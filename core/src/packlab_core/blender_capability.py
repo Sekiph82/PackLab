@@ -14,6 +14,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from .subprocess_runner import NO_WINDOW
+
 BLENDER_SUPPORTED_MAJOR = 5
 BLENDER_PROBE_TIMEOUT_SECONDS = 20.0
 _VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:\s|$)")
@@ -52,11 +54,15 @@ class BlenderCapability:
         return asdict(self) | {"status": self.status.value}
 
 
+def _run_hidden(*args, **kwargs):
+    return subprocess.run(*args, creationflags=NO_WINDOW, **kwargs)
+
+
 def discover_blender(
     configured_path: str | os.PathLike[str] | None = None,
     *,
     timeout_seconds: float = BLENDER_PROBE_TIMEOUT_SECONDS,
-    runner=subprocess.run,
+    runner=_run_hidden,
     which=shutil.which,
     system: str = sys.platform,
     environ: dict[str, str] | None = None,

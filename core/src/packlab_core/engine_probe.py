@@ -12,6 +12,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from .engine_baseline import COLMAP_BASELINE, OPENMVS_BASELINE
+from .subprocess_runner import NO_WINDOW
 
 
 class EngineProbeStatus(StrEnum):
@@ -110,6 +111,7 @@ def _default_runner(executable: Path, arguments: Sequence[str]) -> tuple[int, st
         check=False,
         shell=False,
         timeout=2.0,
+        creationflags=NO_WINDOW,
     )
     return completed.returncode, (completed.stdout or "")[:4096], (completed.stderr or "")[:4096]
 
