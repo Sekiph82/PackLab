@@ -82,7 +82,10 @@ class InteriorThresholds:
     min_rim_overlap: float = 0.6  # interior rim-band points with a body point near
     max_gap_mm: float = 2.0  # uncovered depth tolerated inside the covered run (stays missing)
     min_support: int = 4  # neighbours within max(2 mm, 4 spacings) for a surface point
-    max_wall_mm: float = 8.0  # thicker "wall" = interior of a different jar
+    max_wall_mm: float = 4.0  # thicker "wall" (and > max_wall_ratio x rim radius): foreign
+    max_wall_ratio: float = 0.08
+    max_floaters: int = 1000  # isolated points below the rim before "too noisy" (and share)
+    max_floater_share: float = 0.1
     wall_variation_mm: float = 2.0  # per depth band, around the median wall
     max_outside_share: float = 0.25
     ring_elevation_deg: float = 70.0  # second-steepest capture ring (60/70/80)
@@ -250,13 +253,13 @@ def _outer_radius(
 
 
 def _two_walls(
-    gap: np.ndarray, body_noise: float, t: InteriorThresholds
+    gap: np.ndarray, body_noise: float, limit: float
 ) -> tuple[float, float, float] | None:
     """(wall, split, noise) from the gaps of the interior scan's wall points (mm inward from the
     body's outer wall): 1-D two-Gaussian EM, outer wall near 0 and inner wall at the thickness.
     One cluster only: inner wall when clearly off the outer wall, else None (no interior)."""
 
-    g = gap[(gap > -2.0) & (gap < t.max_wall_mm + 2.0)]
+    g = gap[(gap > -2.0) & (gap < limit)]
     if len(g) < 30:
         return None
     mu = np.array([0.0, max(float(np.percentile(g, 90)), 3 * body_noise)])
@@ -374,6 +377,19 @@ def merge_interior(
     below = np.nonzero(
         (moved[:, 2] < b_rim.height - b_rim.band) & (moved[:, 2] > 0) & np.isfinite(gap)
     )[0]
+    # Surface support first: floaters (isolated points) are never written as interior, and a
+    # scan that is mostly floaters is refused as too noisy.
+    support = max(2.0, 4.0 * spacing)
+    if len(below) > t.min_support:
+        kth = _nearest(moved[below])(moved[below], t.min_support + 1)[1][:, -1]
+        dropped = int((kth >= support).sum())
+        if dropped > max(t.max_floaters, t.max_floater_share * len(below)):
+            raise InteriorMergeError(
+                f"interior merge refused: {dropped} isolated points (floaters) below the rim - "
+                "too noisy; light the inside evenly and rescan",
+                ("too_noisy",),
+            )
+        below = below[kth < support]
     nz = np.ones(len(moved))
     if len(below) >= 10:
         nz[below] = np.abs(_normals(moved[below])[:, 2])
@@ -383,7 +399,7 @@ def merge_interior(
     # Wall thickness from the data: the interior scan's inner wall sits ``wall`` inside the
     # body's outer wall, any outer wall it also saw sits near 0 (two-cluster fit), so 0.5-2.5 mm
     # walls separate without a fixed margin.
-    walls = _two_walls(gap[wallish], noise, t)
+    walls = _two_walls(gap[wallish], noise, 0.5 * b_rim.radius)
     if walls is None:
         raise InteriorMergeError(
             "interior merge refused: the interior scan shows no wall surface below the rim",
@@ -391,30 +407,46 @@ def merge_interior(
         )
     wall, split, noise = walls
     inner = wallish & (gap > split)
-    outside = wallish & (gap < -max(1.5, 4 * noise, spacing))
-    profile = _profile_failures(moved, gap, inner, outside, wallish, wall, noise, b_rim, t)
+    outside = wallish & (gap < -max(1.0, 3 * noise, spacing))
+    bound = max(t.max_wall_mm, t.max_wall_ratio * b_rim.radius)
+    implausible = []
+    if wall > bound:
+        implausible.append(f"wall {wall:.1f} mm > {bound:.1f} mm")
+    if outside.sum() > max(30, t.max_outside_share * inner.sum()):
+        implausible.append(f"{int(outside.sum())} wall points outside the body's outer wall")
+    if implausible:
+        raise InteriorMergeError(
+            "interior merge refused: interior_wall_implausible ("
+            + "; ".join(implausible)
+            + ") - different jar or misaligned scan",
+            ("interior_wall_implausible",),
+        )
+    profile = _profile_failures(moved, gap, inner, wall, noise, b_rim, t)
     if profile:
         raise InteriorMergeError(
             "interior merge refused: " + "; ".join(profile) + " - different jar?",
             ("interior_profile_mismatch",),
         )
     candidate = np.nonzero(in_below & (gap > split))[0]
-    # Surface support: floaters (isolated points) are never written as interior.
-    support = max(2.0, 4.0 * spacing)
-    if len(candidate) > t.min_support:
-        kth = _nearest(moved[candidate])(moved[candidate], t.min_support + 1)[1][:, -1]
-        candidate = candidate[kth < support]
-    if len(candidate) < 30:
-        raise InteriorMergeError(
-            "interior merge refused: the interior scan shows no surface below the rim",
-            ("insufficient_overlap",),
-        )
     depth = b_rim.height - moved[candidate, 2]
     sectors = _sector(rel[candidate])
     floor = (nz[candidate] > 0.8) & (radius[candidate] < 0.8 * (b_rim.radius - wall / 2))
     floor_depth = None
     if floor.sum() >= 30 and len(np.unique(sectors[floor])) / SECTORS >= t.min_band_coverage:
         floor_depth = float(np.median(depth[floor]))
+    # Thin shell: only points near the inner wall profile (body outer wall minus the measured
+    # wall, within the per-band allowance) or on the scanned floor are interior; blobs inside
+    # the cavity are not.
+    shell = max(t.wall_variation_mm, 3 * noise, 2 * spacing)
+    keep = np.abs(gap[candidate] - wall) < shell
+    if floor_depth is not None:
+        keep |= (nz[candidate] > 0.8) & (np.abs(depth - floor_depth) < shell)
+    candidate, depth, sectors = candidate[keep], depth[keep], sectors[keep]
+    if len(candidate) < 30:
+        raise InteriorMergeError(
+            "interior merge refused: the interior scan shows no surface below the rim",
+            ("insufficient_overlap",),
+        )
     # Density-aware coverage: a sector counts when it holds a quarter of the points its wall
     # area would give at the measured spacing (random points: density ~0.22 / spacing^2).
     area = band * 2 * np.pi * max(b_rim.radius - wall, 1.0) / SECTORS
@@ -483,8 +515,6 @@ def _profile_failures(
     moved: np.ndarray,
     gap: np.ndarray,
     inner: np.ndarray,
-    outside: np.ndarray,
-    wallish: np.ndarray,
     wall: float,
     noise: float,
     rim: _Rim,
@@ -496,11 +526,6 @@ def _profile_failures(
     strongly thickened corners need a larger ``wall_variation_mm``."""
 
     failures = []
-    if wall > t.max_wall_mm:
-        failures.append(f"interior wall {wall:.1f} mm inside the outer wall > {t.max_wall_mm}")
-    share = outside.sum() / max(wallish.sum(), 1)
-    if share > t.max_outside_share:
-        failures.append(f"{share:.0%} of the interior scan's walls lie outside the body")
     depth = rim.height - moved[:, 2]
     level = (depth / t.band_mm).astype(int)
     allowed = max(t.wall_variation_mm, 4 * noise)

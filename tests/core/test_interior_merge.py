@@ -217,4 +217,52 @@ def test_different_jar_interior_refused() -> None:
     ]
     with pytest.raises(InteriorMergeError) as error:
         merge_interior(body, PartInput("interior", _moved(rng, other)))
-    assert error.value.codes == ("interior_profile_mismatch",)
+    assert error.value.codes[0] in ("interior_wall_implausible", "interior_profile_mismatch")
+
+
+def _foreign(rng, inner):
+    """Interior scan with the body's rim and outer wall top, but ``inner`` as its inside."""
+    return np.r_[_disc(rng, R - WALL, R, H, d=2.0), _cyl(rng, R, H - 10, H), inner]
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["outside_r42", "inset_6mm", "taper"],
+)
+def test_impossible_or_foreign_interior_refused(case) -> None:
+    rng = np.random.default_rng(41)
+    body = PartInput("body", outer_scan(rng))
+    if case == "outside_r42":  # inner wall outside the body's outer wall
+        inner = _cyl(rng, 42.0, H - 60, H - 3)
+    elif case == "inset_6mm":
+        inner = _cyl(rng, R - 6.0, H - 60, H - 3)
+    else:  # foreign jar narrowing from r 37.5 to r 28 with depth
+        z = rng.uniform(H - 70, H - 3, 12000)
+        a = rng.uniform(0, 2 * np.pi, len(z))
+        r = 28.0 + (R - WALL - 28.0) * (z - (H - 70)) / 67.0
+        inner = np.c_[r * np.cos(a), r * np.sin(a), z]
+    with pytest.raises(InteriorMergeError) as error:
+        merge_interior(body, PartInput("interior", _moved(rng, _foreign(rng, inner))))
+    assert error.value.codes[0] in ("interior_wall_implausible", "interior_profile_mismatch")
+
+
+def test_reflection_blob_inside_the_cavity_is_not_written() -> None:
+    rng = np.random.default_rng(42)
+    body, interior = _inputs(rng, 60.0)
+    blob = rng.normal(0, 2.0, (1500, 3)) + [10.0, 0.0, 70.0]  # dense, away from the wall
+    points = np.r_[interior.points, _moved(rng, blob)]
+    result = merge_interior(body, PartInput("interior", points))
+    rows = result.point_index[result.source_index == 1]
+    assert (rows >= len(interior.points)).sum() == 0
+    assert result.deepest_covered_mm == pytest.approx(60.0, abs=2.5)
+
+
+def test_mostly_floaters_is_too_noisy() -> None:
+    rng = np.random.default_rng(43)
+    body, interior = _inputs(rng, 60.0)
+    z = rng.uniform(10, 95, 3000)
+    a, r = rng.uniform(0, 2 * np.pi, 3000), rng.uniform(0, 36, 3000)
+    floaters = np.c_[r * np.cos(a), r * np.sin(a), z]
+    with pytest.raises(InteriorMergeError) as error:
+        merge_interior(body, PartInput("interior", np.r_[interior.points, _moved(rng, floaters)]))
+    assert error.value.codes == ("too_noisy",)
