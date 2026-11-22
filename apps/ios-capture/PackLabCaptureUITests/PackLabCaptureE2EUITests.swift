@@ -85,7 +85,17 @@ final class PackLabCaptureE2EUITests: XCTestCase {
             // Menu-style Form picker: open it, then pick the role.
             let byID = app.buttons["scanRole"]
             tap(byID.waitForExistence(timeout: 5) ? byID : app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Scan role'")).firstMatch, "Scan role picker")
-            tap(app.buttons[role], "role \(role)")
+            // The menu item has no activation point while the menu animates in (CI run
+            // 45031239553), so wait for a real frame and tap its centre by coordinate.
+            let option = app.buttons[role]
+            XCTAssertTrue(option.waitForExistence(timeout: 10), "role \(role) not in the menu")
+            for _ in 0..<20 {
+                let frame = option.frame
+                if frame.minX.isFinite && frame.minY.isFinite && frame.width > 0 && frame.height > 0 { break }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+            option.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
             shot("\(name)-role-chosen")
         }
         shot("\(name)-wizard")
