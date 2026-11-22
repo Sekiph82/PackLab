@@ -896,8 +896,20 @@ public struct NewScanWizard: View {
         Form {
             TextField("Package name", text: $name)
             // PL-0482: one package = six scans (closure, body, assembled; each upright and upside down).
-            Picker("Scan role", selection: $partRole) { ForEach(ScanPartRole.allCases, id: \.self) { Text($0.displayName).tag($0) } }
-                .accessibilityIdentifier("scanRole")
+            // All roles visible as rows (no menu): one tap, and each row has a stable identifier.
+            Section("Scan role") {
+                ForEach(ScanPartRole.allCases, id: \.self) { role in
+                    Button { partRole = role } label: {
+                        HStack {
+                            Text(role.displayName).foregroundStyle(.primary)
+                            Spacer()
+                            if role == partRole { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                        }
+                    }
+                    .accessibilityIdentifier("scanRole.\(role.rawValue)")
+                    .accessibilityAddTraits(role == partRole ? .isSelected : [])
+                }
+            }
             Text(partRole == .bodyInterior ? "Lid off, emptied and clean. Photos from steep above (60°, 70°, 80°) into the opening; light the inside evenly and avoid glare." : "Scan every part upright and upside down so the model has no holes: closure, body, assembled.")
                 .font(.caption).foregroundStyle(.secondary)
             Picker("Package type", selection: $packageType) { ForEach(PackageType.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }

@@ -53,7 +53,7 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         // scan is delivered automatically with no pairing step.
         tap(app.buttons["More actions"], "More")
         tap(app.buttons["Allow PackLab to trigger captures"], "Allow PackLab to trigger captures")
-        try guidedScan(named: "Replay scan 2", role: "Body (lid off)", remoteWedges: 3)
+        try guidedScan(named: "Replay scan 2", role: "body", remoteWedges: 3)
         try requestFromStudio("finish")
         waitForLabel(app.staticTexts["remoteControlLastResult"], equal: "PackLab remote finish: finished", timeout: 60)
         shot("scan2-finished-by-packlab-studio")
@@ -80,25 +80,21 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         let nameField = app.textFields["Package name"]
         XCTAssertTrue(nameField.waitForExistence(timeout: 10))
         nameField.tap()
-        nameField.typeText(name)
+        // Return closes the keyboard so the role rows below the name are not covered.
+        nameField.typeText(name + "\n")
         if let role {
-            // Menu-style Form picker: open it, then pick the role.
-            let byID = app.buttons["scanRole"]
-            tap(byID.waitForExistence(timeout: 5) ? byID : app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Scan role'")).firstMatch, "Scan role picker")
-            // The menu item has no activation point while the menu animates in (CI run
-            // 45031239553), so wait for a real frame and tap its centre by coordinate.
-            let option = app.buttons[role]
-            XCTAssertTrue(option.waitForExistence(timeout: 10), "role \(role) not in the menu")
-            for _ in 0..<20 {
-                let frame = option.frame
-                if frame.minX.isFinite && frame.minY.isFinite && frame.width > 0 && frame.height > 0 { break }
-                Thread.sleep(forTimeInterval: 0.5)
-            }
-            Thread.sleep(forTimeInterval: 0.5)
-            option.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            // Role rows are plain Form buttons (no menu): wait until hittable, tap once, and
+            // require the row to report itself selected.
+            let row = app.buttons["scanRole.\(role)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 10), "role row \(role) not found")
+            waitFor(row, "isHittable == true", timeout: 10)
+            row.tap()
+            waitFor(row, "isSelected == true", timeout: 5)
             shot("\(name)-role-chosen")
         }
         shot("\(name)-wizard")
+        // The Form is lazy and the role rows push Start below the fold: scroll until it exists.
+        for _ in 0..<6 where !app.buttons["Start"].exists { app.swipeUp() }
         tap(app.buttons["Start"], "Start")
         // The protocol Form is lazy: scroll until its Continue button is materialised.
         let proceed = app.buttons["Continue"]
@@ -197,6 +193,14 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         field.tap()
         if clearing > 0 { field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: clearing)) }
         field.typeText(text)
+    }
+
+    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval) {
+        let result = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout)
+        if result != .completed {
+            shot("timeout")
+            XCTFail("\(element) never satisfied '\(format)'")
+        }
     }
 
     private func waitForLabel(_ element: XCUIElement, equal: String? = nil, containing: String? = nil, timeout: TimeInterval) {
