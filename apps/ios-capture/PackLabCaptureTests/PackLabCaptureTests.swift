@@ -2680,24 +2680,28 @@ final class PackLabCaptureTests: XCTestCase {
     }
 
     func testPL0105NearDuplicateDetectionPreservesUsefulParallaxAndFailsSafeWithoutPose() {
+        // Duplicate rules are tested on the previous single middle ring (elevation 0 in range).
+        let legacy = OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15)])
         let base = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
         let accepted = DuplicateEvidence(captureID: "accepted", pose: base, visualSignature: [1, 2, 3])
-        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", pose: base, visualSignature: [1, 2, 3]), accepted: [accepted])
+        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", pose: base, visualSignature: [1, 2, 3]), accepted: [accepted], configuration: legacy)
         XCTAssertTrue(duplicate.isDuplicate)
         let parallax = PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: 0.2, y: 0, z: -1).values, tracking: .normal)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "parallax", pose: parallax), accepted: [accepted]).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "parallax", pose: parallax), accepted: [accepted], configuration: legacy).isDuplicate)
         let stale = PoseSample(timestamp: 3, transform: base.transform, tracking: .limited)
-        XCTAssertEqual(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "stale", pose: stale), accepted: [accepted]).reasonCode, "duplicate_pose_unavailable")
+        XCTAssertEqual(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "stale", pose: stale), accepted: [accepted], configuration: legacy).reasonCode, "duplicate_pose_unavailable")
     }
 
     func testPL0105AcceptedPoseBindingDuplicateDecisionFeedsAutoGate() {
+        // Duplicate rules are tested on the previous single middle ring (elevation 0 in range).
+        let legacy = OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15)])
         let base = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
         let binding = acceptedPoseBinding(captureID: "accepted", pose: base)
-        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: acceptedPoseBinding(captureID: "candidate", pose: base), visualSignature: [1, 2, 3]), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding, visualSignature: [1, 2, 3])])
+        let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: acceptedPoseBinding(captureID: "candidate", pose: base), visualSignature: [1, 2, 3]), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding, visualSignature: [1, 2, 3])], configuration: legacy)
         XCTAssertTrue(duplicate.isDuplicate)
         XCTAssertEqual(duplicate.reasonCode, "near_duplicate_candidate")
         let stale = PoseCaptureBinding(captureID: "candidate", captureTimestamp: 1, aligned: AlignedPose(sample: nil, delta: 1, status: "stale"))
-        let useful = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: stale), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding)])
+        let useful = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "candidate", poseBinding: stale), accepted: [DuplicateEvidence(captureID: "accepted", poseBinding: binding)], configuration: legacy)
         XCTAssertFalse(useful.isDuplicate)
         XCTAssertEqual(useful.reasonCode, "duplicate_pose_unavailable")
         let sharp = SharpnessMetric(availability: .available, normalizedLaplacianVariance: 0.03, sampleCount: 10, band: .accept, reasonCode: "sharpness_accept")
@@ -2708,33 +2712,38 @@ final class PackLabCaptureTests: XCTestCase {
         let quality = QualityDecisionEngine.evaluate(CandidateQualityMetrics(sharpness: sharp, motionBlur: motion, highlightClipping: clip, shadowClipping: clip, framing: frame, background: background))
         let input = AutoCaptureInput(monotonicTimestamp: 1, poseEligible: true, targetSector: CoverageSector(ringID: "middle", azimuthIndex: 0), quality: quality, overlapAllowed: true, duplicateDecision: duplicate, admission: CaptureAdmissionController())
         XCTAssertTrue(AutoCaptureController().evaluate(input).reasons.contains("near_duplicate_candidate"))
+        // Strict order: auto-capture off the next wedge is refused.
+        let outOfOrder = AutoCaptureInput(monotonicTimestamp: 1, poseEligible: true, targetSector: CoverageSector(ringID: "middle", azimuthIndex: 0), quality: quality, overlapAllowed: true, admission: CaptureAdmissionController(), inOrder: false)
+        XCTAssertTrue(AutoCaptureController().evaluate(outOfOrder).reasons.contains("capture_out_of_order"))
     }
 
     func testPL0105DuplicateDetectorProvesTranslationElevationAndSignatureBoundaries() {
+        // Duplicate rules are tested on the previous single middle ring (elevation 0 in range).
+        let legacy = OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15)])
         let basePose = PoseSample(timestamp: 1, transform: CoordinateTransform.translation(x: 0, y: 0, z: -1).values, tracking: .normal)
         let accepted = DuplicateEvidence(captureID: "accepted", pose: basePose, visualSignature: [0, 0, 0, 0])
 
         let translationPolicy = DuplicatePolicy(maximumTranslationMeters: 0.04, maximumElevationDifference: 0, maximumSignatureDistance: 0)
         let atTranslation = PoseSample(timestamp: 2, transform: CoordinateTransform.translation(x: 0.04, y: 0, z: -1).values, tracking: .normal)
         let pastTranslation = PoseSample(timestamp: 3, transform: CoordinateTransform.translation(x: 0.040001, y: 0, z: -1).values, tracking: .normal)
-        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "translation-at", pose: atTranslation), accepted: [accepted], policy: translationPolicy).isDuplicate)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "translation-past", pose: pastTranslation), accepted: [accepted], policy: translationPolicy).isDuplicate)
+        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "translation-at", pose: atTranslation), accepted: [accepted], configuration: legacy, policy: translationPolicy).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "translation-past", pose: pastTranslation), accepted: [accepted], configuration: legacy, policy: translationPolicy).isDuplicate)
 
         let elevationPolicy = DuplicatePolicy(maximumTranslationMeters: 1, maximumElevationDifference: 4, maximumSignatureDistance: 0)
         let atElevation = PoseSample(timestamp: 4, transform: CoordinateTransform.translation(x: 0, y: tan(4 * Double.pi / 180), z: -1).values, tracking: .normal)
         let pastElevation = PoseSample(timestamp: 5, transform: CoordinateTransform.translation(x: 0, y: tan(4.0001 * Double.pi / 180), z: -1).values, tracking: .normal)
-        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-at", pose: atElevation), accepted: [accepted], policy: elevationPolicy).isDuplicate)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-past", pose: pastElevation), accepted: [accepted], policy: elevationPolicy).isDuplicate)
+        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-at", pose: atElevation), accepted: [accepted], configuration: legacy, policy: elevationPolicy).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-past", pose: pastElevation), accepted: [accepted], configuration: legacy, policy: elevationPolicy).isDuplicate)
 
         let sameAzimuthUseful = PoseSample(timestamp: 6, transform: CoordinateTransform.translation(x: 0, y: tan(5 * Double.pi / 180), z: -1).values, tracking: .normal)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-useful", pose: sameAzimuthUseful), accepted: [accepted], policy: translationPolicy).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "elevation-useful", pose: sameAzimuthUseful), accepted: [accepted], configuration: legacy, policy: translationPolicy).isDuplicate)
 
         let signaturePolicy = DuplicatePolicy(maximumTranslationMeters: 0, maximumElevationDifference: 0, maximumSignatureDistance: 2)
         let signaturePose = PoseSample(timestamp: 6, transform: CoordinateTransform.translation(x: 0.001, y: 0, z: -1).values, tracking: .normal)
         let signatureAt = DuplicateEvidence(captureID: "signature-at", pose: signaturePose, visualSignature: [0, 0, 1, 1])
         let signaturePast = DuplicateEvidence(captureID: "signature-past", pose: signaturePose, visualSignature: [0, 1, 1, 1])
-        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: signatureAt, accepted: [accepted], policy: signaturePolicy).isDuplicate)
-        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: signaturePast, accepted: [accepted], policy: signaturePolicy).isDuplicate)
+        XCTAssertTrue(NearDuplicateDetector.evaluate(candidate: signatureAt, accepted: [accepted], configuration: legacy, policy: signaturePolicy).isDuplicate)
+        XCTAssertFalse(NearDuplicateDetector.evaluate(candidate: signaturePast, accepted: [accepted], configuration: legacy, policy: signaturePolicy).isDuplicate)
     }
 
     func testPL0106StandardBottleCompletionRequiresEveryConfiguredRing() {
@@ -3314,13 +3323,13 @@ final class PackLabCaptureTests: XCTestCase {
         await ActiveScanSessionRegistry().install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: [])))
         let jpeg = try XCTUnwrap(makeJPEGFixture(width: 8, height: 6))
         await vm.bindStillCaptureBackend(Backend(bytes: jpeg))
-        // Object center at (1, 0, 1); camera 0.5 m further along +Z: middle ring, azimuth 180 deg
-        // around the object (around the AR origin it would be ~34 deg, wedge 0).
+        // Object center at (1, 0, 1); camera 0.5 m further along +Z and 0.1 m up: h10 ring
+        // (about 11 deg), azimuth 180 deg around the object (another wedge around the AR origin).
         let centerSet = await vm.setObjectCenter(ObjectCenter(position: [1, 0, 1], method: "test_injected", worldIdentity: "test-world"))
         XCTAssertTrue(centerSet)
         var poses = PoseBuffer()
-        poses.append(orbitPose(1, 0, 1.5, timestamp: 19.9))
-        poses.append(orbitPose(1, 0, 1.5, timestamp: 20.0))
+        poses.append(orbitPose(1, 0.1, 1.5, timestamp: 19.9))
+        poses.append(orbitPose(1, 0.1, 1.5, timestamp: 20.0))
         let poseSnapshot = poses
         let checker = try XCTUnwrap(makeLumaPixelBuffer(width: 128, height: 96, format: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange) { x, y in (x / 8 + y / 8) % 2 == 0 ? 60 : 190 })
         let liveFrame = LiveQualityFrameSampler.qualityFrame(from: checker)
@@ -3375,7 +3384,7 @@ final class PackLabCaptureTests: XCTestCase {
         for id in acceptedIDs { XCTAssertTrue(FileManager.default.fileExists(atPath: layout.images.appendingPathComponent("\(id).heic").path)) }
         let photos = try JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: Data(contentsOf: layout.photoMetadata))
         XCTAssertEqual(Set(photos.photos.map(\.imagePath)), Set(acceptedIDs.map { "images/\($0).heic" }))
-        XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "middle", azimuthIndex: 4)])
+        XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "h10", azimuthIndex: 8)])
 
         let destination = root.appendingPathComponent("exports/e2e-manual.packscan")
         let pickup = root.appendingPathComponent("documents-pickup", isDirectory: true)
@@ -3472,7 +3481,7 @@ final class PackLabCaptureTests: XCTestCase {
         let layout = SessionStorageLayout(root: root, sessionID: "layout-proof")
         try await ScanSessionStore(layout: layout).create(NewScanDraft(sessionID: "layout-proof", packageName: "Bottle", packageType: .bottle, captureMode: .freehand))
         // The injected tracking pose sits at the AR origin; with the object center at
-        // (0.6, -0.1, 0) the camera is at azimuth 270 deg, middle ring, so the dial shows a dot.
+        // (0.6, -0.1, 0) the camera is at azimuth 270 deg, h10 ring (~9.5 deg), so the dial shows a dot.
         let vm = CaptureRuntimeViewModel(trackingService: SequenceTrackingService([TrackingQualityClassifier.classify(state: .normal)]), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()), automaticallyPoll: false)
         vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE, layout: layout)
         let centerSet = await vm.setObjectCenter(ObjectCenter(position: [0.6, -0.1, 0], method: "test_injected", worldIdentity: "layout-world"))
@@ -3487,7 +3496,7 @@ final class PackLabCaptureTests: XCTestCase {
         // (pose_unavailable); start the runtime (as ContentView's .task does; start is
         // idempotent) so the injected pose is mapped before the layout is measured.
         await vm.start()
-        XCTAssertEqual(vm.m04LiveObservation?.sector, CoverageSector(ringID: "middle", azimuthIndex: 6))
+        XCTAssertEqual(vm.m04LiveObservation?.sector, CoverageSector(ringID: "h10", azimuthIndex: 12))
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let recorder = LayoutFrameRecorder()
         let window = UIWindow(windowScene: scene)
@@ -3507,7 +3516,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertGreaterThan(dial.height, 100)
         XCTAssertTrue(safeArea.contains(dial), "Guidance dial frame \(dial) is not inside the safe area \(safeArea)")
         XCTAssertLessThan(dial.maxY, frame.minY, "the dial sits above the capture button")
-        XCTAssertEqual(vm.m04LiveObservation?.sector, CoverageSector(ringID: "middle", azimuthIndex: 6))
+        XCTAssertEqual(vm.m04LiveObservation?.sector, CoverageSector(ringID: "h10", azimuthIndex: 12))
         XCTAssertNotEqual(vm.m04Instruction, .setObjectCenter)
         // The crosshair (full-screen centre) must stay visible: no panel may cover it.
         let crosshairZone = CGRect(x: window.bounds.midX - 30, y: window.bounds.midY - 30, width: 60, height: 60)
@@ -3595,28 +3604,31 @@ final class PackLabCaptureTests: XCTestCase {
         func map(_ dx: Double, _ dy: Double, _ dz: Double) -> CoveragePoseObservation {
             CoveragePoseMapper.map(captureID: "c", pose: orbitPose(1 + dx, 0.2 + dy, -2 + dz), configuration: configuration, center: center)
         }
-        XCTAssertEqual(map(0, 0, -0.5).sector, CoverageSector(ringID: "middle", azimuthIndex: 0))
-        XCTAssertEqual(map(0.5, 0, 0).sector, CoverageSector(ringID: "middle", azimuthIndex: 2))
-        XCTAssertEqual(map(0, 0, 0.5).sector, CoverageSector(ringID: "middle", azimuthIndex: 4))
-        let wrap = map(-0.01, 0, -1)
-        XCTAssertEqual(wrap.sector?.azimuthIndex, 7)
+        XCTAssertEqual(map(0, 0.1, -0.5).sector, CoverageSector(ringID: "h10", azimuthIndex: 0))
+        XCTAssertEqual(map(0.5, 0.1, 0).sector, CoverageSector(ringID: "h10", azimuthIndex: 4))
+        XCTAssertEqual(map(0, 0.1, 0.5).sector, CoverageSector(ringID: "h10", azimuthIndex: 8))
+        let wrap = map(-0.01, 0.2, -1)
+        XCTAssertEqual(wrap.sector?.azimuthIndex, 15)
         XCTAssertGreaterThan(wrap.azimuthDegrees ?? 0, 359)
-        // Half-open ring boundaries are unchanged: exactly 15 deg is upper, just below is middle.
-        XCTAssertEqual(map(0, tan(15 * Double.pi / 180), -1).sector?.ringID, "upper")
-        XCTAssertEqual(map(0, tan(14.9 * Double.pi / 180), -1).sector?.ringID, "middle")
-        XCTAssertEqual(map(0, -tan(20 * Double.pi / 180), -1).sector?.ringID, "lower")
-        XCTAssertEqual(map(0, tan(50 * Double.pi / 180), -1).status, "elevation_out_of_range")
+        // Half-open 10-degree bands: h10 [5, 15), h20 [15, 25), h30 [25, 35), h40 [35, 45), h50 [45, 55).
+        let inside: [(Double, String)] = [(5, "h10"), (14.9, "h10"), (15, "h20"), (25, "h30"), (35, "h40"), (44.9, "h40"), (45, "h50"), (54.9, "h50")]
+        for (degrees, ring) in inside {
+            XCTAssertEqual(map(0, tan(degrees * Double.pi / 180), -1).sector?.ringID, ring, "\(degrees)")
+        }
+        for degrees in [-20.0, 0, 4.9, 55, 60] {
+            XCTAssertEqual(map(0, tan(degrees * Double.pi / 180), -1).status, "elevation_out_of_range", "\(degrees)")
+        }
         // The device bug: around the AR world origin the same camera lands in another wedge.
-        let camera = orbitPose(1, 0.2, -1.5)
-        XCTAssertEqual(CoveragePoseMapper.map(captureID: "c", pose: camera, configuration: configuration).sector, CoverageSector(ringID: "middle", azimuthIndex: 0))
-        XCTAssertEqual(map(0, 0, 0.5).sector?.azimuthIndex, 4)
+        let camera = orbitPose(1, 0.3, -1.5)
+        XCTAssertEqual(CoveragePoseMapper.map(captureID: "c", pose: camera, configuration: configuration).sector, CoverageSector(ringID: "h10", azimuthIndex: 1))
+        XCTAssertEqual(map(0, 0.1, 0.5).sector?.azimuthIndex, 8)
         // nil center keeps the historical mapping; a malformed center is never guessed.
         XCTAssertEqual(CoveragePoseMapper.map(captureID: "c", pose: camera, configuration: configuration), CoveragePoseMapper.map(captureID: "c", pose: camera, configuration: configuration, center: [0, 0, 0]))
         XCTAssertEqual(CoveragePoseMapper.map(captureID: "c", pose: camera, configuration: configuration, center: [1, 2]).status, "object_center_invalid")
         // Coverage and duplicate detection use the same center.
         var model = OrbitCoverageModel(configuration: configuration)
-        XCTAssertEqual(model.observe(captureID: "c", poseBinding: acceptedPoseBinding(captureID: "c", pose: camera), center: center).sector, CoverageSector(ringID: "middle", azimuthIndex: 4))
-        let near = orbitPose(0.99, 0.2, -1.5)
+        XCTAssertEqual(model.observe(captureID: "c", poseBinding: acceptedPoseBinding(captureID: "c", pose: camera), center: center).sector, CoverageSector(ringID: "h10", azimuthIndex: 8))
+        let near = orbitPose(0.99, 0.3, -1.5)
         let duplicate = NearDuplicateDetector.evaluate(candidate: DuplicateEvidence(captureID: "n", poseBinding: acceptedPoseBinding(captureID: "n", pose: near)), accepted: [DuplicateEvidence(captureID: "c", poseBinding: acceptedPoseBinding(captureID: "c", pose: camera))], configuration: configuration, center: center)
         XCTAssertTrue(duplicate.isDuplicate)
     }
@@ -3625,54 +3637,57 @@ final class PackLabCaptureTests: XCTestCase {
         let configuration = OrbitCoverageConfiguration()
         func at(_ azimuth: Double, _ elevation: Double) -> CoveragePoseObservation {
             let ring = configuration.rings.first { elevation >= $0.minimumElevation && elevation < $0.maximumElevation }
-            return CoveragePoseObservation(captureID: "live", sector: ring.map { CoverageSector(ringID: $0.id, azimuthIndex: Int(azimuth / 45)) }, azimuthDegrees: azimuth, elevationDegrees: elevation, status: ring == nil ? "elevation_out_of_range" : "available")
+            return CoveragePoseObservation(captureID: "live", sector: ring.map { CoverageSector(ringID: $0.id, azimuthIndex: Int(azimuth / 22.5)) }, azimuthDegrees: azimuth, elevationDegrees: elevation, status: ring == nil ? "elevation_out_of_range" : "available")
         }
         func instruction(_ current: CoveragePoseObservation?, _ target: CoverageSector?, centerSet: Bool = true) -> OrbitGuidanceInstruction {
             OrbitGuidance.instruction(current: current, target: target, configuration: configuration, centerSet: centerSet)
         }
         func sector(_ ring: String, _ index: Int) -> CoverageSector { CoverageSector(ringID: ring, azimuthIndex: index) }
-        XCTAssertEqual(instruction(at(100, 0), sector("middle", 2), centerSet: false), .setObjectCenter)
-        XCTAssertEqual(instruction(nil, sector("middle", 2)), .waitForTracking)
-        XCTAssertEqual(instruction(at(100, 0), nil), .complete)
-        XCTAssertEqual(instruction(at(100, 0), sector("middle", 2)), .holdAndCapture)
-        XCTAssertEqual(instruction(at(100, 0), sector("middle", 2)).text, "Hold here — tap Manual Capture")
+        XCTAssertEqual(instruction(at(100, 10), sector("h10", 4), centerSet: false), .setObjectCenter)
+        XCTAssertEqual(instruction(nil, sector("h10", 4)), .waitForTracking)
+        XCTAssertEqual(instruction(at(100, 10), nil), .complete)
+        XCTAssertEqual(instruction(at(100, 10), sector("h10", 4)), .holdAndCapture)
+        XCTAssertEqual(instruction(at(100, 10), sector("h10", 4)).text, "Hold here — tap Manual Capture")
         // Larger azimuth is to the operator's left; both directions and the 0/360 wrap.
-        XCTAssertEqual(instruction(at(22.5, 0), sector("middle", 2)), .walk(.left, degrees: 90))
-        XCTAssertEqual(instruction(at(202.5, 0), sector("middle", 2)), .walk(.right, degrees: 90))
-        XCTAssertEqual(instruction(at(350, 0), sector("middle", 0)), .walk(.left, degrees: 35))
-        XCTAssertEqual(instruction(at(10, 0), sector("middle", 7)), .walk(.right, degrees: 35))
-        XCTAssertEqual(instruction(at(22.5, 0), sector("middle", 2)).text, "Walk left ~90° around the package")
-        // Height before azimuth.
-        XCTAssertEqual(instruction(at(100, -20), sector("middle", 2)), .raise(toRingID: "middle"))
-        XCTAssertEqual(instruction(at(100, 20), sector("middle", 2)), .lower(toRingID: "middle"))
-        XCTAssertEqual(instruction(at(100, 60), sector("middle", 2)), .lower(toRingID: "middle"))
-        XCTAssertEqual(instruction(at(300, 0), sector("upper", 2)).text, "Raise the phone and look down at the package")
-        XCTAssertEqual(instruction(at(300, 0), sector("lower", 2)).text, "Hold the phone at table level (lens just above the table surface), or place the package near the table edge")
-        // Next target: nearest missing wedge on the current ring, then the nearest ring.
-        let all = configuration.rings.flatMap { ring in (0..<8).map { sector(ring.id, $0) } }
+        XCTAssertEqual(instruction(at(11.25, 10), sector("h10", 4)), .walk(.left, degrees: 90))
+        XCTAssertEqual(instruction(at(191.25, 10), sector("h10", 4)), .walk(.right, degrees: 90))
+        XCTAssertEqual(instruction(at(350, 10), sector("h10", 0)), .walk(.left, degrees: 20))
+        XCTAssertEqual(instruction(at(10, 10), sector("h10", 15)), .walk(.right, degrees: 20))
+        XCTAssertEqual(instruction(at(11.25, 10), sector("h10", 4)).text, "Walk left ~90° around the package")
+        // Height before azimuth; below 5 deg (out of range) the operator is told to raise the phone.
+        XCTAssertEqual(instruction(at(100, 0), sector("h10", 4)), .raise(toRingID: "h10"))
+        XCTAssertEqual(instruction(at(300, 0), sector("h10", 2)).text, "Raise the phone to 10° above (side view)")
+        XCTAssertEqual(instruction(at(100, 20), sector("h10", 4)), .lower(toRingID: "h10"))
+        XCTAssertEqual(instruction(at(100, 60), sector("h20", 4)), .lower(toRingID: "h20"))
+        XCTAssertEqual(instruction(at(100, 20), sector("h50", 4)), .raise(toRingID: "h50"))
+        XCTAssertEqual(instruction(at(300, 10), sector("h50", 2)).text, "Raise the phone and look down at the package")
+        XCTAssertEqual(instruction(at(300, 10), sector("h20", 2)).text, "Raise the phone to 20° above")
+        XCTAssertEqual(instruction(at(300, 50), sector("h10", 2)).text, "Lower the phone to 10° above (side view)")
+        XCTAssertEqual(configuration.rings.map { OrbitGuidance.heightName(ringID: $0.id) }, ["10° above (side view)", "20° above", "30° above", "40° above", "50° above (looking down)"])
+        // Next target (not strict): nearest missing wedge on the current ring, then the nearest ring.
+        let all = configuration.rings.flatMap { ring in (0..<16).map { sector(ring.id, $0) } }
         func snapshot(captured: [CoverageSector]) -> OrbitCoverageSnapshot {
             OrbitCoverageSnapshot(configuration: configuration, capturedSectors: captured, missingSectors: all.filter { !captured.contains($0) }, duplicateCaptureIDs: [], invalidCaptureIDs: [], observations: [])
         }
-        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: []), current: at(100, 0)), sector("middle", 2))
-        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: [sector("middle", 2)]), current: at(100, 0)), sector("middle", 1))
-        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: [sector("middle", 7)]), current: at(350, 0)), sector("middle", 0))
-        let middleDone = snapshot(captured: (0..<8).map { sector("middle", $0) })
-        let fallback = OrbitGuidance.nextTarget(snapshot: middleDone, current: at(100, 0))
-        XCTAssertNotEqual(fallback?.ringID, "middle")
-        XCTAssertEqual(fallback?.azimuthIndex, 2)
-        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: []), current: nil), sector("lower", 0))
-        // Tabletop: the lower ring (camera below the package) is optional. The model never
-        // lists its wedges as missing, so guidance never targets them and completion ignores them.
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: []), current: at(100, 10)), sector("h10", 4))
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: [sector("h10", 4)]), current: at(100, 10)), sector("h10", 3))
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: [sector("h10", 15)]), current: at(350, 10)), sector("h10", 0))
+        let firstRingDone = snapshot(captured: (0..<16).map { sector("h10", $0) })
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: firstRingDone, current: at(100, 10)), sector("h20", 4))
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: snapshot(captured: []), current: nil), sector("h10", 0))
+        // All five rings are required: every wedge of every ring is missing at the start,
+        // and a camera below the lowest ring is sent up to it.
         var tabletop = OrbitCoverageModel()
         let empty = tabletop.snapshot()
-        XCTAssertEqual(empty.missingSectors.count, 16)
-        XCTAssertFalse(empty.missingSectors.contains { $0.ringID == "lower" })
-        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: empty, current: nil), sector("middle", 0))
-        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: empty, current: at(100, -20))?.ringID, "middle")
-        _ = tabletop.observe(captureID: "low", poseBinding: acceptedPoseBinding(captureID: "low", pose: orbitPose(0, -tan(20 * Double.pi / 180), 1)))
+        XCTAssertEqual(empty.missingSectors.count, 80)
+        XCTAssertEqual(Set(empty.missingSectors.map(\.ringID)), ["h10", "h20", "h30", "h40", "h50"])
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: empty, current: nil), sector("h10", 0))
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: empty, current: at(100, 0))?.ringID, "h10")
+        XCTAssertEqual(tabletop.observe(captureID: "flat", poseBinding: acceptedPoseBinding(captureID: "flat", pose: orbitPose(0, 0, 1))).status, "elevation_out_of_range")
+        _ = tabletop.observe(captureID: "low", poseBinding: acceptedPoseBinding(captureID: "low", pose: orbitPose(0, tan(10 * Double.pi / 180), 1)))
         let lowOnly = tabletop.snapshot()
-        XCTAssertEqual(lowOnly.capturedSectors.map(\.ringID), ["lower"], "an optional-ring photo is still kept as evidence")
-        XCTAssertEqual(lowOnly.completionFraction, 0)
+        XCTAssertEqual(lowOnly.capturedSectors, [sector("h10", 8)])
+        XCTAssertEqual(lowOnly.completionFraction, 1.0 / 80, accuracy: 1e-12)
         XCTAssertFalse(lowOnly.isComplete)
         // The package must be in view: angle between the camera axis (-Z) and the object center.
         let facing = orbitPose(0, 0, 1)
@@ -3681,8 +3696,8 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [0, 0, 2]) ?? -1, 180, accuracy: 1e-9)
         XCTAssertEqual(OrbitGuidance.viewAngleToCenter(pose: facing, center: [tan(20 * Double.pi / 180), 0, 0]) ?? -1, 20, accuracy: 1e-9)
         XCTAssertNil(OrbitGuidance.viewAngleToCenter(pose: nil, center: [0, 0, 0]))
-        XCTAssertEqual(OrbitGuidance.instruction(current: at(100, 0), target: sector("middle", 2), configuration: configuration, centerSet: true, viewAngle: 40), .pointAtPackage)
-        XCTAssertEqual(OrbitGuidance.instruction(current: at(100, 0), target: sector("middle", 2), configuration: configuration, centerSet: true, viewAngle: 10), .holdAndCapture)
+        XCTAssertEqual(OrbitGuidance.instruction(current: at(100, 10), target: sector("h10", 4), configuration: configuration, centerSet: true, viewAngle: 40), .pointAtPackage)
+        XCTAssertEqual(OrbitGuidance.instruction(current: at(100, 10), target: sector("h10", 4), configuration: configuration, centerSet: true, viewAngle: 10), .holdAndCapture)
         XCTAssertEqual(OrbitGuidanceInstruction.pointAtPackage.text, "Point the camera at the package — keep it in the middle of the screen")
         // Protocol explains the method in plain words.
         let method = CaptureProtocolViewModel(preset: PackagingPresetCatalog.matteHDPE).sections.first
@@ -3690,9 +3705,9 @@ final class PackLabCaptureTests: XCTestCase {
         let text = method?.lines.joined(separator: " ") ?? ""
         XCTAssertTrue(text.contains("A4 mat"))
         XCTAssertTrue(text.contains("Set object center"))
-        XCTAssertTrue(text.contains("8 photos per height"))
+        XCTAssertTrue(text.contains("Take 16 photos per height (one every 22.5°) at 5 heights, 10° apart — 80 photos."), text)
         XCTAssertTrue(text.contains("where the package touches the mat"))
-        XCTAssertTrue(text.contains("table level"))
+        XCTAssertFalse(text.contains("table level"))
     }
 
     func testOrbitDialIsEgocentricAndMatchesWalkInstructions() {
@@ -3705,16 +3720,162 @@ final class PackLabCaptureTests: XCTestCase {
         }
         XCTAssertEqual(OrbitGuidance.dialScreenAngle(azimuth: 0, current: nil), 180, accuracy: 1e-9)
         // (b) The target wedge is drawn on the side the instruction says to walk, incl. 0/360.
-        let cases: [(current: Double, target: Int, expected: WalkDirection)] = [(22.5, 2, .left), (202.5, 2, .right), (350, 0, .left), (10, 7, .right), (100, 5, .left), (100, 0, .right)]
+        let cases: [(current: Double, target: Int, expected: WalkDirection)] = [(22.5, 4, .left), (202.5, 4, .right), (350, 0, .left), (10, 15, .right), (100, 11, .left), (100, 0, .right)]
         for item in cases {
-            let ring = configuration.rings[1]
-            let observation = CoveragePoseObservation(captureID: "live", sector: CoverageSector(ringID: ring.id, azimuthIndex: Int(item.current / 45)), azimuthDegrees: item.current, elevationDegrees: 0, status: "available")
+            let ring = configuration.rings[0]
+            let observation = CoveragePoseObservation(captureID: "live", sector: CoverageSector(ringID: ring.id, azimuthIndex: Int(item.current / 22.5)), azimuthDegrees: item.current, elevationDegrees: 10, status: "available")
             let target = CoverageSector(ringID: ring.id, azimuthIndex: item.target)
             guard case .walk(let direction, _) = OrbitGuidance.instruction(current: observation, target: target, configuration: configuration, centerSet: true) else { return XCTFail("expected a walk instruction for \(item)") }
             XCTAssertEqual(direction, item.expected)
             let wedge = OrbitGuidance.dialUnitVector(screenAngle: OrbitGuidance.dialScreenAngle(azimuth: OrbitGuidance.wedgeCenter(azimuthIndex: item.target, configuration: configuration), current: item.current))
             if direction == .left { XCTAssertLessThan(wedge.x, 0, "\(item)") } else { XCTAssertGreaterThan(wedge.x, 0, "\(item)") }
         }
+    }
+
+    func testStandardPolicyNeedsEightyOverlappingPhotosAcrossFiveRings() {
+        let configuration = OrbitCoverageConfiguration()
+        XCTAssertEqual(configuration.azimuthBinCount, 16)
+        XCTAssertEqual(configuration.rings.map(\.id), ["h10", "h20", "h30", "h40", "h50"])
+        XCTAssertEqual(configuration.rings.map(\.minimumElevation), [5, 15, 25, 35, 45])
+        XCTAssertEqual(configuration.rings.map(\.maximumElevation), [15, 25, 35, 45, 55])
+        XCTAssertTrue(configuration.rings.allSatisfy(\.required))
+        XCTAssertEqual(StandardBottleCoveragePolicy.standard.requirements.map(\.ringID), ["h10", "h20", "h30", "h40", "h50"])
+        XCTAssertEqual(StandardBottleCoveragePolicy.standard.requirements.map(\.minimumSectorCount), [16, 16, 16, 16, 16])
+        XCTAssertTrue(StandardBottleCoveragePolicy.standard.requirements.allSatisfy(\.required))
+        // Turntable is pinned to its previous orbit configuration.
+        let turntable = PackagingPresetCatalog.turntable.coverage
+        XCTAssertEqual(turntable.orbit.azimuthBinCount, 24)
+        XCTAssertEqual(turntable.orbit.rings.map(\.id), ["lower", "middle", "upper"])
+        XCTAssertFalse(turntable.orbit.strictOrder)
+        XCTAssertEqual(turntable.ringRequirements.requirements.map(\.minimumSectorCount), [4, 4, 4])
+        func run(spacing: Double, elevations: [Double]) -> (snapshot: OrbitCoverageSnapshot, rings: RingCoverageEvaluation, photos: Int) {
+            var model = OrbitCoverageModel(configuration: configuration)
+            var photos = 0
+            for elevation in elevations {
+                for azimuth in stride(from: 11.25, to: 360, by: spacing) {
+                    let a = azimuth * Double.pi / 180
+                    let id = "e\(Int(elevation))-a\(Int(azimuth * 100))"
+                    let pose = orbitPose(sin(a), tan(elevation * Double.pi / 180), -cos(a))
+                    _ = model.observe(captureID: id, poseBinding: acceptedPoseBinding(captureID: id, pose: pose))
+                    photos += 1
+                }
+            }
+            let snapshot = model.snapshot()
+            return (snapshot, RingCoverageEvaluation(snapshot: snapshot), photos)
+        }
+        // 22.5-degree spacing at five heights 10 degrees apart: 80 photos complete every ring.
+        let dense = run(spacing: 22.5, elevations: [10, 20, 30, 40, 50])
+        XCTAssertEqual(dense.photos, 80)
+        XCTAssertEqual(dense.snapshot.capturedSectors.count, 80)
+        XCTAssertTrue(dense.snapshot.isComplete)
+        XCTAssertTrue(dense.rings.isComplete)
+        // The old 45-degree spacing (8 per ring) leaves gaps on every ring.
+        let sparse = run(spacing: 45, elevations: [10, 20, 30, 40, 50])
+        XCTAssertEqual(sparse.photos, 40)
+        XCTAssertFalse(sparse.snapshot.isComplete)
+        XCTAssertEqual(sparse.snapshot.missingSectors.count, 40)
+        XCTAssertFalse(sparse.rings.isComplete)
+        XCTAssertEqual(sparse.rings.missingRingIDs, ["h10", "h20", "h30", "h40", "h50"])
+        // Three heights only (the old ring layout) leave two rings empty.
+        let threeHeights = run(spacing: 22.5, elevations: [10, 30, 50])
+        XCTAssertEqual(threeHeights.photos, 48)
+        XCTAssertFalse(threeHeights.snapshot.isComplete)
+        XCTAssertEqual(threeHeights.rings.missingRingIDs, ["h20", "h40"])
+    }
+
+    func testStrictOrderFollowsRingsAndNeighbouringWedges() throws {
+        let configuration = OrbitCoverageConfiguration(strictOrder: true)
+        XCTAssertEqual(PackagingPresetCatalog.matteHDPE.coverage.orbit, configuration)
+        XCTAssertFalse(OrbitCoverageConfiguration().strictOrder)
+        let elevations: [String: Double] = ["h10": 10, "h20": 20, "h30": 30, "h40": 40, "h50": 50]
+        var counter = 0
+        func observe(_ model: inout OrbitCoverageModel, _ ring: String, _ index: Int) -> CoveragePoseObservation {
+            counter += 1
+            let a = (Double(index) + 0.5) * 22.5 * Double.pi / 180
+            let id = "c\(counter)"
+            return model.observe(captureID: id, poseBinding: acceptedPoseBinding(captureID: id, pose: orbitPose(sin(a), tan((elevations[ring] ?? 0) * Double.pi / 180), -cos(a))))
+        }
+        // In order: h10 from wedge 5 round to wedge 4 (wrap-around), then each next ring starts
+        // at the wedge nearest the current azimuth. 80 photos complete the scan.
+        var model = OrbitCoverageModel(configuration: configuration)
+        var last: CoveragePoseObservation?
+        for ring in ["h10", "h20", "h30", "h40", "h50"] {
+            let start: Int
+            if ring == "h10" {
+                start = 5
+            } else {
+                let target = try XCTUnwrap(OrbitGuidance.nextTarget(snapshot: model.snapshot(), current: last))
+                XCTAssertEqual(target.ringID, ring)
+                XCTAssertEqual(target.azimuthIndex, last?.sector?.azimuthIndex, "next ring starts above the last photo")
+                start = target.azimuthIndex
+            }
+            for step in 0..<16 {
+                let index = (start + step) % 16
+                if step > 0 { XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: model.snapshot(), current: last), CoverageSector(ringID: ring, azimuthIndex: index)) }
+                let observation = observe(&model, ring, index)
+                XCTAssertEqual(observation.status, "available", "\(ring) \(index)")
+                last = observation
+            }
+        }
+        let done = model.snapshot()
+        XCTAssertEqual(done.capturedSectors.count, 80)
+        XCTAssertTrue(done.isComplete)
+        XCTAssertTrue(RingCoverageEvaluation(snapshot: done).isComplete)
+        XCTAssertNil(OrbitGuidance.nextTarget(snapshot: done, current: last))
+        // Skipping a wedge (or going backwards) is refused and not counted; a retake of the
+        // last wedge is allowed but not counted twice.
+        var skip = OrbitCoverageModel(configuration: configuration)
+        XCTAssertEqual(observe(&skip, "h10", 3).status, "available")
+        let skipped = observe(&skip, "h10", 5)
+        XCTAssertEqual(skipped.status, "capture_out_of_order")
+        XCTAssertNil(skipped.sector)
+        XCTAssertEqual(observe(&skip, "h10", 2).status, "capture_out_of_order")
+        XCTAssertEqual(skip.snapshot().capturedSectors, [CoverageSector(ringID: "h10", azimuthIndex: 3)])
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: skip.snapshot(), current: skipped), CoverageSector(ringID: "h10", azimuthIndex: 4))
+        XCTAssertEqual(observe(&skip, "h10", 3).status, "available")
+        XCTAssertEqual(skip.snapshot().capturedSectors.count, 1)
+        XCTAssertEqual(observe(&skip, "h10", 4).status, "available")
+        // Wrap-around inside a ring: from wedge 15 the next wedge is 0.
+        var wrap = OrbitCoverageModel(configuration: configuration)
+        _ = observe(&wrap, "h10", 15)
+        XCTAssertEqual(OrbitGuidance.nextTarget(snapshot: wrap.snapshot(), current: nil), CoverageSector(ringID: "h10", azimuthIndex: 0))
+        XCTAssertEqual(observe(&wrap, "h10", 0).status, "available")
+        // Jumping to another ring early is refused, also as the very first photo.
+        XCTAssertEqual(observe(&skip, "h20", 5).status, "capture_out_of_order")
+        XCTAssertEqual(observe(&skip, "h50", 5).status, "capture_out_of_order")
+        XCTAssertEqual(skip.snapshot().capturedSectors.count, 2)
+        var early = OrbitCoverageModel(configuration: configuration)
+        XCTAssertEqual(observe(&early, "h30", 0).status, "capture_out_of_order")
+        XCTAssertTrue(early.snapshot().capturedSectors.isEmpty)
+        XCTAssertTrue(OrbitGuidance.allowsInOrder(CoverageSector(ringID: "h10", azimuthIndex: 9), snapshot: early.snapshot()), "any wedge may start the first ring")
+        XCTAssertFalse(OrbitGuidance.allowsInOrder(nil, snapshot: early.snapshot()))
+        // Without strict order nothing changes.
+        XCTAssertTrue(OrbitGuidance.allowsInOrder(nil, snapshot: OrbitCoverageModel().snapshot()))
+        XCTAssertNil(OrbitGuidance.strictOrderStep(snapshot: OrbitCoverageModel().snapshot()))
+        // Contexts persisted before strict order decode as not strict.
+        let legacy = try JSONDecoder().decode(OrbitCoverageConfiguration.self, from: Data(#"{"azimuthBinCount":8,"rings":[]}"#.utf8))
+        XCTAssertFalse(legacy.strictOrder)
+        XCTAssertEqual(try JSONDecoder().decode(OrbitCoverageConfiguration.self, from: JSONEncoder().encode(configuration)), configuration)
+    }
+
+    @MainActor
+    func testStrictOrderRuntimeTargetsNextWedgeAndDoesNotCountOutOfOrderPhotos() {
+        let vm = CaptureRuntimeViewModel(trackingService: FoundationARTrackingService(isAvailable: false), motionService: FoundationMotionService(), healthMonitor: DeviceHealthMonitor(provider: UnavailableDeviceHealthProvider()), automaticallyPoll: false)
+        vm.configureM04QualityRuntime(preset: PackagingPresetCatalog.matteHDPE)
+        func record(_ id: String, _ index: Int, elevation: Double = 10) -> CoveragePoseObservation {
+            let a = (Double(index) + 0.5) * 22.5 * Double.pi / 180
+            let pose = orbitPose(sin(a), tan(elevation * Double.pi / 180), -cos(a))
+            return vm.recordAcceptedCaptureCoverage(AcceptedCaptureRecord(captureID: id, sequence: 0, sourceFilename: "\(id).heic", metadataFilename: "\(id).json", poseBinding: acceptedPoseBinding(captureID: id, pose: pose)))
+        }
+        XCTAssertEqual(record("a", 3).status, "available")
+        XCTAssertEqual(vm.m04CoverageTarget, CoverageSector(ringID: "h10", azimuthIndex: 4))
+        XCTAssertEqual(record("b", 6).status, "capture_out_of_order")
+        XCTAssertEqual(record("c", 4, elevation: 30).status, "capture_out_of_order")
+        XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "h10", azimuthIndex: 3)])
+        XCTAssertEqual(vm.m04CoverageTarget, CoverageSector(ringID: "h10", azimuthIndex: 4))
+        XCTAssertEqual(record("d", 4).status, "available")
+        XCTAssertEqual(vm.m04CoverageTarget, CoverageSector(ringID: "h10", azimuthIndex: 5))
+        XCTAssertTrue(ContentView.manualBlockHint("capture_out_of_order").hasPrefix("Out of order — go back to the blue wedge"))
     }
 
     func testObjectCenterFromBasePlaneHitHeightAndPlausibility() {
@@ -3771,10 +3932,10 @@ final class PackLabCaptureTests: XCTestCase {
         vm.bindObjectCenterSources(center: nil, worldIdentity: { world.identity })
         let centerSet = await vm.setObjectCenter(ObjectCenter(position: [0, 0, 0], method: "test_injected", worldIdentity: "world-1"))
         XCTAssertTrue(centerSet)
-        let record = AcceptedCaptureRecord(captureID: "p1", sequence: 0, sourceFilename: "p1.heic", metadataFilename: "p1.json", poseBinding: acceptedPoseBinding(captureID: "p1", pose: orbitPose(0, 0, 0.5)))
+        let record = AcceptedCaptureRecord(captureID: "p1", sequence: 0, sourceFilename: "p1.heic", metadataFilename: "p1.json", poseBinding: acceptedPoseBinding(captureID: "p1", pose: orbitPose(0, 0.1, 0.5)))
         let observation = vm.recordAcceptedCaptureCoverage(record)
         XCTAssertEqual(observation.frameID, "world-1")
-        XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "middle", azimuthIndex: 4)])
+        XCTAssertEqual(vm.m04Coverage.capturedSectors, [CoverageSector(ringID: "h10", azimuthIndex: 8)])
 
         // Tracking reset: the center is dropped, live coverage restarts, the old wedges are kept apart.
         world.identity = "world-2"
@@ -3791,8 +3952,8 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(persisted.orbitCoverage?.capturedSectors.count, 0)
 
         // Resume after relaunch (new AR world): restored coverage is flagged, not counted.
-        var oldModel = OrbitCoverageModel()
-        _ = oldModel.observe(captureID: "p1", poseBinding: acceptedPoseBinding(captureID: "p1", pose: orbitPose(0, 0, 0.5)), center: [0, 0, 0], frameID: "world-1")
+        var oldModel = OrbitCoverageModel(configuration: PackagingPresetCatalog.matteHDPE.coverage.orbit)
+        _ = oldModel.observe(captureID: "p1", poseBinding: acceptedPoseBinding(captureID: "p1", pose: orbitPose(0, 0.1, 0.5)), center: [0, 0, 0], frameID: "world-1")
         let resumed = makeRuntime()
         resumed.bindObjectCenterSources(center: nil, worldIdentity: { "world-3" })
         XCTAssertTrue(resumed.restoreM04OrbitCoverage(oldModel.snapshot()))
@@ -3954,13 +4115,13 @@ final class PackLabCaptureTests: XCTestCase {
         try jpeg.write(to: layout.images.appendingPathComponent("x.heic"))
         try JSONEncoder().encode(orphan).write(to: layout.photoRecords.appendingPathComponent("x.json"))
         var model = OrbitCoverageModel()
-        _ = model.observe(captureID: "b", poseBinding: acceptedPoseBinding(captureID: "b", pose: orbitPose(0, 0, 0.5)))
+        _ = model.observe(captureID: "b", poseBinding: acceptedPoseBinding(captureID: "b", pose: orbitPose(0, 0.1, 0.5)))
         try await M04SessionContextStore(layout: layout).persist(M04ScanContext(preset: PackagingPresetCatalog.matteHDPE, orbitCoverage: model.snapshot()))
 
         let items = SessionPhotoIndex.items(layout: layout)
         XCTAssertEqual(items.map(\.id), ["a", "b", "c"])
         XCTAssertEqual(items.map(\.sequence), [0, 1, 2])
-        XCTAssertEqual(items.map(\.label), ["#1", "#2 · middle wedge 5", "#3"])
+        XCTAssertEqual(items.map(\.label), ["#1", "#2 · h10 wedge 9", "#3"])
         let thumbnail = try XCTUnwrap(SessionPhotoIndex.image(at: items[0].sourceURL, maxPixelSize: 300))
         XCTAssertEqual(thumbnail.width, 8)
 
@@ -3994,7 +4155,7 @@ final class PackLabCaptureTests: XCTestCase {
         let glossy = PackagingPresetCatalog.preset(for: .glossyPET)
         XCTAssertEqual(glossy.id, .glossyPET)
         XCTAssertLessThan(glossy.quality.highlight.rejectFraction, matte.quality.highlight.rejectFraction)
-        XCTAssertGreaterThan(glossy.coverage.orbit.azimuthBinCount, matte.coverage.orbit.azimuthBinCount)
+        XCTAssertGreaterThanOrEqual(glossy.coverage.orbit.azimuthBinCount, matte.coverage.orbit.azimuthBinCount)
         XCTAssertTrue(glossy.lightingGuidance.contains { $0.localizedCaseInsensitiveContains("reflection") })
     }
 
@@ -4064,7 +4225,7 @@ final class PackLabCaptureTests: XCTestCase {
         XCTAssertEqual(incomplete.missingRegions, [.handle])
         let complete = AsymmetricCoverageEvaluation(observedRegions: [.front: 1, .back: 1, .left: 1, .right: 1, .handle: 1], policy: policy)
         XCTAssertTrue(complete.isComplete)
-        XCTAssertEqual(PackagingPresetCatalog.preset(for: .asymmetricJerrycan).coverage.orbit.azimuthBinCount, 12)
+        XCTAssertEqual(PackagingPresetCatalog.preset(for: .asymmetricJerrycan).coverage.orbit.azimuthBinCount, 16)
     }
 
     @MainActor

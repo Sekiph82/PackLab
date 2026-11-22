@@ -336,7 +336,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
               OrbitCoverageModel(snapshot: snapshot).snapshot() == snapshot else { return false }
         m04CoverageModel = OrbitCoverageModel(snapshot: snapshot)
         m04Coverage = snapshot
-        m04CoverageTarget = snapshot.missingSectors.first
+        m04CoverageTarget = OrbitGuidance.nextTarget(snapshot: snapshot, current: nil)
         m04RingCoverage = RingCoverageEvaluation(snapshot: snapshot, policy: m04RingPolicy)
         recomputeM04Completion()
         return true
@@ -348,7 +348,7 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let frameID = m04ObjectCenter?.worldIdentity
         let observation = m04CoverageModel.observe(captureID: record.captureID, poseBinding: record.poseBinding, center: center, frameID: frameID)
         m04Coverage = m04CoverageModel.snapshot()
-        m04CoverageTarget = m04Coverage.missingSectors.first
+        m04CoverageTarget = OrbitGuidance.nextTarget(snapshot: m04Coverage, current: m04LiveObservation)
         m04RingCoverage = RingCoverageEvaluation(snapshot: m04Coverage, policy: m04RingPolicy)
         m04AcceptedDuplicateEvidence.append(DuplicateEvidence(captureID: record.captureID, poseBinding: record.poseBinding))
         updateOrbitGuidance()
@@ -452,7 +452,12 @@ final class CaptureRuntimeViewModel: ObservableObject {
         let overlapAllowed = target.map { !m04Coverage.capturedSectors.contains($0) } ?? false
         let candidateEvidence = DuplicateEvidence(captureID: evaluation.input.captureID, poseBinding: evaluation.input.pose)
         let duplicateDecision = NearDuplicateDetector.evaluate(candidate: candidateEvidence, accepted: m04AcceptedDuplicateEvidence, configuration: m04Coverage.configuration, center: m04ObjectCenter?.position)
-        return AutoCaptureInput(monotonicTimestamp: monotonicTimestamp, poseEligible: tracking.poseEvidenceEligible, targetSector: target, quality: evaluation.quality, overlapAllowed: overlapAllowed, duplicateDecision: duplicateDecision, admission: admission)
+        // Strict order: auto-capture fires only on the allowed next wedge.
+        var inOrder = !m04Coverage.configuration.strictOrder
+        if !inOrder, let center = m04ObjectCenter, let livePose = evaluation.input.pose?.aligned.sample {
+            inOrder = OrbitGuidance.allowsInOrder(CoveragePoseMapper.map(captureID: "live", pose: livePose, configuration: m04Coverage.configuration, center: center.position).sector, snapshot: m04Coverage)
+        }
+        return AutoCaptureInput(monotonicTimestamp: monotonicTimestamp, poseEligible: tracking.poseEvidenceEligible, targetSector: target, quality: evaluation.quality, overlapAllowed: overlapAllowed, duplicateDecision: duplicateDecision, admission: admission, inOrder: inOrder)
     }
 
     /// `recordDiagnostics: false` (the 2 Hz live loop) skips the candidate log and only
@@ -623,6 +628,11 @@ final class CaptureRuntimeViewModel: ObservableObject {
             }
             if let base = center.basePosition, base.count == 3, livePose.transform.count == 16, livePose.transform[7] < base[1] - 0.01 {
                 return (await refuseManual(["camera_below_table"], captureID: captureID, monotonicTimestamp: monotonicTimestamp), nil)
+            }
+            // Strict order: only the blue (next) wedge may be photographed, so photos overlap.
+            let liveSector = CoveragePoseMapper.map(captureID: captureID, pose: livePose, configuration: m04Coverage.configuration, center: center.position).sector
+            if !OrbitGuidance.allowsInOrder(liveSector, snapshot: m04Coverage) {
+                return (await refuseManual(["capture_out_of_order"], captureID: captureID, monotonicTimestamp: monotonicTimestamp), nil)
             }
         }
         let record = AcceptedCaptureRecord(captureID: captureID, sequence: state.nextSequence, sourceFilename: "\(captureID).heic", metadataFilename: "\(captureID).json")
@@ -1475,6 +1485,7 @@ struct ContentView: View {
         case "camera_below_table": return "the phone is below the table surface, so the table hides the package — raise the phone above the table (camera_below_table)"
         case "object_center_unset": return "aim the crosshair where the package touches the table and tap Set object center (object_center_unset)"
         case "capture_in_flight": return "previous photo is still being saved — wait for it to finish (capture_in_flight)"
+        case "capture_out_of_order": return "Out of order — go back to the blue wedge (capture_out_of_order)"
         default: return reason
         }
     }
