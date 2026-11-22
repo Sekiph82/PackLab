@@ -683,11 +683,22 @@ class StudioMainWindow(QMainWindow):
             self.showFullScreen()
         if saved.dock_state:
             self.restoreState(QByteArray.fromBase64(saved.dock_state.encode("ascii")))
+            self._redock_offscreen_docks()
+            QTimer.singleShot(0, self._redock_offscreen_docks)  # geometry settles on show
         try:
             self.navigation.navigate(Route(saved.last_route))
         except ValueError:
             self.navigation.navigate(Route.LIBRARY)
         self.navigation_panel.select_route(self.navigation.current_route)
+
+    def _redock_offscreen_docks(self) -> None:
+        """A saved floating dock that is not fully on a screen is docked again (PL-0464)."""
+        screens = [screen.availableGeometry() for screen in QGuiApplication.screens()]
+        for dock in self.workspace.docks.values():
+            if dock.isFloating() and not any(
+                area.contains(dock.frameGeometry()) for area in screens
+            ):
+                dock.setFloating(False)
 
     def _current_work_area(self) -> tuple[int, int, int, int] | None:
         screens = QGuiApplication.screens()

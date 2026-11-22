@@ -81,7 +81,6 @@ TURKISH: dict[str, str] = {
     "Turn the photos of an imported scan into a 3D model (COLMAP / OpenMVS).": (
         "İçe aktarılan taramanın fotoğraflarından 3B model oluşturun (COLMAP / OpenMVS)."
     ),
-    "Scan Master": "Scan Master (ölçülmüş tarama)",
     "Promote a cleaned scan to Scan Master, the measured reference copy of the real object.": (
         "Temizlenmiş taramayı Scan Master'a yükseltin: gerçek nesnenin ölçülmüş referans kopyası."
     ),
@@ -231,6 +230,14 @@ TURKISH: dict[str, str] = {
     "build cancelled": "oluşturma iptal edildi",
     "No imported scans yet: use Capture Inbox first.": (
         "Henüz içe aktarılmış tarama yok: önce Tarama Gelen Kutusu'nu kullanın."
+    ),
+    "Label zone": "Etiket alanı",
+    "Curvature-checked on the exact CAD surface.": "CAD yüzeyinde eğrilik denetimli.",
+    "Placement (0..1)": "Yerleşim (0..1)",
+    "Material and mockup": "Malzeme ve önizleme",
+    "Visual reference only.": "Yalnızca görsel referans.",
+    "Adds the open Design Model and the project's Scan Master as a library asset.": (
+        "Açık Tasarım Modelini ve projenin Scan Master'ını kütüphaneye varlık olarak ekler."
     ),
     # Shell status messages
     "Created project {path}": "Proje oluşturuldu: {path}",

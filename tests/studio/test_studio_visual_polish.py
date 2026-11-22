@@ -178,6 +178,43 @@ def test_language_setting_persists_and_turkish_applies_on_start(monkeypatch, tmp
     app.processEvents()
 
 
+def test_every_page_fits_1280x720_without_horizontal_overflow(monkeypatch, tmp_path) -> None:
+    for code in ("en", "tr"):
+        settings = tmp_path / f"fit-{code}.ini"
+        QSettings(str(settings), QSettings.Format.IniFormat).setValue(SETTINGS_KEY, code)
+        app, window = _window(monkeypatch, tmp_path, settings_path=settings)
+        try:
+            window.resize(1280, 720)
+            window.show()
+            app.processEvents()
+            assert window.minimumSizeHint().width() <= 1280
+            for route in Route:
+                window.navigation.navigate(route)
+                app.processEvents()
+                assert window.width() <= 1280, (code, route)
+                assert not window.route_scroll.horizontalScrollBar().isVisible(), (code, route)
+                assert window.workspace.docks[DockId.JOBS].isVisible(), (code, route)
+        finally:
+            window.close()
+            app.processEvents()
+
+
+def test_floating_dock_off_screen_is_docked_again(monkeypatch, tmp_path) -> None:
+    app, window = _window(monkeypatch, tmp_path)
+    try:
+        window.show()
+        scene = window.workspace.docks[DockId.SCENE]
+        scene.show()
+        scene.setFloating(True)
+        scene.move(-5000, -5000)
+        app.processEvents()
+        window._redock_offscreen_docks()  # runs after restoring a saved dock state
+        assert not scene.isFloating()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_old_saved_dock_state_is_dropped(tmp_path) -> None:
     path = tmp_path / "window-preferences.json"
     path.write_text(json.dumps({"schema_version": 1, "dock_state": "AAAA"}), encoding="utf-8")

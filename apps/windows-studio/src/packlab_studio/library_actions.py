@@ -13,6 +13,7 @@ from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -160,9 +161,7 @@ class LibraryActionsBar(QWidget):
         self.asset_name = QLineEdit(self)
         self.asset_name.setObjectName("packlab.library.new-asset.name")
         self.asset_name.setPlaceholderText("e.g. Jar 500 ml")
-        self.create_button = self._button(
-            "Add to library (Design Model / Scan Master)", "new-asset.create", self.create_asset
-        )
+        self.create_button = self._button("Add to library", "new-asset.create", self.create_asset)
         self.backup_button = self._button("Back up library…", "backup", self.backup)
         self.restore_button = self._button("Restore backup into folder…", "restore", self.restore)
         self.contact_button = self._button(
@@ -181,11 +180,11 @@ class LibraryActionsBar(QWidget):
         create_button_row.addWidget(self.create_button)
         create_button_row.addStretch(1)
         create_row.addRow("", create_button_row)
-        file_row = QHBoxLayout()
-        file_row.addWidget(self.backup_button)
-        file_row.addWidget(self.restore_button)
-        file_row.addWidget(self.contact_button)
-        file_row.addStretch(1)
+        file_row = QGridLayout()  # two columns: fits 1280 px screens in Turkish too
+        file_row.addWidget(self.backup_button, 0, 0)
+        file_row.addWidget(self.restore_button, 0, 1)
+        file_row.addWidget(self.contact_button, 1, 0)
+        file_row.setColumnStretch(2, 1)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(create_row)
@@ -212,7 +211,7 @@ class LibraryActionsBar(QWidget):
         can_add = self.workbench.session is not None or self._scan_master() is not None
         self.create_button.setEnabled(can_add)
         self.create_button.setToolTip(
-            ""
+            tr("Adds the open Design Model and the project's Scan Master as a library asset.")
             if can_add
             else tr(
                 "Open a Design Model (Labels page) or promote a Scan Master in the project first."

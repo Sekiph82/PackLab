@@ -92,6 +92,7 @@ class EngineeringExportView(QWidget):
         )
         self.source_summary = QLabel(self)
         self.source_summary.setObjectName("packlab.export.source-summary")
+        self.source_summary.setWordWrap(True)
         self.available_formats = QLabel(self)
         self.available_formats.setObjectName("packlab.export.available-formats")
         self.format_selector = QComboBox(self)
