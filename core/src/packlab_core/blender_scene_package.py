@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import re
 from dataclasses import dataclass
@@ -577,9 +576,10 @@ def _digest(value: object) -> str:
     return hashlib.sha256(_canonical_json(value)).hexdigest()
 
 
-# Shared by the Blender runner (embedded below) and Studio's label preview, so both
-# place artwork columns/rows identically (PL-0487 review V01).
-def artwork_viewer_orientation(overlay: dict[str, Any]) -> tuple[bool, bool]:
+# Single source of truth for artwork column/row orientation (PL-0487 review V01/V02): the
+# Blender runner embeds this exact text and Studio's label preview executes it, so both
+# agree. A string (not inspect.getsource) so .pyc-only packaged builds still import.
+VIEWER_ORIENTATION_SOURCE = r'''def _viewer_orientation(overlay):
     """Mirror flags so artwork reads upright and left-to-right from outside the package.
 
     Zone u/v follow the CAD face parameterisation, which says nothing about "up" for
@@ -621,6 +621,17 @@ def artwork_viewer_orientation(overlay: dict[str, Any]) -> tuple[bool, bool]:
     mirror_u = sum(a * b for a, b in zip(u_axis, viewer_right)) < 0.0
     mirror_v = v_axis[2] > 0.0
     return mirror_u, mirror_v
+'''
+_ORIENTATION_NAMESPACE: dict[str, Any] = {}
+exec(
+    compile(VIEWER_ORIENTATION_SOURCE, "packlab_viewer_orientation", "exec"), _ORIENTATION_NAMESPACE
+)
+
+
+def artwork_viewer_orientation(overlay: dict[str, Any]) -> tuple[bool, bool]:
+    """(mirror_u, mirror_v) for an overlay record; same code as the Blender runner."""
+    mirror_u, mirror_v = _ORIENTATION_NAMESPACE["_viewer_orientation"](overlay)
+    return bool(mirror_u), bool(mirror_v)
 
 
 BLENDER_SCENE_RUNNER = r'''"""PackLab static Blender scene builder; consumes JSON data only."""
@@ -1133,10 +1144,7 @@ if __name__ == "__main__":
     main()
 '''.replace(
     "__PACKLAB_VIEWER_ORIENTATION__\n",
-    inspect.getsource(artwork_viewer_orientation).replace(
-        "def artwork_viewer_orientation(overlay: dict[str, Any]) -> tuple[bool, bool]:",
-        "def _viewer_orientation(overlay):",
-    ),
+    VIEWER_ORIENTATION_SOURCE,
 )
 
 
@@ -1145,6 +1153,7 @@ __all__ = [
     "BLENDER_SCENE_PACKAGE_CONTRACT",
     "BLENDER_SCENE_PACKAGE_SCHEMA_VERSION",
     "BLENDER_SCENE_RUNNER_FILENAME",
+    "VIEWER_ORIENTATION_SOURCE",
     "artwork_viewer_orientation",
     "BlenderArtworkBinding",
     "BlenderScenePackage",
