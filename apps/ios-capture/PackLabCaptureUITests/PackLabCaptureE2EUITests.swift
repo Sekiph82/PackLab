@@ -6,8 +6,9 @@ import XCTest
 /// code typed into the manual pairing form, the second is delivered automatically after
 /// Finalize with no pairing step; PL-0429: in the second scan PackLab Studio (the CI receiver's
 /// RemoteControlHub) presses Capture now (refused once by a gate, then 3 wedges) and Finish
-/// scan. The receiver-side check (validate_packscan, import report
-/// image counts, exactly one paired device) runs in the CI step after this test.
+/// scan. PL-0482: scan 1 keeps the default role (assembled), scan 2 is a "Body (lid off)" scan.
+/// The receiver-side check (validate_packscan, import report image counts, exactly one paired
+/// device, manifest part_role absent + body) runs in the CI step after this test.
 @MainActor
 final class PackLabCaptureE2EUITests: XCTestCase {
     private var app = XCUIApplication()
@@ -52,7 +53,7 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         // scan is delivered automatically with no pairing step.
         tap(app.buttons["More actions"], "More")
         tap(app.buttons["Allow PackLab to trigger captures"], "Allow PackLab to trigger captures")
-        try guidedScan(named: "Replay scan 2", remoteWedges: 3)
+        try guidedScan(named: "Replay scan 2", role: "body", remoteWedges: 3)
         try requestFromStudio("finish")
         waitForLabel(app.staticTexts["remoteControlLastResult"], equal: "PackLab remote finish: finished", timeout: 60)
         shot("scan2-finished-by-packlab-studio")
@@ -63,6 +64,8 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         XCTAssertFalse(app.textFields["pairing.code"].exists, "automatic sync must not ask to pair again")
         waitForLabel(status, equal: "Delivered to PackLab", timeout: 240)
         shot("history-scan2-delivered-automatically")
+        waitForLabel(app.staticTexts["scanRole.Replay scan 1"], equal: "Assembled (lid on)", timeout: 10)
+        waitForLabel(app.staticTexts["scanRole.Replay scan 2"], equal: "Body (lid off)", timeout: 10)
         // Clean History: only the two scans (no exports folder row) and no problem labels.
         XCTAssertFalse(app.staticTexts["Unavailable scan"].exists, "a non-session folder is listed in History")
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Problem:'")).count, 0, "History rows report problems")
@@ -72,13 +75,26 @@ final class PackLabCaptureE2EUITests: XCTestCase {
 
     /// `remoteWedges` > 0: PackLab Studio (the CI receiver) presses Capture now for the first
     /// wedges instead of the Manual Capture tap, after one request refused by the center gate.
-    private func guidedScan(named name: String, remoteWedges: Int = 0) throws {
+    private func guidedScan(named name: String, role: String? = nil, remoteWedges: Int = 0) throws {
         tap(app.buttons["New Scan"], "New Scan")
         let nameField = app.textFields["Package name"]
         XCTAssertTrue(nameField.waitForExistence(timeout: 10))
         nameField.tap()
-        nameField.typeText(name)
+        // Return closes the keyboard so the role rows below the name are not covered.
+        nameField.typeText(name + "\n")
+        if let role {
+            // Role rows are plain Form buttons (no menu): wait until hittable, tap once, and
+            // require the row to report itself selected.
+            let row = app.buttons["scanRole.\(role)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 10), "role row \(role) not found")
+            waitFor(row, "isHittable == true", timeout: 10)
+            row.tap()
+            waitFor(row, "isSelected == true", timeout: 5)
+            shot("\(name)-role-chosen")
+        }
         shot("\(name)-wizard")
+        // The Form is lazy and the role rows push Start below the fold: scroll until it exists.
+        for _ in 0..<6 where !app.buttons["Start"].exists { app.swipeUp() }
         tap(app.buttons["Start"], "Start")
         // The protocol Form is lazy: scroll until its Continue button is materialised.
         let proceed = app.buttons["Continue"]
@@ -132,8 +148,7 @@ final class PackLabCaptureE2EUITests: XCTestCase {
     }
 
     private func openHistory() {
-        tap(app.buttons["More actions"], "More")
-        tap(app.buttons["History"], "History")
+        tap(app.buttons["historyButton"], "History")
         XCTAssertTrue(app.navigationBars["Scan History"].waitForExistence(timeout: 10))
         shot("history")
     }
@@ -177,6 +192,14 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         field.tap()
         if clearing > 0 { field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: clearing)) }
         field.typeText(text)
+    }
+
+    private func waitFor(_ element: XCUIElement, _ format: String, timeout: TimeInterval) {
+        let result = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate(format: format), object: element)], timeout: timeout)
+        if result != .completed {
+            shot("timeout")
+            XCTFail("\(element) never satisfied '\(format)'")
+        }
     }
 
     private func waitForLabel(_ element: XCUIElement, equal: String? = nil, containing: String? = nil, timeout: TimeInterval) {

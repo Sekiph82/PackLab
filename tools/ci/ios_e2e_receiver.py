@@ -132,11 +132,20 @@ def _verify_remote(root: Path, captures: int) -> list[str]:
     return failures
 
 
-def verify(root: Path, expected_scans: int, expected_images: int, remote_captures: int = 0) -> int:
+def verify(
+    root: Path,
+    expected_scans: int,
+    expected_images: int,
+    remote_captures: int = 0,
+    part_roles: list[str] | None = None,
+) -> int:
     failures: list[str] = []
     packages = sorted((root / "capture_inbox").glob("*.packscan"))
+    roles: list[str] = []
     for package in packages:
         report = validate_packscan(package)
+        # PL-0482: the phone omits part_role for assembled; "absent" stands for that here.
+        roles.append(str(report.manifest.get("part_role", "absent")))
         images = [name for name in report.payloads if name.startswith("images/")]
         print(
             f"validate_packscan PASS {package.name}: {len(images)} images, capture_id {report.manifest.get('capture_id')}"
@@ -187,6 +196,10 @@ def verify(root: Path, expected_scans: int, expected_images: int, remote_capture
         )
     if remote_captures:
         failures.extend(_verify_remote(root, remote_captures))
+    if part_roles is not None:
+        print(f"manifest part_role values: {sorted(roles)}")
+        if sorted(roles) != sorted(part_roles):
+            failures.append(f"expected part_role values {sorted(part_roles)}, got {sorted(roles)}")
     for failure in failures:
         print(f"FAIL: {failure}", file=sys.stderr)
     return 1 if failures else 0
@@ -205,11 +218,19 @@ def main() -> int:
     verify_parser.add_argument("--expected-scans", type=int, required=True)
     verify_parser.add_argument("--expected-images", type=int, required=True)
     verify_parser.add_argument("--expected-remote-captures", type=int, default=0)
+    verify_parser.add_argument(
+        "--expected-part-roles",
+        help="comma-separated manifest part_role values ('absent' = key omitted), any order",
+    )
     args = parser.parse_args()
     if args.command == "serve":
         return serve(args.root, args.offer_file, args.port, args.control_dir)
     return verify(
-        args.root, args.expected_scans, args.expected_images, args.expected_remote_captures
+        args.root,
+        args.expected_scans,
+        args.expected_images,
+        args.expected_remote_captures,
+        args.expected_part_roles.split(",") if args.expected_part_roles else None,
     )
 
 
