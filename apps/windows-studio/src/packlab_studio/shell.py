@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -41,6 +42,7 @@ from .history import Operation
 from .i18n import LANGUAGES, SETTINGS_KEY, set_language, tr, translate_widget_tree
 from .jobs import JobManager
 from .labels_view import install_design_workbench
+from .mask_correction import MaskCorrectionView
 from .measure_view import MeasureDesignView
 from .model_viewer import ModelViewerView
 from .navigation import (
@@ -266,6 +268,7 @@ class StudioMainWindow(QMainWindow):
         self.navigation_panel.route_requested.connect(self.navigation.navigate)
         self.page_header = PageHeader()
         self.page_header.show_route(self.navigation.current_route)
+        self.route_stack.show_route(self.navigation.current_route)
         self.navigation.route_changed.connect(
             lambda value: self.route_stack.show_route(Route(value))
         )
@@ -283,7 +286,13 @@ class StudioMainWindow(QMainWindow):
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(0)
         page_layout.addWidget(self.page_header)
-        page_layout.addWidget(self.route_stack, 1)
+        # F14: a tall page scrolls instead of pushing the Jobs dock out of the window.
+        self.route_scroll = QScrollArea(page)
+        self.route_scroll.setObjectName("packlab.page.scroll")
+        self.route_scroll.setWidgetResizable(True)
+        self.route_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.route_scroll.setWidget(self.route_stack)
+        page_layout.addWidget(self.route_scroll, 1)
         splitter.addWidget(self.navigation_panel)
         splitter.addWidget(page)
         splitter.setCollapsible(0, False)
@@ -574,6 +583,15 @@ class StudioMainWindow(QMainWindow):
         self.build_model.build_finished.connect(self._on_build_finished)
         builds.open_model_requested.connect(self._open_in_viewer)
         builds.route_requested.connect(self.navigation.navigate)
+        builds.build_requested.connect(self.start_build)
+        self.build_model.build_started.connect(lambda *_args: self.refresh_builds())
+        self.build_model.build_finished.connect(lambda *_args: self.refresh_builds())
+        self.navigation.route_changed.connect(
+            lambda value: self.refresh_builds() if value == Route.RECONSTRUCTION.value else None
+        )
+        mask = self.route_stack.views[Route.MASK_CORRECTION]
+        if isinstance(mask, MaskCorrectionView):
+            mask.route_requested.connect(self.navigation.navigate)
         measure = self.route_stack.views[Route.MEASURE_DESIGN]
         if isinstance(measure, MeasureDesignView):
             # Next-step buttons hand the just-built model to Measure & Design.
@@ -586,6 +604,20 @@ class StudioMainWindow(QMainWindow):
                     else None
                 )
             )
+
+    def refresh_builds(self) -> None:
+        """Scan list on the Build 3D Model page: inbox scans + this project's builds."""
+        inbox = self.route_stack.views[Route.CAPTURE_INBOX]
+        builds = self.route_stack.views[Route.RECONSTRUCTION]
+        if not isinstance(inbox, CaptureInboxView) or not isinstance(builds, BuildModelView):
+            return
+        session = inbox.session
+        try:
+            entries = [] if session is None else session.entries()
+        except Exception:  # unreadable inbox index: show an empty list, never crash
+            entries = []
+        layout = self.project_manager.layout
+        builds.refresh_history(entries, None if layout is None else layout.root)
 
     def ensure_project(self):
         """Open (or create on first run) the per-user default project; no dialog needed."""

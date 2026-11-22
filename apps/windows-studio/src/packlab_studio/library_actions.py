@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 from packlab_core.design_model import PackageFamily
 from packlab_core.packaging_asset import (
@@ -35,6 +37,7 @@ from packlab_core.packaging_asset import (
 from packlab_core.reconstruction import ScaleState
 
 from .design_workbench import DesignModelSession, DesignWorkbench
+from .i18n import tr
 from .packaging_library_backup import PackagingLibraryBackupService
 from .packaging_library_browser import PackagingLibraryBrowserService, PackagingLibraryBrowserView
 from .packaging_library_contact_sheet import PackagingLibraryContactSheetExporter
@@ -189,7 +192,42 @@ class LibraryActionsBar(QWidget):
         layout.addLayout(file_row)
         layout.addWidget(self.status)
         workbench.changed.connect(self._prefill)
+        # F12: impossible actions are disabled, with the reason in the tooltip.
+        workbench.changed.connect(self.update_enabled)
+        browser.item_view.currentItemChanged.connect(lambda *_args: self.update_enabled())
+        model = browser.item_view.model()
+        model.rowsInserted.connect(lambda *_args: self.update_enabled())
+        model.rowsRemoved.connect(lambda *_args: self.update_enabled())
+        model.modelReset.connect(lambda *_args: self.update_enabled())
         self._prefill()
+        self.update_enabled()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.update_enabled()  # the project's Scan Master may have changed meanwhile
+
+    def update_enabled(self) -> None:
+        if not isValid(self) or not isValid(self.browser.item_view):
+            return  # model signals can fire while the window is being destroyed
+        can_add = self.workbench.session is not None or self._scan_master() is not None
+        self.create_button.setEnabled(can_add)
+        self.create_button.setToolTip(
+            ""
+            if can_add
+            else tr(
+                "Open a Design Model (Labels page) or promote a Scan Master in the project first."
+            )
+        )
+        selected = self.browser.selected_asset_id is not None
+        self.browser.create_sku_button.setEnabled(selected)
+        self.browser.create_sku_button.setToolTip(
+            "" if selected else tr("Select a packaging asset in the list first.")
+        )
+        has_assets = self.browser.item_view.count() > 0
+        self.contact_button.setEnabled(has_assets)
+        self.contact_button.setToolTip(
+            "" if has_assets else tr("The library is empty: add an asset first.")
+        )
 
     def _button(self, text: str, name: str, slot: Callable[[], object]) -> QPushButton:
         button = QPushButton(text, self)

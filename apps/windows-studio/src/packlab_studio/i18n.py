@@ -53,6 +53,7 @@ def translate_widget_tree(root: QWidget) -> None:
     for line in root.findChildren(QLineEdit):
         line.setPlaceholderText(tr(line.placeholderText()))
     for combo in root.findChildren(QComboBox):
+        combo.setPlaceholderText(tr(combo.placeholderText()))
         for index in range(combo.count()):  # item data (the logic key) is unchanged
             combo.setItemText(index, tr(combo.itemText(index)))
     for dock in root.findChildren(QDockWidget):
@@ -170,6 +171,67 @@ TURKISH: dict[str, str] = {
         'captures" seçeneğini açın.'
     ),
     "Phone connected, no active scan.": "Telefon bağlı, etkin tarama yok.",
+    # Page-level fixes (F7-F16)
+    "{label}: working, this can take up to a minute…": (
+        "{label}: çalışıyor, bu işlem bir dakika kadar sürebilir…"
+    ),
+    "No photo mask is waiting for correction. A correction session opens here when the "
+    "automatic object mask of a photo needs fixing. To keep only the object of a built 3D "
+    "model, use Measure & Design > 1. Isolate object.": (
+        "Düzeltme bekleyen fotoğraf maskesi yok. Bir fotoğrafın otomatik nesne maskesinin "
+        "düzeltilmesi gerektiğinde düzeltme oturumu burada açılır. Oluşturulan 3B modelde "
+        "yalnızca nesneyi bırakmak için Ölç ve Tasarla > 1. Nesneyi ayır adımını kullanın."
+    ),
+    "Open Measure && Design": "Ölç ve Tasarla'yı aç",
+    "In plain words: these files have not been checked against the real object yet. Do not "
+    "use them for moulds or production.": (
+        "Kısacası: bu dosyalar henüz gerçek nesneyle karşılaştırılmadı. Kalıp veya üretim "
+        "için kullanmayın."
+    ),
+    "No format: nothing to export yet": "Biçim yok: henüz dışa aktarılacak bir şey yok",
+    "Nothing to export yet: build a 3D model, then promote it to Scan Master in Measure & "
+    "Design.": (
+        "Henüz dışa aktarılacak bir şey yok: 3B model oluşturun, ardından Ölç ve Tasarla'da "
+        "Scan Master'a yükseltin."
+    ),
+    "Nothing to export yet: open a Design Model on the Labels page, or create one in Measure "
+    "& Design or Package Families.": (
+        "Henüz dışa aktarılacak bir şey yok: Etiketler sayfasında bir Tasarım Modeli açın veya "
+        "Ölç ve Tasarla ya da Ambalaj Aileleri'nde oluşturun."
+    ),
+    "Open a Design Model (Labels page) or promote a Scan Master in the project first.": (
+        "Önce bir Tasarım Modeli açın (Etiketler sayfası) veya projede bir Scan Master yükseltin."
+    ),
+    "Select a packaging asset in the list first.": "Önce listeden bir ambalaj varlığı seçin.",
+    "The library is empty: add an asset first.": "Kütüphane boş: önce bir varlık ekleyin.",
+    "Scan Master is the official measured copy of the real object that later designs refer "
+    "to. Promote the cleaned object you selected in Measure & Design. Your name and reason "
+    "are stored in the audit history.": (
+        "Scan Master, sonraki tasarımların dayandığı, gerçek nesnenin resmi ölçülmüş "
+        "kopyasıdır. Ölç ve Tasarla'da seçtiğiniz temizlenmiş nesneyi yükseltin. Adınız ve "
+        "gerekçeniz denetim geçmişine kaydedilir."
+    ),
+    "In plain words: the dimensions are not yet confirmed on the physical object and the "
+    "model must not be used to make moulds.": (
+        "Kısacası: ölçüler henüz fiziksel nesne üzerinde doğrulanmadı ve model kalıp yapımında "
+        "kullanılmamalıdır."
+    ),
+    "Your name": "Adınız",
+    "e.g. your name": "ör. adınız",
+    "e.g. Cleaned jar scan, scale checked on the mat": (
+        "ör. Temizlenmiş kavanoz taraması, ölçek matta kontrol edildi"
+    ),
+    "Build selected scan": "Seçili taramadan model oluştur",
+    "Open selected model": "Seçili modeli aç",
+    "Scans and builds": "Taramalar ve modeller",
+    "not built yet": "henüz model yok",
+    "building or interrupted": "oluşturuluyor veya yarıda kaldı",
+    "built": "oluşturuldu",
+    "build failed": "oluşturma başarısız",
+    "build cancelled": "oluşturma iptal edildi",
+    "No imported scans yet: use Capture Inbox first.": (
+        "Henüz içe aktarılmış tarama yok: önce Tarama Gelen Kutusu'nu kullanın."
+    ),
     # Shell status messages
     "Created project {path}": "Proje oluşturuldu: {path}",
     "New project failed: {error}": "Yeni proje oluşturulamadı: {error}",

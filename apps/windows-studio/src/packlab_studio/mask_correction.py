@@ -72,6 +72,7 @@ class MaskCorrectionView(QWidget):
     child_created = Signal(object)
     cancelled = Signal()
     correction_rejected = Signal(str)
+    route_requested = Signal(str)  # F9: the explanation's next-step button
 
     def __init__(
         self,
@@ -101,8 +102,26 @@ class MaskCorrectionView(QWidget):
         actions.addWidget(self.undo_button)
         actions.addWidget(self.submit_button)
         actions.addWidget(self.cancel_button)
+        actions.addStretch(1)
+        # F9: no dead end. Sessions are opened by the photo-mask pipeline; for a built
+        # model the object-only cleanup is "1. Isolate object" in Measure & Design.
+        self.idle_help = QLabel(
+            "No photo mask is waiting for correction. A correction session opens here when "
+            "the automatic object mask of a photo needs fixing. To keep only the object of a "
+            "built 3D model, use Measure & Design > 1. Isolate object.",
+            self,
+        )
+        self.idle_help.setObjectName("packlab.mask-correction.idle-help")
+        self.idle_help.setWordWrap(True)
+        self.measure_button = QPushButton("Open Measure && Design", self)
+        self.measure_button.setObjectName("packlab.mask-correction.open-measure")
+        self.measure_button.clicked.connect(lambda: self.route_requested.emit("measure-design"))
+        idle_row = QHBoxLayout()
+        idle_row.addWidget(self.idle_help, 1)
+        idle_row.addWidget(self.measure_button, 0, Qt.AlignmentFlag.AlignTop)
         layout = QVBoxLayout(self)
-        layout.addWidget(self.canvas)
+        layout.addLayout(idle_row)
+        layout.addWidget(self.canvas, 1)
         layout.addLayout(actions)
         layout.addWidget(self.status)
         self.canvas.pixel_clicked.connect(self.add_pixel_edit)
@@ -192,6 +211,8 @@ class MaskCorrectionView(QWidget):
         self._set_session_enabled(False)
 
     def _set_session_enabled(self, enabled: bool) -> None:
+        self.idle_help.setVisible(not enabled)
+        self.measure_button.setVisible(not enabled)
         self.mode.setEnabled(enabled)
         self.submit_button.setEnabled(enabled)
         self.cancel_button.setEnabled(enabled)

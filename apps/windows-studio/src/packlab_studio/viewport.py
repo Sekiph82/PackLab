@@ -457,6 +457,7 @@ class ViewportRenderMode(StrEnum):
     WIREFRAME = "wireframe"
     NORMALS = "normals"
     POINT_CLOUD = "point-cloud"
+    SHADED = "shaded"  # opaque, lit faces without triangle outlines (PL-0464 F7)
 
 
 @dataclass(frozen=True, slots=True)
@@ -739,6 +740,9 @@ class QtRasterViewportAdapter:
                 if projected is not None:
                     painter.drawPoint(projected)
             return
+        if state.render_mode is ViewportRenderMode.SHADED:
+            self._shade_mesh(painter, item.geometry, state.camera, size, color)
+            return
         painter.setPen(QPen(color, 1.5 if selected else 1.0))
         for triangle in item.geometry.triangles:
             points = [
@@ -755,6 +759,55 @@ class QtRasterViewportAdapter:
                 painter.drawPolygon(polygon)
         if state.render_mode is ViewportRenderMode.NORMALS:
             self._draw_normals(painter, item.geometry, state.camera, size, color)
+
+    def _shade_mesh(
+        self,
+        painter: QPainter,
+        mesh: MeshGeometry,
+        camera: ViewportCamera,
+        size: QSize,
+        color: QColor,
+    ) -> None:
+        """Far-to-near filled faces, headlight-lit; same projection as ``_project``."""
+        if not mesh.triangles:
+            return
+        x, y, z = (np.asarray(mesh.vertices, dtype=np.float64) - np.asarray(camera.target)).T
+        yaw = math.radians(camera.yaw_degrees)
+        pitch = math.radians(camera.pitch_degrees)
+        x1 = math.cos(yaw) * x + math.sin(yaw) * z
+        z1 = -math.sin(yaw) * x + math.cos(yaw) * z
+        y1 = math.cos(pitch) * y - math.sin(pitch) * z1
+        z2 = math.sin(pitch) * y + math.cos(pitch) * z1 + camera.distance
+        view = np.stack([x1, y1, z2], axis=1)
+        faces = np.asarray(mesh.triangles, dtype=np.int64).reshape(-1, 3)
+        corners = view[faces]
+        visible = (corners[:, :, 2] > 0.001).all(axis=1)
+        normal = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+        length = np.linalg.norm(normal, axis=1)
+        light = np.abs(normal[:, 2]) / np.where(length > 0, length, 1.0)
+        shade = 0.35 + 0.65 * light
+        unit = min(size.width(), size.height()) * 0.8
+        depth = np.where(visible, corners[:, :, 2].mean(axis=1), 0.0)
+        for index in np.argsort(-depth):
+            if not visible[index]:
+                continue
+            polygon = QPolygonF(
+                [
+                    QPointF(
+                        size.width() / 2 + (px + camera.pan_x) * unit / pz,
+                        size.height() / 2 - (py + camera.pan_y) * unit / pz,
+                    )
+                    for px, py, pz in corners[index]
+                ]
+            )
+            fill = QColor.fromRgbF(
+                color.redF() * shade[index],
+                color.greenF() * shade[index],
+                color.blueF() * shade[index],
+            )
+            painter.setPen(QPen(fill, 0.8))  # same-colour edge hides seams, not outlines
+            painter.setBrush(fill)
+            painter.drawPolygon(polygon)
 
     def _splat_points(
         self,

@@ -17,11 +17,14 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
     QStyle,
     QVBoxLayout,
@@ -210,14 +213,42 @@ class ScanMasterEditorView(QWidget):
         self.authority_status.setObjectName("packlab.scan-master.authority-status")
         self.status = QLabel("No promotion requested.", self)
         self.status.setObjectName("packlab.scan-master.status")
+        # F13: one compact, explained card instead of full-width fields on an empty page.
+        self.authority_status.setWordWrap(True)
+        self.status.setWordWrap(True)
+        self.actor_input.setPlaceholderText("e.g. your name")
+        self.reason_input.setPlaceholderText("e.g. Cleaned jar scan, scale checked on the mat")
+        intro = QLabel(
+            "Scan Master is the official measured copy of the real object that later "
+            "designs refer to. Promote the cleaned object you selected in Measure & Design. "
+            "Your name and reason are stored in the audit history.",
+            self,
+        )
+        intro.setWordWrap(True)
+        plain = QLabel(
+            "In plain words: the dimensions are not yet confirmed on the physical object and "
+            "the model must not be used to make moulds.",
+            self,
+        )
+        plain.setWordWrap(True)
         form = QFormLayout()
-        form.addRow("Actor", self.actor_input)
-        form.addRow("Promotion reason", self.reason_input)
+        form.addRow("Your name", self.actor_input)
+        form.addRow("Reason", self.reason_input)
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.promote_button)
+        button_row.addStretch(1)
+        card = QGroupBox("Promote to Scan Master", self)
+        card.setMaximumWidth(760)
+        card_layout = QVBoxLayout(card)
+        card_layout.addWidget(intro)
+        card_layout.addLayout(form)
+        card_layout.addLayout(button_row)
+        card_layout.addWidget(self.authority_status)
+        card_layout.addWidget(plain)
+        card_layout.addWidget(self.status)
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.promote_button)
-        layout.addWidget(self.authority_status)
-        layout.addWidget(self.status)
+        layout.addWidget(card)
+        layout.addStretch(1)
         self.promote_button.clicked.connect(self._request_promotion)
 
     def _request_promotion(self) -> None:
@@ -482,7 +513,20 @@ class RouteStack(QStackedWidget):
             self.addWidget(view)
 
     def show_route(self, route: Route) -> None:
+        # Only the visible page counts for the minimum size, so the surrounding scroll
+        # area scrolls when *this* page needs it, not because of the tallest page.
+        for key, view in self.views.items():
+            policy = QSizePolicy.Policy.Preferred if key is route else QSizePolicy.Policy.Ignored
+            view.setSizePolicy(policy, policy)
         self.setCurrentWidget(self.views[route])
+        self.updateGeometry()
+
+    # QStackedLayout answers height-for-width with the preferred height of *all* pages, so
+    # the surrounding scroll area would scroll every page to the tallest one. Answer with
+    # the visible page's minimum height: scrolling starts only when that page is cramped.
+    def heightForWidth(self, _width: int) -> int:
+        page = self.currentWidget()
+        return -1 if page is None else page.minimumSizeHint().height()
 
     def set_project_available(self, available: bool) -> None:
         for route in PROJECT_ROUTES:

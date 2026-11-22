@@ -196,3 +196,80 @@ def test_qr_code_is_bounded_and_inbox_scrolls(monkeypatch, tmp_path) -> None:
     finally:
         window.close()
         app.processEvents()
+
+
+def test_page_level_fixes_f7_to_f16(monkeypatch, tmp_path) -> None:
+    from packlab_studio.build_model import BuildModelView
+    from packlab_studio.engineering_export import EngineeringExportView
+    from packlab_studio.mask_correction import MaskCorrectionView
+    from packlab_studio.model_viewer import ModelViewerView
+    from packlab_studio.package_families_view import PackageFamiliesView
+    from packlab_studio.receiver_session import InboxEntry
+    from packlab_studio.viewport import PointCloudGeometry, SceneObjectKind
+
+    app, window = _window(monkeypatch, tmp_path)
+    try:
+        window.new_project(tmp_path / "project", "Jar")
+        window.show()
+        views = window.route_stack.views
+        # F14: pages scroll inside the window, so docks keep their space.
+        assert window.route_scroll.widget() is window.route_stack
+        # F8: Fit centres on the robust (outlier-free) box of the model.
+        viewer = views[Route.MODEL_VIEWER]
+        assert isinstance(viewer, ModelViewerView)
+        cloud = [(10.0 + x * 0.01, 5.0, 2.0 + x * 0.01) for x in range(100)]
+        cloud += [(1000.0, 1000.0, 1000.0)]  # a far SfM outlier
+        viewer.service.add_geometry(
+            "model", SceneObjectKind.SCAN_MESH, PointCloudGeometry(tuple(cloud))
+        )
+        viewer.fit()
+        camera = viewer.service.state.camera
+        assert abs(camera.target[0] - 10.5) < 0.1 and camera.distance < 5
+        # F9: Mask Correction explains itself and leads somewhere.
+        mask = views[Route.MASK_CORRECTION]
+        assert isinstance(mask, MaskCorrectionView)
+        window.navigation.navigate(Route.MASK_CORRECTION)
+        assert mask.idle_help.isVisible()
+        mask.measure_button.click()
+        assert window.navigation.current_route is Route.MEASURE_DESIGN
+        # F10: Exports empty state, no purposeless Cancel.
+        exports = views[Route.EXPORTS]
+        assert isinstance(exports, EngineeringExportView)
+        window.navigation.navigate(Route.EXPORTS)
+        assert exports.empty_state.isVisible() and not exports.cancel_button.isVisible()
+        # F12: impossible Library actions are disabled with a reason.
+        library = views[Route.LIBRARY]
+        window.navigation.navigate(Route.LIBRARY)
+        app.processEvents()
+        assert not library.create_sku_button.isEnabled()
+        assert library.create_sku_button.toolTip()
+        # F7: a family change clears the stale status line.
+        families = views[Route.PACKAGE_FAMILIES]
+        assert isinstance(families, PackageFamiliesView)
+        families.status.setText("Closure: stale")
+        families.family.setCurrentIndex(
+            (families.family.currentIndex() + 1) % families.family.count()
+        )
+        assert "stale" not in families.status.text()
+        # F16: scans with their latest build state and Build/Open actions.
+        builds = views[Route.RECONSTRUCTION]
+        assert isinstance(builds, BuildModelView)
+        digest = "a" * 64
+        workspace = tmp_path / "project" / "working" / "reconstruction" / "r-1"
+        (workspace / "outputs" / "mvs").mkdir(parents=True)
+        (workspace / "outputs" / "mvs" / "scene_dense.ply").write_bytes(b"ply\n")
+        (workspace / "manifest.json").write_text(
+            json.dumps({"source_digest": digest, "state": "succeeded"}), encoding="utf-8"
+        )
+        entry = InboxEntry("cap-1", digest, "imported", "network", 12, "", "iPhone 16", 0.0)
+        requested: list[tuple[str, str]] = []
+        builds.build_requested.connect(lambda *args: requested.append(args))
+        builds.refresh_history([entry], tmp_path / "project")
+        builds.history.setCurrentRow(0)
+        assert "built" in builds.history.item(0).text()
+        assert builds.open_selected_button.isEnabled()
+        builds.build_selected_button.click()
+        assert requested == [("cap-1", digest)]
+    finally:
+        window.close()
+        app.processEvents()

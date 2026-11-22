@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QVBoxLayout,
@@ -35,6 +36,8 @@ from packlab_core.technical_drawing_dimensions import build_drawing_dimensions
 from packlab_core.technical_drawing_export import export_technical_drawing_vectors
 from packlab_core.technical_drawing_pdf import export_technical_drawing_pdf
 from packlab_core.technical_drawing_title_block import build_technical_drawing_title_block
+
+from .i18n import tr
 
 
 class ExportSourceKind(StrEnum):
@@ -100,10 +103,23 @@ class EngineeringExportView(QWidget):
         )
         self.disclaimer.setObjectName("packlab.export.physical-disclaimer")
         self.disclaimer.setWordWrap(True)
+        self.plain_disclaimer = QLabel(
+            "In plain words: these files have not been checked against the real object yet. "
+            "Do not use them for moulds or production.",
+            self,
+        )
+        self.plain_disclaimer.setObjectName("packlab.export.plain-disclaimer")
+        self.plain_disclaimer.setWordWrap(True)
+        # F10: what to do when there is nothing to export (instead of an empty dropdown).
+        self.empty_state = QLabel("", self)
+        self.empty_state.setObjectName("packlab.export.empty-state")
+        self.empty_state.setWordWrap(True)
+        self.format_selector.setPlaceholderText("No format: nothing to export yet")
         self.export_button = QPushButton("Export selected source", self)
         self.export_button.setObjectName("packlab.export.run")
         self.cancel_button = QPushButton("Cancel", self)
         self.cancel_button.setObjectName("packlab.export.cancel")
+        self.cancel_button.hide()  # F10: nothing runs in the background to cancel
         self.status = QLabel("No export requested.", self)
         self.status.setObjectName("packlab.export.status")
         self.status.setWordWrap(True)
@@ -115,10 +131,16 @@ class EngineeringExportView(QWidget):
         form.addRow("Format", self.format_selector)
         layout = QVBoxLayout(self)
         layout.addLayout(form)
+        layout.addWidget(self.empty_state)
         layout.addWidget(self.disclaimer)
-        layout.addWidget(self.export_button)
-        layout.addWidget(self.cancel_button)
+        layout.addWidget(self.plain_disclaimer)
+        export_row = QHBoxLayout()
+        export_row.addWidget(self.export_button)
+        export_row.addWidget(self.cancel_button)
+        export_row.addStretch(1)
+        layout.addLayout(export_row)
         layout.addWidget(self.status)
+        layout.addStretch(1)
 
         self.source_selector.currentIndexChanged.connect(self.refresh_source)
         self.export_button.clicked.connect(self.export_selected)
@@ -163,6 +185,7 @@ class EngineeringExportView(QWidget):
                 self.available_formats.setText("None")
                 self.format_selector.clear()
                 self.export_button.setEnabled(False)
+                self._show_empty_state(source_kind)
                 return
             source_available = True
             model = design_source.model
@@ -188,7 +211,27 @@ class EngineeringExportView(QWidget):
             self.format_selector.addItem(label, value)
         if self.format_selector.findData(chosen) >= 0:
             self.format_selector.setCurrentIndex(self.format_selector.findData(chosen))
+        elif self.format_selector.count():  # a placeholder would otherwise stay selected
+            self.format_selector.setCurrentIndex(0)
         self.export_button.setEnabled(source_available and bool(formats))
+        self._show_empty_state(None if source_available and formats else source_kind)
+
+    def _show_empty_state(self, source_kind: ExportSourceKind | None) -> None:
+        if source_kind is None:
+            self.empty_state.hide()
+            return
+        self.empty_state.setText(
+            tr(
+                "Nothing to export yet: build a 3D model, then promote it to Scan Master in "
+                "Measure & Design."
+            )
+            if source_kind is ExportSourceKind.SCAN_MESH
+            else tr(
+                "Nothing to export yet: open a Design Model on the Labels page, or create one "
+                "in Measure & Design or Package Families."
+            )
+        )
+        self.empty_state.show()
 
     def cancel_export(self) -> None:
         self.status.setText("Export cancelled; no domain service was called.")
