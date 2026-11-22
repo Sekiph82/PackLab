@@ -654,8 +654,23 @@ class MeasureDesignView(QWidget):
             request = self.promotion_request(self.actor.text().strip(), self.reason.text().strip())
             if request is None:
                 raise md.MeasureDesignError("isolate and scale the object first")
+            assert self.model is not None and self.frame is not None
+            # PL-0487: the cloud -> Scan Master (= Design Model) frame, so placed parts can be
+            # composed into Design Model frames later.
+            source_frame = {
+                "source_cloud_sha256": self.model.sha256,
+                "source_frame": (
+                    "part_combine_mat_frame_mm"
+                    if self.part_record is not None
+                    else "reconstruction_units"
+                ),
+                "part": self.loaded_part,
+                "source_to_scan_master": [float(v) for v in self.frame.matrix.ravel()],
+            }
             revision = ScanMasterPromotionAction(manager).promote(
-                request, expected_project_revision=manager.current.revision
+                request,
+                expected_project_revision=manager.current.revision,
+                source_frame=source_frame,
             )
             self.scan_master = revision
             self._show_scan_master()

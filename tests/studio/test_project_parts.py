@@ -362,6 +362,10 @@ def test_combined_part_measures_promotes_and_fits_in_its_mat_frame(app, tmp_path
         linked, _document = manager.part_design_model("body")
         assert linked["revision_id"] == view.design.model.revision_id, view.status.text()
         assert linked["part"] == "body" and manager.part_design_model("closure") is None
+        frame = manager.part_design_frame("body")  # recorded at promotion (PL-0487)
+        assert frame["source_cloud_sha256"] == view.model.sha256
+        assert frame["source_frame"] == "part_combine_mat_frame_mm" and frame["part"] == "body"
+        assert np.allclose(frame["source_to_scan_master"], view.frame.matrix.ravel())
         assert "Body Design Model" in view.status.text()
         labels = window.route_stack.views[Route.LABELS]
         assert labels.part == "body"

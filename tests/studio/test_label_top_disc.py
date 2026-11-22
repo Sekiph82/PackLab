@@ -205,3 +205,107 @@ def test_top_overlay_rotation_preview_and_mockup_package(closure, tmp_path, monk
     overlays = job.package.manifest()["body"]["scene"]["overlays"]
     assert [item["mapping_mode"] for item in overlays] == ["PLANAR_DISC"]
     assert overlays[0]["geometry"]["outer_radius_mm_unverified"] == pytest.approx(40.0)
+
+
+def test_preview_and_blender_share_artwork_orientation(app, tmp_path, monkeypatch) -> None:
+    """Asymmetric artwork (left half blue) on a wrap label at the back of a jar."""
+    from packlab_core import blender_scene_package as package
+
+    body = DesignWorkbench()
+    body.open_document(nominal_jar_design_document(height_mm=50.0, diameter_mm=85.0))
+    entry = body.add_label_zone(
+        body.suggest_label_zone(LabelZoneKind.WRAP),
+        boundary=LabelZoneBoundary(0.4, 0.1, 0.6, 0.9),  # centred on -Y (back)
+    )
+    body.import_artwork(entry, _png(200, 100), fit_mode="STRETCH")
+    points, colors = label_preview_points(body.session, entry)
+    blue = colors[:, 2] > colors[:, 0]
+    # A viewer at -Y looking at +Y has +X on the right: artwork left (blue) must be at -X.
+    assert (points[blue, 0] < 0).mean() > 0.95 and (points[~blue, 0] > 0).mean() > 0.95
+
+    monkeypatch.setenv("PACKLAB_BUILD_REVISION", "a" * 40)
+    fake = tmp_path / "blender.exe"
+    fake.write_bytes(b"not run")
+    job = body.prepare_mockup(tmp_path, executable=fake)
+    (overlay,) = job.package.manifest()["body"]["scene"]["overlays"]
+    # Blender's runner uses this very function (embedded source), so both agree.
+    assert package.artwork_viewer_orientation(overlay) == (True, True)
+    runner = package.BLENDER_SCENE_RUNNER
+    assert "def _viewer_orientation(overlay):" in runner
+    assert "__PACKLAB_VIEWER_ORIENTATION__" not in runner
+    assert "viewer_right = [-normal[1], normal[0], 0.0]" in runner
+
+
+def test_top_refuses_downward_and_off_axis_faces(app) -> None:
+    from packlab_core.cad_label_surface_analysis import (
+        CadLabelSurfacePolicy,
+        analyze_cad_label_surfaces,
+    )
+    from packlab_core.label_zone import create_label_zone
+    from packlab_core.label_zone_placement import create_label_zone_placement_revision
+
+    jar = DesignWorkbench()
+    jar.open_document(nominal_jar_design_document(height_mm=15.0, diameter_mm=90.0))
+    session = jar.session
+    policy = CadLabelSurfacePolicy((0.0, 0.0, -1.0), 5.0, 0.05)
+    analysis = analyze_cad_label_surfaces(session.model, session.label_representation, policy)
+    (bottom,) = [
+        item
+        for item in analysis.candidates
+        if item.advisory_classification == "LABEL_SAFE_CANDIDATE" and item.center[2] < 1e-6
+    ]
+    full = LabelZoneBoundary(0.0, 0.0, 1.0, 1.0)
+    zone = create_label_zone(
+        session.model,
+        session.label_representation,
+        zone_kind=LabelZoneKind.TOP,
+        component_id=session.component_id,
+        feature_id=session.profile_feature_id,
+        boundary=full,
+    )
+    placement = create_label_zone_placement_revision(
+        zone, full, actor_id="tester", reason="bottom face", created_at_utc="2026-11-22T00:00:00Z"
+    )
+    with pytest.raises(LabelMetricSurfaceBindingError, match="disc_must_face_up"):
+        create_label_metric_surface_binding(
+            session.model,
+            session.label_representation,
+            placement,
+            analysis,
+            bottom.analysis_region_id,
+        )
+
+    off_axis = DesignWorkbench()
+    off_axis.open_document(
+        nominal_jar_design_document(height_mm=15.0, diameter_mm=90.0, axis_origin=(10.0, 0, 0))
+    )
+    with pytest.raises(LabelMetricSurfaceBindingError, match="disc_not_on_axis"):
+        off_axis.add_label_zone(off_axis.suggest_label_zone(LabelZoneKind.TOP))
+
+
+def test_top_dieline_json_has_circle_outlines_and_restore_flags_small_faces(
+    closure, tmp_path
+) -> None:
+    entry = closure.add_label_zone(
+        closure.suggest_label_zone(LabelZoneKind.TOP),
+        disc_outer_radius_mm=40.0,
+        disc_inner_radius_mm=10.0,
+    )
+    path, _export = closure.export_dieline_svg(entry, tmp_path)
+    record = __import__("json").loads(path.with_suffix(".json").read_text("utf-8"))
+    outline = record["dieline"]["disc_outline"]
+    assert record["dieline"]["boundary_vertices_kind"] == "BOUNDING_SQUARE_OF_DISC"
+    outer = np.asarray(outline["source"]["outer_polyline"])
+    inner = np.asarray(outline["source"]["inner_polyline"])
+    assert np.allclose(np.hypot(*outer.T), 40.0) and np.allclose(np.hypot(*inner.T), 10.0)
+    assert outline["safe"]["outer_radius"] == 38.0 and outline["bleed"]["inner_radius"] == 8.5
+
+    document = closure.label_document("closure", lambda content, media: "unused")
+    small = DesignWorkbench()  # a smaller closure (35 mm top radius) cannot hold 40 mm
+    small.open_document(nominal_jar_design_document(height_mm=15.0, diameter_mm=70.0))
+    problems = small.restore_labels(document, lambda path, sha: b"")
+    assert small.labels == [] and "at most the top face radius 35.00 mm" in problems[0]
+    same = DesignWorkbench()  # a bigger one keeps the absolute mm size
+    same.open_document(nominal_jar_design_document(height_mm=15.0, diameter_mm=120.0))
+    assert same.restore_labels(document, lambda path, sha: b"") == []
+    assert disc_radii(same.labels[0].metric_binding) == pytest.approx((40.0, 10.0))

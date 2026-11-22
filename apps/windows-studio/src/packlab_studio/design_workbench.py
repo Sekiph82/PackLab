@@ -34,6 +34,7 @@ from packlab_core.blender_scene_package import (
     BlenderArtworkBinding,
     BlenderScenePackage,
     ProjectAssetReference,
+    artwork_viewer_orientation,
     create_blender_scene_package,
 )
 from packlab_core.cad_adapter import cad_shape_precise_bounds
@@ -94,6 +95,7 @@ from packlab_core.label_metric_surface_binding import (
     create_label_dieline_print_intent,
     create_label_metric_surface_binding,
     disc_binding_options,
+    disc_radii,
     map_label_artwork_to_metric_surface,
 )
 from packlab_core.label_zone import LabelZoneBoundary, LabelZoneKind, create_label_zone
@@ -398,6 +400,7 @@ def nominal_jar_design_document(
     project_id: str = "packlab-nominal-jar",
     actor_id: str = "studio-user",
     created_at_utc: str | None = None,
+    axis_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> bytes:
     """User-authored nominal jar (straight revolve) as a canonical Design Model document."""
     if not (math.isfinite(height_mm) and math.isfinite(diameter_mm)):
@@ -447,7 +450,7 @@ def nominal_jar_design_document(
         profile,
         profile_feature_id=profile_feature.feature_id,
         axis_feature_id=axis_feature.feature_id,
-        axis_origin=(0.0, 0.0, 0.0),
+        axis_origin=axis_origin,
         axis_direction=(0.0, 0.0, 1.0),
         angle_degrees=360.0,
     )
@@ -623,7 +626,7 @@ class DesignWorkbench(QObject):
                     "placement_revision_id": entry.placement.revision_id,
                     "metric_binding_revision_id": entry.metric_binding.revision_id,
                     "size_mm_unverified": [width, height],
-                    "disc": disc_binding_options(entry.metric_binding) or None,
+                    "disc": _disc_document(entry.metric_binding),
                     "artwork": artwork,
                 }
             )
@@ -656,12 +659,20 @@ class DesignWorkbench(QObject):
                     **{key: float(item["boundary"][key]) for key in _BOUNDARY_KEYS}
                 )
                 disc = item.get("disc") if kind is LabelZoneKind.TOP else None
+                if kind is LabelZoneKind.TOP and not disc:
+                    raise DesignWorkbenchError("top label without disc radii")
                 entry = self.add_label_zone(
                     self.suggest_label_zone(kind),
-                    boundary=boundary,  # a top label's boundary carries its outer radius
+                    # Top labels keep absolute mm radii; a face too small is refused (flagged).
+                    boundary=None if disc else boundary,
                     variant_id=str(item["variant_id"]),
-                    disc_inner_radius_mm=None if not disc else float(disc["disc_inner_radius_mm"]),
-                    disc_rotation_degrees=0.0 if not disc else float(disc["disc_rotation_degrees"]),
+                    disc_outer_radius_mm=(
+                        float(disc["outer_radius_mm_unverified"]) if disc else None
+                    ),
+                    disc_inner_radius_mm=(
+                        float(disc["inner_radius_mm_unverified"]) if disc else None
+                    ),
+                    disc_rotation_degrees=float(disc["rotation_degrees"]) if disc else 0.0,
                 )
                 artwork = item.get("artwork")
                 if artwork is not None:
@@ -871,13 +882,14 @@ class DesignWorkbench(QObject):
         session = self.require_session()
         host = session.label_representation
         record = export.as_dict() | {
+            "dieline": intent.as_dict(),  # outline (circle/annulus for a top label), mm
             "label_host": {
                 "brep_revision_id": host.revision_id,
                 "straight_run_tolerance_mm_unverified": host.straight_run_tolerance,
                 "band_approximated_by_cylinder": session.label_band_snapped,
                 "host_height_mm_unverified": entry.metric_binding.host_height_mm_unverified,
                 "host_circumference_mm_unverified": (entry.metric_binding.host_width_mm_unverified),
-            }
+            },
         }
         target.with_suffix(".json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -1065,6 +1077,18 @@ def _new_directory(folder: Path, stem: str) -> Path:
     raise DesignWorkbenchError("Too many mockup folders in that location.")
 
 
+def _disc_document(binding: LabelMetricSurfaceBinding) -> dict[str, float] | None:
+    """Top label radii in absolute mm (both) and rotation, as saved in a label document."""
+    if binding.mapping_mode != "PLANAR_DISC":
+        return None
+    outer, inner = disc_radii(binding)
+    return {
+        "outer_radius_mm_unverified": outer,
+        "inner_radius_mm_unverified": inner,
+        "rotation_degrees": float(disc_binding_options(binding)["disc_rotation_degrees"]),
+    }
+
+
 def label_preview_points(
     session: DesignModelSession, entry: LabelZoneEntry, *, step_mm: float = 0.75
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -1151,10 +1175,13 @@ def label_preview_points(
     w, h = image.width(), image.height()
     rows_bytes = np.frombuffer(image.constBits(), np.uint8).reshape(h, image.bytesPerLine())
     pixels = rows_bytes[:, : w * 4].reshape(h, w, 4)
-    rgba = pixels[
-        np.round((1.0 - t) * (h - 1)).astype(int),  # artwork rows start at the top
-        np.round(s * (w - 1)).astype(int),
-    ]
+    # Same column/row orientation as the Blender mockup (one shared function).
+    mirror_u, mirror_v = artwork_viewer_orientation(
+        {"mapping_mode": overlay.mapping_mode, "geometry": geometry}
+    )
+    column = 1.0 - s if mirror_u else s
+    row = 1.0 - t if mirror_v else t  # fraction from the artwork's top row
+    rgba = pixels[np.round(row * (h - 1)).astype(int), np.round(column * (w - 1)).astype(int)]
     keep = rgba[:, 3] > 0
     return points[keep], rgba[keep, :3]
 

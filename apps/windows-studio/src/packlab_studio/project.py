@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -287,9 +288,26 @@ class ProjectManager:
         return self.commit_edit(next_state, expected_revision=expected_revision)
 
     def persist_scan_master_revision(
-        self, revision: object, *, expected_revision: int
+        self,
+        revision: object,
+        *,
+        expected_revision: int,
+        source_frame: dict[str, Any] | None = None,
     ) -> ProjectMetadata:
-        """Persist a core-created immutable Scan Master and select it in project state."""
+        """Persist a core-created immutable Scan Master and select it in project state.
+
+        ``source_frame`` (PL-0487): the 4x4 map from the promoted cloud's frame to the Scan
+        Master frame and that cloud's digest, so other frames can be composed with it.
+        """
+        if source_frame is not None:
+            matrix = source_frame.get("source_to_scan_master")
+            if (
+                not isinstance(matrix, list)
+                or len(matrix) != 16
+                or not all(isinstance(v, float) and math.isfinite(v) for v in matrix)
+                or not isinstance(source_frame.get("source_cloud_sha256"), str)
+            ):
+                raise ProjectError("scan master source frame is invalid")
 
         if self.layout is None or self.metadata is None:
             raise ProjectError("no project is open")
@@ -354,6 +372,7 @@ class ProjectManager:
             "mold_use_authorized": False,
             "promotion_actor": manifest.get("promotion_actor"),
             "promotion_reason": manifest.get("promotion_reason"),
+            "source_frame": source_frame,
         }
         next_state = dict(state)
         next_state["scan_master_revisions"] = [*records, record]
@@ -741,6 +760,24 @@ class ProjectManager:
         if document.get("design_model_revision_id") != revision_id:
             raise ProjectError("design model document does not match its record")
         return record, document
+
+    def part_design_frame(self, part: str) -> dict[str, Any] | None:
+        """Source frame of the Scan Master that ``part``'s Design Model was fitted to.
+
+        The Design Model shares its Scan Master's frame; ``source_to_scan_master`` maps the
+        promoted cloud (e.g. the combined part in its mat frame, mm) into it. None for
+        standalone models or Scan Masters promoted before frames were recorded.
+        """
+        found = self.part_design_model(part)
+        if found is None or self.layout is None:
+            return None
+        scan_master_id = found[0].get("scan_master_revision_id")
+        _, state = self._read_authority(self.layout)
+        for item in state.get("scan_master_revisions", []):
+            if isinstance(item, dict) and item.get("revision_id") == scan_master_id:
+                frame = item.get("source_frame")
+                return frame if isinstance(frame, dict) else None
+        return None
 
     # ------------------------------------------------------------ part labels (PL-0487)
 

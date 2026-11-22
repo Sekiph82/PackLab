@@ -218,6 +218,7 @@ class LabelDielineRevision:
             "width": self.width,
             "height": self.height,
             "extents": list(self.extents),
+            **(_disc_outline(self) if self.mapping_mode == "PLANAR_DISC" else {}),
             "limitations": list(self.limitations),
             "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
             "print_fit_verified": False,
@@ -702,6 +703,45 @@ def _cylindrical_wrap(face: Any) -> tuple[float, float, tuple[tuple[str, float |
             ("azimuth_direction", "+Y_TO_PLUS_X"),
         ),
     )
+
+
+DISC_OUTLINE_SEGMENTS = 128
+
+
+def _circle_polyline(radius: float) -> list[list[float]]:
+    """Closed counter-clockwise circle about the axis as a polyline (first point not repeated)."""
+    return [
+        [
+            radius * math.cos(2.0 * math.pi * index / DISC_OUTLINE_SEGMENTS),
+            radius * math.sin(2.0 * math.pi * index / DISC_OUTLINE_SEGMENTS),
+        ]
+        for index in range(DISC_OUTLINE_SEGMENTS)
+    ]
+
+
+def _disc_outline(dieline: LabelDielineRevision) -> dict[str, object]:
+    """Circle/annulus outlines of a PLANAR_DISC dieline; boundary_vertices is its square."""
+    outer, inner = disc_radii(dieline.binding)
+    safe, bleed = dieline.safe_margin_mm_unverified, dieline.bleed_mm_unverified
+    rings = {
+        "source": (outer, inner),
+        "safe": (outer - safe, inner + safe if inner > 0.0 else 0.0),
+        "bleed": (outer + bleed, max(inner - bleed, 0.0)),
+    }
+    return {
+        "boundary_vertices_kind": "BOUNDING_SQUARE_OF_DISC",
+        "disc_outline": {
+            name: {
+                "outer_radius": ring_outer,
+                "inner_radius": ring_inner,
+                "outer_polyline": _circle_polyline(ring_outer),
+                "inner_polyline": _circle_polyline(ring_inner) if ring_inner > 0.0 else [],
+            }
+            for name, (ring_outer, ring_inner) in rings.items()
+        },
+        "disc_outline_unit": "mm_unverified",
+        "disc_outline_segments": DISC_OUTLINE_SEGMENTS,
+    }
 
 
 def disc_radii(binding: LabelMetricSurfaceBinding) -> tuple[float, float]:

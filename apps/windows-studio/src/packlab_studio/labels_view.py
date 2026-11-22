@@ -32,6 +32,7 @@ from packlab_core.label_zone import LabelZoneBoundary, LabelZoneKind
 from .design_workbench import (
     DESIGN_DOCUMENT_SUFFIX,
     DesignWorkbench,
+    DesignWorkbenchError,
     LabelZoneEntry,
     LabelZoneSuggestion,
     MockupJob,
@@ -103,6 +104,8 @@ class LabelsView(QWidget):
         self.placement_provider: Callable[[], tuple[str, Any, Any]] = lambda: ("none", None, ())
         self.stale_document: dict[str, Any] | None = None
         self.assembled_geometry: list[tuple[str, SceneObjectKind, Any]] = []
+        # (key, geometry, label count, notes) of the last Assembled preview
+        self._assembled_cache: tuple[str, list[Any], int, list[str]] | None = None
         # Injectable choosers keep every action drivable offscreen.
         self.choose_design_model_path: Callable[[], str] = lambda: QFileDialog.getOpenFileName(
             self,
@@ -657,9 +660,10 @@ class LabelsView(QWidget):
         """Both parts' Design Models and labels, the closure seated by the PL-0484 placement.
 
         The Blender mockup renders one Design Model, so Assembled shows a combined preview
-        here instead. Placement: the assembly's closure-on-body transform, applied coaxially
-        (each Design Model's revolve axis is its part axis at the origin, Measure & Design
-        frame). Preview only; geometry authority stays with each part's Design Model.
+        here instead. The closure's Design Model goes into the body's Design Model frame
+        through the recorded frames: body_design <- body_cloud <- closure_cloud (placement)
+        <- closure_design. Preview only; geometry authority stays with each Design Model.
+        The result is cached until a Design Model, label document or placement changes.
         """
         self.assembled_geometry = []
         self.assembled_viewer.service = ViewportService(self.assembled_viewer.service.adapter)
@@ -686,6 +690,12 @@ class LabelsView(QWidget):
             )
             return
         try:
+            key = self._assembled_key(record)
+            if self._assembled_cache is not None and self._assembled_cache[0] == key:
+                _key, geometry_list, count, notes = self._assembled_cache
+                self._show_assembled_geometry(geometry_list, count, notes, record, mockup_note)
+                return
+            transforms = {"body": np.eye(4), "closure": self._closure_in_body(record)}
             parts = {part: self._part_workbench(part) for part in ("body", "closure")}
         except Exception as error:
             self.status.setText(f"Not done: {_text_error(error)}")
@@ -694,11 +704,6 @@ class LabelsView(QWidget):
         if missing:
             self.status.setText("; ".join(missing) + ". " + mockup_note)
             return
-        matrix = np.asarray(record["graph"]["relationships"][0]["closure_on_body"], float)
-        closure_on_body = matrix.reshape(4, 4).copy()
-        closure_on_body[:2, 3] = 0.0  # coaxial: seated closure shares the body axis
-        transforms = {"body": np.eye(4), "closure": closure_on_body}
-        service = ViewportService(self.assembled_viewer.service.adapter)
         notes, count = [], 0
         for part, (workbench, note) in parts.items():
             assert workbench is not None and workbench.session is not None
@@ -727,6 +732,70 @@ class LabelsView(QWidget):
                 count += 1
             if note:
                 notes.append(note)
+        self._assembled_cache = (key, list(self.assembled_geometry), count, notes)
+        self._show_assembled_geometry(self.assembled_geometry, count, notes, record, mockup_note)
+
+    def _assembled_key(self, record: dict[str, Any]) -> str:
+        manager = self.project_manager
+        parts = {}
+        for part in ("body", "closure"):
+            found = manager.part_design_model(part)
+            parts[part] = {
+                "design": None if found is None else found[0]["revision_id"],
+                "labels": manager.part_labels(part),
+                "frame": manager.part_design_frame(part),
+            }
+        return json.dumps(
+            {
+                "graph": record["graph"].get("revision_id"),
+                "sources": record.get("sources"),
+                **parts,
+            },
+            sort_keys=True,
+            default=str,
+        )
+
+    def _closure_in_body(self, record: dict[str, Any]) -> np.ndarray:
+        """4x4 closure Design Model frame -> body Design Model frame (mm_unverified)."""
+        manager = self.project_manager
+        value = record.get("sources")
+        sources: dict[str, Any] = value if isinstance(value, dict) else {}
+        frames = {}
+        for part in ("body", "closure"):
+            name = tr(part.capitalize())
+            frame = manager.part_design_frame(part)
+            if frame is None:
+                raise DesignWorkbenchError(
+                    tr(
+                        "the {part} Design Model has no recorded scan frame: fit it in Measure & "
+                        "Design with Use selected part (promote, fit, save)"
+                    ).format(part=name)
+                )
+            source = sources.get(part) or {}
+            if source.get("cloud_sha256") != frame.get("source_cloud_sha256") or source.get(
+                "frame"
+            ) != frame.get("source_frame"):
+                raise DesignWorkbenchError(
+                    tr(
+                        "the {part} Design Model was fitted to another cloud than the placed "
+                        "one: place the closure again or refit {part}"
+                    ).format(part=name)
+                )
+            frames[part] = np.asarray(frame["source_to_scan_master"], float).reshape(4, 4)
+        relationship = record["graph"]["relationships"][0]["closure_on_body"]
+        closure_on_body = np.asarray(relationship, float).reshape(4, 4)
+        return frames["body"] @ closure_on_body @ np.linalg.inv(frames["closure"])
+
+    def _show_assembled_geometry(
+        self,
+        geometry_list: list[tuple[str, SceneObjectKind, Any]],
+        count: int,
+        notes: list[str],
+        record: dict[str, Any],
+        mockup_note: str,
+    ) -> None:
+        self.assembled_geometry = list(geometry_list)
+        service = ViewportService(self.assembled_viewer.service.adapter)
         for object_id, kind, geometry in self.assembled_geometry:
             service.add_geometry(object_id, kind, geometry)
         self.assembled_viewer.service = service

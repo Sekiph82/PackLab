@@ -16,7 +16,11 @@ from PySide6.QtCore import QSettings
 
 from packlab_studio import i18n, labels_view
 from packlab_studio.app import create_application
-from packlab_studio.design_workbench import load_design_model_session, nominal_jar_design_document
+from packlab_studio.design_workbench import (
+    label_preview_points,
+    load_design_model_session,
+    nominal_jar_design_document,
+)
 from packlab_studio.navigation import Route
 from packlab_studio.shell import StudioMainWindow
 
@@ -79,11 +83,56 @@ def _save_part_model(manager, part: str, *, height: float, diameter: float) -> s
     return session.model.revision_id
 
 
-def _placement(seat: float = SEAT_MM):
+YAW_DEG = 37.0
+BODY_AXIS = (12.0, -7.0)  # each part's axis in its own scan mat frame (mm)
+CLOSURE_AXIS = (-20.0, 5.0)
+
+
+def _translate(x: float, y: float, z: float = 0.0) -> np.ndarray:
     matrix = np.eye(4)
-    matrix[:3, 3] = (1.5, -0.7, seat)  # small axis offset: shown coaxially
+    matrix[:3, 3] = (x, y, z)
+    return matrix
+
+
+def _yaw(degrees: float) -> np.ndarray:
+    c, s = np.cos(np.radians(degrees)), np.sin(np.radians(degrees))
+    matrix = np.eye(4)
+    matrix[:2, :2] = ((c, -s), (s, c))
+    return matrix
+
+
+def _frames(manager, monkeypatch, *, closure_sha: str = "c" * 64) -> None:
+    """Measure & Design frames (scan mat frame -> Design Model frame) of both parts."""
+    frames = {
+        "body": {
+            "source_cloud_sha256": "b" * 64,
+            "source_frame": "part_combine_mat_frame_mm",
+            "source_to_scan_master": _translate(-BODY_AXIS[0], -BODY_AXIS[1]).ravel().tolist(),
+        },
+        "closure": {
+            "source_cloud_sha256": closure_sha,
+            "source_frame": "part_combine_mat_frame_mm",
+            "source_to_scan_master": _translate(-CLOSURE_AXIS[0], -CLOSURE_AXIS[1])
+            .ravel()
+            .tolist(),
+        },
+    }
+    monkeypatch.setattr(manager, "part_design_frame", lambda part: frames[part])
+
+
+def _placement(seat: float = SEAT_MM):
+    """Closure scan seated on the body scan: its axis onto the body axis, turned by YAW."""
+    matrix = (
+        _translate(BODY_AXIS[0], BODY_AXIS[1], seat)
+        @ _yaw(YAW_DEG)
+        @ _translate(-CLOSURE_AXIS[0], -CLOSURE_AXIS[1])
+    )
     record = {
         "status": "placed",
+        "sources": {
+            part: {"cloud_sha256": sha * 64, "frame": "part_combine_mat_frame_mm"}
+            for part, sha in (("assembled", "a"), ("body", "b"), ("closure", "c"))
+        },
         "graph": {
             "revision_id": "scan-assembly-graph:" + "a" * 64,
             "relationships": [{"closure_on_body": matrix.ravel().tolist()}],
@@ -165,7 +214,11 @@ def test_each_part_has_its_own_design_model_labels_and_reopens(app, tmp_path) ->
         assert document["design_model_revision_id"] == closure
         top = document["labels"][0]
         assert top["kind"] == "top" and top["artwork"] is not None
-        assert top["disc"] == {"disc_inner_radius_mm": 10.0, "disc_rotation_degrees": 30.0}
+        assert top["disc"] == {
+            "outer_radius_mm_unverified": 40.0,
+            "inner_radius_mm_unverified": 10.0,
+            "rotation_degrees": 30.0,
+        }
 
         labels.show_part("body")  # switching back restores the body labels from the project
         assert [entry.variant_id for entry in labels.workbench.labels] == ["body-wrap"]
@@ -227,8 +280,8 @@ def test_labels_go_stale_when_the_part_design_model_changes(app, tmp_path) -> No
         app.processEvents()
 
 
-def test_assembled_shows_both_parts_labels_with_the_placement(app, tmp_path) -> None:
-    window, _manager, labels, _body, _closure = _project(app, tmp_path)
+def test_assembled_shows_both_parts_labels_with_the_placement(app, tmp_path, monkeypatch):
+    window, manager, labels, _body, _closure = _project(app, tmp_path)
     try:
         labels.show_part("assembled")
         assert "closure placed on the body" in labels.status.text()  # no placement yet
@@ -245,6 +298,14 @@ def test_assembled_shows_both_parts_labels_with_the_placement(app, tmp_path) -> 
 
         labels.placement_provider = _placement()
         labels.show_part("assembled")
+        assert "no recorded scan frame" in labels.status.text()  # standalone models
+        _frames(manager, monkeypatch, closure_sha="d" * 64)
+        labels.show_part("body")
+        labels.show_part("assembled")
+        assert "fitted to another cloud" in labels.status.text()
+        _frames(manager, monkeypatch)
+        labels.show_part("body")
+        labels.show_part("assembled")
         assert labels.assembled_viewer.isVisibleTo(labels)
         assert not labels.render_button.isEnabled()
         assert "one Design Model at a time" in labels.status.text()
@@ -260,9 +321,16 @@ def test_assembled_shows_both_parts_labels_with_the_placement(app, tmp_path) -> 
         assert np.allclose(top[:, 1], SEAT_MM + 15.0 + 0.2)
         top_radius = np.hypot(top[:, 0], top[:, 2])
         assert top_radius.max() <= 40.0 + 1e-6 and top_radius.min() >= 10.0 - 1e-6
-        # viewer is y-up: y = Design Model z (mm). Closure seated at the placement height,
-        # coaxial with the body (xy offset of the placement dropped).
-        closure_y = np.asarray(shown["closure"].vertices)[:, 1]
+        # The closure Design Model, composed through both scan frames and the placement,
+        # lands on the body axis (offsets cancel) turned by the placement's yaw.
+        workbench, _note = labels._part_workbench("closure")
+        unplaced, _colors = label_preview_points(workbench.session, workbench.labels[1])
+        expected = unplaced @ _yaw(YAW_DEG)[:3, :3].T + (0.0, 0.0, SEAT_MM)
+        assert np.allclose(top, [(x, z, -y) for x, y, z in expected])
+        # viewer is y-up: y = Design Model z (mm). Closure seated at the placement height.
+        closure = np.asarray(shown["closure"].vertices)
+        assert np.hypot(closure[:, 0], closure[:, 2]).max() == pytest.approx(45.0, abs=1e-3)
+        closure_y = closure[:, 1]
         assert closure_y.min() == pytest.approx(SEAT_MM, abs=1e-6)
         assert closure_y.max() == pytest.approx(SEAT_MM + 15.0, abs=1e-6)
         skirt = np.asarray(shown["closure-label-0"].points)
@@ -277,10 +345,16 @@ def test_assembled_shows_both_parts_labels_with_the_placement(app, tmp_path) -> 
         labels.show_part("body")
         _add_wrap(labels, "body-band", v_min=0.05, v_max=0.2)
         labels.import_button.click()
+        cached = labels._assembled_cache
         labels.show_part("assembled")
+        assert labels._assembled_cache is not cached  # label document changed: recomputed
         ids = {object_id for object_id, _kind, _geometry in labels.assembled_geometry}
         assert "body-label-1" in ids
         assert "4 label(s)" in labels.status.text()
+        cached = labels._assembled_cache
+        labels.show_part("closure")
+        labels.show_part("assembled")
+        assert labels._assembled_cache is cached  # nothing changed: no OCC work again
     finally:
         window.close()
         app.processEvents()

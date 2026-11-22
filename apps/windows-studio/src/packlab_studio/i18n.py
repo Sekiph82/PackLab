@@ -547,4 +547,6 @@ TURKISH: dict[str, str] = {
     "0 = no hole": "0 = delik yok",
     "Outer radius": "Dış yarıçap",
     "Inner radius": "İç yarıçap",
+    "the {part} Design Model has no recorded scan frame: fit it in Measure & Design with Use selected part (promote, fit, save)": "{part} Tasarım Modelinin kayıtlı tarama çerçevesi yok: Ölçü ve Tasarım'da Seçili parçayı kullan ile uydurun (yükselt, uydur, kaydet)",
+    "the {part} Design Model was fitted to another cloud than the placed one: place the closure again or refit {part}": "{part} Tasarım Modeli yerleştirilenden farklı bir buluta uydurulmuş: kapağı yeniden yerleştirin veya {part} yeniden uydurun",
 }
