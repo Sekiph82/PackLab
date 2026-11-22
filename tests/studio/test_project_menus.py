@@ -122,6 +122,15 @@ def test_app_run_wires_preferences_settings_and_default_project(monkeypatch) -> 
         def show(self) -> None:
             pass
 
+        def resume_paired_receiver(self) -> None:
+            captured["resumed"] = True
+
+    class FakeTimer:
+        @staticmethod
+        def singleShot(_msec: int, callback) -> None:
+            callback()
+
+    monkeypatch.setattr(studio_app, "QTimer", FakeTimer)
     monkeypatch.setattr(studio_app, "create_application", lambda _argv: FakeApp())
     monkeypatch.setattr(studio_app, "StudioMainWindow", FakeWindow)
     monkeypatch.setattr(studio_app, "claim_single_instance", lambda: 0)
@@ -131,6 +140,7 @@ def test_app_run_wires_preferences_settings_and_default_project(monkeypatch) -> 
     assert isinstance(captured["preferences"], PreferencesStore)
     assert str(captured["default_project_root"]).endswith("default")
     assert str(captured["settings_path"]).endswith("studio-settings.ini")
+    assert captured["resumed"] is True  # real launch resumes the receiver for paired phones
 
 
 def test_settings_engines_panel_lists_discovery_and_rechecks(monkeypatch) -> None:

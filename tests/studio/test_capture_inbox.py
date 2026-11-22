@@ -268,3 +268,45 @@ def test_remote_capture_panel_sends_commands_and_shows_phone_status(monkeypatch,
     finally:
         window.close()
         app.processEvents()
+
+
+def test_receiver_starts_at_launch_only_when_a_phone_is_paired(monkeypatch, tmp_path) -> None:
+    """Pair once: after a restart the paired phone can send without visiting the page."""
+    app, window, view = _window(monkeypatch, tmp_path)
+    try:
+        app.processEvents()
+        assert view._session is None  # a plain window never creates the receiver session
+        window.resume_paired_receiver()
+        assert not view.timer.isActive() and view.receive_button.isEnabled()  # nobody paired
+        view.receive_button.click()
+        offer = view.offer
+        assert offer is not None
+        _call(
+            f"https://{offer.host}:{offer.port}/v1/pair",
+            body=json.dumps(
+                {
+                    "offer": json.loads(offer.qr_payload()),
+                    "pairing_code": offer.pairing_code,
+                    "tls_certificate_fingerprint": offer.tls_certificate_fingerprint,
+                    "device_name": "iPhone17,3",
+                }
+            ).encode(),
+        )
+    finally:
+        window.close()
+        app.processEvents()
+    app, window, view = _window(monkeypatch, tmp_path)
+    try:
+        app.processEvents()
+        assert view._session is None  # still nothing until the launch path asks
+        window.resume_paired_receiver()
+        assert view.timer.isActive() and not view.receive_button.isEnabled()
+        assert view.session is not None and view.session.running
+        assert view.offer is None  # no pairing code is issued unless the owner asks
+        view._tick()
+        assert view.offer is None
+    finally:
+        window.close()
+        app.processEvents()
+    view.resume_for_paired_devices()  # after shutdown: never restarts
+    assert view.session is not None and not view.session.running

@@ -690,6 +690,15 @@ class StudioMainWindow(QMainWindow):
         layout = self.project_manager.layout
         builds.refresh_history(entries, None if layout is None else layout.root)
 
+    def resume_paired_receiver(self) -> None:
+        """Pair once: a paired phone can send without the owner opening Capture Inbox.
+
+        Called only from the real launch path (app.run), never for test/smoke windows.
+        """
+        inbox = self.route_stack.views[Route.CAPTURE_INBOX]
+        if isinstance(inbox, CaptureInboxView):
+            inbox.resume_for_paired_devices()
+
     def ensure_project(self):
         """Open (or create on first run) the per-user default project; no dialog needed."""
         if self.project_manager.current is not None or self._default_project_root is None:

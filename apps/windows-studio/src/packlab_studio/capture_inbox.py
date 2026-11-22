@@ -238,10 +238,11 @@ class CaptureInboxView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.scroll_area)
 
+        self._shut_down = False
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self._tick)
-        self.receive_button.clicked.connect(self.start_receiving)
+        self.receive_button.clicked.connect(lambda: self.start_receiving())
         self.new_code_button.clicked.connect(self.new_code)
         self.stop_button.clicked.connect(self.stop_receiving)
         self.import_button.clicked.connect(self.import_file)
@@ -277,7 +278,19 @@ class CaptureInboxView(QWidget):
         if self._session_factory is not None:
             self.refresh_inbox()
 
-    def start_receiving(self) -> None:
+    def resume_for_paired_devices(self) -> None:
+        """Start listening at launch when a phone already paired (no page visit needed)."""
+        if self._shut_down or self._session_factory is None or self.timer.isActive():
+            return
+        try:
+            session = self.session
+            paired = session is not None and bool(session.paired_devices())
+        except Exception:
+            return  # unreadable device store: stay stopped, the page still offers Receive
+        if paired:
+            self.start_receiving(issue_code=False)
+
+    def start_receiving(self, issue_code: bool = True) -> None:
         session = self.session
         if session is None:
             return
@@ -297,7 +310,12 @@ class CaptureInboxView(QWidget):
         )
         self.receiving_label.show()
         self.status_label.setText(tr("If Windows asks, allow PackLab on private networks."))
-        self.new_code()
+        if issue_code:
+            self.new_code()
+        else:  # auto-start for paired phones: no pairing code until the owner asks
+            self.pairing_label.setText(
+                tr("Paired phones can send now. Press New code to pair another.")
+            )
         self.timer.start()
 
     def stop_receiving(self) -> None:
@@ -497,6 +515,7 @@ class CaptureInboxView(QWidget):
         self.refresh_inbox()
 
     def shutdown(self) -> None:
+        self._shut_down = True
         self.timer.stop()
         if self._session is not None:
             self._session.stop()
