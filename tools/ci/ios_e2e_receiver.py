@@ -145,7 +145,7 @@ def verify(
     for package in packages:
         report = validate_packscan(package)
         # PL-0482: the phone omits part_role for assembled; "absent" stands for that here.
-        roles.append(report.manifest.get("part_role", "absent"))
+        roles.append(str(report.manifest.get("part_role", "absent")))
         images = [name for name in report.payloads if name.startswith("images/")]
         print(
             f"validate_packscan PASS {package.name}: {len(images)} images, capture_id {report.manifest.get('capture_id')}"
