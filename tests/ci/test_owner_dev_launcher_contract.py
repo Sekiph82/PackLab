@@ -529,7 +529,7 @@ def test_failed_locked_sync_preserves_previous_runtime(tmp_path: Path) -> None:
     assert list((owner_root / "releases").glob("a" * 40 + "-*")) == [existing_release]
 
 
-def test_compatibility_current_runtime_switch_preserves_releases(tmp_path: Path) -> None:
+def test_compatibility_current_runtime_switch_keeps_only_current_release(tmp_path: Path) -> None:
     if not shutil.which("powershell.exe"):
         return
     owner_root = tmp_path / "owner runtime with spaces"
@@ -537,13 +537,11 @@ def test_compatibility_current_runtime_switch_preserves_releases(tmp_path: Path)
     second_id = "c" * 40 + "-" + "d" * 32
     first_release = owner_root / "releases" / first_id
     second_release = owner_root / "releases" / second_id
-    first_release.mkdir(parents=True)
-    second_release.mkdir(parents=True)
     lock_bytes = b"immutable dependency lock\n"
-    for release, runtime_id, source_sha in (
-        (first_release, first_id, "a" * 40),
-        (second_release, second_id, "c" * 40),
-    ):
+
+    def make_release(release: Path, runtime_id: str, source_sha: str) -> None:
+        # Releases are built just before each switch, as the refresh tool does.
+        release.mkdir(parents=True)
         (release / "uv.lock").write_bytes(lock_bytes)
         (release / "owner-dev-runtime.json").write_text(
             json.dumps(
@@ -556,6 +554,8 @@ def test_compatibility_current_runtime_switch_preserves_releases(tmp_path: Path)
             ),
             encoding="utf-8",
         )
+
+    make_release(first_release, first_id, "a" * 40)
     current = owner_root / "current"
     current.mkdir(parents=True)
     (current / "preserved.txt").write_text("keep prior owner runtime")
@@ -587,8 +587,28 @@ def test_compatibility_current_runtime_switch_preserves_releases(tmp_path: Path)
         and (preserved[0] / "preserved.txt").read_text() == "keep prior owner runtime"
     )
 
+    make_release(second_release, second_id, "c" * 40)
     second = switch(second_id)
     assert second.returncode == 0, second.stdout + second.stderr
     assert current.is_dir() and not current.is_symlink()
     assert json.loads((current / "owner-dev-runtime.json").read_text())["runtime_id"] == second_id
-    assert (first_release / "owner-dev-runtime.json").is_file()
+    # Only the newest rollback copy is kept (owner request 2026-11-22): it holds the first runtime.
+    kept = list(owner_root.glob("previous-*"))
+    assert len(kept) == 1, kept
+    assert json.loads((kept[0] / "owner-dev-runtime.json").read_text())["runtime_id"] == first_id
+    # Only the release that is now current is kept (owner request 2026-11-22).
+    assert not first_release.exists() and (second_release / "owner-dev-runtime.json").is_file()
+    unrelated = owner_root / "previous-notes"
+    unrelated.mkdir()
+    foreign = owner_root / "releases" / "not-a-runtime"
+    foreign.mkdir()
+    third_id = "e" * 40 + "-" + "f" * 32
+    third_release = owner_root / "releases" / third_id
+    make_release(third_release, third_id, "e" * 40)
+    third = switch(third_id)
+    assert third.returncode == 0, third.stdout + third.stderr
+    previous_copies = list(owner_root.glob("previous-[0-9a-f]*"))
+    assert len(previous_copies) == 1 and unrelated.is_dir() and foreign.is_dir()
+    kept_runtime = json.loads((previous_copies[0] / "owner-dev-runtime.json").read_text())
+    assert kept_runtime["runtime_id"] == second_id
+    assert not second_release.exists() and third_release.is_dir()

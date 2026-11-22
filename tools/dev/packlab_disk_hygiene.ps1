@@ -312,7 +312,16 @@ function Remove-OwnerDevSuperseded([string]$OwnerRoot) {
         if ($removed -eq 0 -and (Test-Path -LiteralPath $path)) { $script:Summary.retained_paths += $path }
     }
     if ($previous) { $snapshotKeepId = $previous.Manifest.runtime_id }
-    else { $snapshotKeepId = $null }
+    else {
+        # The refresh keeps only the current release, so the rollback copy is the newest
+        # verified previous-* snapshot of a different runtime; never delete the only one.
+        $newestSnapshot = Get-ChildItem -LiteralPath $OwnerRoot -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^previous-' } |
+            ForEach-Object { [pscustomobject]@{ Item = $_; Manifest = (Get-OwnerDevManifest $_.FullName) } } |
+            Where-Object { $null -ne $_.Manifest -and $_.Manifest.runtime_id -ne $current.runtime_id } |
+            Sort-Object { $_.Item.LastWriteTimeUtc } -Descending | Select-Object -First 1
+        $snapshotKeepId = if ($newestSnapshot) { $newestSnapshot.Manifest.runtime_id } else { $null }
+    }
     foreach ($snapshot in Get-ChildItem -LiteralPath $OwnerRoot -Directory -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^previous-' }) {
         $manifest = Get-OwnerDevManifest $snapshot.FullName
         if ($null -eq $manifest) {
