@@ -698,7 +698,7 @@ class LabelsView(QWidget):
             mesh = session.label_preview.mesh
             kind = SceneObjectKind.DESIGN_MODEL if part == "body" else SceneObjectKind.CAP
             geometry: Any = MeshGeometry(
-                _display(placed(np.asarray(mesh.vertices))), tuple(map(tuple, mesh.triangles))
+                _display(placed(np.asarray(mesh.vertices))), mesh.triangles
             )
             self.assembled_geometry.append((part, kind, geometry))
             for index, entry in enumerate(workbench.labels):

@@ -1041,12 +1041,12 @@ def label_preview_points(
         assignment,
         asset,
     )
-    geometry = dict(overlay.geometry)
+    geometry: dict[str, Any] = dict(overlay.geometry)
     width_mm, height_mm = entry.size_mm
     columns = int(min(240, max(8, width_mm / step_mm)))
     rows = int(min(120, max(4, height_mm / step_mm)))
-    s, t = np.meshgrid(np.linspace(0, 1, columns), np.linspace(0, 1, rows))
-    s, t = s.ravel(), t.ravel()
+    grid_s, grid_t = np.meshgrid(np.linspace(0, 1, columns), np.linspace(0, 1, rows))
+    s, t = grid_s.ravel(), grid_t.ravel()
     lift = 0.2
     if geometry["mode"] == "CYLINDRICAL_WRAP":
         cx, cy, _cz = (float(v) for v in geometry["center_mm_unverified"])
@@ -1070,8 +1070,8 @@ def label_preview_points(
         )
     image = QImage.fromData(png).convertToFormat(QImage.Format.Format_RGBA8888)
     w, h = image.width(), image.height()
-    pixels = np.frombuffer(image.constBits(), np.uint8).reshape(h, image.bytesPerLine())
-    pixels = pixels[:, : w * 4].reshape(h, w, 4)
+    rows_bytes = np.frombuffer(image.constBits(), np.uint8).reshape(h, image.bytesPerLine())
+    pixels = rows_bytes[:, : w * 4].reshape(h, w, 4)
     rgba = pixels[
         np.round((1.0 - t) * (h - 1)).astype(int),  # artwork rows start at the top
         np.round(s * (w - 1)).astype(int),
