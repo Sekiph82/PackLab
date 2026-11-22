@@ -260,7 +260,8 @@ class PackageFamiliesView(QWidget):
         self.source.blockSignals(False)
         self.preset.blockSignals(True)
         self.preset.clear()
-        self.preset.addItems(list(pf.PRESETS[family]))
+        for name in pf.PRESETS[family]:
+            self.preset.addItem(name, name)  # data = logic key; text may be translated
         self.preset.blockSignals(False)
         while self.parameters_form.rowCount():
             self.parameters_form.removeRow(0)
@@ -275,13 +276,17 @@ class PackageFamiliesView(QWidget):
             self.parameters_form.addRow(label, spin)
         self._preset_changed()
 
+    def _preset_key(self) -> str:
+        data = self.preset.currentData()
+        return data if isinstance(data, str) else self.preset.currentText()
+
     def _preset_changed(self, *_args: object) -> None:
         family = self.family_key
-        values: dict[str, Any] = pf.default_parameters(family, self.preset.currentText())
+        values: dict[str, Any] = pf.default_parameters(family, self._preset_key())
         if family == "closure":
             try:
                 _model, context = pf.container_context(self._container_document())
-                values = pf.closure_defaults(context, self.preset.currentText())
+                values = pf.closure_defaults(context, self._preset_key())
             except Exception as error:
                 self.status.setText(f"Closure: {error}")
         for name, spin in self.spins.items():
@@ -377,7 +382,7 @@ class PackageFamiliesView(QWidget):
 
     def create_design(self) -> None:
         def action() -> str:
-            family, preset, actor = self.family_key, self.preset.currentText(), self._actor()
+            family, preset, actor = self.family_key, self._preset_key(), self._actor()
             manager = self._manager()
             if family == "closure":
                 design = pf.create_closure(
