@@ -1163,6 +1163,29 @@ def object_mesh(mesh_model: LoadedModel, isolation: Isolation, frame: Frame) -> 
     )
 
 
+PART_GAP_MIN_MM = 2.0
+PART_GAP_SPACING_FACTOR = 3.0
+
+
+def derived_surface_gaps(
+    mesh: TriangleMeshData, scanned_mm: np.ndarray
+) -> tuple[tuple[int, ...], float]:
+    """Vertices of a derived (Poisson) surface with no scanned point nearby: filled, not seen.
+
+    Threshold: max(2 mm, 3 x the median scanned point spacing).
+    """
+    import open3d as o3d
+
+    scanned = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(scanned_mm))
+    spacing = float(np.median(np.asarray(scanned.compute_nearest_neighbor_distance())))
+    limit = max(PART_GAP_MIN_MM, PART_GAP_SPACING_FACTOR * spacing)
+    vertices = o3d.geometry.PointCloud(
+        o3d.utility.Vector3dVector(np.asarray(mesh.vertices, dtype=float))
+    )
+    distance = np.asarray(vertices.compute_point_cloud_distance(scanned))
+    return tuple(int(i) for i in np.nonzero(distance > limit)[0]), limit
+
+
 def promotion_request(
     *,
     project_id: str,
@@ -1172,24 +1195,69 @@ def promotion_request(
     frame: Frame,
     actor_id: str,
     reason: str,
+    part_record: dict[str, Any] | None = None,
 ) -> ScanMasterPromotionRequest:
     # A companion mesh comes from the same OpenMVS scene, so it shares the model's frame.
     aligned = object_mesh(mesh_model, isolation, frame)
     aligned_id = f"aligned-object-mesh-{mesh_sha256(aligned)[:40]}"
-    reconstruction = ReconstructionOutputManifest(
-        project_id=project_id,
-        reconstruction_revision=model.reconstruction_revision,
-        backend_id=ReconstructionBackendId.COLMAP_OPENMVS,
-        backend_version="external-build",
-        backend_build=model.path.name,
-        backend_license="COLMAP BSD-3-Clause; OpenMVS AGPL-3.0 (external process)",
-        configuration_digest=_sha256_json({"model": model.sha256, "mesh": mesh_model.sha256}),
-        source_input_digest=model.sha256,
-        camera_convention="world-to-camera",
-        point_count=len(model.points),
-        triangle_count=0 if mesh_model.triangles is None else len(mesh_model.triangles),
-        limitations=("source digest is the built model file, not the raw PackScan",),
-    )
+    derived = frame.scale.source == "part_combine"
+    surface_note = ""
+    if derived:
+        if part_record is None:
+            raise MeasureDesignError("a combined part needs its combine record to be promoted")
+        mesh_method = str(part_record.get("mesh_method"))
+        surface_note = (
+            f"surface DERIVED, not scanned: Open3D Poisson ({mesh_method}) closed from the "
+            f"merged part cloud sha256 {model.sha256}; filled areas are coverage gaps"
+        )
+        reconstruction = ReconstructionOutputManifest(
+            project_id=project_id,
+            reconstruction_revision=model.reconstruction_revision,
+            # Source clouds are COLMAP/OpenMVS builds; the surface itself is derived.
+            backend_id=ReconstructionBackendId.COLMAP_OPENMVS,
+            backend_version=f"derived:open3d-poisson:{mesh_method}",
+            backend_build=f"part-combine:{part_record.get('part')}",
+            backend_license=(
+                "source clouds: COLMAP BSD-3-Clause, OpenMVS AGPL-3.0 (external process); "
+                "derived surface: Open3D MIT"
+            ),
+            configuration_digest=_sha256_json(
+                {
+                    "part_cloud": model.sha256,
+                    "mesh": mesh_model.sha256,
+                    "mesh_method": mesh_method,
+                    "combine_method": part_record.get("method"),
+                    "sources": [s.get("model_sha256") for s in part_record.get("sources", [])],
+                }
+            ),
+            source_input_digest=model.sha256,
+            camera_convention="world-to-camera",
+            asset_paths={
+                "part_cloud": str(part_record.get("artifact_path")),
+                "derived_surface": str(part_record.get("mesh_artifact_path")),
+            },
+            point_count=len(model.points),
+            triangle_count=0 if mesh_model.triangles is None else len(mesh_model.triangles),
+            limitations=(
+                surface_note,
+                "source digest is the merged part cloud, not the raw PackScans",
+            ),
+        )
+    else:
+        reconstruction = ReconstructionOutputManifest(
+            project_id=project_id,
+            reconstruction_revision=model.reconstruction_revision,
+            backend_id=ReconstructionBackendId.COLMAP_OPENMVS,
+            backend_version="external-build",
+            backend_build=model.path.name,
+            backend_license="COLMAP BSD-3-Clause; OpenMVS AGPL-3.0 (external process)",
+            configuration_digest=_sha256_json({"model": model.sha256, "mesh": mesh_model.sha256}),
+            source_input_digest=model.sha256,
+            camera_convention="world-to-camera",
+            point_count=len(model.points),
+            triangle_count=0 if mesh_model.triangles is None else len(mesh_model.triangles),
+            limitations=("source digest is the built model file, not the raw PackScan",),
+        )
     scale_id = frame.scale.provenance.provenance_id
     lineage = CapturedScanLineage(
         project_id,
@@ -1239,13 +1307,17 @@ def promotion_request(
             {"disposition": "component_cleanup_refused", "reason": str(error)},
         )
         final = aligned
+    gaps: tuple[int, ...] = ()
+    gap_mm = 0.0
+    if derived:
+        gaps, gap_mm = derived_surface_gaps(final, frame.apply(model.points))
     holes = analyze_mesh_holes(
         final,
         parent_revision_id=final_id,
         scale_state=ScaleState.METRIC_UNVERIFIED,
         scale_provenance_id=scale_id,
         uncertain_vertex_indices=(),
-        coverage_gap_vertex_indices=(),
+        coverage_gap_vertex_indices=gaps,
     )
     return ScanMasterPromotionRequest(
         lineage=lineage,
@@ -1261,10 +1333,15 @@ def promotion_request(
             "object isolated geometrically (base plane + cluster), not by SAM masks",
             f"scale source {frame.scale.source}; METRIC_UNVERIFIED",
             "no physical validation against the real package",
+            *((surface_note,) if derived else ()),
         ),
         coverage_gaps=(
-            ("merged upright + upside-down scans; a closed, hole-free surface is not proven",)
-            if frame.scale.source == "part_combine"
+            (
+                "merged upright + upside-down scans; a closed, hole-free surface is not proven",
+                f"{len(gaps)} of {len(final.vertices)} surface vertices are DERIVED fill "
+                f"(farther than {gap_mm:.2f} mm from any scanned point)",
+            )
+            if derived
             else ("underside against the support plane is not observed",)
         ),
     )

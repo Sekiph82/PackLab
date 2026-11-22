@@ -506,4 +506,5 @@ TURKISH: dict[str, str] = {
     "Body and closure are shown where their own scans put them; placing the closure on the body is not available yet.": "Gövde ve kapak kendi taramalarındaki konumlarında gösterilir; kapağın gövdeye yerleştirilmesi henüz yok.",
     "Use selected part: {part}": "Seçili parçayı kullan: {part}",
     "Part selection": "Parça seçimi",
+    "{part}: no scan yet": "{part}: henüz tarama yok",
 }

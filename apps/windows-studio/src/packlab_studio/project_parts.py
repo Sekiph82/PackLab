@@ -113,6 +113,25 @@ def _cached_sha(path: Path) -> str | None:
     return _SHA_CACHE[key]
 
 
+def _stat(path: Path) -> list[int]:
+    stat = path.stat()
+    return [stat.st_size, stat.st_mtime_ns]
+
+
+def _unchanged(path: Path, record: dict[str, Any]) -> bool:
+    """Size + mtime as written by the combine job (cheap on the UI thread).
+
+    Records without them (none in the wild yet) fall back to the full digest; Measure &
+    Design re-hashes on load (``load_model``) and compares the record's digests.
+    """
+    try:
+        if "file_stat" in record:
+            return _stat(path) == record["file_stat"]
+    except OSError:
+        return False
+    return _cached_sha(path) == record.get("file_sha256")
+
+
 def part_states(
     manager: ProjectManager, entries: list[Any], overrides: dict[str, str]
 ) -> dict[str, PartState]:
@@ -150,7 +169,7 @@ def part_states(
                 )
             except Exception:
                 cloud = None
-            if cloud is None or _cached_sha(cloud) != record.get("file_sha256"):
+            if cloud is None or not _unchanged(cloud, record):
                 reason = tr("merged cloud missing or changed on disk; combine again")
                 states[part] = PartState(part, up, fl, "ready", reason, up.model, None)
             else:
@@ -209,7 +228,7 @@ def write_cloud(folder: Path, part: str, points: np.ndarray, colors: np.ndarray 
     return _write_atomic(folder, part, lambda path: o3d.io.write_point_cloud(path, cloud))
 
 
-MESH_METHOD = "poisson_depth8_outward_normals_density_trim_q05_v1"
+MESH_METHOD = "open3d_poisson_depth8_outward_normals_bbox_crop_2mm_v2"
 
 
 def write_mesh(folder: Path, part: str, points: np.ndarray) -> Path:
@@ -223,9 +242,13 @@ def write_mesh(folder: Path, part: str, points: np.ndarray) -> Path:
     cloud.orient_normals_towards_camera_location(points.mean(axis=0))
     cloud.normals = o3d.utility.Vector3dVector(-np.asarray(cloud.normals))
     cloud.orient_normals_consistent_tangent_plane(15)
-    mesh, raw_density = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(cloud, depth=8)
-    density = np.asarray(raw_density)
-    mesh.remove_vertices_by_mask(density < np.quantile(density, 0.05))
+    mesh, _density = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(cloud, depth=8)
+    # Fill across unscanned areas is kept (closed surface) and flagged later as coverage
+    # gaps by distance to the scanned points (measure_design.derived_surface_gaps); only
+    # Poisson's balloon beyond the scanned extent is cut.
+    vertices = np.asarray(mesh.vertices)
+    low, high = points.min(axis=0) - 2.0, points.max(axis=0) + 2.0
+    mesh.remove_vertices_by_mask(((vertices < low) | (vertices > high)).any(axis=1).tolist())
     if len(mesh.triangles) < 20:
         raise OSError("merged part surface could not be meshed")
     return _write_atomic(
@@ -448,6 +471,7 @@ class ScenePanel(QWidget):
             tr("Combine {part}").format(part=tr(PART_LABELS[state.part])), "part-merge"
         )
         token = threading.Event()
+        self._cancel[state.part] = token
 
         def hook() -> bool:
             token.set()
@@ -487,8 +511,12 @@ class ScenePanel(QWidget):
         def cancelled() -> bool:
             return token.is_set() or jobs.get(job_id).state is JobState.CANCELLED
 
+        written: list[Path] = []
+
         def finish(outcome: str, record: dict[str, Any] | None = None, error: str = "") -> None:
-            self._invoker.call(self._finish, job_id, part, outcome, record, error, project_id)
+            self._invoker.call(
+                self._finish, job_id, part, outcome, record, error, project_id, written
+            )
 
         try:
             sources, inputs = [], []
@@ -540,7 +568,7 @@ class ScenePanel(QWidget):
                 "artifact_path": None,
             }
             try:
-                result = aligner(*inputs)
+                result = aligner(inputs[0], inputs[1])
             except MultiScanAlignmentError as error:
                 record.update(status="refused", reason=str(error))
             else:
@@ -549,14 +577,17 @@ class ScenePanel(QWidget):
                 jobs.update_progress(job_id, 0.9, tr("Writing the merged part cloud"))
                 folder = layout.path("derived", "parts")
                 target = write_cloud(folder, part, result.points, result.colors)
+                written.append(target)
                 if cancelled():
                     return finish("cancelled")
                 mesh = write_mesh(folder, part, result.points)
+                written.append(mesh)
                 record.update(
                     status="combined",
                     reason=None,
                     artifact_path=f"derived/parts/{target.name}",
                     file_sha256=_sha256(target),
+                    file_stat=_stat(target),
                     mesh_artifact_path=f"derived/parts/{mesh.name}",
                     mesh_sha256=_sha256(mesh),
                     mesh_method=MESH_METHOD,
@@ -602,15 +633,27 @@ class ScenePanel(QWidget):
         record: dict[str, Any] | None,
         error: str,
         project_id: str,
+        written: list[Path],
     ) -> None:
+        token = self._cancel.get(part)
+        state = self.jobs.get(job_id).state
+        if (token is not None and token.is_set()) or state in (
+            JobState.CANCELLING,
+            JobState.CANCELLED,
+        ):
+            outcome, record = "cancelled", None  # a late cancel still discards the result
         metadata = self.projects.metadata
         if record is not None and (metadata is None or metadata.project_id != project_id):
             outcome, error, record = "failed", "project changed while combining", None
+        committed = False
         if record is not None:
             try:
                 self.projects.record_part_merge(part, record)
+                committed = True
             except Exception as failure:
                 outcome, error = "failed", str(failure)
+        if not committed:
+            self._discard(written)
         if outcome == "cancelled":
             self.jobs.finish_cancel(job_id)
         elif outcome == "failed":
@@ -624,6 +667,18 @@ class ScenePanel(QWidget):
             self.jobs.succeed(job_id, message)
         self.refresh()
         self.combine_finished.emit(part, outcome)
+
+    def _discard(self, written: list[Path]) -> None:
+        """Remove files of an uncommitted combine unless a stored record uses them."""
+        root = None if self.projects.layout is None else self.projects.layout.root
+        kept = {
+            str(record.get(key))
+            for record in (self.projects.part_merges() if root is not None else {}).values()
+            for key in ("artifact_path", "mesh_artifact_path")
+        }
+        for path in written:
+            if f"derived/parts/{path.name}" not in kept:
+                path.unlink(missing_ok=True)
 
 
 __all__ = ["PartScan", "PartState", "ScenePanel", "marker_scale", "part_scans", "part_states"]

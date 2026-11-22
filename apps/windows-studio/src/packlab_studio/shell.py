@@ -713,7 +713,8 @@ class StudioMainWindow(QMainWindow):
         viewer = self.route_stack.views[Route.MODEL_VIEWER]
         measure = self.route_stack.views[Route.MEASURE_DESIGN]
         if isinstance(measure, MeasureDesignView):
-            measure.show_part(None if part is None else tr(str(part).capitalize()))
+            label = None if part is None else tr(str(part).capitalize())
+            measure.show_part(label, self.scene_panel.selected_cloud() is not None)
         if isinstance(viewer, ModelViewerView) and paths:
             viewer.load(*paths)
 

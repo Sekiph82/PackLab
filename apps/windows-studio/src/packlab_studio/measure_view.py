@@ -93,6 +93,7 @@ class MeasureDesignView(QWidget):
         self._companion: Path | None = None
         # PL-0485: the Scene panel's selected part cloud, used instead of the latest build.
         self.part_provider: Callable[[], Path | None] | None = None
+        self.part_label: str | None = None  # selected Scene part, None = no selection
         self.part_record: dict[str, Any] | None = None  # set when a combined part is loaded
 
         self.viewer = ModelViewerView()
@@ -358,20 +359,27 @@ class MeasureDesignView(QWidget):
         if chosen:
             self.load(Path(chosen))
 
-    def show_part(self, label: str | None) -> None:
+    def show_part(self, label: str | None, has_cloud: bool = True) -> None:
         """Name the selected project part on the load button (None: latest build)."""
-        self.latest_button.setText(
-            tr("Use latest project build")
-            if label is None
-            else tr("Use selected part: {part}").format(part=label)
-        )
+        self.part_label = label
+        if label is None:
+            text = tr("Use latest project build")
+        elif has_cloud:
+            text = tr("Use selected part: {part}").format(part=label)
+        else:
+            text = tr("{part}: no scan yet").format(part=label)
+        self.latest_button.setText(text)
+        self.latest_button.setEnabled(label is None or has_cloud)
 
     def use_latest_build(self, path: Path | None = None) -> bool:
         """Load ``path`` (a just-finished build) or the newest build in the open project."""
 
         layout = getattr(self.project_manager, "layout", None)
-        if path is None and self.part_provider is not None:
+        if path is None and self.part_label is not None and self.part_provider is not None:
             path = self.part_provider()
+            if path is None:  # never fall back to another build behind the owner's back
+                self.status.setText(tr("{part}: no scan yet").format(part=self.part_label))
+                return False
         if path is None and layout is not None:
             path = md.latest_built_model(layout.root)
         if path is None:
@@ -438,7 +446,7 @@ class MeasureDesignView(QWidget):
         if not isinstance(artifact, str):
             return None
         mesh = layout.path("derived", artifact.removeprefix("derived/"))
-        if not mesh.is_file() or md._sha256_file(mesh) != record.get("mesh_sha256"):
+        if not mesh.is_file():
             raise md.MeasureDesignError(
                 "the part surface mesh is missing or changed; combine again"
             )
@@ -605,6 +613,12 @@ class MeasureDesignView(QWidget):
             if companion is None:
                 raise md.MeasureDesignError("promotion needs a mesh; open the built OBJ/PLY mesh")
             self.mesh_model = md.load_model(companion)
+            record = self.part_record
+            if record is not None and self.mesh_model.sha256 != record.get("mesh_sha256"):
+                self.mesh_model = None
+                raise md.MeasureDesignError(
+                    "the part surface mesh changed on disk; combine the part again"
+                )
         if self.frame.geometry.project_id != self._project_id():
             self.frame = md.build_frame(
                 self.model, self.isolation, self.frame.scale, project_id=self._project_id()
@@ -617,6 +631,7 @@ class MeasureDesignView(QWidget):
             frame=self.frame,
             actor_id=actor_id,
             reason=reason,
+            part_record=self.part_record,
         )
 
     def promote(self) -> None:

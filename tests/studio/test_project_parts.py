@@ -341,6 +341,14 @@ def test_combined_part_measures_promotes_and_fits_in_its_mat_frame(app, tmp_path
         assert result is not None, view.status.text()
         assert result.get("height").value_mm == pytest.approx(80.0, abs=1.5)
         assert result.get("max_body_diameter").value_mm == pytest.approx(80.0, abs=2.0)
+        request = view.promotion_request("owner", "derived surface provenance")
+        built = request.lineage.reconstruction
+        assert built.backend_version == f"derived:open3d-poisson:{record['mesh_method']}"
+        assert built.asset_paths["derived_surface"] == record["mesh_artifact_path"]
+        assert built.source_input_digest == record["file_sha256"]
+        assert any("surface DERIVED" in item for item in built.limitations)
+        assert any("surface DERIVED" in item for item in request.known_limitations)
+        assert any("DERIVED fill" in item for item in request.coverage_gaps)
         view.promote_button.click()
         assert view.scan_master is not None, view.status.text()
         view.owner_review.setChecked(True)
@@ -350,6 +358,11 @@ def test_combined_part_measures_promotes_and_fits_in_its_mat_frame(app, tmp_path
         assert np.ptp(z) == pytest.approx(80.0, abs=1.5)  # top and bottom both present
         assert 70.0 < view.design.height <= 81.5  # fitted revolved profile, not a measurement
 
+        # A part without its own cloud never silently loads another build.
+        panel.tree.setCurrentItem(panel.items["assembled"])
+        assert not view.latest_button.isEnabled() and "no scan yet" in view.latest_button.text()
+        assert not view.use_latest_build()
+
         # A single-scan part keeps the mat-based flow (plane search, marker / manual scale).
         panel.tree.setCurrentItem(panel.items["closure"])
         assert view.use_latest_build() and view.part_record is None
@@ -358,3 +371,92 @@ def test_combined_part_measures_promotes_and_fits_in_its_mat_frame(app, tmp_path
         assert view.scale is None
     finally:
         window.close()
+
+
+def test_holed_part_surface_lists_derived_fill_as_coverage_gaps(tmp_path) -> None:
+    import uuid
+
+    from packlab_studio import measure_design as md
+    from packlab_studio.project_parts import write_cloud, write_mesh
+
+    def jar(holed: bool) -> np.ndarray:
+        rng = np.random.default_rng(7)
+        a, z = rng.uniform(0, 2 * np.pi, 20000), rng.uniform(0, 80, 20000)
+        wall = np.c_[40 * np.cos(a), 40 * np.sin(a), z]
+        if holed:  # a 60 deg x 40 mm window the scans never saw
+            wall = wall[~((a < np.pi / 3) & (z > 20) & (z < 60))]
+        r, b = 40 * np.sqrt(rng.uniform(0, 1, 5000)), rng.uniform(0, 2 * np.pi, 5000)
+        caps = [np.c_[r * np.cos(b), r * np.sin(b), np.full(5000, h)] for h in (0.0, 80.0)]
+        return np.concatenate([wall, *caps])
+
+    counts = {}
+    for holed in (False, True):
+        folder = tmp_path / ("holed" if holed else "full")
+        points = jar(holed)
+        cloud, mesh = write_cloud(folder, "body", points, None), write_mesh(folder, "body", points)
+        model, mesh_model = md.load_model(cloud), md.load_model(mesh)
+        record = {
+            "part": "body",
+            "status": "combined",
+            "method": "synthetic",
+            "mesh_method": "poisson-test",
+            "file_sha256": model.sha256,
+            "artifact_path": f"derived/parts/{cloud.name}",
+            "mesh_artifact_path": f"derived/parts/{mesh.name}",
+            "sources": [
+                {"view": v, "mm_per_unit": 1.0, "scale_source": "known", "scale_uncertainty": 0.001}
+                for v in ("upright", "flipped")
+            ],
+        }
+        isolation = md.isolate_in_mat_frame(model)
+        scale = md.part_combine_scale(model, record)
+        frame = md.build_frame(model, isolation, scale, project_id=str(uuid.uuid4()))
+        request = md.promotion_request(
+            project_id=frame.geometry.project_id,
+            model=model,
+            mesh_model=mesh_model,
+            isolation=isolation,
+            frame=frame,
+            actor_id="owner",
+            reason="test",
+            part_record=record,
+        )
+        gaps, _limit = md.derived_surface_gaps(request.final_mesh, frame.apply(model.points))
+        counts[holed] = len(gaps)
+        assert any(f"{len(gaps)} of " in item for item in request.coverage_gaps)
+    assert counts[True] > 50 and counts[True] > 5 * counts[False], counts
+
+
+def test_late_cancel_discards_result_and_files(app, project) -> None:
+    from types import SimpleNamespace
+
+    rng = np.random.default_rng(8)
+    root = project.layout.root
+    entries = [
+        _entry(_build(root, "b-up", _jar(rng, False)), "body"),
+        _entry(_build(root, "b-flip", _jar(rng, True)), "body_flipped"),
+    ]
+    merged = _jar(rng, False)
+    merged = merged[merged[:, 2] > 0.5]
+
+    def quick(*_scans):
+        return SimpleNamespace(
+            points=merged, colors=None, reference_id="r", surface_coverage={}, alignments=()
+        )
+
+    panel = _panel(project, entries, aligner=quick)
+    original, job = panel._finish, {}
+
+    def cancel_then_finish(*args):  # Cancel pressed after the worker's last checkpoint
+        project.job_manager.request_cancel(job["id"])
+        return original(*args)
+
+    panel._finish = cancel_then_finish
+    outcomes = []
+    panel.combine_finished.connect(lambda part, outcome: outcomes.append(outcome))
+    job["id"] = panel.combine("body")
+    _pump(app, lambda: outcomes)
+    assert outcomes == ["cancelled"]
+    assert project.job_manager.get(job["id"]).state is JobState.CANCELLED
+    assert "body" not in project.part_merges()
+    assert not list((root / "derived" / "parts").glob("*.ply"))  # written files removed
