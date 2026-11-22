@@ -23,9 +23,12 @@ def test_corrupt_and_future_state_fall_back_to_defaults(tmp_path) -> None:
 
 def test_v0_migrates_and_geometry_is_sanitized(tmp_path) -> None:
     path = tmp_path / "preferences.json"
-    path.write_text(json.dumps({"schema_version": 0, "last_page": "editor", "geometry": [-5000, 5000, 1, 2]}), encoding="utf-8")
+    path.write_text(
+        json.dumps({"schema_version": 0, "last_page": "editor", "geometry": [-5000, 5000, 1, 2]}),
+        encoding="utf-8",
+    )
     assert PreferencesStore(path).load().last_route == "editor"
-    assert sanitize_geometry([-5000, 5000, 1, 2], bounds=(0, 0, 1920, 1080)) == (0, 1000, 640, 480)
+    assert sanitize_geometry([-5000, 5000, 1, 2], bounds=(0, 0, 1920, 1080)) == (0, 600, 640, 480)
 
 
 def test_shell_round_trip_uses_injected_store(monkeypatch, tmp_path) -> None:

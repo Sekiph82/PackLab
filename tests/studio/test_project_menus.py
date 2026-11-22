@@ -64,13 +64,19 @@ def test_file_menu_new_close_and_recent_reopen(monkeypatch, tmp_path) -> None:
         assert not _enabled(window, Route.MASK_CORRECTION)
 
         recent = window.recent_menu.actions()
-        assert [action.text() for action in recent] == [str(target)]
+        assert [action.text() for action in recent] == ["Bottle 500 ml"]  # name, not path (F6)
+        assert recent[0].toolTip() == str(target)
         recent[0].trigger()
         assert window.project_manager.current is not None
 
         window.choose_open_project_path = lambda: str(tmp_path / "not-a-project")
         window.open_project_action.trigger()
         assert "Open project failed" in window.statusBar().currentMessage()
+        dialog = window.error_dialog  # F4: a visible dialog with reason and next step
+        assert dialog is not None and dialog.isVisible()
+        assert "not-a-project" in dialog.text() and "Reason:" in dialog.text()
+        assert "File > Open Project" in dialog.informativeText()
+        dialog.close()
     finally:
         window.close()
         app.processEvents()
@@ -118,6 +124,9 @@ def test_app_run_wires_preferences_settings_and_default_project(monkeypatch) -> 
 
     monkeypatch.setattr(studio_app, "create_application", lambda _argv: FakeApp())
     monkeypatch.setattr(studio_app, "StudioMainWindow", FakeWindow)
+    monkeypatch.setattr(studio_app, "claim_single_instance", lambda: 0)
+    monkeypatch.setattr(studio_app, "publish_instance_window", lambda _window: None)
+    monkeypatch.setattr(studio_app, "enter_documents_folder", lambda: None)
     assert studio_app.run(["PackLabStudio"]) == studio_app.EXIT_SUCCESS
     assert isinstance(captured["preferences"], PreferencesStore)
     assert str(captured["default_project_root"]).endswith("default")

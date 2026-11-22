@@ -35,7 +35,7 @@ def _record_ownerdev_import_failure(error: Exception) -> None:
 
 
 try:
-    from .app import main
+    from .app import EXIT_ALREADY_RUNNING, main
 except Exception as error:
     _record_ownerdev_import_failure(error)
     raise
@@ -67,6 +67,6 @@ def _record_startup_failure() -> None:
 
 
 _exit_code = main()
-if _exit_code:
+if _exit_code and _exit_code != EXIT_ALREADY_RUNNING:  # that window was focused instead
     _record_startup_failure()
 raise SystemExit(_exit_code)
