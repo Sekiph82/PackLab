@@ -18,6 +18,7 @@ import struct
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -463,6 +464,27 @@ def isolate_object(model: LoadedModel, cameras: tuple[CameraPose, ...] = ()) -> 
             best, best_score = members, score
     if best is None:
         raise MeasureDesignError("no object cluster above the support plane")
+    notes.append(f"support plane {len(inliers):,} inliers, rms {plane_rms:.4g} units")
+    return _axis_isolation(points, best, normal, offset, foot, tolerance, plane_rms, notes)
+
+
+def _axis_isolation(
+    points: np.ndarray,
+    best: np.ndarray,
+    normal: np.ndarray,
+    offset: float,
+    foot: np.ndarray,
+    tolerance: float,
+    plane_rms: float,
+    notes: list[str],
+    method: str = ISOLATION_METHOD,
+) -> Isolation:
+    """Axis, footprint radius and top of the object cluster ``best`` standing on the plane."""
+
+    def radial(values: np.ndarray, centre: np.ndarray) -> np.ndarray:
+        relative = values - centre
+        return np.asarray(np.linalg.norm(relative - np.outer(relative @ normal, normal), axis=1))
+
     # Axis centre: middle of the robust footprint extent along two in-plane directions.
     helper = np.array([1.0, 0, 0]) if abs(normal[0]) < 0.9 else np.array([0, 1.0, 0])
     x_axis = np.cross(normal, helper)
@@ -500,14 +522,11 @@ def isolate_object(model: LoadedModel, cameras: tuple[CameraPose, ...] = ()) -> 
         tolerance,
         plane_rms,
         np.array([]),
-        ISOLATION_METHOD,
+        method,
         (),
     )
     indices = np.nonzero(isolation.region_mask(points))[0]
-    notes.append(
-        f"support plane {len(inliers):,} inliers, rms {plane_rms:.4g} units; "
-        f"object cluster {len(best):,} points, kept {len(indices):,} in its footprint"
-    )
+    notes.append(f"object cluster {len(best):,} points, kept {len(indices):,} in its footprint")
     return Isolation(
         normal,
         offset,
@@ -517,7 +536,7 @@ def isolate_object(model: LoadedModel, cameras: tuple[CameraPose, ...] = ()) -> 
         tolerance,
         plane_rms,
         indices,
-        ISOLATION_METHOD,
+        method,
         tuple(notes),
     )
 
@@ -750,6 +769,110 @@ def manual_scale(
         "manual_reference",
         provenance,
         f"{known_mm:g} mm over {length:.5g} units",
+    )
+
+
+# ---------------------------------------------------------------- combined parts (PL-0485)
+
+PART_FRAME_METHOD = "part_combine_mat_frame_z_up_axis_v1"
+PART_FRAME_TOLERANCE_MM = 0.5
+
+
+def isolate_in_mat_frame(model: LoadedModel) -> Isolation:
+    """A combined part cloud is already levelled in the mat frame (mm, mat at z = 0).
+
+    The merge holds only the object (PL-0483 drops the mat and clutter), so the support
+    plane is known: no plane search, the object is every point above z = 0.
+    """
+
+    normal = np.array([0.0, 0.0, 1.0])
+    points = model.points
+    best = np.nonzero(points[:, 2] > PART_FRAME_TOLERANCE_MM)[0]
+    if len(best) < 30:
+        raise MeasureDesignError("the combined part cloud has nothing above the mat plane")
+    foot = np.r_[np.median(points[best, :2], axis=0), 0.0]
+    notes = ["combined part: mat frame known from the combine (z up, mat at z = 0)"]
+    return _axis_isolation(
+        points, best, normal, 0.0, foot, PART_FRAME_TOLERANCE_MM, 0.0, notes, PART_FRAME_METHOD
+    )
+
+
+def part_combine_scale(model: LoadedModel, record: dict[str, Any]) -> ScaleResult:
+    """Scale of a combined part: already mm; provenance = each source build's own scale."""
+
+    sources = record.get("sources")
+    if record.get("status") != "combined" or not isinstance(sources, list) or len(sources) < 2:
+        raise MeasureDesignError("not a combined part record")
+    relative = []
+    for source in sources:
+        factor, uncertainty = source.get("mm_per_unit"), source.get("scale_uncertainty")
+        if not isinstance(factor, float | int) or not isinstance(uncertainty, float | int):
+            raise MeasureDesignError(
+                "the combine did not record each scan's scale uncertainty; combine the part again"
+            )
+        relative.append(float(uncertainty) / float(factor))
+    uncertainty = max(relative)  # mm per mm: the worse source scale bounds the merge
+    references = tuple(
+        {
+            "reference_id": f"part-combine-{source.get('view')}",
+            "package_sha256": source.get("package_sha256"),
+            "model_sha256": source.get("model_sha256"),
+            "mm_per_unit": source.get("mm_per_unit"),
+            "scale_source": source.get("scale_source"),
+            "uncertainty_mm_per_unit": source.get("scale_uncertainty"),
+            "evidence_class": "source_build_scale_unverified",
+        }
+        for source in sources
+    )
+    identity: dict[str, Any] = {
+        "contract": "packlab.scale-provenance.v1",
+        "version": "scale_provenance_v1",
+        "source_method": "part_combine",
+        "calibration_observation_ids": [],
+        "physical_references": list(references),
+        "estimated_scale_factor": 1.0,
+        "scale_factor_unit": "mm_per_reconstruction_unit",
+        "residuals": [],
+        "rejected_observations": [],
+        "algorithm_version": str(record.get("method")),
+        "outlier_policy_version": "multiscan_alignment_gate_v1",
+        "input_reconstruction_revision": model.reconstruction_revision,
+        "camera_solution_revision": f"part-combine-{str(record.get('file_sha256'))[:40]}",
+        "uncertainty": {
+            "representation": "standard_uncertainty_mm_per_reconstruction_unit",
+            "value": uncertainty,
+        },
+        "created_at_utc": _now(),
+        "actor_process_provenance": {"actor_id": "packlab-studio", "process_id": "part-combine"},
+        "scale_state": ScaleState.METRIC_UNVERIFIED.value,
+        "promotion_evidence": None,
+        "ai_visual_reference_measurement_authority": False,
+    }
+    provenance = ScaleProvenance(
+        "scale-provenance:" + _provenance_digest(identity),
+        "part_combine",
+        (),
+        references,
+        1.0,
+        (),
+        (),
+        identity["algorithm_version"],
+        identity["outlier_policy_version"],
+        model.reconstruction_revision,
+        identity["camera_solution_revision"],
+        dict(identity["uncertainty"]),
+        str(identity["created_at_utc"]),
+        "packlab-studio",
+        "part-combine",
+        ScaleState.METRIC_UNVERIFIED,
+    )
+    return ScaleResult(
+        1.0,
+        uncertainty,
+        "part_combine",
+        provenance,
+        "combined part in mat-frame mm; scale from "
+        + ", ".join(f"{s.get('view')} {s.get('scale_source')}" for s in sources),
     )
 
 
@@ -1040,6 +1163,29 @@ def object_mesh(mesh_model: LoadedModel, isolation: Isolation, frame: Frame) -> 
     )
 
 
+PART_GAP_MIN_MM = 2.0
+PART_GAP_SPACING_FACTOR = 3.0
+
+
+def derived_surface_gaps(
+    mesh: TriangleMeshData, scanned_mm: np.ndarray
+) -> tuple[tuple[int, ...], float]:
+    """Vertices of a derived (Poisson) surface with no scanned point nearby: filled, not seen.
+
+    Threshold: max(2 mm, 3 x the median scanned point spacing).
+    """
+    import open3d as o3d
+
+    scanned = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(scanned_mm))
+    spacing = float(np.median(np.asarray(scanned.compute_nearest_neighbor_distance())))
+    limit = max(PART_GAP_MIN_MM, PART_GAP_SPACING_FACTOR * spacing)
+    vertices = o3d.geometry.PointCloud(
+        o3d.utility.Vector3dVector(np.asarray(mesh.vertices, dtype=float))
+    )
+    distance = np.asarray(vertices.compute_point_cloud_distance(scanned))
+    return tuple(int(i) for i in np.nonzero(distance > limit)[0]), limit
+
+
 def promotion_request(
     *,
     project_id: str,
@@ -1049,24 +1195,69 @@ def promotion_request(
     frame: Frame,
     actor_id: str,
     reason: str,
+    part_record: dict[str, Any] | None = None,
 ) -> ScanMasterPromotionRequest:
     # A companion mesh comes from the same OpenMVS scene, so it shares the model's frame.
     aligned = object_mesh(mesh_model, isolation, frame)
     aligned_id = f"aligned-object-mesh-{mesh_sha256(aligned)[:40]}"
-    reconstruction = ReconstructionOutputManifest(
-        project_id=project_id,
-        reconstruction_revision=model.reconstruction_revision,
-        backend_id=ReconstructionBackendId.COLMAP_OPENMVS,
-        backend_version="external-build",
-        backend_build=model.path.name,
-        backend_license="COLMAP BSD-3-Clause; OpenMVS AGPL-3.0 (external process)",
-        configuration_digest=_sha256_json({"model": model.sha256, "mesh": mesh_model.sha256}),
-        source_input_digest=model.sha256,
-        camera_convention="world-to-camera",
-        point_count=len(model.points),
-        triangle_count=0 if mesh_model.triangles is None else len(mesh_model.triangles),
-        limitations=("source digest is the built model file, not the raw PackScan",),
-    )
+    derived = frame.scale.source == "part_combine"
+    surface_note = ""
+    if derived:
+        if part_record is None:
+            raise MeasureDesignError("a combined part needs its combine record to be promoted")
+        mesh_method = str(part_record.get("mesh_method"))
+        surface_note = (
+            f"surface DERIVED, not scanned: Open3D Poisson ({mesh_method}) closed from the "
+            f"merged part cloud sha256 {model.sha256}; filled areas are coverage gaps"
+        )
+        reconstruction = ReconstructionOutputManifest(
+            project_id=project_id,
+            reconstruction_revision=model.reconstruction_revision,
+            # Source clouds are COLMAP/OpenMVS builds; the surface itself is derived.
+            backend_id=ReconstructionBackendId.COLMAP_OPENMVS,
+            backend_version=f"derived:open3d-poisson:{mesh_method}",
+            backend_build=f"part-combine:{part_record.get('part')}",
+            backend_license=(
+                "source clouds: COLMAP BSD-3-Clause, OpenMVS AGPL-3.0 (external process); "
+                "derived surface: Open3D MIT"
+            ),
+            configuration_digest=_sha256_json(
+                {
+                    "part_cloud": model.sha256,
+                    "mesh": mesh_model.sha256,
+                    "mesh_method": mesh_method,
+                    "combine_method": part_record.get("method"),
+                    "sources": [s.get("model_sha256") for s in part_record.get("sources", [])],
+                }
+            ),
+            source_input_digest=model.sha256,
+            camera_convention="world-to-camera",
+            asset_paths={
+                "part_cloud": str(part_record.get("artifact_path")),
+                "derived_surface": str(part_record.get("mesh_artifact_path")),
+            },
+            point_count=len(model.points),
+            triangle_count=0 if mesh_model.triangles is None else len(mesh_model.triangles),
+            limitations=(
+                surface_note,
+                "source digest is the merged part cloud, not the raw PackScans",
+            ),
+        )
+    else:
+        reconstruction = ReconstructionOutputManifest(
+            project_id=project_id,
+            reconstruction_revision=model.reconstruction_revision,
+            backend_id=ReconstructionBackendId.COLMAP_OPENMVS,
+            backend_version="external-build",
+            backend_build=model.path.name,
+            backend_license="COLMAP BSD-3-Clause; OpenMVS AGPL-3.0 (external process)",
+            configuration_digest=_sha256_json({"model": model.sha256, "mesh": mesh_model.sha256}),
+            source_input_digest=model.sha256,
+            camera_convention="world-to-camera",
+            point_count=len(model.points),
+            triangle_count=0 if mesh_model.triangles is None else len(mesh_model.triangles),
+            limitations=("source digest is the built model file, not the raw PackScan",),
+        )
     scale_id = frame.scale.provenance.provenance_id
     lineage = CapturedScanLineage(
         project_id,
@@ -1116,13 +1307,17 @@ def promotion_request(
             {"disposition": "component_cleanup_refused", "reason": str(error)},
         )
         final = aligned
+    gaps: tuple[int, ...] = ()
+    gap_mm = 0.0
+    if derived:
+        gaps, gap_mm = derived_surface_gaps(final, frame.apply(model.points))
     holes = analyze_mesh_holes(
         final,
         parent_revision_id=final_id,
         scale_state=ScaleState.METRIC_UNVERIFIED,
         scale_provenance_id=scale_id,
         uncertain_vertex_indices=(),
-        coverage_gap_vertex_indices=(),
+        coverage_gap_vertex_indices=gaps,
     )
     return ScanMasterPromotionRequest(
         lineage=lineage,
@@ -1138,8 +1333,17 @@ def promotion_request(
             "object isolated geometrically (base plane + cluster), not by SAM masks",
             f"scale source {frame.scale.source}; METRIC_UNVERIFIED",
             "no physical validation against the real package",
+            *((surface_note,) if derived else ()),
         ),
-        coverage_gaps=("underside against the support plane is not observed",),
+        coverage_gaps=(
+            (
+                "merged upright + upside-down scans; a closed, hole-free surface is not proven",
+                f"{len(gaps)} of {len(final.vertices)} surface vertices are DERIVED fill "
+                f"(farther than {gap_mm:.2f} mm from any scanned point)",
+            )
+            if derived
+            else ("underside against the support plane is not observed",)
+        ),
     )
 
 

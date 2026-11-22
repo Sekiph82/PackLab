@@ -103,24 +103,33 @@ class ModelViewerView(QWidget):
         if chosen:
             self.load(Path(chosen))
 
-    def load(self, path: Path) -> bool:
+    def load(self, path: Path, *more: Path) -> bool:
+        """Show one model, or several side by side (project parts, PL-0485)."""
         started = time.perf_counter()
-        try:
-            geometry = self.service.adapter.load(path)
-        except ViewportLoadError as error:
-            self.status.setText(f"Cannot open {path.name}: {error} ({error.code.value})")
-            return False
-        is_cloud = isinstance(geometry, PointCloudGeometry)
-        budget = POINT_DISPLAY_BUDGET if is_cloud else MESH_DISPLAY_BUDGET
-        shown, plan = display_geometry(geometry, LODPolicy(display_budget=budget))
-        self.service = ViewportService(self.service.adapter)
-        self.service.add_geometry("model", SceneObjectKind.SCAN_MESH, shown)
-        colored = " colored" if isinstance(geometry, PointCloudGeometry) and geometry.colors else ""
-        kind = "points" if is_cloud else "triangles"
-        shown_note = "" if plan.stride == 1 else f", showing {plan.display_count:,}"
+        service = ViewportService(self.service.adapter)
+        notes = []
+        for index, item in enumerate((path, *more)):
+            try:
+                geometry = self.service.adapter.load(item)
+            except ViewportLoadError as error:
+                self.status.setText(f"Cannot open {item.name}: {error} ({error.code.value})")
+                return False
+            is_cloud = isinstance(geometry, PointCloudGeometry)
+            budget = POINT_DISPLAY_BUDGET if is_cloud else MESH_DISPLAY_BUDGET
+            shown, plan = display_geometry(geometry, LODPolicy(display_budget=budget))
+            service.add_geometry(
+                "model" if index == 0 else f"model-{index}", SceneObjectKind.SCAN_MESH, shown
+            )
+            colored = (
+                " colored" if isinstance(geometry, PointCloudGeometry) and geometry.colors else ""
+            )
+            kind = "points" if is_cloud else "triangles"
+            shown_note = "" if plan.stride == 1 else f", showing {plan.display_count:,}"
+            notes.append(f"{item.name}: {geometry_count(geometry):,}{colored} {kind}{shown_note}")
+        self.service = service
         self.status.setText(
-            f"{path.name}: {geometry_count(geometry):,}{colored} {kind}{shown_note} "
-            f"(loaded in {time.perf_counter() - started:.1f} s). Units as stored in the file."
+            f"{'; '.join(notes)} (loaded in {time.perf_counter() - started:.1f} s). "
+            "Units as stored in the file."
         )
         self.fit()
         return True

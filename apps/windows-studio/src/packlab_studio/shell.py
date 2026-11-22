@@ -70,12 +70,13 @@ from .preferences import (
     sanitize_geometry,
 )
 from .project import ProjectManager
+from .project_parts import ScenePanel
 from .receiver_session import ReceiverSession
 from .recovery import RecoveryItem, RecoveryManager, RecoveryStatus
 from .scan_master_promotion import ScanMasterPromotionAction, ScanMasterPromotionRequest
 from .shutdown import ShutdownCoordinator
 from .version import current_build_info
-from .workspace import WorkspaceManager
+from .workspace import DockId, WorkspaceManager
 
 AUTOSAVE_DRAFT_JOB = "autosave-design-draft"
 AUTOSAVE_DRAFT_PATH = "autosave/design-model-draft.json"
@@ -83,6 +84,7 @@ AUTOSAVE_DELAY_MS = 2000
 _POINTER_LABELS = {
     "active_design_model_revision_id": "Design Model",
     "active_scan_master_revision_id": "Scan Master",
+    "selected_part": "Part selection",
 }
 _RECOVERY_LABELS = {AUTOSAVE_DRAFT_JOB: "Unsaved Design Model edits (autosaved draft)"}
 # Restored geometry is the client area; keep room for the title bar and frame on screen (F5).
@@ -328,6 +330,7 @@ class StudioMainWindow(QMainWindow):
         self.setCentralWidget(splitter)
         install_design_workbench(self)
         self.workspace = WorkspaceManager(self, job_manager=self.job_manager)
+        self._wire_scene_panel()
         self.navigation.set_project_context(self.project_manager)
         self._sync_project_state()
         self._restore_preferences()
@@ -675,6 +678,45 @@ class StudioMainWindow(QMainWindow):
                     else None
                 )
             )
+
+    def _wire_scene_panel(self) -> None:
+        """PL-0485: Scene / Objects lists the project's parts; selection drives the pages."""
+        inbox = self.route_stack.views[Route.CAPTURE_INBOX]
+
+        def entries() -> list:
+            session = inbox.session if isinstance(inbox, CaptureInboxView) else None
+            return [] if session is None else session.entries()
+
+        self.scene_panel = ScenePanel(self.project_manager, self.job_manager, entries)
+        dock = self.workspace.docks[DockId.SCENE]
+        dock.setWidget(self.scene_panel)
+        self.scene_panel.part_selected.connect(self._show_part)
+        self.build_model.build_finished.connect(lambda *_args: self.scene_panel.refresh())
+        measure = self.route_stack.views[Route.MEASURE_DESIGN]
+        if isinstance(measure, MeasureDesignView):
+            measure.part_provider = self.scene_panel.selected_cloud
+        self._scene_project: str | None = None
+        self.project_manager.add_listener(self._reveal_scene_panel)
+        self.scene_panel.refresh()
+
+    def _reveal_scene_panel(self, _metadata: object) -> None:
+        """Opening a project that has part scans shows the Scene dock once."""
+        layout = self.project_manager.layout
+        root = None if layout is None else str(layout.root)
+        if root == self._scene_project:
+            return
+        self._scene_project = root
+        if any(state.status != "missing" for state in self.scene_panel.states.values()):
+            self.workspace.docks[DockId.SCENE].show()
+
+    def _show_part(self, part: object, paths: tuple[Path, ...]) -> None:
+        viewer = self.route_stack.views[Route.MODEL_VIEWER]
+        measure = self.route_stack.views[Route.MEASURE_DESIGN]
+        if isinstance(measure, MeasureDesignView):
+            label = None if part is None else tr(str(part).capitalize())
+            measure.show_part(label, self.scene_panel.selected_cloud() is not None)
+        if isinstance(viewer, ModelViewerView) and paths:
+            viewer.load(*paths)
 
     def refresh_builds(self) -> None:
         """Scan list on the Build 3D Model page: inbox scans + this project's builds."""

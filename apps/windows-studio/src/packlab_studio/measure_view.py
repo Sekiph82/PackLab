@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import measure_design as md
+from .i18n import tr
 from .model_viewer import MODEL_FILTER, POINT_DISPLAY_BUDGET, ModelViewerView
 from .scan_master_promotion import ScanMasterPromotionAction, ScanMasterPromotionRequest
 from .viewport import MeshGeometry, PointCloudGeometry, SceneObjectKind, ViewportService
@@ -90,6 +91,10 @@ class MeasureDesignView(QWidget):
         self.dirty = False
         self._project_seen: str | None = None
         self._companion: Path | None = None
+        # PL-0485: the Scene panel's selected part cloud, used instead of the latest build.
+        self.part_provider: Callable[[], Path | None] | None = None
+        self.part_label: str | None = None  # selected Scene part, None = no selection
+        self.part_record: dict[str, Any] | None = None  # set when a combined part is loaded
 
         self.viewer = ModelViewerView()
         self.viewer.open_button.hide()
@@ -354,10 +359,27 @@ class MeasureDesignView(QWidget):
         if chosen:
             self.load(Path(chosen))
 
+    def show_part(self, label: str | None, has_cloud: bool = True) -> None:
+        """Name the selected project part on the load button (None: latest build)."""
+        self.part_label = label
+        if label is None:
+            text = tr("Use latest project build")
+        elif has_cloud:
+            text = tr("Use selected part: {part}").format(part=label)
+        else:
+            text = tr("{part}: no scan yet").format(part=label)
+        self.latest_button.setText(text)
+        self.latest_button.setEnabled(label is None or has_cloud)
+
     def use_latest_build(self, path: Path | None = None) -> bool:
         """Load ``path`` (a just-finished build) or the newest build in the open project."""
 
         layout = getattr(self.project_manager, "layout", None)
+        if path is None and self.part_label is not None and self.part_provider is not None:
+            path = self.part_provider()
+            if path is None:  # never fall back to another build behind the owner's back
+                self.status.setText(tr("{part}: no scan yet").format(part=self.part_label))
+                return False
         if path is None and layout is not None:
             path = md.latest_built_model(layout.root)
         if path is None:
@@ -371,6 +393,9 @@ class MeasureDesignView(QWidget):
         def action() -> str:
             self.model = md.load_model(path)
             companion = md.companion_mesh_path(path) if self.model.triangles is None else None
+            self.part_record = self._combined_part(path)
+            if self.part_record is not None:
+                companion = self._part_mesh(self.part_record)
             self.mesh_model = self.model if self.model.triangles is not None else None
             self._companion = companion
             self.workspace = md.find_colmap_workspace(path)
@@ -403,13 +428,43 @@ class MeasureDesignView(QWidget):
 
         return self._run("Open", action)
 
+    def _combined_part(self, path: Path) -> dict[str, Any] | None:
+        """The project's Combine-part record whose merged cloud is ``path`` (PL-0485)."""
+        manager, layout = self.project_manager, getattr(self.project_manager, "layout", None)
+        if layout is None or not hasattr(manager, "part_merges"):
+            return None
+        for record in manager.part_merges().values():
+            artifact = record.get("artifact_path")
+            if record.get("status") == "combined" and isinstance(artifact, str):
+                if os.path.normcase(str(layout.root / artifact)) == os.path.normcase(str(path)):
+                    return record
+        return None
+
+    def _part_mesh(self, record: dict[str, Any]) -> Path | None:
+        layout = self.project_manager.layout
+        artifact = record.get("mesh_artifact_path")
+        if not isinstance(artifact, str):
+            return None
+        mesh = layout.path("derived", artifact.removeprefix("derived/"))
+        if not mesh.is_file():
+            raise md.MeasureDesignError(
+                "the part surface mesh is missing or changed; combine again"
+            )
+        return mesh
+
     def isolate(self) -> None:
         model = self.model
         if model is None:
             return
 
+        record = self.part_record
+
         def action() -> str:
-            self.isolation = isolation = md.isolate_object(model, self.cameras)
+            self.isolation = isolation = (
+                md.isolate_object(model, self.cameras)
+                if record is None
+                else md.isolate_in_mat_frame(model)
+            )
             self.scale = self.frame = self.measurements = None
             upright = md.upright_matrix(isolation)
             points = model.points[isolation.object_indices] @ upright[:3, :3].T + upright[:3, 3]
@@ -431,6 +486,10 @@ class MeasureDesignView(QWidget):
                 + "; ".join(isolation.notes)
                 + ". Manual points prefilled with the object's base and top along its axis."
             )
+            if record is not None:  # combined part: already mm, scale from its source builds
+                note = self.results.text()
+                self._set_scale(md.part_combine_scale(model, record))
+                self.results.setText(f"{note}\n{self.results.text()}")
             return "isolated"
 
         self._run("Isolate", action)
@@ -554,6 +613,12 @@ class MeasureDesignView(QWidget):
             if companion is None:
                 raise md.MeasureDesignError("promotion needs a mesh; open the built OBJ/PLY mesh")
             self.mesh_model = md.load_model(companion)
+            record = self.part_record
+            if record is not None and self.mesh_model.sha256 != record.get("mesh_sha256"):
+                self.mesh_model = None
+                raise md.MeasureDesignError(
+                    "the part surface mesh changed on disk; combine the part again"
+                )
         if self.frame.geometry.project_id != self._project_id():
             self.frame = md.build_frame(
                 self.model, self.isolation, self.frame.scale, project_id=self._project_id()
@@ -566,6 +631,7 @@ class MeasureDesignView(QWidget):
             frame=self.frame,
             actor_id=actor_id,
             reason=reason,
+            part_record=self.part_record,
         )
 
     def promote(self) -> None:
