@@ -269,6 +269,10 @@ class StudioMainWindow(QMainWindow):
             self.job_manager, self.project_manager, backend=build_backend
         )
         self._wire_build_model()
+        inbox_view = self.route_stack.views[Route.CAPTURE_INBOX]
+        if isinstance(inbox_view, CaptureInboxView):
+            # Pair once: a paired phone must be able to send without opening this page.
+            QTimer.singleShot(0, inbox_view.resume_for_paired_devices)
         measure = self.route_stack.views[Route.MEASURE_DESIGN]
         if self.scan_master_request_provider is None and isinstance(measure, MeasureDesignView):
             # Editor > Promote uses the cleaned object selection from Measure & Design.

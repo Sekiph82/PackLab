@@ -146,6 +146,7 @@ class CaptureInboxView(QWidget):
         build_row.addStretch(1)
         layout.addLayout(build_row)
 
+        self._shut_down = False
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self._tick)
@@ -184,6 +185,18 @@ class CaptureInboxView(QWidget):
         super().showEvent(event)
         if self._session_factory is not None:
             self.refresh_inbox()
+
+    def resume_for_paired_devices(self) -> None:
+        """Start listening at launch when a phone already paired (no page visit needed)."""
+        if self._shut_down or self._session_factory is None or self.timer.isActive():
+            return
+        try:
+            session = self.session
+            paired = session is not None and bool(session.paired_devices())
+        except Exception:
+            return  # unreadable device store: stay stopped, the page still offers Receive
+        if paired:
+            self.start_receiving()
 
     def start_receiving(self) -> None:
         session = self.session
@@ -376,6 +389,7 @@ class CaptureInboxView(QWidget):
         self.refresh_inbox()
 
     def shutdown(self) -> None:
+        self._shut_down = True
         self.timer.stop()
         if self._session is not None:
             self._session.stop()
