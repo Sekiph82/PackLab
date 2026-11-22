@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import measure_design as md
+from .i18n import tr
 from .model_viewer import MODEL_FILTER, POINT_DISPLAY_BUDGET, ModelViewerView
 from .scan_master_promotion import ScanMasterPromotionAction, ScanMasterPromotionRequest
 from .viewport import MeshGeometry, PointCloudGeometry, SceneObjectKind, ViewportService
@@ -90,6 +91,8 @@ class MeasureDesignView(QWidget):
         self.dirty = False
         self._project_seen: str | None = None
         self._companion: Path | None = None
+        # PL-0485: the Scene panel's selected part cloud, used instead of the latest build.
+        self.part_provider: Callable[[], Path | None] | None = None
 
         self.viewer = ModelViewerView()
         self.viewer.open_button.hide()
@@ -354,10 +357,20 @@ class MeasureDesignView(QWidget):
         if chosen:
             self.load(Path(chosen))
 
+    def show_part(self, label: str | None) -> None:
+        """Name the selected project part on the load button (None: latest build)."""
+        self.latest_button.setText(
+            tr("Use latest project build")
+            if label is None
+            else tr("Use selected part: {part}").format(part=label)
+        )
+
     def use_latest_build(self, path: Path | None = None) -> bool:
         """Load ``path`` (a just-finished build) or the newest build in the open project."""
 
         layout = getattr(self.project_manager, "layout", None)
+        if path is None and self.part_provider is not None:
+            path = self.part_provider()
         if path is None and layout is not None:
             path = md.latest_built_model(layout.root)
         if path is None:

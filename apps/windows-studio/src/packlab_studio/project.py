@@ -36,7 +36,10 @@ _SELECTION_EVENTS = {
     "active_design_model_revision_id": "design_model_selection_events",
     # PL-0482: {package_sha256: part_role} owner assignments; the whole map is the value.
     "scan_part_roles": "scan_part_role_events",
+    # PL-0485: Scene panel view {"part": closure|body|assembled|None, "hidden": [parts]}.
+    "selected_part": "part_selection_events",
 }
+PROJECT_PARTS = ("closure", "body", "assembled")
 _PACKAGE_DIGEST = re.compile(r"[0-9a-f]{64}")
 _PART_ROLE_EVENT_LIMIT = 200
 
@@ -760,6 +763,69 @@ class ProjectManager:
         committed = self.commit_edit(next_state, expected_revision=self.metadata.revision)
         self._record_selection("scan_part_roles", before, after)
         return committed
+
+    # ------------------------------------------------------------ project parts (PL-0485)
+
+    def part_view(self) -> dict[str, Any]:
+        """Selected part and parts hidden on Assembled; malformed state reads as none."""
+        empty: dict[str, Any] = {"part": None, "hidden": []}
+        if self.layout is None:
+            return empty
+        _, state = self._read_authority(self.layout)
+        value = state.get("selected_part")
+        if not isinstance(value, dict) or value.get("part") not in (None, *PROJECT_PARTS):
+            return empty
+        hidden = value.get("hidden")
+        hidden = hidden if isinstance(hidden, list) else []
+        return {"part": value.get("part"), "hidden": sorted(set(hidden) & set(PROJECT_PARTS))}
+
+    def set_part_view(self, part: str | None, hidden: list[str] | tuple[str, ...] = ()) -> None:
+        """Select a part / toggle visibility (undoable selection; unchanged = no revision)."""
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        if part not in (None, *PROJECT_PARTS) or not set(hidden) <= set(PROJECT_PARTS):
+            raise ProjectError("project part is unknown")
+        after = {"part": part, "hidden": sorted(set(hidden))}
+        _, state = self._read_authority(self.layout)
+        before = state.get("selected_part")
+        if before == after:
+            return
+        next_state = dict(state)
+        next_state["selected_part"] = after
+        self.commit_edit(next_state, expected_revision=self.metadata.revision)
+        self._record_selection("selected_part", before, after)
+
+    def part_merges(self) -> dict[str, dict[str, Any]]:
+        """Latest Combine-part record per part (combined or refused)."""
+        if self.layout is None:
+            return {}
+        _, state = self._read_authority(self.layout)
+        value = state.get("part_merges")
+        if not isinstance(value, dict):
+            return {}
+        return {
+            part: record
+            for part, record in value.items()
+            if part in PROJECT_PARTS and isinstance(record, dict)
+        }
+
+    def record_part_merge(self, part: str, record: dict[str, Any]) -> ProjectMetadata:
+        """Store a Combine-part result; an artifact record, not an undoable selection."""
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        if part not in PROJECT_PARTS or record.get("part") != part:
+            raise ProjectError("project part is unknown")
+        artifact = record.get("artifact_path")
+        if artifact is not None and not (
+            isinstance(artifact, str)
+            and re.fullmatch(r"derived/parts/[a-z]+-[0-9a-f]{16}\.ply", artifact)
+        ):
+            raise ProjectError("part cloud path is invalid")
+        _, state = self._read_authority(self.layout)
+        merges = state.get("part_merges")
+        next_state = dict(state)
+        next_state["part_merges"] = {**(merges if isinstance(merges, dict) else {}), part: record}
+        return self.commit_edit(next_state, expected_revision=self.metadata.revision)
 
     # ------------------------------------------------------------ undo / redo (PL-0456)
 
