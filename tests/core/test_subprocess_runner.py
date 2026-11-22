@@ -232,3 +232,26 @@ def test_windows_children_get_no_console_window(monkeypatch):
         assert seen["flags"] & sp.CREATE_NO_WINDOW
     else:
         assert runner.NO_WINDOW == 0
+
+
+def test_blender_probe_and_cad_commit_hide_console(monkeypatch):
+    import os
+    import subprocess as sp
+
+    from packlab_core import blender_capability, cad_export_manifest
+
+    flags = []
+
+    def fake_run(*args, **kwargs):
+        flags.append(kwargs.get("creationflags", 0))
+        return sp.CompletedProcess(args[0], 0, "0" * 40 + "\n", "")
+
+    monkeypatch.setattr(sp, "run", fake_run)
+    monkeypatch.delenv("PACKLAB_COMMIT", raising=False)
+    blender_capability._run_hidden(["blender", "--version"], capture_output=True)
+    try:
+        cad_export_manifest.resolve_packlab_commit()
+    except Exception:
+        pass
+    expected = getattr(sp, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    assert flags and all(flag == expected for flag in flags)
