@@ -84,3 +84,16 @@ def test_disk_hygiene_policy_protects_owner_data_and_sets_space_floor() -> None:
     assert "Hugging Face, Puppeteer, browser, GPU, and Codex runtime/cache" in policy
     assert "uv cache clean" in policy
     assert "OWNER DEV" in policy
+
+
+def test_ownerdev_cleanup_never_deletes_the_only_rollback_snapshot() -> None:
+    # The refresh keeps only the current release (owner request 2026-11-22), so hygiene must
+    # fall back to the newest verified previous-* snapshot instead of deleting all of them.
+    helper = (Path(__file__).resolve().parents[2] / "tools/dev/packlab_disk_hygiene.ps1").read_text(
+        encoding="utf-8"
+    )
+    fallback = helper.index("$newestSnapshot = Get-ChildItem")
+    deletion_loop = helper.index("foreach ($snapshot in Get-ChildItem -LiteralPath $OwnerRoot")
+    assert fallback < deletion_loop
+    assert "$_.Manifest.runtime_id -ne $current.runtime_id" in helper[fallback:deletion_loop]
+    assert "$snapshotKeepId = if ($newestSnapshot)" in helper[fallback:deletion_loop]

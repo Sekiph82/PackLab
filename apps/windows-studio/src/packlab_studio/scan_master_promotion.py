@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from packlab_core.geometry_adapter import TriangleMeshData
 from packlab_core.hole_detection import MeshHoleReport
@@ -66,7 +67,11 @@ class ScanMasterPromotionAction:
         self.project_manager = project_manager
 
     def promote(
-        self, request: ScanMasterPromotionRequest, *, expected_project_revision: int
+        self,
+        request: ScanMasterPromotionRequest,
+        *,
+        expected_project_revision: int,
+        source_frame: dict[str, Any] | None = None,
     ) -> ScanMasterRevision:
         manager = self.project_manager
         if manager.layout is None or manager.metadata is None:
@@ -91,7 +96,9 @@ class ScanMasterPromotionAction:
             coverage_gaps=request.coverage_gaps,
             preview_proxy=request.preview_proxy,
         )
-        manager.persist_scan_master_revision(revision, expected_revision=expected_project_revision)
+        manager.persist_scan_master_revision(
+            revision, expected_revision=expected_project_revision, source_frame=source_frame
+        )
         return revision
 
 

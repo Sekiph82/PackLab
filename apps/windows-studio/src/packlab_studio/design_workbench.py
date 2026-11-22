@@ -13,12 +13,14 @@ import math
 import re
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from packlab_core.blender_capability import (
@@ -26,11 +28,13 @@ from packlab_core.blender_capability import (
     _select_executable,
     discover_blender,
 )
+from packlab_core.blender_label_render_overlay import create_label_render_overlay_binding
 from packlab_core.blender_render import render_standard_views, run_blender_render
 from packlab_core.blender_scene_package import (
     BlenderArtworkBinding,
     BlenderScenePackage,
     ProjectAssetReference,
+    artwork_viewer_orientation,
     create_blender_scene_package,
 )
 from packlab_core.cad_adapter import cad_shape_precise_bounds
@@ -90,6 +94,8 @@ from packlab_core.label_metric_surface_binding import (
     create_label_dieline,
     create_label_dieline_print_intent,
     create_label_metric_surface_binding,
+    disc_binding_options,
+    disc_radii,
     map_label_artwork_to_metric_surface,
 )
 from packlab_core.label_zone import LabelZoneBoundary, LabelZoneKind, create_label_zone
@@ -114,6 +120,8 @@ DESIGN_DOCUMENT_SUFFIX = ".packlab-design.json"
 # Measure & Design saves revisions here (project "derived" area) with this contract.
 PROJECT_DESIGN_MODEL_DIR = Path("derived") / "design_model"
 STUDIO_REVISION_CONTRACT = "packlab.studio-design-model-revision.v1"
+PART_LABELS_CONTRACT = "packlab.studio-part-labels.v1"  # labels of one project part
+_BOUNDARY_KEYS = ("u_min", "v_min", "u_max", "v_max")
 # Labels are refused on regions curving tighter than this (|k| <= 0.05/mm, radius >= 20 mm).
 LABEL_MAXIMUM_ABSOLUTE_CURVATURE_PER_MM = 0.05
 # Exports: only numerically identical radii are merged into one face (no shape change).
@@ -127,16 +135,19 @@ _TARGET_NORMAL = {
     LabelZoneKind.FRONT: (0.0, 1.0, 0.0),
     LabelZoneKind.BACK: (0.0, -1.0, 0.0),
     LabelZoneKind.WRAP: (0.0, 1.0, 0.0),
+    LabelZoneKind.TOP: (0.0, 0.0, 1.0),
 }
 _HOST_SURFACE = {
     LabelZoneKind.FRONT: "GeomAbs_Plane",
     LabelZoneKind.BACK: "GeomAbs_Plane",
     LabelZoneKind.WRAP: "GeomAbs_Cylinder",
+    LabelZoneKind.TOP: "GeomAbs_Plane",
 }
 _DEFAULT_BOUNDARY = {
     LabelZoneKind.FRONT: LabelZoneBoundary(0.1, 0.15, 0.9, 0.85),
     LabelZoneKind.BACK: LabelZoneBoundary(0.1, 0.15, 0.9, 0.85),
     LabelZoneKind.WRAP: LabelZoneBoundary(0.0, 0.1, 1.0, 0.9),
+    LabelZoneKind.TOP: LabelZoneBoundary(0.0, 0.0, 1.0, 1.0),  # the whole top disc
 }
 
 
@@ -389,6 +400,7 @@ def nominal_jar_design_document(
     project_id: str = "packlab-nominal-jar",
     actor_id: str = "studio-user",
     created_at_utc: str | None = None,
+    axis_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> bytes:
     """User-authored nominal jar (straight revolve) as a canonical Design Model document."""
     if not (math.isfinite(height_mm) and math.isfinite(diameter_mm)):
@@ -438,7 +450,7 @@ def nominal_jar_design_document(
         profile,
         profile_feature_id=profile_feature.feature_id,
         axis_feature_id=axis_feature.feature_id,
-        axis_origin=(0.0, 0.0, 0.0),
+        axis_origin=axis_origin,
         axis_direction=(0.0, 0.0, 1.0),
         angle_degrees=360.0,
     )
@@ -575,6 +587,101 @@ class DesignWorkbench(QObject):
         self.changed.emit()
         return session
 
+    def close_document(self) -> None:
+        """No Design Model (e.g. the selected part has none yet)."""
+        self.session = None
+        self.labels = []
+        self.changed.emit()
+
+    def label_document(
+        self, part: str, store_artwork: Callable[[bytes, str], str]
+    ) -> dict[str, Any]:
+        """Persistable label document of ``part`` (PL-0487), traceable to the Design Model.
+
+        Each label keeps the inputs that re-create it (kind, boundary, variant, artwork file
+        + fit) and the revision ids it was created with; ``store_artwork`` saves the artwork
+        bytes in the project and returns their project-relative path.
+        """
+        session = self.require_session()
+        labels = []
+        for entry in self.labels:
+            artwork = None
+            if entry.artwork is not None:
+                asset = entry.artwork.asset
+                artwork = {
+                    "path": store_artwork(entry.artwork.content, asset.media_type),
+                    "sha256": asset.content_sha256,
+                    "media_type": asset.media_type,
+                    "fit_mode": entry.artwork.mapping.fit_mode,
+                    "artwork_revision_id": asset.revision_id,
+                    "assignment_revision_id": entry.artwork.assignment.revision_id,
+                }
+            width, height = entry.size_mm
+            labels.append(
+                {
+                    "variant_id": entry.variant_id,
+                    "kind": entry.kind.value,
+                    "boundary": entry.placement.boundary.as_dict(),
+                    "zone_id": entry.placement.label_zone.zone_id,
+                    "placement_revision_id": entry.placement.revision_id,
+                    "metric_binding_revision_id": entry.metric_binding.revision_id,
+                    "size_mm_unverified": [width, height],
+                    "disc": _disc_document(entry.metric_binding),
+                    "artwork": artwork,
+                }
+            )
+        return {
+            "contract": PART_LABELS_CONTRACT,
+            "part": part,
+            "design_model_revision_id": session.model.revision_id,
+            "design_document_sha256": session.document_sha256,
+            "label_host_brep_revision_id": session.label_representation.revision_id,
+            "coordinate_unit": "mm_unverified",
+            "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
+            "updated_at_utc": _utc_now(),
+            "labels": labels,
+        }
+
+    def restore_labels(
+        self, document: dict[str, Any], read_artwork: Callable[[str, str], bytes]
+    ) -> list[str]:
+        """Re-create the labels of a label document on the open Design Model.
+
+        Every zone goes through the same curvature-checked suggestion and core binding as
+        a new one; labels the model no longer takes are skipped and reported.
+        """
+        self.require_session()
+        problems = []
+        for item in document.get("labels", []):
+            try:
+                kind = LabelZoneKind(item["kind"])
+                boundary = LabelZoneBoundary(
+                    **{key: float(item["boundary"][key]) for key in _BOUNDARY_KEYS}
+                )
+                disc = item.get("disc") if kind is LabelZoneKind.TOP else None
+                if kind is LabelZoneKind.TOP and not disc:
+                    raise DesignWorkbenchError("top label without disc radii")
+                entry = self.add_label_zone(
+                    self.suggest_label_zone(kind),
+                    # Top labels keep absolute mm radii; a face too small is refused (flagged).
+                    boundary=None if disc else boundary,
+                    variant_id=str(item["variant_id"]),
+                    disc_outer_radius_mm=(
+                        float(disc["outer_radius_mm_unverified"]) if disc else None
+                    ),
+                    disc_inner_radius_mm=(
+                        float(disc["inner_radius_mm_unverified"]) if disc else None
+                    ),
+                    disc_rotation_degrees=float(disc["rotation_degrees"]) if disc else 0.0,
+                )
+                artwork = item.get("artwork")
+                if artwork is not None:
+                    content = read_artwork(str(artwork["path"]), str(artwork["sha256"]))
+                    self.import_artwork(entry, content, fit_mode=str(artwork["fit_mode"]))
+            except Exception as error:  # one bad label must not hide the others
+                problems.append(f"{item.get('variant_id', '?')}: {error}")
+        return problems
+
     def require_session(self) -> DesignModelSession:
         if self.session is None:
             raise DesignWorkbenchError("Open a Design Model first.")
@@ -627,6 +734,10 @@ class DesignWorkbench(QObject):
             )
         ]
         if not candidates:
+            if kind is LabelZoneKind.TOP:
+                raise DesignWorkbenchError(
+                    "No flat round top face facing up on this Design Model for a top label."
+                )
             if kind is LabelZoneKind.WRAP:
                 raise DesignWorkbenchError(
                     "No curvature-safe cylindrical face for a wrap label on this Design Model."
@@ -641,6 +752,8 @@ class DesignWorkbench(QObject):
         def rank(item: CadLabelSurfaceCandidate) -> tuple[float, int, float]:
             heights = [point[2] for point in item.support_points]
             span = max(heights) - min(heights) if kind is LabelZoneKind.WRAP else 0.0
+            if kind is LabelZoneKind.TOP:  # the topmost up-facing face (closure top)
+                return (-round(item.center[2], 6), len(item.rejection_reasons), 0.0)
             return (-round(span, 6), len(item.rejection_reasons), round(item.center[2], 6))
 
         candidate = min(candidates, key=rank)
@@ -653,11 +766,58 @@ class DesignWorkbench(QObject):
         boundary: LabelZoneBoundary | None = None,
         variant_id: str | None = None,
         actor_id: str = "studio-user",
+        disc_outer_radius_mm: float | None = None,
+        disc_inner_radius_mm: float | None = None,
+        disc_rotation_degrees: float = 0.0,
     ) -> LabelZoneEntry:
+        """Add a zone; TOP zones take outer/inner radius (mm) and artwork rotation (deg)."""
         session = self.require_session()
         if suggestion.analysis.source_design_model_revision_id != session.model.revision_id:
             raise DesignWorkbenchError("The suggestion belongs to another Design Model.")
         chosen = boundary or suggestion.boundary
+        options: dict[str, Any] = {}
+        if suggestion.kind is LabelZoneKind.TOP:
+            options = {
+                "disc_inner_radius_mm": disc_inner_radius_mm,
+                "disc_rotation_degrees": disc_rotation_degrees,
+            }
+            chosen = boundary or LabelZoneBoundary(0.0, 0.0, 1.0, 1.0)
+            if disc_outer_radius_mm is not None:
+                host = self._top_host_radius(suggestion)
+                if not 0.0 < disc_outer_radius_mm <= host + 1e-9:
+                    raise DesignWorkbenchError(
+                        f"Top label outer radius must be above 0 and at most the top face "
+                        f"radius {host:.2f} mm."
+                    )
+                half = min(disc_outer_radius_mm / host, 1.0) / 2.0
+                chosen = LabelZoneBoundary(0.5 - half, 0.5 - half, 0.5 + half, 0.5 + half)
+        elif disc_outer_radius_mm is not None or disc_inner_radius_mm is not None:
+            raise DesignWorkbenchError("Disc radii apply to top labels only.")
+        entry = self._new_entry(suggestion, chosen, actor_id, options)
+        variant = variant_id or suggestion.kind.value
+        if any(item.variant_id == variant for item in self.labels):
+            raise DesignWorkbenchError(f"A label variant named {variant!r} already exists.")
+        entry.variant_id = variant
+        self.labels.append(entry)
+        self.changed.emit()
+        return entry
+
+    def _top_host_radius(self, suggestion: LabelZoneSuggestion) -> float:
+        entry = self._new_entry(
+            suggestion, LabelZoneBoundary(0.0, 0.0, 1.0, 1.0), "studio-user", {}
+        )
+        return float(
+            dict(entry.metric_binding.mapping_parameters)["host_outer_radius_mm_unverified"]
+        )
+
+    def _new_entry(
+        self,
+        suggestion: LabelZoneSuggestion,
+        chosen: LabelZoneBoundary,
+        actor_id: str,
+        options: dict[str, Any],
+    ) -> LabelZoneEntry:
+        session = self.require_session()
         zone = create_label_zone(
             session.model,
             session.label_representation,
@@ -679,14 +839,11 @@ class DesignWorkbench(QObject):
             placement,
             suggestion.analysis,
             suggestion.candidate.analysis_region_id,
+            **options,
         )
-        variant = variant_id or suggestion.kind.value
-        if any(item.variant_id == variant for item in self.labels):
-            raise DesignWorkbenchError(f"A label variant named {variant!r} already exists.")
-        entry = LabelZoneEntry(suggestion.kind, variant, placement, suggestion.analysis, binding)
-        self.labels.append(entry)
-        self.changed.emit()
-        return entry
+        return LabelZoneEntry(
+            suggestion.kind, suggestion.kind.value, placement, suggestion.analysis, binding
+        )
 
     def import_artwork(
         self, entry: LabelZoneEntry, source: str | Path | bytes, *, fit_mode: str = "CONTAIN"
@@ -725,13 +882,14 @@ class DesignWorkbench(QObject):
         session = self.require_session()
         host = session.label_representation
         record = export.as_dict() | {
+            "dieline": intent.as_dict(),  # outline (circle/annulus for a top label), mm
             "label_host": {
                 "brep_revision_id": host.revision_id,
                 "straight_run_tolerance_mm_unverified": host.straight_run_tolerance,
                 "band_approximated_by_cylinder": session.label_band_snapped,
                 "host_height_mm_unverified": entry.metric_binding.host_height_mm_unverified,
                 "host_circumference_mm_unverified": (entry.metric_binding.host_width_mm_unverified),
-            }
+            },
         }
         target.with_suffix(".json").write_text(
             json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -919,6 +1077,115 @@ def _new_directory(folder: Path, stem: str) -> Path:
     raise DesignWorkbenchError("Too many mockup folders in that location.")
 
 
+def _disc_document(binding: LabelMetricSurfaceBinding) -> dict[str, float] | None:
+    """Top label radii in absolute mm (both) and rotation, as saved in a label document."""
+    if binding.mapping_mode != "PLANAR_DISC":
+        return None
+    outer, inner = disc_radii(binding)
+    return {
+        "outer_radius_mm_unverified": outer,
+        "inner_radius_mm_unverified": inner,
+        "rotation_degrees": float(disc_binding_options(binding)["disc_rotation_degrees"]),
+    }
+
+
+def label_preview_points(
+    session: DesignModelSession, entry: LabelZoneEntry, *, step_mm: float = 0.75
+) -> tuple[np.ndarray, np.ndarray]:
+    """Artwork-coloured points on the label's exact host patch (mm, Design Model frame).
+
+    Geometry is the core render overlay (``create_label_render_overlay_binding``), the same
+    one the Blender mockup uses; points sit 0.2 mm off the surface so the viewer shows them
+    over the model. Transparent artwork pixels are left out. Preview only.
+    """
+    from PySide6.QtGui import QImage
+
+    if entry.artwork is None:
+        return np.zeros((0, 3)), np.zeros((0, 3), dtype=np.uint8)
+    png = _render_png(entry.artwork, entry.size_mm)
+    asset = ingest_label_artwork(png)
+    mapping = map_label_artwork_to_metric_surface(
+        asset, entry.placement, entry.metric_binding, fit_mode=entry.artwork.mapping.fit_mode
+    )
+    assignment = create_label_artwork_assignment(
+        mapping,
+        entry.placement,
+        variant_id=entry.variant_id,
+        wrap_seam_u_normalized=0.0 if entry.kind is LabelZoneKind.WRAP else None,
+    )
+    overlay = create_label_render_overlay_binding(
+        session.model,
+        session.label_representation,
+        entry.analysis,
+        entry.metric_binding,
+        entry.placement,
+        mapping,
+        assignment,
+        asset,
+    )
+    geometry: dict[str, Any] = dict(overlay.geometry)
+    width_mm, height_mm = entry.size_mm
+    columns = int(min(240, max(8, width_mm / step_mm)))
+    rows = int(min(120, max(4, height_mm / step_mm)))
+    grid_s, grid_t = np.meshgrid(np.linspace(0, 1, columns), np.linspace(0, 1, rows))
+    s, t = grid_s.ravel(), grid_t.ravel()
+    lift = 0.2
+    if geometry["mode"] == "CYLINDRICAL_WRAP":
+        cx, cy, _cz = (float(v) for v in geometry["center_mm_unverified"])
+        radius = float(geometry["radius_mm_unverified"]) + lift
+        theta0 = float(geometry["angular_start_radians"])
+        theta1 = float(geometry["angular_end_radians"])
+        z0 = float(geometry["axial_start_mm_unverified"])
+        z1 = float(geometry["axial_end_mm_unverified"])
+        theta = theta0 + s * (theta1 - theta0)  # seam +Y, azimuth +Y towards +X
+        points = np.column_stack(
+            [cx + radius * np.sin(theta), cy + radius * np.cos(theta), z0 + t * (z1 - z0)]
+        )
+    elif geometry["mode"] == "PLANAR_DISC":
+        host = float(geometry["host_outer_radius_mm_unverified"])
+        u_axis = np.asarray(geometry["u_axis"], dtype=float)
+        v_axis = np.asarray(geometry["v_axis"], dtype=float)
+        bounds = geometry.get(
+            "drawn_rect_normalized_uv", geometry["placement_boundary_normalized_uv"]
+        )
+        zone_u = bounds[0] + s * (bounds[2] - bounds[0])
+        zone_v = bounds[1] + t * (bounds[3] - bounds[1])
+        offsets = 2.0 * host * np.column_stack([zone_u - 0.5, zone_v - 0.5])
+        distance = np.hypot(offsets[:, 0], offsets[:, 1])
+        inside = (distance <= float(geometry["outer_radius_mm_unverified"])) & (
+            distance >= float(geometry["inner_radius_mm_unverified"])
+        )
+        points = (
+            np.asarray(geometry["center_mm_unverified"], dtype=float)
+            + offsets[:, :1] * u_axis
+            + offsets[:, 1:] * v_axis
+            + np.array([0.0, 0.0, lift])
+        )
+        s, t, points = s[inside], t[inside], points[inside]
+    else:
+        corners = np.asarray(geometry["zone_corners_mm_unverified"], dtype=float)
+        normal = np.asarray(geometry["surface_normal"], dtype=float)
+        points = (
+            corners[0]
+            + s[:, None] * (corners[1] - corners[0])
+            + t[:, None] * (corners[3] - corners[0])
+            + lift * normal
+        )
+    image = QImage.fromData(png).convertToFormat(QImage.Format.Format_RGBA8888)
+    w, h = image.width(), image.height()
+    rows_bytes = np.frombuffer(image.constBits(), np.uint8).reshape(h, image.bytesPerLine())
+    pixels = rows_bytes[:, : w * 4].reshape(h, w, 4)
+    # Same column/row orientation as the Blender mockup (one shared function).
+    mirror_u, mirror_v = artwork_viewer_orientation(
+        {"mapping_mode": overlay.mapping_mode, "geometry": geometry}
+    )
+    column = 1.0 - s if mirror_u else s
+    row = 1.0 - t if mirror_v else t  # fraction from the artwork's top row
+    rgba = pixels[np.round(row * (h - 1)).astype(int), np.round(column * (w - 1)).astype(int)]
+    keep = rgba[:, 3] > 0
+    return points[keep], rgba[keep, :3]
+
+
 def _render_png(artwork: LabelArtwork, size_mm: tuple[float, float]) -> bytes:
     """Blender textures need PNG; an SVG is rasterised (render-only, ~8 px/mm, <= 2048 px)."""
     if artwork.asset.media_type == "image/png":
@@ -955,6 +1222,7 @@ __all__ = [
     "LabelZoneSuggestion",
     "MockupJob",
     "find_blender",
+    "label_preview_points",
     "latest_project_design_model",
     "load_design_model_session",
     "nominal_jar_design_document",

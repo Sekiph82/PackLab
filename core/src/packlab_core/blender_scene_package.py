@@ -7,6 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
+from typing import Any
 
 from .blender_label_render_overlay import (
     LabelRenderOverlayError,
@@ -575,6 +576,64 @@ def _digest(value: object) -> str:
     return hashlib.sha256(_canonical_json(value)).hexdigest()
 
 
+# Single source of truth for artwork column/row orientation (PL-0487 review V01/V02): the
+# Blender runner embeds this exact text and Studio's label preview executes it, so both
+# agree. A string (not inspect.getsource) so .pyc-only packaged builds still import.
+VIEWER_ORIENTATION_SOURCE = r'''def _viewer_orientation(overlay):
+    """Mirror flags so artwork reads upright and left-to-right from outside the package.
+
+    Zone u/v follow the CAD face parameterisation, which says nothing about "up" for
+    artwork; with world +Z as up, image columns must run to the viewer's right
+    (Z x outward normal) and image rows (top-left origin) must run downward.
+    """
+    geometry = overlay["geometry"]
+    if overlay["mapping_mode"] == "PLANAR_DISC":
+        # Top label: columns run along the zone u axis, rows (top-left origin) against v.
+        return False, True
+    if overlay["mapping_mode"] == "PLANAR_RECTANGULAR":
+        u_axis = [float(c) for c in geometry["u_axis"]]
+        v_axis = [float(c) for c in geometry["v_axis"]]
+        normal = [float(c) for c in geometry["surface_normal"]]
+    else:
+        import math as _math
+
+        theta = (
+            float(geometry["angular_start_radians"]) + float(geometry["angular_end_radians"])
+        ) / 2.0
+        if geometry.get("azimuth_direction") != "+Y_TO_PLUS_X" or [
+            float(c) for c in geometry["axis"]
+        ] != [0.0, 0.0, 1.0]:
+            raise ValueError("scene_wrap_orientation_unsupported")
+        normal = [_math.sin(theta), _math.cos(theta), 0.0]
+        u_axis = [_math.cos(theta), -_math.sin(theta), 0.0]
+        sign = (
+            1.0
+            if float(geometry["axial_end_mm_unverified"])
+            >= float(geometry["axial_start_mm_unverified"])
+            else -1.0
+        )
+        v_axis = [sign * float(c) for c in geometry["axis"]]
+    # "Up" is only defined for zones whose v axis is vertical and whose normal is not
+    # vertical (e.g. not a top-face label); fail closed rather than guess (review P3-1).
+    if abs(v_axis[2]) < 0.999 or abs(normal[2]) > 1e-6:
+        raise ValueError("scene_artwork_up_direction_undefined")
+    viewer_right = [-normal[1], normal[0], 0.0]  # world Z x outward normal
+    mirror_u = sum(a * b for a, b in zip(u_axis, viewer_right)) < 0.0
+    mirror_v = v_axis[2] > 0.0
+    return mirror_u, mirror_v
+'''
+_ORIENTATION_NAMESPACE: dict[str, Any] = {}
+exec(
+    compile(VIEWER_ORIENTATION_SOURCE, "packlab_viewer_orientation", "exec"), _ORIENTATION_NAMESPACE
+)
+
+
+def artwork_viewer_orientation(overlay: dict[str, Any]) -> tuple[bool, bool]:
+    """(mirror_u, mirror_v) for an overlay record; same code as the Blender runner."""
+    mirror_u, mirror_v = _ORIENTATION_NAMESPACE["_viewer_orientation"](overlay)
+    return bool(mirror_u), bool(mirror_v)
+
+
 BLENDER_SCENE_RUNNER = r'''"""PackLab static Blender scene builder; consumes JSON data only."""
 from __future__ import annotations
 
@@ -762,37 +821,7 @@ def _image_material(overlay, image_path):
     return material, image
 
 
-def _viewer_orientation(overlay):
-    """Mirror flags so artwork reads upright and left-to-right from outside the package.
-
-    Zone u/v follow the CAD face parameterisation, which says nothing about "up" for
-    artwork; with world +Z as up, image columns must run to the viewer's right
-    (Z x outward normal) and image rows (top-left origin) must run downward.
-    """
-    geometry = overlay["geometry"]
-    if overlay["mapping_mode"] == "PLANAR_RECTANGULAR":
-        u_axis = [float(c) for c in geometry["u_axis"]]
-        v_axis = [float(c) for c in geometry["v_axis"]]
-        normal = [float(c) for c in geometry["surface_normal"]]
-    else:
-        import math as _math
-        theta = (float(geometry["angular_start_radians"]) + float(geometry["angular_end_radians"])) / 2.0
-        if geometry.get("azimuth_direction") != "+Y_TO_PLUS_X" or [
-            float(c) for c in geometry["axis"]
-        ] != [0.0, 0.0, 1.0]:
-            raise ValueError("scene_wrap_orientation_unsupported")
-        normal = [_math.sin(theta), _math.cos(theta), 0.0]
-        u_axis = [_math.cos(theta), -_math.sin(theta), 0.0]
-        sign = 1.0 if float(geometry["axial_end_mm_unverified"]) >= float(geometry["axial_start_mm_unverified"]) else -1.0
-        v_axis = [sign * float(c) for c in geometry["axis"]]
-    # "Up" is only defined for zones whose v axis is vertical and whose normal is not
-    # vertical (e.g. not a top-face label); fail closed rather than guess (review P3-1).
-    if abs(v_axis[2]) < 0.999 or abs(normal[2]) > 1e-6:
-        raise ValueError("scene_artwork_up_direction_undefined")
-    viewer_right = [-normal[1], normal[0], 0.0]  # world Z x outward normal
-    mirror_u = sum(a * b for a, b in zip(u_axis, viewer_right)) < 0.0
-    mirror_v = v_axis[2] > 0.0
-    return mirror_u, mirror_v
+__PACKLAB_VIEWER_ORIENTATION__
 
 
 def _artwork_uv(overlay, u, v, width, height, mirror_u=False, mirror_v=False):
@@ -863,6 +892,42 @@ def _create_overlay(overlay, root, base_matrix):
         for index in range(segments):
             start = index * 2
             faces.append((start, start + 2, start + 3, start + 1))
+    elif mode == "PLANAR_DISC":
+        import math as _math
+        from mathutils import Vector
+        host = float(geometry["host_outer_radius_mm_unverified"])
+        outer = float(geometry["outer_radius_mm_unverified"])
+        inner = float(geometry["inner_radius_mm_unverified"])
+        center = [float(c) for c in geometry["center_mm_unverified"]]
+        u_axis = [float(c) for c in geometry["u_axis"]]
+        v_axis = [float(c) for c in geometry["v_axis"]]
+        if [float(c) for c in geometry["surface_normal"]] != [0.0, 0.0, 1.0] or not (
+            0.0 <= inner < outer <= host
+        ):
+            raise ValueError("scene_disc_overlay_geometry_invalid")
+        lift = float(overlay["renderer_only_offset_mm_unverified"])
+        segments = 96
+
+        def disc_vertex(u, v):
+            x = center[0] + (u - 0.5) * 2.0 * host * u_axis[0] + (v - 0.5) * 2.0 * host * v_axis[0]
+            y = center[1] + (u - 0.5) * 2.0 * host * u_axis[1] + (v - 0.5) * 2.0 * host * v_axis[1]
+            verts.append(tuple(base_matrix @ Vector((x, y, center[2] + lift))))
+            uv_coords.append((u, v))
+
+        # Rings in zone uv (host square), so the radii are exact at the vertices.
+        rings = [inner, outer] if inner > 0.0 else [0.0, outer]
+        for radius in rings:
+            count = 1 if radius == 0.0 else segments
+            for index in range(count):
+                phi = 2.0 * _math.pi * index / segments
+                disc_vertex(0.5 + radius * _math.cos(phi) / (2.0 * host), 0.5 + radius * _math.sin(phi) / (2.0 * host))
+        if inner > 0.0:
+            for index in range(segments):
+                nxt = (index + 1) % segments
+                faces.append((index, nxt, segments + nxt, segments + index))
+        else:
+            for index in range(segments):
+                faces.append((0, 1 + index, 1 + (index + 1) % segments))
     else:
         raise ValueError("scene_overlay_mapping_unsupported")
     mesh = bpy.data.meshes.new("PackLabOverlayMesh_" + str(overlay["zone_id"]))
@@ -947,7 +1012,7 @@ def _build_scene(root, body, assets, scene, result_relative, package_revision_id
     overlay_facts = []
     assets_by_path = {item["project_relative_path"]: item for item in assets}
     for overlay in scene.get("overlays", []):
-        if overlay.get("mapping_mode") not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP"}:
+        if overlay.get("mapping_mode") not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC"}:
             raise ValueError("scene_overlay_mapping_unsupported")
         offset = overlay.get("renderer_only_offset_mm_unverified")
         if isinstance(offset, bool) or not isinstance(offset, (int, float)) or float(offset) != 0.001:
@@ -1077,7 +1142,10 @@ def _decode_fact(value):
 
 if __name__ == "__main__":
     main()
-'''
+'''.replace(
+    "__PACKLAB_VIEWER_ORIENTATION__\n",
+    VIEWER_ORIENTATION_SOURCE,
+)
 
 
 __all__ = [
@@ -1085,6 +1153,8 @@ __all__ = [
     "BLENDER_SCENE_PACKAGE_CONTRACT",
     "BLENDER_SCENE_PACKAGE_SCHEMA_VERSION",
     "BLENDER_SCENE_RUNNER_FILENAME",
+    "VIEWER_ORIENTATION_SOURCE",
+    "artwork_viewer_orientation",
     "BlenderArtworkBinding",
     "BlenderScenePackage",
     "BlenderScenePackageError",

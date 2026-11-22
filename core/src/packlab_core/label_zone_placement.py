@@ -66,6 +66,16 @@ def canonical_label_zone_surface_frame(zone_kind: LabelZoneKind) -> LabelZoneSur
             seam_direction=None,
             **common,
         )
+    if zone_kind is LabelZoneKind.TOP:
+        # Seen from above by a viewer at the front (+Y): artwork right = -X, artwork up = -Y.
+        return LabelZoneSurfaceFrame(
+            frame_id=f"{LABEL_ZONE_SURFACE_FRAME_CONTRACT}:top",
+            canonical_world_frame=PACKLAB_NORMALIZED_FRAME,
+            surface_normal="+Z",
+            u_axis="-X",
+            v_axis="-Y",
+            seam_direction=None,
+        )
     return LabelZoneSurfaceFrame(
         frame_id=f"{LABEL_ZONE_SURFACE_FRAME_CONTRACT}:wrap",
         surface_normal="RADIAL_OUTWARD",
