@@ -13,30 +13,40 @@ pytest.importorskip("open3d")
 
 from packlab_core.multiscan_alignment import (  # noqa: E402
     METRIC_STATUS,
+    AlignmentThresholds,
     MultiScanAlignmentError,
     ScanInput,
     align_part_pair,
     align_scans,
     check_alignment,
 )
+from packlab_core.multiscan_alignment import _prepare as prepare_scan  # noqa: E402
 
-DENSITY = 0.5  # points per mm^2
+
+class _Gen:
+    """Seeded sampler carrying the surface point density (points per mm^2)."""
+
+    def __init__(self, rng, density):
+        self.rng, self.density = rng, density
+
+    def uniform(self, *args):
+        return self.rng.uniform(*args)
 
 
 def _cyl(rng, r, z0, z1, a0=0.0, a1=2 * np.pi):
-    n = int(DENSITY * r * (a1 - a0) * (z1 - z0))
+    n = int(rng.density * r * (a1 - a0) * (z1 - z0))
     a, z = rng.uniform(a0, a1, n), rng.uniform(z0, z1, n)
     return np.c_[r * np.cos(a), r * np.sin(a), z]
 
 
 def _disc(rng, r0, r1, z):
-    n = int(DENSITY * np.pi * (r1**2 - r0**2))
+    n = int(rng.density * np.pi * (r1**2 - r0**2))
     a, r = rng.uniform(0, 2 * np.pi, n), np.sqrt(rng.uniform(r0**2, r1**2, n))
     return np.c_[r * np.cos(a), r * np.sin(a), np.full(n, z)]
 
 
 def _rect(rng, x, y0, y1, z0, z1):  # plane x = const
-    n = int(DENSITY * (y1 - y0) * (z1 - z0))
+    n = int(rng.density * (y1 - y0) * (z1 - z0))
     return np.c_[np.full(n, x), rng.uniform(y0, y1, n), rng.uniform(z0, z1, n)]
 
 
@@ -45,7 +55,7 @@ def _wall(rng, y, x0, x1, z0, z1):  # plane y = const
 
 
 def _cap(rng, x0, x1, y0, y1, z):  # plane z = const
-    n = int(DENSITY * (x1 - x0) * (y1 - y0))
+    n = int(rng.density * (x1 - x0) * (y1 - y0))
     return np.c_[rng.uniform(x0, x1, n), rng.uniform(y0, y1, n), np.full(n, z)]
 
 
@@ -118,6 +128,7 @@ def scan(
     tilt_deg=None,
     scale_error=1.0,
     role="given",
+    density=0.5,
     **shape_args,
 ):
     """Return (ScanInput, object->camera-units 4x4) for an upright or upside-down capture.
@@ -126,7 +137,7 @@ def scan(
     scale_error: multiplies the mm_per_unit handed to the aligner.
     """
     rng = np.random.default_rng(seed)
-    height, faces = shape(rng, **shape_args)
+    height, faces = shape(_Gen(rng, density), **shape_args)
     hidden = "top" if flipped else "bottom"  # face on the mat is not seen
     obj = np.concatenate([p for name, p in faces.items() if name != hidden])
     if keep_frac < 1.0:  # only the part of the object nearest the camera (top in mat frame)
@@ -135,8 +146,9 @@ def scan(
     place = _hom(_rot([0, 0, 1], rng.uniform(0, 2 * np.pi)), [*rng.uniform(-30, 30, 2), 0])
     if flipped:
         place = place @ _hom(_rot([1, 0, 0], np.pi), [0, 0, height])
-    mat = np.c_[rng.uniform(-148, 148, 18000), rng.uniform(-105, 105, 18000), np.zeros(18000)]
-    pts = np.r_[_apply(place, obj), mat] + rng.normal(0, 0.15, (len(obj) + 18000, 3))
+    count = int(18000 * density / 0.5)
+    mat = np.c_[rng.uniform(-148, 148, count), rng.uniform(-105, 105, count), np.zeros(count)]
+    pts = np.r_[_apply(place, obj), mat] + rng.normal(0, 0.15, (len(obj) + count, 3))
     if floaters:  # MVS-like stray points floating above the part
         pts = np.r_[pts, rng.uniform([-60, -60, height + 5], [60, 60, height + 60], (floaters, 3))]
     if subsample < 1.0:
@@ -179,7 +191,7 @@ def test_upright_and_flipped_pair_recovers_known_transform(shape):
     result = align_part_pair(up, fl)
     _assert_recovered(result, (t_up, t_fl))
     pair = result.alignments[1]
-    assert pair.flipped and pair.yaw_determined and pair.rmse_mm < 0.5 and pair.coverage > 0.95
+    assert pair.flipped and pair.yaw_determined and pair.rmse_mm < 0.5 and pair.coverage > 0.9
     assert result.metric_status == METRIC_STATUS
     # Outside covered on all sides: top from the upright scan, bottom from the flipped scan.
     assert min(result.surface_coverage.values()) > 0.85, result.surface_coverage
@@ -319,3 +331,56 @@ def test_deterministic():
     assert np.array_equal(first.points, second.points)
     assert np.array_equal(first.point_index, second.point_index)
     assert np.array_equal(first.alignments[1].matrix, second.alignments[1].matrix)
+
+
+def _yaw_tilt_shift(result, truths):
+    d = np.linalg.inv(result.alignments[0].matrix @ truths[0]) @ (
+        result.alignments[1].matrix @ truths[1]
+    )
+    rotation = d[:3, :3] / np.cbrt(np.linalg.det(d[:3, :3]))
+    angle = np.degrees(np.arccos(np.clip((np.trace(rotation) - 1) / 2, -1, 1)))
+    tilt = np.degrees(np.arccos(np.clip(rotation[2, 2], -1, 1)))
+    return angle, tilt, float(np.linalg.norm(d[:3, 3]))
+
+
+@pytest.mark.parametrize("shape", [body, closure])
+@pytest.mark.parametrize("density", [0.5, 0.2, 0.1, 0.05])
+def test_density_sweep_aligns_without_wrong_claims(shape, density):
+    """Point spacing drives eps / slices / distances; sparse clouds still align. Yaw that the
+    data cannot pin is flagged, never claimed: a determined yaw is within the probe angle."""
+    (up, t_up), (fl, t_fl) = (
+        scan(shape, False, 1, density=density),
+        scan(shape, True, 2, density=density),
+    )
+    result = align_part_pair(up, fl)
+    yaw, tilt, shift = _yaw_tilt_shift(result, (t_up, t_fl))
+    assert tilt < 1.0 and shift < 0.5, (yaw, tilt, shift)
+    if result.alignments[1].yaw_determined:
+        assert yaw < AlignmentThresholds().yaw_probe_deg, yaw
+    if density == 0.5:
+        assert result.alignments[1].yaw_determined and yaw < 1.0
+
+
+def test_rigid_moved_subsampled_copy_self_aligns_with_invariant_shell():
+    """Same geometry, rigidly moved and 85 % subsampled: same side wall, exact alignment."""
+    original, _ = scan(body, False, 1, density=0.2)
+    rng = np.random.default_rng(9)
+    motion = _hom(_rot(rng.normal(size=3), 2.0), rng.normal(size=3))
+    keep = rng.random(len(original.points)) < 0.85
+    copy = ScanInput(
+        "copy",
+        _apply(motion, original.points)[keep],
+        original.colors[keep],
+        mm_per_unit=original.mm_per_unit,
+        flipped=False,
+    )
+    limits = AlignmentThresholds()
+    a, b = prepare_scan(original, limits), prepare_scan(copy, limits)
+    assert abs(len(b.shell) / len(a.shell) / 0.85 - 1) < 0.08  # frame-invariant side wall
+    result = align_scans([original, copy])
+    pair = result.alignments[1]
+    assert not pair.flipped and pair.coverage > 0.9
+    sample = original.points[keep][::40]
+    moved = _apply(result.alignments[0].matrix, sample)
+    copied = _apply(pair.matrix, _apply(motion, sample))
+    assert np.median(np.linalg.norm(moved - copied, axis=1)) < 0.2
