@@ -4,6 +4,11 @@ Each part is built from its upright and upside-down scans (PL-0482 roles). "Comb
 runs ``align_part_pair`` (PL-0483) on the two dense clouds in a background job and stores
 the merged cloud (``derived/parts``), transforms, metrics or the refusal reason in the
 project. Merged clouds are in the reference scan's mat frame, mm, METRIC_UNVERIFIED.
+
+"Place closure on body" (PL-0484, on Assembled) registers Body and Closure into the Assembled
+cloud (``packlab_core.part_placement``) in a background job and stores the placed clouds
+(``derived/parts/*-placed-*.ply``), the scan-level assembly graph revision and clearance
+diagnostics, or the typed refusal, in the project.
 """
 
 from __future__ import annotations
@@ -44,8 +49,10 @@ STATUS_TEXT = {
     "combined": "combined",
     "refused": "refused",
     "combining": "combining…",
+    "placed": "placed",
 }
 _ROLE = Qt.ItemDataRole.UserRole
+PLACEMENT = "placement"  # job key of the closure-on-body placement
 
 
 @dataclass(frozen=True)
@@ -177,6 +184,53 @@ def part_states(
     return states
 
 
+def _scale_key(state: PartState) -> list[Any] | None:
+    """Scales a combined part was built with (None for a single scan)."""
+    if state.status != "combined" or state.record is None:
+        return None
+    return [source.get("mm_per_unit") for source in state.record.get("sources", [])]
+
+
+def placement_state(
+    manager: ProjectManager, states: dict[str, PartState]
+) -> tuple[str, dict[str, Any] | None, tuple[Path, ...]]:
+    """(none / placed / refused / stale, record, placed body + closure clouds).
+
+    Stale when a part now shows a different cloud (path, content digest, combined/single status
+    or combine scale) than the placement used, or a placed cloud is missing or changed on disk.
+    A single scan's marker scale is a function of its build, so its cloud digest covers it.
+    """
+    layout, record = manager.layout, manager.part_placement()
+    if layout is None or record is None:
+        return "none", None, ()
+    sources = record.get("sources")
+    for part in ("assembled", "body", "closure"):
+        state = states.get(part)
+        if state is None or state.cloud is None or not isinstance(sources, dict):
+            return "stale", record, ()
+        stored = sources.get(part) or {}
+        if (
+            stored.get("cloud_path") != _rel(layout.root, state.cloud)
+            or stored.get("status") != state.status
+            or stored.get("scale_key") != _scale_key(state)
+            or stored.get("cloud_sha256") != _cached_sha(state.cloud)
+        ):
+            return "stale", record, ()
+    if record.get("status") != "placed":
+        return "refused", record, ()
+    placed = []
+    for part in ("body", "closure"):
+        try:
+            path = layout.path("derived", str(record["artifacts"][part]).removeprefix("derived/"))
+            fresh = _stat(path) == record["file_stats"][part]
+        except Exception:
+            return "stale", record, ()
+        if not fresh:
+            return "stale", record, ()
+        placed.append(path)
+    return "placed", record, tuple(placed)
+
+
 # ---------------------------------------------------------------- combine job
 
 
@@ -261,6 +315,7 @@ class ScenePanel(QWidget):
 
     part_selected = Signal(object, object)  # part (str | None), tuple[Path, ...] to show
     combine_finished = Signal(str, str)  # part, outcome (combined/refused/cancelled/failed)
+    placement_finished = Signal(str)  # outcome (placed/refused/cancelled/failed)
 
     def __init__(
         self,
@@ -270,13 +325,16 @@ class ScenePanel(QWidget):
         *,
         scale_for: Callable[[Any], tuple[Any, ...]] = marker_scale,
         aligner: Callable[..., Any] | None = None,
+        placer: Callable[..., Any] | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName("packlab.scene.panel")
         self.projects, self.jobs = project_manager, job_manager
         self.entries_provider = entries_provider
-        self.scale_for, self.aligner = scale_for, aligner
+        self.scale_for, self.aligner, self.placer = scale_for, aligner, placer
         self.states: dict[str, PartState] = {}
+        # (status none/placed/refused/stale, record, placed body + closure clouds)
+        self.placement: tuple[str, dict[str, Any] | None, tuple[Path, ...]] = ("none", None, ())
         self.view: dict[str, Any] = {"part": None, "hidden": []}
         self._jobs_by_part: dict[str, str] = {}
         self._cancel: dict[str, threading.Event] = {}
@@ -297,8 +355,12 @@ class ScenePanel(QWidget):
         self.cancel_button = QPushButton(tr("Cancel combine"))
         self.cancel_button.setObjectName("packlab.scene.cancel")
         self.cancel_button.clicked.connect(lambda: self.cancel(self.view["part"]))
+        self.place_button = QPushButton(tr("Place closure on body"))
+        self.place_button.setObjectName("packlab.scene.place")
+        self.place_button.clicked.connect(self.place)
         buttons = QHBoxLayout()
         buttons.addWidget(self.combine_button)
+        buttons.addWidget(self.place_button)
         buttons.addWidget(self.cancel_button)
         layout = QVBoxLayout(self)
         layout.addWidget(self.tree, 1)
@@ -321,9 +383,11 @@ class ScenePanel(QWidget):
             overrides = self.projects.scan_part_roles()
             self.states = part_states(self.projects, entries, overrides)
             self.view = self.projects.part_view()
+            self.placement = placement_state(self.projects, self.states)
         except Exception as error:  # unreadable inbox/project: panel stays usable
             self.details.setText(tr("Parts unavailable: {error}").format(error=error))
             self.states, self.view = {}, {"part": None, "hidden": []}
+            self.placement = ("none", None, ())
         self.tree.blockSignals(True)
         try:
             assembled = self.items["assembled"]
@@ -373,9 +437,14 @@ class ScenePanel(QWidget):
         state = self.states.get(part or "")
         paths = [state.cloud] if state is not None and state.cloud is not None else []
         if part == "assembled":
-            for other in ("body", "closure"):
+            status, _record, placed = self.placement
+            for index, other in enumerate(("body", "closure")):
                 extra = self.states.get(other)
-                if extra and extra.cloud and other not in self.view["hidden"]:
+                if other in self.view["hidden"]:
+                    continue
+                if status == "placed":
+                    paths.append(placed[index])  # where the assembled scan puts it
+                elif extra and extra.cloud:
                     paths.append(extra.cloud)
         return tuple(paths)
 
@@ -394,10 +463,15 @@ class ScenePanel(QWidget):
         part = self.view["part"]
         state = self.states.get(part or "")
         running = part in self._running_parts()
+        placing = PLACEMENT in self._running_parts()
         self.combine_button.setEnabled(
             bool(state and state.upright and state.flipped) and not running
         )
-        self.cancel_button.setEnabled(running)
+        ready = [self.states.get(p) for p in ("assembled", "body", "closure")]
+        self.place_button.setEnabled(
+            part == "assembled" and not placing and all(s and s.cloud for s in ready)
+        )
+        self.cancel_button.setEnabled(running or (part == "assembled" and placing))
         if state is None:
             self.details.setText(tr("Select a part to show it in Model Viewer."))
             return
@@ -414,13 +488,41 @@ class ScenePanel(QWidget):
             )
             lines.append(tr("Units: mm in the mat frame, METRIC_UNVERIFIED."))
         if part == "assembled":
-            lines.append(
-                tr(
-                    "Body and closure are shown where their own scans put them; placing the "
-                    "closure on the body is not available yet."
-                )
-            )
+            lines.extend(self._placement_lines(placing))
         self.details.setText("\n".join(lines))
+
+    def _placement_lines(self, placing: bool) -> list[str]:
+        status, record, _placed = self.placement
+        if placing:
+            return [tr("Placing the closure on the body…")]
+        if status == "placed" and record is not None:
+            graph = record["graph"]
+            body, closure = (item["residuals"] for item in graph["components"])
+            pair = graph["diagnostics"]["pair"]
+            return [
+                tr("Closure placed on body (assembled scan as reference)."),
+                tr("body: coverage {coverage:.0%}, RMSE {rmse:.2f} mm").format(
+                    coverage=body["coverage"], rmse=body["rmse_mm"]
+                ),
+                tr("closure: coverage {coverage:.0%}, RMSE {rmse:.2f} mm").format(
+                    coverage=closure["coverage"], rmse=closure["rmse_mm"]
+                ),
+                tr("engaged depth {depth:.1f} mm, clearance {status}").format(
+                    depth=graph["relationships"][0]["engaged_depth_mm"], status=pair["status"]
+                ),
+                tr("Assembly graph {revision}").format(revision=graph["revision_id"][:32]),
+                tr("Units: mm in the mat frame, METRIC_UNVERIFIED."),
+            ]
+        if status == "refused" and record is not None:
+            return [tr("Closure placement refused: {reason}").format(reason=record["reason"])]
+        if status == "stale":
+            return [tr("Parts changed since the closure was placed; place it again.")]
+        return [
+            tr(
+                "Body and closure are shown where their own scans put them; use Place closure "
+                "on body to seat the closure using the assembled scan."
+            )
+        ]
 
     # ------------------------------------------------------------ owner actions
 
@@ -453,10 +555,11 @@ class ScenePanel(QWidget):
         self.refresh()  # set_part_view notifies only on a new revision
 
     def cancel(self, part: str | None) -> None:
-        job_id = self._jobs_by_part.get(part or "")
-        if job_id is not None and self._job_active(job_id):
-            self.jobs.request_cancel(job_id)
-            self.refresh()
+        for key in (part or "", PLACEMENT if part == "assembled" else ""):
+            job_id = self._jobs_by_part.get(key)
+            if job_id is not None and self._job_active(job_id):
+                self.jobs.request_cancel(job_id)
+        self.refresh()
 
     def combine(self, part: str | None) -> str | None:
         """Start the Combine-part background job for ``part``; returns the job id."""
@@ -625,6 +728,178 @@ class ScenePanel(QWidget):
                 return finish("cancelled")
             finish("failed", error=f"{type(error).__name__}: {error}")
 
+    # ------------------------------------------------------------ closure placement (PL-0484)
+
+    def place(self) -> str | None:
+        """Start the Place-closure-on-body background job; returns the job id."""
+        layout, metadata = self.projects.layout, self.projects.metadata
+        states = {part: self.states.get(part) for part in ("assembled", "body", "closure")}
+        if layout is None or any(s is None or s.cloud is None for s in states.values()):
+            return None
+        if PLACEMENT in self._running_parts():
+            return self._jobs_by_part[PLACEMENT]
+        assert metadata is not None
+        job = self.jobs.create(tr("Place closure on body"), "part-placement")
+        token = threading.Event()
+        self._cancel[PLACEMENT] = token
+
+        def hook() -> bool:
+            token.set()
+            return False  # the worker confirms at its next checkpoint
+
+        self.jobs.register_cancel_hook(job.job_id, hook)
+        thread = threading.Thread(
+            target=self._place_work,
+            args=(job.job_id, states, layout, metadata.project_id, token),
+            name="packlab-part-placement",
+            daemon=True,
+        )
+        self._jobs_by_part[PLACEMENT] = job.job_id
+        self._threads[PLACEMENT] = thread
+        self.jobs.start(job.job_id)
+        thread.start()
+        self.refresh()
+        return job.job_id
+
+    def _place_work(
+        self,
+        job_id: str,
+        states: dict[str, PartState],
+        layout: Any,
+        project_id: str,
+        token: threading.Event,
+    ) -> None:
+        from packlab_core.multiscan_alignment import ScanInput
+        from packlab_core.part_placement import (
+            METHOD,
+            METRIC_STATUS,
+            PartInput,
+            PartPlacementError,
+            part_from_scan,
+            place_closure_on_body,
+            scan_assembly_graph,
+        )
+
+        from . import measure_design as md
+
+        jobs = cast(JobManager, _MainThreadJobs(self.jobs, self._invoker))
+        placer = self.placer or place_closure_on_body
+        root = layout.root
+        written: list[Path] = []
+        sources: dict[str, dict[str, Any]] = {}
+        record: dict[str, Any] = {
+            "created_at": datetime.now(UTC).isoformat(),
+            "method": METHOD,
+            "metric_status": METRIC_STATUS,
+            "sources": sources,
+            "artifacts": {},
+        }
+
+        def cancelled() -> bool:
+            return token.is_set() or jobs.get(job_id).state is JobState.CANCELLED
+
+        def finish(outcome: str, result: dict[str, Any] | None = None, error: str = "") -> None:
+            self._invoker.call(
+                self._finish, job_id, PLACEMENT, outcome, result, error, project_id, written
+            )
+
+        def load(part: str, state: PartState) -> PartInput:
+            assert state.cloud is not None
+            model = md.load_model(state.cloud)
+            source = sources[part]
+            source["cloud_sha256"] = model.sha256
+            if state.status == "combined":  # already object points in its mat frame, mm
+                source.update(frame="part_combine_mat_frame_mm", scale_source="part_combine")
+                return PartInput(f"{part}-{model.sha256[:12]}", model.points, model.colors)
+            if state.upright is None or state.cloud != state.upright.model:
+                raise PartPlacementError(
+                    tr("{part}: only the upside-down scan exists; scan it upright").format(
+                        part=tr(PART_LABELS[part])
+                    ),
+                    ("part_missing",),
+                )
+            try:
+                scale = self.scale_for(model)  # (mm_per_unit, source[, uncertainty])
+            except ValueError as error:
+                raise PartPlacementError(
+                    f"{part} scan scale unavailable: {error}", ("scale_unavailable",)
+                ) from error
+            source.update(
+                frame="single_scan_mat_frame_mm",
+                mm_per_unit=float(scale[0]),
+                scale_source=scale[1],
+                scale_uncertainty=float(scale[2]) if len(scale) > 2 else None,
+            )
+            scan = ScanInput(
+                f"{part}-{model.sha256[:12]}", model.points, model.colors, mm_per_unit=scale[0]
+            )
+            return part_from_scan(scan)
+
+        for part, state in states.items():  # refusals stay matched to the parts they saw
+            assert state.cloud is not None
+            sources[part] = {
+                "status": state.status,
+                "cloud_path": _rel(root, state.cloud),
+                "scale_key": _scale_key(state),
+            }
+        try:
+            inputs = {}
+            for step, part in enumerate(("assembled", "body", "closure")):
+                if cancelled():
+                    return finish("cancelled")
+                label = tr(PART_LABELS[part])
+                jobs.update_progress(
+                    job_id, 0.1 + 0.15 * step, tr("Loading {part}").format(part=label)
+                )
+                inputs[part] = load(part, states[part])
+            if cancelled():
+                return finish("cancelled")
+            jobs.update_progress(job_id, 0.55, tr("Registering body and closure"))
+            result = placer(inputs["assembled"], inputs["body"], inputs["closure"])
+            if cancelled():
+                return finish("cancelled")
+            jobs.update_progress(job_id, 0.9, tr("Writing the placed parts"))
+            folder = layout.path("derived", "parts")
+            stats, outputs = {}, {}
+            for part, placement in (("body", result.body), ("closure", result.closure)):
+                points = np.asarray(inputs[part].points)
+                moved = points @ placement.matrix[:3, :3].T + placement.matrix[:3, 3]
+                target = write_cloud(folder, f"{part}-placed", moved, inputs[part].colors)
+                written.append(target)
+                record["artifacts"][part] = f"derived/parts/{target.name}"
+                stats[part] = _stat(target)
+                outputs[part] = {
+                    "cloud_path": record["artifacts"][part],
+                    "cloud_sha256": _sha256(target),
+                }
+                if cancelled():
+                    return finish("cancelled")
+            graph = scan_assembly_graph(
+                result,
+                sources,
+                "closure placed on body using the assembled scan (PL-0484)",
+                outputs,
+            )
+            record.update(
+                status="placed",
+                reason=None,
+                file_stats=stats,
+                artifact_sha256={part: item["cloud_sha256"] for part, item in outputs.items()},
+                graph=graph,
+                graph_revision_id=graph["revision_id"],
+            )
+            finish("placed", record)
+        except PartPlacementError as error:
+            if cancelled():
+                return finish("cancelled")
+            record.update(status="refused", reason=str(error), codes=list(error.codes))
+            record["artifacts"] = {}
+            finish("refused", record)
+        except Exception as error:  # the job reports it; Studio stays usable
+            if cancelled():
+                return finish("cancelled")
+            finish("failed", error=f"{type(error).__name__}: {error}")
+
     def _finish(
         self,
         job_id: str,
@@ -636,6 +911,7 @@ class ScenePanel(QWidget):
         written: list[Path],
     ) -> None:
         token = self._cancel.get(part)
+        placing = part == PLACEMENT
         state = self.jobs.get(job_id).state
         if (token is not None and token.is_set()) or state in (
             JobState.CANCELLING,
@@ -648,7 +924,10 @@ class ScenePanel(QWidget):
         committed = False
         if record is not None:
             try:
-                self.projects.record_part_merge(part, record)
+                if placing:
+                    self.projects.record_part_placement(record)
+                else:
+                    self.projects.record_part_merge(part, record)
                 committed = True
             except Exception as failure:
                 outcome, error = "failed", str(failure)
@@ -660,13 +939,16 @@ class ScenePanel(QWidget):
             self.jobs.fail(job_id, error)
         elif self.jobs.get(job_id).state not in TERMINAL_STATES:
             message = (
-                tr("combined")
-                if outcome == "combined"
+                tr(STATUS_TEXT.get(outcome, outcome))
+                if outcome in ("combined", "placed")
                 else tr("refused: {reason}").format(reason=record["reason"] if record else "")
             )
             self.jobs.succeed(job_id, message)
         self.refresh()
-        self.combine_finished.emit(part, outcome)
+        if placing:
+            self.placement_finished.emit(outcome)
+        else:
+            self.combine_finished.emit(part, outcome)
 
     def _discard(self, written: list[Path]) -> None:
         """Remove files of an uncommitted combine unless a stored record uses them."""
@@ -676,9 +958,19 @@ class ScenePanel(QWidget):
             for record in (self.projects.part_merges() if root is not None else {}).values()
             for key in ("artifact_path", "mesh_artifact_path")
         }
+        placement = self.projects.part_placement() if root is not None else None
+        kept |= {str(path) for path in (placement or {}).get("artifacts", {}).values()}
         for path in written:
             if f"derived/parts/{path.name}" not in kept:
                 path.unlink(missing_ok=True)
 
 
-__all__ = ["PartScan", "PartState", "ScenePanel", "marker_scale", "part_scans", "part_states"]
+__all__ = [
+    "PartScan",
+    "PartState",
+    "ScenePanel",
+    "marker_scale",
+    "part_scans",
+    "part_states",
+    "placement_state",
+]
