@@ -43,6 +43,9 @@ final class CaptureRuntimeViewModel: ObservableObject {
     @Published private(set) var packageHeightSource = "package_type_default"
     /// Coverage from an earlier AR world: shown, persisted, never counted toward completion.
     @Published private(set) var m04PreviousWorldCoverage: OrbitCoverageSnapshot?
+    /// Resume of a scan whose stored coverage no longer matches its capture layout (started
+    /// with an older app build, e.g. before the five-height orbit): coverage starts again.
+    static let coverageRestartedMessage = "This scan was started with an older capture layout, so its coverage starts again. Photos already taken stay in the scan and are sent, but do not count toward coverage."
     static let worldResetMessage = "Tracking was reset — set the center again; coverage restarts (your photos are kept)"
     @Published private(set) var m04ActivePreset = PackagingPresetCatalog.matteHDPE
     @Published private(set) var m04ReflectionGuidance: [String] = []
@@ -1245,7 +1248,7 @@ struct ContentView: View {
                             .padding(.horizontal, 8)
                         VStack(alignment: .leading, spacing: 2) {
                             ForEach(runtime.m04RingCoverage.statuses) { status in
-                                Text("\(status.ringID): \(status.capturedSectorCount)/\(status.minimumSectorCount)\(status.missing ? " · missing" : " · ready")")
+                                Text("\(OrbitGuidance.shortName(ringID: status.ringID)): \(status.capturedSectorCount)/\(status.minimumSectorCount)\(status.missing ? " · missing" : " · ready")")
                             }
                             ForEach(runtime.m04RingCoverage.guidance, id: \.self) { Text($0) }
                             ForEach(runtime.m04DetailGuidance, id: \.self) { Text($0) }
@@ -1403,13 +1406,13 @@ struct ContentView: View {
                 }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission, readiness: runtime.newScanReadiness) { draft in
-                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE); runtime.beginScan(preset: preset, layout: layout, packageType: draft.packageType); runtime.activeScanName = draft.packageName; runtime.startLiveCandidateLoop(); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))); scanStartError = nil } catch { scanStartError = "Scan could not start: \(error.localizedDescription)" } }
+                Task { do { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); let store = ScanSessionStore(layout: layout); try await store.create(draft); let preset = draft.capturePreset; runtime.beginScan(preset: preset, layout: layout, packageType: draft.packageType); runtime.activeScanName = draft.packageName; runtime.startLiveCandidateLoop(); let context = M04ScanContext(preset: preset, preparationAcknowledged: draft.preflight?.preparationAcknowledged ?? false, treatmentMode: draft.treatmentMode?.rawValue, preflight: draft.preflight, basePass: runtime.m04BasePass, completion: runtime.m04Completion, qualityGuidance: runtime.m04QualityGuidanceState, asymmetricCoverage: runtime.m04AsymmetricCoverage, turntableCoverage: runtime.m04TurntableCoverage); try await M04SessionContextStore(layout: layout).persist(context); await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: PersistedSessionState(sessionID: draft.sessionID, nextSequence: 0, epoch: 0, acceptedIDs: []))); scanStartError = nil } catch { scanStartError = "Scan could not start: \(error.localizedDescription)" } }
                 showNewScan = false
             } } }
             .sheet(isPresented: $showHistory) { NavigationStack { LocalScanHistoryView(root: ContentView.sessionRoot, onFinalized: { sessionID in runtime.endActiveSession(sessionID: sessionID) }) } }
             .sheet(isPresented: $showARPreview) { NavigationStack { ARPreviewEntryView() } }
             .sheet(isPresented: $showResume) { NavigationStack { SessionResumeView(root: ContentView.sessionRoot, onResume: { candidate in
-                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.beginScan(preset: PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE), layout: layout, packageType: draft.packageType); runtime.activeScanName = draft.packageName; runtime.startLiveCandidateLoop(); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; _ = runtime.restoreM04OrbitCoverage(context.orbitCoverage); _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage); runtime.restoreObjectCenter(context.objectCenter, previousWorldCoverage: context.previousWorldCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
+                if let draft = candidate.draft, let state = candidate.state { let layout = SessionStorageLayout(root: ContentView.sessionRoot, sessionID: draft.sessionID); runtime.beginScan(preset: draft.capturePreset, layout: layout, packageType: draft.packageType); runtime.activeScanName = draft.packageName; runtime.startLiveCandidateLoop(); Task { if let context = try? await M04SessionContextStore(layout: layout).load() { if let basePass = context.basePass { runtime.restoreBasePass(basePass) }; if context.orbitCoverage != nil, !runtime.restoreM04OrbitCoverage(context.orbitCoverage) { scanStartError = CaptureRuntimeViewModel.coverageRestartedMessage }; _ = runtime.restoreM04DetailPassState(context.detailPasses); runtime.restoreQualityGuidance(context.qualityGuidance); runtime.restoreAsymmetricCoverage(context.asymmetricCoverage); runtime.restoreTurntableCoverage(context.turntableCoverage); runtime.restoreObjectCenter(context.objectCenter, previousWorldCoverage: context.previousWorldCoverage) }; await ContentView.sessionRegistry.install(ActiveScanSession(draft: draft, state: state)) } }
                 showResume = false
             }, onDiscard: { candidate in
                 runtime.endActiveSession(sessionID: candidate.id)
@@ -1485,7 +1488,7 @@ struct ContentView: View {
         case "camera_below_table": return "the phone is below the table surface, so the table hides the package — raise the phone above the table (camera_below_table)"
         case "object_center_unset": return "aim the crosshair where the package touches the table and tap Set object center (object_center_unset)"
         case "capture_in_flight": return "previous photo is still being saved — wait for it to finish (capture_in_flight)"
-        case "capture_out_of_order": return "Out of order — go back to the blue wedge (capture_out_of_order)"
+        case "capture_out_of_order": return "Out of order — go back to the blue wedge"
         default: return reason
         }
     }

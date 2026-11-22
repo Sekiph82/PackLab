@@ -853,7 +853,7 @@ public struct CoverageDisplayItem: Sendable, Equatable, Identifiable {
     public let sector: CoverageSector
     public let status: CoverageDisplayStatus
     public let label: String
-    public init(sector: CoverageSector, status: CoverageDisplayStatus) { self.sector = sector; self.status = status; self.label = "\(sector.ringID) sector \(sector.azimuthIndex + 1) \(status.rawValue)" }
+    public init(sector: CoverageSector, status: CoverageDisplayStatus) { self.sector = sector; self.status = status; self.label = "\(OrbitGuidance.shortName(ringID: sector.ringID)) sector \(sector.azimuthIndex + 1) \(status.rawValue)" }
     public var id: String { sector.id }
 }
 
@@ -1029,7 +1029,7 @@ public struct RingCoverageEvaluation: Codable, Sendable, Equatable {
         }
         missingRingIDs = statuses.filter(\.missing).map(\.ringID)
         isComplete = missingRingIDs.isEmpty
-        guidance = missingRingIDs.map { "Capture more \($0) ring sectors" }
+        guidance = missingRingIDs.map { "Capture more \(OrbitGuidance.shortName(ringID: $0)) ring sectors" }
     }
 }
 
@@ -1265,6 +1265,19 @@ public enum PackagingPresetCatalog {
     public static let asymmetricJerrycan = PackagingPreset(id: .asymmetricJerrycan, version: "1.0.0", displayName: "Asymmetric / Jerrycan", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(strictOrder: true), asymmetricCoverage: AsymmetricCoveragePolicy()), lightingGuidance: ["Use even diffuse lighting across front, back and handle regions."], preparationGuidance: ["Keep the handle unobstructed and capture front/back/side regions."], requiresPreparationAcknowledgement: false)
     public static let closureCap = PackagingPreset(id: .closureCap, version: "1.0.0", displayName: "Closure / Cap", quality: QualityPolicyConfiguration(framing: FramingThresholds(minimumObjectFraction: 0.14, maximumObjectFraction: 0.65, minimumMargin: 0.05)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "closure", minimumElevation: 10, maximumElevation: 55)]), ringRequirements: StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "closure", minimumSectorCount: 8)])), lightingGuidance: ["Use even diffuse lighting over threads, pump or cap details."], preparationGuidance: ["Move to a safe working distance and keep the cap centered without edge cropping."], requiresPreparationAcknowledgement: false)
     public static let turntable = PackagingPreset(id: .turntable, version: "1.0.0", displayName: "Turntable", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 24, rings: [CoverageRingDefinition(id: "lower", minimumElevation: -35, maximumElevation: -10, required: false), CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15), CoverageRingDefinition(id: "upper", minimumElevation: 15, maximumElevation: 40)]), ringRequirements: StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 4, required: false), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 4), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 4)])), lightingGuidance: ["Keep the camera and background static while the object rotates."], preparationGuidance: ["Use a stable turntable and record angle evidence for each frame."], requiresPreparationAcknowledgement: false)
+    /// PL-0489 body interior (lid off, emptied): three steep rings looking into the opening,
+    /// centred 60/70/80 deg above the object center, 16 wedges each, strict order like the
+    /// outer orbit. Elevations from 85 deg up are out of range (wedges collapse at the pole).
+    public static let interiorOrbit = OrbitCoverageConfiguration(azimuthBinCount: 16, rings: [CoverageRingDefinition(id: "h60", minimumElevation: 55, maximumElevation: 65), CoverageRingDefinition(id: "h70", minimumElevation: 65, maximumElevation: 75), CoverageRingDefinition(id: "h80", minimumElevation: 75, maximumElevation: 85)], strictOrder: true)
+    /// The preset a scan of `role` uses: the chosen preset (matte when none), with the steep
+    /// interior orbit for the body interior. Turntable keeps its own orbit (the wizard refuses
+    /// a turntable interior scan).
+    public static func preset(for id: PackagingPresetID?, role: ScanPartRole) -> PackagingPreset {
+        let base = preset(for: id ?? .matteHDPE)
+        guard role == .bodyInterior, base.id != .turntable else { return base }
+        let rings = StandardBottleCoveragePolicy(requirements: interiorOrbit.rings.map { RingCoverageRequirement(ringID: $0.id, minimumSectorCount: interiorOrbit.azimuthBinCount) })
+        return PackagingPreset(id: base.id, version: base.version, displayName: "\(base.displayName) · body interior", quality: base.quality, coverage: CoveragePolicyConfiguration(orbit: interiorOrbit, ringRequirements: rings), lightingGuidance: ["Light the inside evenly from above with diffuse light; avoid glare on the rim and the bottom."] + base.lightingGuidance, preparationGuidance: ["Take the lid off; the body must be empty, clean and dry inside."] + base.preparationGuidance, requiresPreparationAcknowledgement: base.requiresPreparationAcknowledgement, supportedLensRule: base.supportedLensRule)
+    }
     public static func preset(for id: PackagingPresetID) -> PackagingPreset { switch id { case .glossyPET: return glossyPET; case .transparent: return transparent; case .asymmetricJerrycan: return asymmetricJerrycan; case .closureCap: return closureCap; case .turntable: return turntable; default: return matteHDPE } }
 }
 
@@ -1529,8 +1542,18 @@ public enum OrbitGuidance {
         case "h30": return "30° above"
         case "h40": return "40° above"
         case "h50": return "50° above (looking down)"
+        case "h60": return "60° above (into the opening)"
+        case "h70": return "70° above"
+        case "h80": return "80° above (straight into the opening)"
         default: return ringID
         }
+    }
+
+    /// Short ring label for chips, toasts and coverage lists: "h10" -> "10°"; other ring ids
+    /// (closure, middle, ...) unchanged.
+    public static func shortName(ringID: String) -> String {
+        guard ringID.hasPrefix("h"), let degrees = Int(ringID.dropFirst()) else { return ringID }
+        return "\(degrees)°"
     }
 
     /// Index of the ring containing `elevation`; -1 below all rings, rings.count above.
@@ -1667,7 +1690,7 @@ public enum CaptureToast {
             return "Saved, but the position is unknown (\(observation?.status ?? "pose_unavailable")) — set the object center and keep tracking steady"
         }
         guard newlyCovered else { return "Saved, but this wedge was already covered — go to the blue wedge" }
-        return "Saved: \(sector.ringID) ring, wedge \(sector.azimuthIndex + 1) (\(capturedCount)/\(totalCount))"
+        return "Saved: \(OrbitGuidance.shortName(ringID: sector.ringID)) ring, wedge \(sector.azimuthIndex + 1) (\(capturedCount)/\(totalCount))"
     }
 }
 
@@ -1759,17 +1782,20 @@ public struct OrbitGuidanceDial: View {
                 ForEach(Array(snapshot.configuration.rings.reversed())) { ring in
                     let isTarget = ring.id == target?.ringID
                     let isCurrent = ring.id == current?.sector?.ringID
-                    Text(ring.id)
+                    // Minimum (not fixed) size: the label grows with Dynamic Type instead of clipping.
+                    Text(OrbitGuidance.shortName(ringID: ring.id))
                         .font(.caption2.weight(isTarget ? .bold : .regular))
-                        .frame(width: 58, height: 17)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .padding(.horizontal, 4)
+                        .frame(minWidth: 58, minHeight: 17)
                         .background((isTarget ? Color.blue : Color.gray.opacity(0.35)), in: RoundedRectangle(cornerRadius: 5))
                         .overlay(RoundedRectangle(cornerRadius: 5).stroke(isCurrent ? Color.white : Color.clear, lineWidth: 2))
                         // Optional rings (e.g. lower) are dimmed: they never block completion.
                         .opacity(ring.required ? 1 : 0.45)
-                        .accessibilityLabel(ring.required ? ring.id : "\(ring.id), optional")
+                        .accessibilityLabel(ring.required ? OrbitGuidance.heightName(ringID: ring.id) : "\(OrbitGuidance.heightName(ringID: ring.id)), optional")
                 }
             }
-            .accessibilityLabel("Height: target \(target?.ringID ?? "none"), current \(current?.sector?.ringID ?? "unknown")")
+            .accessibilityLabel("Height: target \(target.map { OrbitGuidance.heightName(ringID: $0.ringID) } ?? "none"), current \((current?.sector).map { OrbitGuidance.heightName(ringID: $0.ringID) } ?? "unknown")")
         }
         .foregroundStyle(.white)
     }

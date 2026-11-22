@@ -1117,7 +1117,7 @@ final class PackLabCaptureTests: XCTestCase {
     func testCanonicalSessionManifestMatchesPackScanManifestSchema() throws {
         // Mirrors schemas/packscan/manifest.schema.json (validated by packlab_core.packscan on Windows).
         let required: Set<String> = ["schema_version", "capture_id", "created_at", "device", "capture_mode", "payloads", "source_evidence", "checksums"]
-        let allowed = required.union(["started_at", "ended_at", "calibration_profile_ref"])
+        let allowed = required.union(["started_at", "ended_at", "calibration_profile_ref", "part_role"])
         let kinds: Set<String> = ["image", "photo_metadata", "mask", "preview", "thumbnail", "diagnostics", "calibration", "other"]
         let payloads = ["metadata/photos.json": Data("{}".utf8), "images/p.heic": Data([1]), "metadata/accepted-records/p.json": Data("{}".utf8)]
         func matches(_ value: Any?, _ pattern: String) -> Bool { (value as? String)?.range(of: pattern, options: .regularExpression) != nil }
@@ -1163,7 +1163,86 @@ final class PackLabCaptureTests: XCTestCase {
             }
             let checksums = try XCTUnwrap(object["checksums"] as? [String: Any])
             XCTAssertEqual(checksums["canonicalization"] as? String, PackScanWriter.checksumCanonicalization)
+            XCTAssertNil(object["part_role"], "a draft without a role is assembled and must omit part_role")
         }
+        // PL-0482: part_role mirrors the schema enum; assembled (the absent-key meaning) is omitted.
+        let schemaRoles: Set<String> = ["closure", "closure_flipped", "body", "body_flipped", "assembled", "assembled_flipped", "body_interior"]
+        XCTAssertEqual(Set(ScanPartRole.allCases.map(\.rawValue)), schemaRoles)
+        for role in ScanPartRole.allCases {
+            let draft = NewScanDraft(sessionID: "role-\(role.rawValue)", packageName: "Jar", packageType: .jar, captureMode: .guidedOrbit, partRole: role)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: SessionGalleryStore.packScanManifest(draft: draft, payloads: payloads)) as? [String: Any])
+            XCTAssertTrue(Set(object.keys).isSubset(of: allowed), "\(role)")
+            XCTAssertEqual(object["part_role"] as? String, role == .assembled ? nil : role.rawValue, "\(role)")
+            let coverage = try XCTUnwrap(((object["capture_mode"] as? [String: Any])?["parameters"] as? [String: Any])?["coverage"] as? [String: Any])
+            XCTAssertEqual(coverage["minimum_view_count"] as? Int, 16, "\(role)")
+        }
+    }
+
+    @MainActor
+    func testPL0482ScanRoleDraftHistoryAndChecklist() throws {
+        // Sessions written before roles existed decode as assembled.
+        let legacy = NewScanDraft(sessionID: "old", packageName: "Jar", packageType: .jar, captureMode: .guidedOrbit, createdAt: Date(timeIntervalSince1970: 1))
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any])
+        json.removeValue(forKey: "partRole")
+        let decoded = try JSONDecoder().decode(NewScanDraft.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(decoded.partRole)
+        XCTAssertEqual(decoded.role, .assembled)
+        // The wizard path carries the chosen role; default is assembled.
+        XCTAssertEqual(try NewScanDraftValidator.make(name: "Jar", type: .jar, mode: .guidedOrbit).role, .assembled)
+        let body = try NewScanDraftValidator.make(name: "Jar", type: .jar, mode: .guidedOrbit, presetID: .matteHDPE, partRole: .bodyFlipped)
+        XCTAssertEqual(try JSONDecoder().decode(NewScanDraft.self, from: JSONEncoder().encode(body)).role, .bodyFlipped)
+        XCTAssertThrowsError(try NewScanDraftValidator.make(name: "Jar", type: .jar, mode: .turntable, presetID: .turntable, partRole: .bodyInterior)) { XCTAssertEqual($0 as? NewScanDraftError, .interiorNeedsHandheldOrbit) }
+        var workflow = NewScanWorkflowModel()
+        var started: NewScanDraft?
+        XCTAssertTrue(NewScanActionCoordinator.start(workflow: &workflow, name: "Jar", type: .jar, mode: .guidedOrbit, notes: "", partRole: .closureFlipped) { started = $0 })
+        XCTAssertEqual(started?.role, .closureFlipped)
+        // History checklist: per package name, the six outer scans; unusable rows and the interior do not count.
+        func entry(_ id: String, _ name: String, _ role: ScanPartRole?, degraded: String? = nil) -> ScanHistoryEntry {
+            ScanHistoryEntry(id: id, packageName: name, packageType: .jar, partRole: role, date: nil, previewPath: nil, exportState: "exported", degradedReason: degraded)
+        }
+        let entries = [entry("1", "Jar", .assembled), entry("2", "Jar", .body), entry("3", "Jar", .bodyInterior), entry("4", "Jar", .closure, degraded: "missing_preview"), entry("5", "Cap", nil)]
+        XCTAssertEqual(LocalScanHistoryView.partChecklist(entries), ["Jar: 2/6 part scans, missing Closure, Closure upside down, Body upside down, Assembled upside down"])
+        let complete = ScanPartRole.outerScans.enumerated().map { entry("\($0.offset)", "Jar", $0.element) }
+        XCTAssertEqual(LocalScanHistoryView.partChecklist(complete), ["Jar: all 6 part scans done"])
+        XCTAssertEqual(ScanPartRole.missingOuterScans(present: Set(ScanPartRole.allCases)), [])
+    }
+
+    func testPL0489BodyInteriorUsesSteepStrictOrbit() {
+        let interior = PackagingPresetCatalog.preset(for: .glossyPET, role: .bodyInterior)
+        XCTAssertEqual(interior.id, .glossyPET)
+        XCTAssertEqual(interior.coverage.orbit.rings.map(\.id), ["h60", "h70", "h80"])
+        XCTAssertEqual(interior.coverage.orbit.azimuthBinCount, 16)
+        XCTAssertTrue(interior.coverage.orbit.strictOrder)
+        XCTAssertEqual(interior.coverage.ringRequirements.requirements.map(\.minimumSectorCount), [16, 16, 16])
+        XCTAssertNil(PackagingPresetCatalog.preset(for: .asymmetricJerrycan, role: .bodyInterior).coverage.asymmetricCoverage)
+        XCTAssertTrue(CaptureProtocolViewModel.methodLines(for: interior).contains("Take 16 photos per height (one every 22.5°) at 3 heights, 10° apart — 48 photos."), "\(CaptureProtocolViewModel.methodLines(for: interior))")
+        // Every other role keeps the chosen preset; turntable never gets the steep orbit.
+        for role in ScanPartRole.allCases where role != .bodyInterior { XCTAssertEqual(PackagingPresetCatalog.preset(for: .glossyPET, role: role), PackagingPresetCatalog.glossyPET) }
+        XCTAssertEqual(PackagingPresetCatalog.preset(for: nil, role: .assembled), PackagingPresetCatalog.matteHDPE)
+        XCTAssertEqual(PackagingPresetCatalog.preset(for: .turntable, role: .bodyInterior), PackagingPresetCatalog.turntable)
+        XCTAssertEqual(NewScanDraft(packageName: "Jar", packageType: .jar, captureMode: .guidedOrbit, presetID: .glossyPET, partRole: .bodyInterior).capturePreset, interior)
+        // Elevation bands [55, 65), [65, 75), [75, 85); the outer 10..50 deg rings are out of range.
+        let configuration = interior.coverage.orbit
+        func ring(_ degrees: Double) -> CoveragePoseObservation {
+            CoveragePoseMapper.map(captureID: "c", pose: orbitPose(0, tan(degrees * Double.pi / 180), -1), configuration: configuration, center: [0, 0, 0])
+        }
+        for (degrees, id) in [(55.0, "h60"), (64.9, "h60"), (65, "h70"), (75, "h80"), (84.9, "h80")] { XCTAssertEqual(ring(degrees).sector?.ringID, id, "\(degrees)") }
+        for degrees in [10.0, 50, 54.9, 85] { XCTAssertEqual(ring(degrees).status, "elevation_out_of_range", "\(degrees)") }
+        XCTAssertEqual(configuration.rings.map { OrbitGuidance.heightName(ringID: $0.id) }, ["60° above (into the opening)", "70° above", "80° above (straight into the opening)"])
+    }
+
+    @MainActor
+    func testRingLabelsAreHumanInChipsToastsAndHints() {
+        XCTAssertEqual(OrbitCoverageConfiguration.standardRings.map { OrbitGuidance.shortName(ringID: $0.id) }, ["10°", "20°", "30°", "40°", "50°"])
+        XCTAssertEqual(OrbitGuidance.shortName(ringID: "closure"), "closure")
+        XCTAssertEqual(OrbitGuidance.shortName(ringID: "high"), "high")
+        let allowed = ManualCaptureDecision(allowed: true, warnings: [], blockingReasons: [])
+        let placed = CoveragePoseObservation(captureID: "p", sector: CoverageSector(ringID: "h30", azimuthIndex: 2), azimuthDegrees: 50, elevationDegrees: 30, status: "available")
+        XCTAssertEqual(CaptureToast.text(decision: allowed, saved: true, observation: placed, newlyCovered: true, capturedCount: 35, totalCount: 80), "Saved: 30° ring, wedge 3 (35/80)")
+        XCTAssertEqual(CoverageDisplayItem(sector: CoverageSector(ringID: "h50", azimuthIndex: 0), status: .missing).label, "50° sector 1 missing")
+        XCTAssertEqual(ContentView.manualBlockHint("capture_out_of_order"), "Out of order — go back to the blue wedge")
+        XCTAssertFalse(RingCoverageEvaluation(snapshot: OrbitCoverageModel(configuration: OrbitCoverageConfiguration()).snapshot()).guidance.joined().contains("h10"))
+        XCTAssertFalse(CaptureRuntimeViewModel.coverageRestartedMessage.isEmpty)
     }
 
     func testPL0119CanonicalWorkflowRequiresAuthoritativeRecordsAndUsesSourceEntryPoint() throws {
@@ -4121,7 +4200,7 @@ final class PackLabCaptureTests: XCTestCase {
         let items = SessionPhotoIndex.items(layout: layout)
         XCTAssertEqual(items.map(\.id), ["a", "b", "c"])
         XCTAssertEqual(items.map(\.sequence), [0, 1, 2])
-        XCTAssertEqual(items.map(\.label), ["#1", "#2 · h10 wedge 9", "#3"])
+        XCTAssertEqual(items.map(\.label), ["#1", "#2 · 10° wedge 9", "#3"])
         let thumbnail = try XCTUnwrap(SessionPhotoIndex.image(at: items[0].sourceURL, maxPixelSize: 300))
         XCTAssertEqual(thumbnail.width, 8)
 

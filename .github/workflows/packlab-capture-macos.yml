@@ -778,7 +778,7 @@ jobs:
           set -euo pipefail
           kill "$(cat "$RUNNER_TEMP/packlab-e2e-receiver.pid")" || true
           cat "$RUNNER_TEMP/packlab-e2e-receiver.log"
-          python tools/ci/ios_e2e_receiver.py verify --root "$RUNNER_TEMP/packlab-e2e-receiver" --expected-scans 2 --expected-images 80 --expected-remote-captures 3 | tee -a "$GITHUB_STEP_SUMMARY"
+          python tools/ci/ios_e2e_receiver.py verify --root "$RUNNER_TEMP/packlab-e2e-receiver" --expected-scans 2 --expected-images 80 --expected-remote-captures 3 --expected-part-roles absent,body | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Guard end-to-end screenshot artifact inputs
         id: guard_e2e_screenshots

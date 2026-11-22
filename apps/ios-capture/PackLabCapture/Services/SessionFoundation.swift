@@ -5,6 +5,27 @@ import ImageIO
 
 public enum CaptureModeID: String, Codable, Sendable, CaseIterable { case freehand, guidedOrbit = "guided_orbit", turntable }
 public enum PackageType: String, Codable, Sendable, CaseIterable { case bottle, jar, jerrycan, tube, sachet, other }
+/// PL-0482: which part a scan shows. Written to the manifest as top-level `part_role`
+/// (schemas/packscan/manifest.schema.json), omitted for `assembled` because that is what an
+/// absent key means and older Studio builds reject unknown manifest keys.
+public enum ScanPartRole: String, Codable, Sendable, CaseIterable {
+    case closure, closureFlipped = "closure_flipped", body, bodyFlipped = "body_flipped", assembled, assembledFlipped = "assembled_flipped", bodyInterior = "body_interior"
+    public var displayName: String {
+        switch self {
+        case .closure: return "Closure"
+        case .closureFlipped: return "Closure upside down"
+        case .body: return "Body (lid off)"
+        case .bodyFlipped: return "Body upside down"
+        case .assembled: return "Assembled (lid on)"
+        case .assembledFlipped: return "Assembled upside down"
+        case .bodyInterior: return "Body interior"
+        }
+    }
+    /// The six outer scans (each part upright and upside down) a hole-free model needs;
+    /// the interior scan (PL-0489) is extra.
+    public static let outerScans: [ScanPartRole] = [.closure, .closureFlipped, .body, .bodyFlipped, .assembled, .assembledFlipped]
+    public static func missingOuterScans(present: Set<ScanPartRole>) -> [ScanPartRole] { outerScans.filter { !present.contains($0) } }
+}
 public struct NewScanDraft: Codable, Sendable, Equatable {
     public let sessionID: String
     public let packageName: String
@@ -15,20 +36,27 @@ public struct NewScanDraft: Codable, Sendable, Equatable {
     public let presetID: PackagingPresetID?
     public let preflight: ScanPreflightResult?
     public let treatmentMode: TransparentTreatmentMode?
-    public init(sessionID: String = UUID().uuidString, packageName: String, packageType: PackageType, captureMode: CaptureModeID, notes: String = "", createdAt: Date = Date(), presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil) { self.sessionID = sessionID; self.packageName = packageName; self.packageType = packageType; self.captureMode = captureMode; self.notes = notes; self.createdAt = createdAt; self.presetID = presetID; self.preflight = preflight; self.treatmentMode = treatmentMode }
+    /// Nil in sessions created before scan roles existed; read through `role`.
+    public let partRole: ScanPartRole?
+    public init(sessionID: String = UUID().uuidString, packageName: String, packageType: PackageType, captureMode: CaptureModeID, notes: String = "", createdAt: Date = Date(), presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil, partRole: ScanPartRole? = nil) { self.sessionID = sessionID; self.packageName = packageName; self.packageType = packageType; self.captureMode = captureMode; self.notes = notes; self.createdAt = createdAt; self.presetID = presetID; self.preflight = preflight; self.treatmentMode = treatmentMode; self.partRole = partRole }
+    public var role: ScanPartRole { partRole ?? .assembled }
+    /// Coverage preset for this scan: the chosen preset, steep for the body interior.
+    public var capturePreset: PackagingPreset { PackagingPresetCatalog.preset(for: presetID, role: role) }
 }
 
-public enum NewScanDraftError: Error, Sendable, Equatable { case emptyName, nameTooLong, notesTooLong }
+public enum NewScanDraftError: Error, Sendable, Equatable { case emptyName, nameTooLong, notesTooLong, interiorNeedsHandheldOrbit }
 public enum NewScanDraftValidator {
     public static let maximumNameLength = 120
     public static let maximumNotesLength = 500
-    public static func make(name: String, type: PackageType, mode: CaptureModeID, notes: String = "", now: Date = Date(), sessionID: String = UUID().uuidString, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil) throws -> NewScanDraft {
+    public static func make(name: String, type: PackageType, mode: CaptureModeID, notes: String = "", now: Date = Date(), sessionID: String = UUID().uuidString, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil, partRole: ScanPartRole = .assembled) throws -> NewScanDraft {
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedName.isEmpty else { throw NewScanDraftError.emptyName }
         guard normalizedName.count <= maximumNameLength else { throw NewScanDraftError.nameTooLong }
         guard normalizedNotes.count <= maximumNotesLength else { throw NewScanDraftError.notesTooLong }
-        return NewScanDraft(sessionID: sessionID, packageName: normalizedName, packageType: type, captureMode: mode, notes: normalizedNotes, createdAt: now, presetID: presetID, preflight: preflight, treatmentMode: treatmentMode)
+        // The steep interior orbit is walked by hand; a fixed turntable camera cannot look in.
+        guard !(partRole == .bodyInterior && presetID == .turntable) else { throw NewScanDraftError.interiorNeedsHandheldOrbit }
+        return NewScanDraft(sessionID: sessionID, packageName: normalizedName, packageType: type, captureMode: mode, notes: normalizedNotes, createdAt: now, presetID: presetID, preflight: preflight, treatmentMode: treatmentMode, partRole: partRole)
     }
 }
 
@@ -36,8 +64,8 @@ public struct NewScanWorkflowModel: Sendable, Equatable {
     public enum State: Sendable, Equatable { case editing, validationFailed(String), started(NewScanDraft), cancelled }
     public private(set) var state: State = .editing
     public init() {}
-    public mutating func start(name: String, type: PackageType, mode: CaptureModeID, notes: String = "", now: Date = Date(), sessionID: String = UUID().uuidString, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil) -> NewScanDraft? {
-        do { let draft = try NewScanDraftValidator.make(name: name, type: type, mode: mode, notes: notes, now: now, sessionID: sessionID, presetID: presetID, preflight: preflight, treatmentMode: treatmentMode); state = .started(draft); return draft }
+    public mutating func start(name: String, type: PackageType, mode: CaptureModeID, notes: String = "", now: Date = Date(), sessionID: String = UUID().uuidString, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil, partRole: ScanPartRole = .assembled) -> NewScanDraft? {
+        do { let draft = try NewScanDraftValidator.make(name: name, type: type, mode: mode, notes: notes, now: now, sessionID: sessionID, presetID: presetID, preflight: preflight, treatmentMode: treatmentMode, partRole: partRole); state = .started(draft); return draft }
         catch let error as NewScanDraftError { state = .validationFailed(String(describing: error)); return nil }
         catch { state = .validationFailed("invalid") ; return nil }
     }
@@ -338,7 +366,7 @@ public actor SessionGalleryStore {
         case .freehand:
             captureMode = ["mode": "freehand", "version": 1]
         case .guidedOrbit:
-            let bins = PackagingPresetCatalog.preset(for: draft.presetID ?? .matteHDPE).coverage.orbit.azimuthBinCount
+            let bins = draft.capturePreset.coverage.orbit.azimuthBinCount
             captureMode = ["mode": "guided_orbit", "version": 1, "parameters": ["orbit_axis": "subject_vertical", "coverage": ["target_sector_deg": 360.0 / Double(max(2, bins)), "minimum_view_count": bins]]]
         case .turntable:
             // ponytail: the schema's turntable mode describes ONE frame per manifest; a multi-photo
@@ -347,7 +375,7 @@ public actor SessionGalleryStore {
             captureMode = ["mode": "freehand", "version": 1]
             provenance = "packlab_ios_capture_turntable_session"
         }
-        return try JSONSerialization.data(withJSONObject: [
+        var manifest: [String: Any] = [
             "schema_version": PackScanWriter.schemaVersion,
             "capture_id": draft.sessionID,
             "created_at": ISO8601DateFormatter().string(from: draft.createdAt),
@@ -356,7 +384,9 @@ public actor SessionGalleryStore {
             "payloads": declarations,
             "source_evidence": ["immutable": true, "authority": "original_capture", "provenance": provenance],
             "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization],
-        ])
+        ]
+        if draft.role != .assembled { manifest["part_role"] = draft.role.rawValue }
+        return try JSONSerialization.data(withJSONObject: manifest)
     }
 
     private func canonicalRecords() throws -> [AcceptedCaptureRecord] {
@@ -659,7 +689,8 @@ public struct ScanHistoryEntry: Codable, Sendable, Equatable, Identifiable {
     public let previewPath: String?
     public let exportState: String
     public let degradedReason: String?
-    public init(id: String, packageName: String, packageType: PackageType?, date: Date?, previewPath: String?, exportState: String, degradedReason: String? = nil) { self.id = id; self.packageName = packageName; self.packageType = packageType; self.date = date; self.previewPath = previewPath; self.exportState = exportState; self.degradedReason = degradedReason }
+    public let partRole: ScanPartRole?
+    public init(id: String, packageName: String, packageType: PackageType?, partRole: ScanPartRole? = nil, date: Date?, previewPath: String?, exportState: String, degradedReason: String? = nil) { self.id = id; self.packageName = packageName; self.packageType = packageType; self.partRole = partRole; self.date = date; self.previewPath = previewPath; self.exportState = exportState; self.degradedReason = degradedReason }
 }
 public struct ScanHistoryIndex: Sendable, Equatable {
     public init() {}
@@ -700,16 +731,16 @@ public actor LocalScanHistoryStore {
             let finalizationURL = directory.appendingPathComponent("finalization.json")
             let finalizationData = try? Data(contentsOf: finalizationURL)
             let finalization = finalizationData.flatMap { try? JSONDecoder().decode(SessionFinalizationRecord.self, from: $0) }
-            if finalizationData != nil && finalization == nil { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview?.path, exportState: "corrupt", degradedReason: "corrupt_finalization") }
-            if let finalization, finalization.sessionID != id { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview?.path, exportState: "corrupt", degradedReason: "invalid_finalization_identity") }
-            guard let preview else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: nil, exportState: finalization?.state.rawValue ?? "in_progress", degradedReason: "missing_preview") }
-            guard let finalization else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: "in_progress") }
+            if finalizationData != nil && finalization == nil { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, partRole: draft.role, date: draft.createdAt, previewPath: preview?.path, exportState: "corrupt", degradedReason: "corrupt_finalization") }
+            if let finalization, finalization.sessionID != id { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, partRole: draft.role, date: draft.createdAt, previewPath: preview?.path, exportState: "corrupt", degradedReason: "invalid_finalization_identity") }
+            guard let preview else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, partRole: draft.role, date: draft.createdAt, previewPath: nil, exportState: finalization?.state.rawValue ?? "in_progress", degradedReason: "missing_preview") }
+            guard let finalization else { return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, partRole: draft.role, date: draft.createdAt, previewPath: preview.path, exportState: "in_progress") }
             if finalization.state == .exported {
                 guard let packagePath = finalization.packagePath, fileManager.fileExists(atPath: packagePath), (try? URL(fileURLWithPath: packagePath).resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
-                    return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: "corrupt", degradedReason: "missing_exported_package")
+                    return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, partRole: draft.role, date: draft.createdAt, previewPath: preview.path, exportState: "corrupt", degradedReason: "missing_exported_package")
                 }
             }
-            return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, date: draft.createdAt, previewPath: preview.path, exportState: finalization.state.rawValue)
+            return ScanHistoryEntry(id: id, packageName: draft.packageName, packageType: draft.packageType, partRole: draft.role, date: draft.createdAt, previewPath: preview.path, exportState: finalization.state.rawValue)
         })
     }
 
@@ -794,8 +825,8 @@ public actor SafeSessionDeleter {
 
 public enum NewScanActionCoordinator {
     @discardableResult
-    public static func start(workflow: inout NewScanWorkflowModel, name: String, type: PackageType, mode: CaptureModeID, notes: String, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil, onStart: (NewScanDraft) -> Void) -> Bool {
-        guard let draft = workflow.start(name: name, type: type, mode: mode, notes: notes, presetID: presetID, preflight: preflight, treatmentMode: treatmentMode) else { return false }
+    public static func start(workflow: inout NewScanWorkflowModel, name: String, type: PackageType, mode: CaptureModeID, notes: String, presetID: PackagingPresetID? = nil, preflight: ScanPreflightResult? = nil, treatmentMode: TransparentTreatmentMode? = nil, partRole: ScanPartRole = .assembled, onStart: (NewScanDraft) -> Void) -> Bool {
+        guard let draft = workflow.start(name: name, type: type, mode: mode, notes: notes, presetID: presetID, preflight: preflight, treatmentMode: treatmentMode, partRole: partRole) else { return false }
         onStart(draft)
         return true
     }
@@ -830,7 +861,7 @@ public enum SessionPhotoIndex {
             .sorted { $0.sequence < $1.sequence }
             .map { record in
                 let sector = observations.last { $0.captureID == record.captureID && $0.status == "available" }?.sector
-                let position = sector.map { " · \($0.ringID) wedge \($0.azimuthIndex + 1)" } ?? ""
+                let position = sector.map { " · \(OrbitGuidance.shortName(ringID: $0.ringID)) wedge \($0.azimuthIndex + 1)" } ?? ""
                 return SessionPhotoItem(id: record.captureID, sequence: record.sequence, sourceURL: layout.images.appendingPathComponent(record.sourceFilename), label: "#\(record.sequence + 1)\(position)")
             }
     }
@@ -854,6 +885,7 @@ public struct NewScanWizard: View {
     @State private var showProtocol = false
     @State private var protocolAcknowledged = false
     @State private var transparentTreatment: TransparentTreatmentMode = .none
+    @State private var partRole: ScanPartRole = .assembled
     @State private var validationMessage: String?
     @State private var workflow = NewScanWorkflowModel()
     public let admission: CaptureAdmissionController
@@ -863,6 +895,11 @@ public struct NewScanWizard: View {
     public var body: some View {
         Form {
             TextField("Package name", text: $name)
+            // PL-0482: one package = six scans (closure, body, assembled; each upright and upside down).
+            Picker("Scan role", selection: $partRole) { ForEach(ScanPartRole.allCases, id: \.self) { Text($0.displayName).tag($0) } }
+                .accessibilityIdentifier("scanRole")
+            Text(partRole == .bodyInterior ? "Lid off, emptied and clean. Photos from steep above (60°, 70°, 80°) into the opening; light the inside evenly and avoid glare." : "Scan every part upright and upside down so the model has no holes: closure, body, assembled.")
+                .font(.caption).foregroundStyle(.secondary)
             Picker("Package type", selection: $packageType) { ForEach(PackageType.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
             Picker("Capture mode", selection: $mode) { ForEach(CaptureModeID.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
             Picker("Packaging preset", selection: $presetID) { ForEach(PackagingPresetID.allCases, id: \.self) { Text(PackagingPresetCatalog.preset(for: $0).displayName).tag($0) } }
@@ -879,16 +916,19 @@ public struct NewScanWizard: View {
                 Button("Cancel") { NewScanActionCoordinator.cancel(workflow: &workflow); dismiss() }
                     .buttonStyle(.borderless)
                 Spacer()
-                Button("Start") { showProtocol = true }
+                Button("Start") {
+                    if partRole == .bodyInterior && presetID == .turntable { validationMessage = "Body interior is photographed by hand from above. Choose a preset other than Turntable."; return }
+                    showProtocol = true
+                }
                     .buttonStyle(.borderless)
             }
         }.navigationTitle("New Scan")
         .sheet(isPresented: $showProtocol) {
             NavigationStack {
-                CaptureProtocolView(preset: PackagingPresetCatalog.preset(for: presetID)) { acknowledged in
+                CaptureProtocolView(preset: PackagingPresetCatalog.preset(for: presetID, role: partRole)) { acknowledged in
                     protocolAcknowledged = acknowledged
                     showProtocol = false
-                    let preset = PackagingPresetCatalog.preset(for: presetID)
+                    let preset = PackagingPresetCatalog.preset(for: presetID, role: partRole)
                     let selectedTreatment = presetID == .transparent ? transparentTreatment : nil
                     if presetID == .transparent && !TransparentPreparationEvaluation(acknowledged: acknowledged, treatment: transparentTreatment).mayStart {
                         validationMessage = "Transparent preparation acknowledgement and a non-none treatment are required."
@@ -899,7 +939,7 @@ public struct NewScanWizard: View {
                         validationMessage = preflight.issues.filter { $0.severity == .blocker }.map(\.message).joined(separator: " ")
                         return
                     }
-                    if NewScanActionCoordinator.start(workflow: &workflow, name: name, type: packageType, mode: mode, notes: notes, presetID: presetID, preflight: preflight, treatmentMode: selectedTreatment, onStart: onStart) { dismiss() }
+                    if NewScanActionCoordinator.start(workflow: &workflow, name: name, type: packageType, mode: mode, notes: notes, presetID: presetID, preflight: preflight, treatmentMode: selectedTreatment, partRole: partRole, onStart: onStart) { dismiss() }
                     else if case .validationFailed(let message) = workflow.state { validationMessage = "Cannot start scan: \(message)" }
                 }
             }
@@ -988,7 +1028,14 @@ public struct LocalScanHistoryView: View {
     private let onFinalized: (@MainActor (String) -> Void)?
     public init(root: URL, onFinalized: (@MainActor (String) -> Void)? = nil) { store = LocalScanHistoryStore(root: root); self.onFinalized = onFinalized }
     public var body: some View {
-        List(entries) { entry in
+        List {
+            let checklist = LocalScanHistoryView.partChecklist(entries)
+            if !checklist.isEmpty {
+                Section("Part scans per package name") {
+                    ForEach(checklist, id: \.self) { Text($0).font(.caption) }
+                }
+            }
+            ForEach(entries) { entry in
             // Two lines: thumbnail + name/status on top, actions below, so nothing is squeezed.
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .top, spacing: 12) {
@@ -999,6 +1046,7 @@ public struct LocalScanHistoryView: View {
                     .frame(width: 56, height: 56).background(Color.gray.opacity(0.15)).clipShape(RoundedRectangle(cornerRadius: 6))
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entry.packageName).font(.headline)
+                        if let role = entry.partRole { Text(role.displayName).font(.subheadline).accessibilityIdentifier("scanRole.\(entry.packageName)") }
                         Text(LocalScanHistoryView.stateText(entry.exportState)).font(.subheadline).foregroundStyle(.secondary)
                         if let reason = entry.degradedReason { Text("Problem: \(reason.replacingOccurrences(of: "_", with: " "))").foregroundStyle(.orange).font(.caption) }
                         // PL-0452 delivery status: queued / sending x% / delivered / failed + reason.
@@ -1039,6 +1087,7 @@ public struct LocalScanHistoryView: View {
                 .font(.subheadline).lineLimit(1)
             }
             .padding(.vertical, 4)
+            }
         }.task { entries = await store.load() }
             .sheet(isPresented: $showShare) { if let share = shareCoordinator.activeShare { PackScanShareSheet(share: share) { completed in shareCoordinator.activityFinished(completed: completed); showShare = false } } }
             .sheet(item: $photoSession) { selection in NavigationStack { SessionPhotoGridView(layout: SessionStorageLayout(root: store.rootURL, sessionID: selection.id)) } }
@@ -1050,6 +1099,16 @@ public struct LocalScanHistoryView: View {
             }
             .navigationTitle("Scan History")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+    }
+    /// PL-0482: per package name (scans of one package share it), how many of the six outer
+    /// part scans exist and which are missing. Unusable scans do not count.
+    static func partChecklist(_ entries: [ScanHistoryEntry]) -> [String] {
+        let byName = Dictionary(grouping: entries.filter { $0.degradedReason == nil && $0.partRole != nil }, by: \.packageName)
+        return byName.keys.sorted().map { name in
+            let missing = ScanPartRole.missingOuterScans(present: Set(byName[name]?.compactMap(\.partRole) ?? []))
+            let total = ScanPartRole.outerScans.count
+            return missing.isEmpty ? "\(name): all \(total) part scans done" : "\(name): \(total - missing.count)/\(total) part scans, missing \(missing.map(\.displayName).joined(separator: ", "))"
+        }
     }
     static func stateText(_ state: String) -> String {
         switch state {
