@@ -58,7 +58,6 @@ def create_application(argv: Sequence[str] | None = None) -> QApplication:
     app = QApplication(arguments)
     app.setOrganizationName(ORGANIZATION_NAME)
     app.setApplicationName(APPLICATION_NAME)
-    app.setApplicationDisplayName(APPLICATION_NAME)
     app.setWindowIcon(application_icon())
     return app
 

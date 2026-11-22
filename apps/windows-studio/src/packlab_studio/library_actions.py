@@ -11,6 +11,7 @@ from typing import Any
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -152,10 +153,10 @@ class LibraryActionsBar(QWidget):
 
         self.asset_id = QLineEdit(self)
         self.asset_id.setObjectName("packlab.library.new-asset.id")
-        self.asset_id.setPlaceholderText("asset ID")
+        self.asset_id.setPlaceholderText("e.g. jar-500ml-a1b2c3d4")
         self.asset_name = QLineEdit(self)
         self.asset_name.setObjectName("packlab.library.new-asset.name")
-        self.asset_name.setPlaceholderText("display name")
+        self.asset_name.setPlaceholderText("e.g. Jar 500 ml")
         self.create_button = self._button(
             "Add to library (Design Model / Scan Master)", "new-asset.create", self.create_asset
         )
@@ -170,10 +171,13 @@ class LibraryActionsBar(QWidget):
         self.status.setObjectName("packlab.library.actions-status")
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        create_row = QHBoxLayout()
-        create_row.addWidget(self.asset_id)
-        create_row.addWidget(self.asset_name, 1)
-        create_row.addWidget(self.create_button)
+        create_row = QFormLayout()  # labelled fields (PL-0464)
+        create_row.addRow("Asset ID", self.asset_id)
+        create_row.addRow("Display name", self.asset_name)
+        create_button_row = QHBoxLayout()
+        create_button_row.addWidget(self.create_button)
+        create_button_row.addStretch(1)
+        create_row.addRow("", create_button_row)
         file_row = QHBoxLayout()
         file_row.addWidget(self.backup_button)
         file_row.addWidget(self.restore_button)

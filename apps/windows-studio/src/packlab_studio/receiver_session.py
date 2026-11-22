@@ -49,6 +49,8 @@ class InboxEntry:
     source_channel: str = ""
     image_count: int | None = None
     capture_mode: str = ""
+    device_model: str = ""  # from the import report; display only
+    imported_at: float | None = None  # import report write time (epoch seconds)
 
 
 class ReceiverSession:
@@ -139,7 +141,9 @@ class ReceiverSession:
         if cached is not None:
             return cached
         try:
-            report = json.loads((self.data_root / record.report_location).read_text("utf-8"))
+            report_path = self.data_root / record.report_location
+            report = json.loads(report_path.read_text("utf-8"))
+            device = report.get("device_summary")
             entry = InboxEntry(
                 record.capture_id,
                 record.package_sha256,
@@ -147,6 +151,8 @@ class ReceiverSession:
                 str(report.get("source_channel", "")),
                 int(report.get("image_count", 0)),
                 str(report.get("capture_mode", "")),
+                str(device.get("model", "")) if isinstance(device, dict) else "",
+                report_path.stat().st_mtime,
             )
         except (OSError, ValueError, TypeError):
             return InboxEntry(record.capture_id, record.package_sha256, "report unreadable")

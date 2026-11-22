@@ -546,7 +546,7 @@ def install_design_workbench(window: StudioMainWindow) -> None:
         )
         library_layout = library.layout()
         if isinstance(library_layout, QVBoxLayout):
-            library_layout.insertWidget(0, bar)
+            library_layout.addWidget(bar)  # below the browser, not above search
 
 
 __all__ = ["LabelsView", "install_design_workbench"]

@@ -96,6 +96,7 @@ class MaskCorrectionView(QWidget):
         self.cancel_button = QPushButton("Cancel", self)
         self.undo_button = QPushButton("Undo", self)
         actions = QHBoxLayout()
+        actions.addWidget(QLabel("Brush", self))
         actions.addWidget(self.mode)
         actions.addWidget(self.undo_button)
         actions.addWidget(self.submit_button)

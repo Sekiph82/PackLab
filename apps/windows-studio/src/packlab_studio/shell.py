@@ -11,7 +11,7 @@ from functools import partial
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QSettings, QStandardPaths, Qt, QTimer
-from PySide6.QtGui import QCloseEvent, QGuiApplication, QKeySequence
+from PySide6.QtGui import QActionGroup, QCloseEvent, QGuiApplication, QKeySequence
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .autosave import AutosaveService
@@ -36,6 +38,7 @@ from .engineering_export import (
     ExportSourceKind,
 )
 from .history import Operation
+from .i18n import LANGUAGES, SETTINGS_KEY, set_language, tr, translate_widget_tree
 from .jobs import JobManager
 from .labels_view import install_design_workbench
 from .measure_view import MeasureDesignView
@@ -43,6 +46,7 @@ from .model_viewer import ModelViewerView
 from .navigation import (
     NavigationController,
     NavigationPanel,
+    PageHeader,
     Route,
     RouteStack,
     ScanMasterEditorView,
@@ -155,6 +159,13 @@ class StudioMainWindow(QMainWindow):
         self.setWindowIcon(application_icon())
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.preferences = preferences
+        self._settings = (
+            None
+            if settings_path is None
+            else QSettings(str(settings_path), QSettings.Format.IniFormat)
+        )
+        # Language is applied at construction (restart to change); default English.
+        set_language("en" if self._settings is None else self._settings.value(SETTINGS_KEY, "en"))
         self.navigation = NavigationController()
         self.job_manager = JobManager()
         self.project_manager = ProjectManager(job_manager=self.job_manager)
@@ -234,11 +245,6 @@ class StudioMainWindow(QMainWindow):
         self._default_project_root = (
             None if default_project_root is None else Path(default_project_root)
         )
-        self._settings = (
-            None
-            if settings_path is None
-            else QSettings(str(settings_path), QSettings.Format.IniFormat)
-        )
         self.build_model = BuildModelController(
             self.job_manager, self.project_manager, backend=build_backend
         )
@@ -258,17 +264,32 @@ class StudioMainWindow(QMainWindow):
             # A Design Model opened for Labels takes the Exports page back from the family.
             self.design_workbench.changed.connect(families.yield_export)
         self.navigation_panel.route_requested.connect(self.navigation.navigate)
+        self.page_header = PageHeader()
+        self.page_header.show_route(self.navigation.current_route)
         self.navigation.route_changed.connect(
             lambda value: self.route_stack.show_route(Route(value))
+        )
+        self.navigation.route_changed.connect(
+            lambda value: self.page_header.show_route(Route(value))
         )
         self.navigation.route_changed.connect(
             lambda value: self.navigation_panel.select_route(Route(value))
         )
         splitter = QSplitter(self)
         splitter.setObjectName("packlab.main.splitter")
+        page = QWidget(splitter)
+        page.setObjectName("packlab.page")
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+        page_layout.addWidget(self.page_header)
+        page_layout.addWidget(self.route_stack, 1)
         splitter.addWidget(self.navigation_panel)
-        splitter.addWidget(self.route_stack)
+        splitter.addWidget(page)
+        splitter.setCollapsible(0, False)
+        splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
+        splitter.setSizes([self.navigation_panel.minimumWidth(), 10_000])
         self.setCentralWidget(splitter)
         install_design_workbench(self)
         self.workspace = WorkspaceManager(self, job_manager=self.job_manager)
@@ -276,6 +297,7 @@ class StudioMainWindow(QMainWindow):
         self._sync_project_state()
         self._restore_preferences()
         self._build_menus()
+        translate_widget_tree(self)  # static texts; no-op in English
         if self._default_project_root is not None:
             self.ensure_project()
 
@@ -313,13 +335,49 @@ class StudioMainWindow(QMainWindow):
         self.undo_action.setShortcut(QKeySequence.StandardKey.Undo)
         self.redo_action = edit_menu.addAction("&Redo selection", self.redo)
         self.redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        view_menu = self.menuBar().addMenu("&View")
+        view_menu.setObjectName("packlab.menu.view")
+        for dock in self.workspace.docks.values():
+            view_menu.addAction(dock.toggleViewAction())
         help_menu = self.menuBar().addMenu("&Help")
         help_menu.setObjectName("packlab.menu.help")
         self.diagnostic_bundle_action = help_menu.addAction(
             "Create &diagnostic bundle", self._diagnostic_bundle_from_menu
         )
+        language_menu = help_menu.addMenu("&Language")
+        language_menu.setObjectName("packlab.menu.language")
+        group = QActionGroup(self)
+        self.language_actions = {}
+        settings_view = self.route_stack.views[Route.SETTINGS]
+        assert isinstance(settings_view, SettingsView)
+        for code, name in LANGUAGES.items():
+            action = language_menu.addAction(name, partial(self.set_ui_language, code))
+            action.setCheckable(True)
+            action.setChecked(settings_view.language.currentData() == code)
+            group.addAction(action)
+            self.language_actions[code] = action
+        settings_view.language.activated.connect(
+            lambda index: self.set_ui_language(str(settings_view.language.itemData(index)))
+        )
         self.project_manager.add_listener(lambda _metadata: self._refresh_project_menu())
         self._refresh_project_menu()
+
+    def set_ui_language(self, code: str) -> None:
+        """Persist the UI language; it is applied on the next start (PL-0464)."""
+        if code not in LANGUAGES:
+            return
+        if self._settings is not None:
+            self._settings.setValue(SETTINGS_KEY, code)
+        settings_view = self.route_stack.views[Route.SETTINGS]
+        if isinstance(settings_view, SettingsView):
+            settings_view.language.setCurrentIndex(settings_view.language.findData(code))
+            # Shown in both languages: the current UI may not be the chosen one.
+            settings_view.language_note.setText(
+                "Language changes apply after restarting PackLab Studio.\n"
+                "Dil değişikliği PackLab Studio yeniden başlatıldığında uygulanır."
+            )
+        self.language_actions[code].setChecked(True)
+        self._menu_status(tr("Language changes apply after restarting PackLab Studio."))
 
     def recent_projects(self) -> list[str]:
         if self._settings is None:
@@ -358,9 +416,9 @@ class StudioMainWindow(QMainWindow):
             return
         try:
             self.new_project(chosen, Path(chosen).name)
-            self._menu_status(f"Created project {chosen}")
+            self._menu_status(tr("Created project {path}").format(path=chosen))
         except Exception as error:
-            self._menu_status(f"New project failed: {error}")
+            self._menu_status(tr("New project failed: {error}").format(error=error))
 
     def _open_project_from_menu(self) -> None:
         chosen = self.choose_open_project_path()
@@ -370,16 +428,16 @@ class StudioMainWindow(QMainWindow):
     def _open_project_path(self, path: str) -> None:
         try:
             self.open_project(path)
-            self._menu_status(f"Opened project {path}")
+            self._menu_status(tr("Opened project {path}").format(path=path))
         except Exception as error:
-            self._menu_status(f"Open project failed: {error}")
+            self._menu_status(tr("Open project failed: {error}").format(error=error))
 
     def _close_project_from_menu(self) -> None:
         try:
             self.close_project()
-            self._menu_status("Project closed")
+            self._menu_status(tr("Project closed"))
         except Exception as error:  # e.g. a build is still running
-            self._menu_status(f"Close project failed: {error}")
+            self._menu_status(tr("Close project failed: {error}").format(error=error))
 
     # ------------------------------------------------- history, autosave, recovery (PL-0456)
 
@@ -409,7 +467,7 @@ class StudioMainWindow(QMainWindow):
 
     def _on_draft_changed(self) -> None:
         self.setWindowModified(True)
-        self.save_indicator.setText("Design Model: unsaved edits (autosave pending)")
+        self.save_indicator.setText(tr("Design Model: unsaved edits (autosave pending)"))
         self.autosave_timer.start()
 
     def autosave_draft(self) -> bool:
@@ -441,7 +499,7 @@ class StudioMainWindow(QMainWindow):
         self.setWindowModified(False)
         if self.project_manager.recovery is not None:
             self.project_manager.recovery.discard(AUTOSAVE_DRAFT_JOB)  # draft is superseded
-        self.save_indicator.setText("All changes saved")
+        self.save_indicator.setText(tr("All changes saved"))
 
     def show_recovery_dialog(self) -> RecoveryDialog | None:
         if not self.recovery_items:
@@ -483,9 +541,9 @@ class StudioMainWindow(QMainWindow):
     def _diagnostic_bundle_from_menu(self) -> None:
         try:
             bundle = self.create_diagnostic_bundle()
-            self._menu_status(f"Diagnostic bundle written: {bundle.path}")
+            self._menu_status(tr("Diagnostic bundle written: {path}").format(path=bundle.path))
         except Exception as error:
-            self._menu_status(f"Diagnostic bundle failed: {error}")
+            self._menu_status(tr("Diagnostic bundle failed: {error}").format(error=error))
 
     # ------------------------------------------------------------- build model (PL-0443/0453)
 
