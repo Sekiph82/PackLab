@@ -470,11 +470,15 @@ TURKISH: dict[str, str] = {
     "Assembled (upside down)": "Kapaklı ambalaj (ters)",
     "Body interior": "Gövde içi",
     "Scan role:": "Tarama rolü:",
-    "Parts:": "Parçalar:",
+    "Parts in this project:": "Bu projedeki parçalar:",
     "upright": "düz",
     "upside down": "ters",
     "interior": "iç",
     "present": "var",
     "missing": "eksik",
     "Scan role not saved: {error}": "Tarama rolü kaydedilmedi: {error}",
+    "Scan roles unreadable: {error}": "Tarama rolleri okunamadı: {error}",
+    "Project file has {count} invalid scan role entries; they are ignored.": (
+        "Proje dosyasında {count} geçersiz tarama rolü kaydı var; yok sayıldı."
+    ),
 }

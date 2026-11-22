@@ -82,12 +82,36 @@ def effective_role(entry: InboxEntry, overrides: dict[str, str] | None = None) -
     return (overrides or {}).get(entry.package_sha256, entry.part_role)
 
 
-def parts_summary_text(entries: list[InboxEntry], overrides: dict[str, str] | None = None) -> str:
-    """One line per part: which of its scans (upright/upside down/interior) are present."""
-    summary = parts_summary(
-        effective_role(entry, overrides) for entry in entries if entry.status == "imported"
-    )
-    lines = [tr("Parts:")]
+def counted_role(
+    entry: InboxEntry,
+    overrides: dict[str, str] | None = None,
+    built_in_project: set[str] | frozenset[str] = frozenset(),
+) -> str | None:
+    """Role a scan contributes to the open project's Parts summary, else None.
+
+    The receiver inbox is shared by every project, so only scans the owner assigned in
+    this project, or scans built in it whose manifest declared a role, count. Role-less
+    (pre-PL-0482) scans never count until the owner assigns them.
+    """
+    if entry.status != "imported":
+        return None
+    digest = entry.package_sha256
+    if overrides and digest in overrides:
+        return overrides[digest]
+    if digest in built_in_project and entry.role_declared:
+        return entry.part_role
+    return None
+
+
+def parts_summary_text(
+    entries: list[InboxEntry],
+    overrides: dict[str, str] | None = None,
+    built_in_project: set[str] | frozenset[str] = frozenset(),
+) -> str:
+    """One line per part: which of its scans (upright/upside down/interior) this project has."""
+    roles = (counted_role(entry, overrides, built_in_project) for entry in entries)
+    summary = parts_summary(role for role in roles if role is not None)
+    lines = [tr("Parts in this project:")]
     for part, views in summary.items():
         states = ", ".join(
             f"{tr(_VIEW_LABELS[view])} {tr('present') if present else tr('missing')}"
@@ -526,7 +550,9 @@ class CaptureInboxView(QWidget):
         self.inbox_list.clear()
         style = self.style()
         overrides = self._overrides()
-        self.parts_label.setText(parts_summary_text(self._shown_entries, overrides))
+        self.parts_label.setText(
+            parts_summary_text(self._shown_entries, overrides, self._built_in_project())
+        )
         for entry in self._shown_entries:
             text, details = inbox_row(entry, effective_role(entry, overrides))
             icon = style.standardIcon(
@@ -552,9 +578,24 @@ class CaptureInboxView(QWidget):
         if self.project_manager is None:
             return {}
         try:
-            return self.project_manager.scan_part_roles()
-        except Exception:  # unreadable project: show manifest roles, never crash
+            roles = self.project_manager.scan_part_roles()
+        except Exception as error:  # unreadable project: show manifest roles, never crash
+            self.status_label.setText(tr("Scan roles unreadable: {error}").format(error=error))
             return {}
+        ignored = getattr(self.project_manager, "scan_part_roles_ignored", 0)
+        if ignored:
+            self.status_label.setText(
+                tr("Project file has {count} invalid scan role entries; they are ignored.").format(
+                    count=ignored
+                )
+            )
+        return roles
+
+    def _built_in_project(self) -> set[str]:
+        from .build_model import latest_builds  # build_model imports this module
+
+        layout = getattr(self.project_manager, "layout", None)
+        return set(latest_builds(None if layout is None else layout.root))
 
     def _selected_entry(self) -> InboxEntry | None:
         row = self.inbox_list.currentRow()
@@ -577,6 +618,8 @@ class CaptureInboxView(QWidget):
         if entry is None or self.project_manager is None:
             return
         role = str(self.role_combo.currentData())
+        if counted_role(entry, self._overrides(), self._built_in_project()) == role:
+            return  # already this project's role: no revision, no undo step
         try:
             self.project_manager.set_scan_part_role(entry.package_sha256, role)
         except Exception as error:

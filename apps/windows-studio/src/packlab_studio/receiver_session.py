@@ -53,6 +53,7 @@ class InboxEntry:
     device_model: str = ""  # from the import report; display only
     imported_at: float | None = None  # import report write time (epoch seconds)
     part_role: str = DEFAULT_PART_ROLE  # manifest role (PL-0482); old reports = assembled
+    role_declared: bool = False  # the manifest itself named the role
 
 
 class ReceiverSession:
@@ -157,6 +158,7 @@ class ReceiverSession:
                 str(device.get("model", "")) if isinstance(device, dict) else "",
                 report_path.stat().st_mtime,
                 str(role) if is_part_role(role) else DEFAULT_PART_ROLE,
+                is_part_role(role),
             )
         except (OSError, ValueError, TypeError):
             return InboxEntry(record.capture_id, record.package_sha256, "report unreadable")

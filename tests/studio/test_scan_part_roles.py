@@ -52,8 +52,11 @@ def test_inbox_entry_carries_manifest_role_and_old_reports_are_assembled(
     session = _session(tmp_path)
     session.import_file(_package(tmp_path / "a.packscan", repo_root, "flip", "body_flipped"))
     session.import_file(_package(tmp_path / "b.packscan", repo_root, "legacy", None))
-    roles = {entry.capture_id: entry.part_role for entry in session.entries()}
-    assert roles == {"flip": "body_flipped", "legacy": "assembled"}
+    roles = {e.capture_id: (e.part_role, e.role_declared) for e in session.entries()}
+    assert roles == {"flip": ("body_flipped", True), "legacy": ("assembled", False)}
+    legacy = next(r for r in session.index_records() if r.capture_id == "legacy")
+    legacy_report = json.loads((session.data_root / str(legacy.report_location)).read_text())
+    assert legacy_report["part_role"] is None  # not declared, never invented
     record = next(r for r in session.index_records() if r.capture_id == "flip")
     report_path = session.data_root / str(record.report_location)
     report = json.loads(report_path.read_text("utf-8"))
@@ -62,7 +65,8 @@ def test_inbox_entry_carries_manifest_role_and_old_reports_are_assembled(
     del report["part_role"]
     report_path.write_text(json.dumps(report), encoding="utf-8")
     fresh = _session(tmp_path)
-    assert {e.capture_id: e.part_role for e in fresh.entries()}["flip"] == "assembled"
+    flip = next(e for e in fresh.entries() if e.capture_id == "flip")
+    assert (flip.part_role, flip.role_declared) == ("assembled", False)
 
 
 def test_project_records_roles_persists_and_undoes(tmp_path) -> None:
@@ -97,19 +101,70 @@ def test_project_records_roles_persists_and_undoes(tmp_path) -> None:
     assert reopened.scan_part_roles() == {}
 
 
-def test_parts_summary_text_uses_project_overrides_and_turkish() -> None:
-    entries = [
-        InboxEntry(DIGEST, DIGEST, "imported", part_role="body"),
-        InboxEntry("b", "b" * 64, "imported"),  # legacy: assembled
-        InboxEntry("c", "c" * 64, "report unreadable", part_role="closure"),
+def test_tampered_project_roles_are_ignored_with_count_and_dropped_on_save(tmp_path) -> None:
+    manager = ProjectManager()
+    manager.new_project(tmp_path / "project", "Jar")
+    manager.set_scan_part_role(DIGEST, "body")
+    authority_path = tmp_path / "project/working/authority.json"
+    authority = json.loads(authority_path.read_text("utf-8"))
+    authority["state"]["scan_part_roles"] = {DIGEST: "body", "../evil": "body", "b" * 64: "lid"}
+    authority_path.write_text(json.dumps(authority), encoding="utf-8")
+    assert manager.scan_part_roles() == {DIGEST: "body"}
+    assert manager.scan_part_roles_ignored == 2
+    manager.set_scan_part_role("c" * 64, "closure")
+    assert manager.scan_part_roles() == {DIGEST: "body", "c" * 64: "closure"}
+    assert manager.scan_part_roles_ignored == 0
+    authority = json.loads(authority_path.read_text("utf-8"))
+    authority["state"]["scan_part_roles"] = ["not", "a", "map"]
+    authority_path.write_text(json.dumps(authority), encoding="utf-8")
+    assert manager.scan_part_roles() == {}
+    assert manager.scan_part_roles_ignored == 1
+
+
+def test_role_events_are_compact_and_bounded(tmp_path, monkeypatch) -> None:
+    from packlab_studio import project as project_module
+
+    monkeypatch.setattr(project_module, "_PART_ROLE_EVENT_LIMIT", 3)
+    manager = ProjectManager()
+    manager.new_project(tmp_path / "project", "Jar")
+    for role in ("body", "body_flipped", "closure", "closure_flipped"):
+        manager.set_scan_part_role(DIGEST, role)
+    state = json.loads((tmp_path / "project/working/state.json").read_text("utf-8"))
+    events = state["scan_part_role_events"]
+    assert [(e["previous_role"], e["role"]) for e in events] == [
+        ("body", "body_flipped"),
+        ("body_flipped", "closure"),
+        ("closure", "closure_flipped"),
     ]
-    text = parts_summary_text(entries, {DIGEST: "body_flipped"})
-    assert "Body: upright missing, upside down present, interior missing" in text
-    assert "Assembled: upright present, upside down missing" in text
-    assert "Closure: upright missing, upside down missing" in text
+    assert all(e["package_sha256"] == DIGEST for e in events)
+
+
+def test_parts_summary_counts_only_this_projects_scans() -> None:
+    entries = [
+        InboxEntry(DIGEST, DIGEST, "imported", part_role="body", role_declared=True),
+        InboxEntry("b", "b" * 64, "imported"),  # legacy, role-less: assembled by default
+        InboxEntry("c", "c" * 64, "report unreadable", part_role="closure", role_declared=True),
+        InboxEntry("f", "f" * 64, "imported", part_role="closure", role_declared=True),
+        InboxEntry("d", "d" * 64, "imported", part_role="body_interior", role_declared=True),
+    ]
+    # Nothing assigned or built here: foreign inbox scans never mark parts present.
+    empty = parts_summary_text(entries)
+    assert "present" not in empty
+    # Built in this project: declared roles count, role-less legacy scans do not.
+    built = parts_summary_text(entries, {}, {DIGEST, "b" * 64, "d" * 64})
+    assert "Body: upright present, upside down missing, interior present" in built
+    assert "Assembled: upright missing, upside down missing" in built
+    assert "Closure: upright missing, upside down missing" in built  # "f" is foreign
+    # Owner assignment counts even for a legacy scan and overrides the manifest.
+    assigned = parts_summary_text(entries, {"b" * 64: "assembled", DIGEST: "body_flipped"}, set())
+    assert "Assembled: upright present" in assigned
+    assert "Body: upright missing, upside down present" in assigned
     try:
         i18n.set_language("tr")
-        assert "Gövde: düz var, ters eksik, iç eksik" in parts_summary_text(entries, {})
+        assert "Gövde: düz var, ters eksik, iç var" in parts_summary_text(
+            entries, {}, {DIGEST, "d" * 64}
+        )
+        assert parts_summary_text([]).startswith("Bu projedeki parçalar:")
     finally:
         i18n.set_language("en")
 
@@ -133,15 +188,23 @@ def test_capture_inbox_role_combo_saves_to_project_and_build_page_shows_role(
         view.inbox_list.setCurrentRow(0)
         assert not view.role_combo.isEnabled()  # no project open: nowhere to save
         assert "Closure" in view.inbox_list.item(0).text()
-        assert "Closure: upright present" in view.parts_label.text()
+        assert "present" not in view.parts_label.text()  # no project: nothing counted
 
         window.project_manager.new_project(tmp_path / "project", "Jar")
         view.inbox_list.setCurrentRow(0)
         assert view.role_combo.isEnabled()
         assert view.role_combo.currentData() == "closure"
+        assert "present" not in view.parts_label.text()  # in the inbox, not in this project
+        revision = window.project_manager.metadata.revision
+        view.role_combo.activated.emit(view.role_combo.currentIndex())  # confirm "closure"
+        digest = view._shown_entries[0].package_sha256
+        assert window.project_manager.scan_part_roles() == {digest: "closure"}
+        assert window.project_manager.metadata.revision == revision + 1
+        assert "Closure: upright present" in view.parts_label.text()
+        view.role_combo.activated.emit(view.role_combo.currentIndex())  # same again: no-op
+        assert window.project_manager.metadata.revision == revision + 1
         view.role_combo.setCurrentIndex(view.role_combo.findData("closure_flipped"))
         view.role_combo.activated.emit(view.role_combo.currentIndex())
-        digest = view._shown_entries[0].package_sha256
         assert window.project_manager.scan_part_roles() == {digest: "closure_flipped"}
         assert "Closure (upside down)" in view.inbox_list.item(0).text()
         assert "part_role: closure_flipped (manifest: closure)" in view.inbox_list.item(0).toolTip()

@@ -1029,7 +1029,7 @@ class BuildModelView(QWidget):
         """One row per imported scan with the status of its latest build in this project."""
         builds = latest_builds(project_root)
         self.history.clear()
-        self.parts_label.setText(parts_summary_text(entries, roles))
+        self.parts_label.setText(parts_summary_text(entries, roles, set(builds)))
         for entry in entries:
             if entry.status != "imported":
                 continue
