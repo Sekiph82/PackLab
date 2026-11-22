@@ -9,6 +9,12 @@ project. Merged clouds are in the reference scan's mat frame, mm, METRIC_UNVERIF
 cloud (``packlab_core.part_placement``) in a background job and stores the placed clouds
 (``derived/parts/*-placed-*.ply``), the scan-level assembly graph revision and clearance
 diagnostics, or the typed refusal, in the project.
+
+"Merge interior" (PL-0489, on Body when a body-interior scan exists) aligns the interior scan to
+the Body cloud by the rim (``packlab_core.interior_merge``) in a background job and stores the
+Body + scanned interior cloud (``derived/parts/body-interior-*.ply``, body points first), depth
+coverage per band and provenance, or the typed refusal. Unscanned depth is never filled; the
+Body cloud used by Measure & Design is unchanged.
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ import os
 import tempfile
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -50,9 +56,11 @@ STATUS_TEXT = {
     "refused": "refused",
     "combining": "combining…",
     "placed": "placed",
+    "merged": "merged",
 }
 _ROLE = Qt.ItemDataRole.UserRole
 PLACEMENT = "placement"  # job key of the closure-on-body placement
+INTERIOR = "interior"  # job key of the body-interior merge
 
 
 @dataclass(frozen=True)
@@ -71,6 +79,7 @@ class PartState:
     reason: str
     cloud: Path | None  # what the viewer shows for this part
     record: dict[str, Any] | None
+    interior: PartScan | None = None  # newest body-interior scan (Body only)
 
 
 def part_scans(
@@ -85,8 +94,8 @@ def part_scans(
         if role is None or build is None or build["state"] != "succeeded" or not build["model"]:
             continue
         part, _, view = role.partition("_")
-        if part not in found or view not in ("", "flipped"):
-            continue  # interior scans are PL-0489
+        if part not in found or view not in ("", "flipped", "interior"):
+            continue
         view = view or "upright"
         scan = PartScan(entry.package_sha256, Path(build["model"]), float(build["time"]))
         if view not in found[part] or found[part][view].time < scan.time:
@@ -181,6 +190,9 @@ def part_states(
                 states[part] = PartState(part, up, fl, "ready", reason, up.model, None)
             else:
                 states[part] = PartState(part, up, fl, "combined", "", cloud, record)
+    for part, scans_of_part in scans.items():
+        if "interior" in scans_of_part:
+            states[part] = replace(states[part], interior=scans_of_part["interior"])
     return states
 
 
@@ -229,6 +241,55 @@ def placement_state(
             return "stale", record, ()
         placed.append(path)
     return "placed", record, tuple(placed)
+
+
+def interior_state(
+    manager: ProjectManager, states: dict[str, PartState]
+) -> tuple[str, dict[str, Any] | None, Path | None]:
+    """(none / merged / refused / stale, record, merged Body + interior cloud).
+
+    Stale when the Body cloud (path, digest, status, combine scale) or the newest body-interior
+    scan differs from what the merge used, or the merged cloud is missing or changed on disk.
+    """
+    layout, record = manager.layout, manager.interior_merge()
+    body = states.get("body")
+    if layout is None or record is None:
+        return "none", None, None
+    sources = record.get("sources") or {}
+    stored, scan = sources.get("body") or {}, sources.get("interior") or {}
+    if (
+        body is None
+        or body.cloud is None
+        or body.interior is None
+        or stored.get("cloud_path") != _rel(layout.root, body.cloud)
+        or stored.get("status") != body.status
+        or stored.get("scale_key") != _scale_key(body)
+        or stored.get("cloud_sha256") != _cached_sha(body.cloud)
+        or scan.get("package_sha256") != body.interior.package_sha256
+        or scan.get("model_path") != _rel(layout.root, body.interior.model)
+    ):
+        return "stale", record, None
+    if record.get("status") != "merged":
+        return "refused", record, None
+    try:
+        path = layout.path("derived", str(record["artifact_path"]).removeprefix("derived/"))
+        fresh = _stat(path) == record["file_stat"]
+    except Exception:
+        return "stale", record, None
+    return ("merged", record, path) if fresh else ("stale", record, None)
+
+
+def depth_ranges(bands: list[dict[str, Any]], key: str) -> str:
+    """'2-60, 64-70' from consecutive bands where ``bands[i][key]`` is true (depth in mm)."""
+    ranges: list[list[float]] = []
+    for band in bands:
+        if not band[key]:
+            continue
+        if ranges and abs(ranges[-1][1] - band["top_mm"]) < 1e-6:
+            ranges[-1][1] = band["bottom_mm"]
+        else:
+            ranges.append([band["top_mm"], band["bottom_mm"]])
+    return ", ".join(f"{top:.0f}-{bottom:.0f}" for top, bottom in ranges)
 
 
 # ---------------------------------------------------------------- combine job
@@ -316,6 +377,7 @@ class ScenePanel(QWidget):
     part_selected = Signal(object, object)  # part (str | None), tuple[Path, ...] to show
     combine_finished = Signal(str, str)  # part, outcome (combined/refused/cancelled/failed)
     placement_finished = Signal(str)  # outcome (placed/refused/cancelled/failed)
+    interior_finished = Signal(str)  # outcome (merged/refused/cancelled/failed)
 
     def __init__(
         self,
@@ -326,12 +388,16 @@ class ScenePanel(QWidget):
         scale_for: Callable[[Any], tuple[Any, ...]] = marker_scale,
         aligner: Callable[..., Any] | None = None,
         placer: Callable[..., Any] | None = None,
+        interior_merger: Callable[..., Any] | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName("packlab.scene.panel")
         self.projects, self.jobs = project_manager, job_manager
         self.entries_provider = entries_provider
         self.scale_for, self.aligner, self.placer = scale_for, aligner, placer
+        self.interior_merger = interior_merger
+        # (status none/merged/refused/stale, record, merged Body + interior cloud)
+        self.interior: tuple[str, dict[str, Any] | None, Path | None] = ("none", None, None)
         self.states: dict[str, PartState] = {}
         # (status none/placed/refused/stale, record, placed body + closure clouds)
         self.placement: tuple[str, dict[str, Any] | None, tuple[Path, ...]] = ("none", None, ())
@@ -358,9 +424,13 @@ class ScenePanel(QWidget):
         self.place_button = QPushButton(tr("Place closure on body"))
         self.place_button.setObjectName("packlab.scene.place")
         self.place_button.clicked.connect(self.place)
+        self.interior_button = QPushButton(tr("Merge interior"))
+        self.interior_button.setObjectName("packlab.scene.interior")
+        self.interior_button.clicked.connect(self.merge_interior)
         buttons = QHBoxLayout()
         buttons.addWidget(self.combine_button)
         buttons.addWidget(self.place_button)
+        buttons.addWidget(self.interior_button)
         buttons.addWidget(self.cancel_button)
         layout = QVBoxLayout(self)
         layout.addWidget(self.tree, 1)
@@ -384,10 +454,12 @@ class ScenePanel(QWidget):
             self.states = part_states(self.projects, entries, overrides)
             self.view = self.projects.part_view()
             self.placement = placement_state(self.projects, self.states)
+            self.interior = interior_state(self.projects, self.states)
         except Exception as error:  # unreadable inbox/project: panel stays usable
             self.details.setText(tr("Parts unavailable: {error}").format(error=error))
             self.states, self.view = {}, {"part": None, "hidden": []}
             self.placement = ("none", None, ())
+            self.interior = ("none", None, None)
         self.tree.blockSignals(True)
         try:
             assembled = self.items["assembled"]
@@ -436,6 +508,8 @@ class ScenePanel(QWidget):
         part = self.view["part"]
         state = self.states.get(part or "")
         paths = [state.cloud] if state is not None and state.cloud is not None else []
+        if part == "body" and self.interior[0] == "merged":
+            paths = [cast(Path, self.interior[2])]  # Body + scanned interior
         if part == "assembled":
             status, _record, placed = self.placement
             for index, other in enumerate(("body", "closure")):
@@ -471,7 +545,12 @@ class ScenePanel(QWidget):
         self.place_button.setEnabled(
             part == "assembled" and not placing and all(s and s.cloud for s in ready)
         )
-        self.cancel_button.setEnabled(running or (part == "assembled" and placing))
+        merging = INTERIOR in self._running_parts()
+        self.interior_button.setVisible(bool(part == "body" and state and state.interior))
+        self.interior_button.setEnabled(bool(state and state.cloud) and not merging)
+        self.cancel_button.setEnabled(
+            running or (part == "assembled" and placing) or (part == "body" and merging)
+        )
         if state is None:
             self.details.setText(tr("Select a part to show it in Model Viewer."))
             return
@@ -489,7 +568,46 @@ class ScenePanel(QWidget):
             lines.append(tr("Units: mm in the mat frame, METRIC_UNVERIFIED."))
         if part == "assembled":
             lines.extend(self._placement_lines(placing))
+        if part == "body" and state.interior is not None:
+            lines.extend(self._interior_lines(merging))
         self.details.setText("\n".join(lines))
+
+    def _interior_lines(self, merging: bool) -> list[str]:
+        status, record, _path = self.interior
+        if merging:
+            return [tr("Merging the body interior…")]
+        if status == "merged" and record is not None:
+            lines = [
+                tr("Interior merged (rim alignment, overlap {overlap:.0%}).").format(
+                    overlap=record["rim_overlap"]
+                ),
+                tr(
+                    "Interior scanned to {depth:.0f} mm below the rim (rim {rim:.0f} mm above "
+                    "the mat), wall about {wall:.1f} mm."
+                ).format(
+                    depth=record["deepest_covered_mm"],
+                    rim=record["interior_depth_mm"],
+                    wall=record.get("wall_mm") or 0.0,
+                ),
+            ]
+            if record.get("floor_depth_mm") is not None:
+                lines.append(
+                    tr("Inner floor at {floor:.0f} mm below the rim; below it is the base.").format(
+                        floor=record["floor_depth_mm"]
+                    )
+                )
+            missing = depth_ranges(record["bands"], "missing")
+            if missing:
+                lines.append(
+                    tr("Not scanned (not filled): {ranges} mm depth.").format(ranges=missing)
+                )
+            lines.append(tr("Units: mm in the mat frame, METRIC_UNVERIFIED."))
+            return lines
+        if status == "refused" and record is not None:
+            return [tr("Interior merge refused: {reason}").format(reason=record["reason"])]
+        if status == "stale":
+            return [tr("Body or interior scan changed since the merge; merge again.")]
+        return [tr("Body interior scan present: use Merge interior.")]
 
     def _placement_lines(self, placing: bool) -> list[str]:
         status, record, _placed = self.placement
@@ -555,7 +673,8 @@ class ScenePanel(QWidget):
         self.refresh()  # set_part_view notifies only on a new revision
 
     def cancel(self, part: str | None) -> None:
-        for key in (part or "", PLACEMENT if part == "assembled" else ""):
+        extra = {"assembled": PLACEMENT, "body": INTERIOR}.get(part or "", "")
+        for key in (part or "", extra):
             job_id = self._jobs_by_part.get(key)
             if job_id is not None and self._job_active(job_id):
                 self.jobs.request_cancel(job_id)
@@ -769,18 +888,14 @@ class ScenePanel(QWidget):
         project_id: str,
         token: threading.Event,
     ) -> None:
-        from packlab_core.multiscan_alignment import ScanInput
         from packlab_core.part_placement import (
             METHOD,
             METRIC_STATUS,
             PartInput,
             PartPlacementError,
-            part_from_scan,
             place_closure_on_body,
             scan_assembly_graph,
         )
-
-        from . import measure_design as md
 
         jobs = cast(JobManager, _MainThreadJobs(self.jobs, self._invoker))
         placer = self.placer or place_closure_on_body
@@ -804,36 +919,7 @@ class ScenePanel(QWidget):
             )
 
         def load(part: str, state: PartState) -> PartInput:
-            assert state.cloud is not None
-            model = md.load_model(state.cloud)
-            source = sources[part]
-            source["cloud_sha256"] = model.sha256
-            if state.status == "combined":  # already object points in its mat frame, mm
-                source.update(frame="part_combine_mat_frame_mm", scale_source="part_combine")
-                return PartInput(f"{part}-{model.sha256[:12]}", model.points, model.colors)
-            if state.upright is None or state.cloud != state.upright.model:
-                raise PartPlacementError(
-                    tr("{part}: only the upside-down scan exists; scan it upright").format(
-                        part=tr(PART_LABELS[part])
-                    ),
-                    ("part_missing",),
-                )
-            try:
-                scale = self.scale_for(model)  # (mm_per_unit, source[, uncertainty])
-            except ValueError as error:
-                raise PartPlacementError(
-                    f"{part} scan scale unavailable: {error}", ("scale_unavailable",)
-                ) from error
-            source.update(
-                frame="single_scan_mat_frame_mm",
-                mm_per_unit=float(scale[0]),
-                scale_source=scale[1],
-                scale_uncertainty=float(scale[2]) if len(scale) > 2 else None,
-            )
-            scan = ScanInput(
-                f"{part}-{model.sha256[:12]}", model.points, model.colors, mm_per_unit=scale[0]
-            )
-            return part_from_scan(scan)
+            return cast(PartInput, self._part_input(part, state, sources[part]))
 
         for part, state in states.items():  # refusals stay matched to the parts they saw
             assert state.cloud is not None
@@ -900,6 +986,190 @@ class ScenePanel(QWidget):
                 return finish("cancelled")
             finish("failed", error=f"{type(error).__name__}: {error}")
 
+    def _part_input(
+        self, part: str, state: PartState, source: dict[str, Any], *, upright_only: bool = True
+    ) -> Any:
+        """PartInput for a part's cloud (combined: as is; single scan: marker scale + mat
+        frame); records frame / scale provenance in ``source``. Raises PartPlacementError."""
+        from packlab_core.multiscan_alignment import ScanInput
+        from packlab_core.part_placement import PartInput, PartPlacementError, part_from_scan
+
+        from . import measure_design as md
+
+        assert state.cloud is not None
+        model = md.load_model(state.cloud)
+        source["cloud_sha256"] = model.sha256
+        if state.status == "combined":  # already object points in its mat frame, mm
+            source.update(frame="part_combine_mat_frame_mm", scale_source="part_combine")
+            return PartInput(f"{part}-{model.sha256[:12]}", model.points, model.colors)
+        if upright_only and (state.upright is None or state.cloud != state.upright.model):
+            raise PartPlacementError(
+                tr("{part}: only the upside-down scan exists; scan it upright").format(
+                    part=tr(PART_LABELS[part])
+                ),
+                ("part_missing",),
+            )
+        try:
+            scale = self.scale_for(model)  # (mm_per_unit, source[, uncertainty])
+        except ValueError as error:
+            raise PartPlacementError(
+                f"{part} scan scale unavailable: {error}", ("scale_unavailable",)
+            ) from error
+        source.update(
+            frame="single_scan_mat_frame_mm",
+            mm_per_unit=float(scale[0]),
+            scale_source=scale[1],
+            scale_uncertainty=float(scale[2]) if len(scale) > 2 else None,
+        )
+        scan = ScanInput(
+            f"{part}-{model.sha256[:12]}", model.points, model.colors, mm_per_unit=scale[0]
+        )
+        return part_from_scan(scan)
+
+    # ------------------------------------------------------------ body interior (PL-0489)
+
+    def merge_interior(self) -> str | None:
+        """Start the Merge-interior background job on Body; returns the job id."""
+        layout, metadata = self.projects.layout, self.projects.metadata
+        body = self.states.get("body")
+        if layout is None or body is None or body.cloud is None or body.interior is None:
+            return None
+        if INTERIOR in self._running_parts():
+            return self._jobs_by_part[INTERIOR]
+        assert metadata is not None
+        job = self.jobs.create(tr("Merge interior"), "interior-merge")
+        token = threading.Event()
+        self._cancel[INTERIOR] = token
+
+        def hook() -> bool:
+            token.set()
+            return False  # the worker confirms at its next checkpoint
+
+        self.jobs.register_cancel_hook(job.job_id, hook)
+        thread = threading.Thread(
+            target=self._interior_work,
+            args=(job.job_id, body, layout, metadata.project_id, token),
+            name="packlab-interior-merge",
+            daemon=True,
+        )
+        self._jobs_by_part[INTERIOR] = job.job_id
+        self._threads[INTERIOR] = thread
+        self.jobs.start(job.job_id)
+        thread.start()
+        self.refresh()
+        return job.job_id
+
+    def _interior_work(
+        self, job_id: str, body: PartState, layout: Any, project_id: str, token: threading.Event
+    ) -> None:
+        from packlab_core.interior_merge import METHOD, METRIC_STATUS, InteriorMergeError
+        from packlab_core.interior_merge import merge_interior as core_merge
+        from packlab_core.part_placement import PartPlacementError
+
+        jobs = cast(JobManager, _MainThreadJobs(self.jobs, self._invoker))
+        merger = self.interior_merger or core_merge
+        root = layout.root
+        written: list[Path] = []
+        assert body.cloud is not None and body.interior is not None
+        interior_scan = body.interior
+        sources: dict[str, dict[str, Any]] = {
+            "body": {
+                "status": body.status,
+                "cloud_path": _rel(root, body.cloud),
+                "scale_key": _scale_key(body),
+            },
+            "interior": {
+                "role": "body_interior",
+                "package_sha256": interior_scan.package_sha256,
+                "model_path": _rel(root, interior_scan.model),
+            },
+        }
+        record: dict[str, Any] = {
+            "created_at": datetime.now(UTC).isoformat(),
+            "method": METHOD,
+            "metric_status": METRIC_STATUS,
+            "sources": sources,
+            "artifact_path": None,
+        }
+
+        def cancelled() -> bool:
+            return token.is_set() or jobs.get(job_id).state is JobState.CANCELLED
+
+        def finish(outcome: str, result: dict[str, Any] | None = None, error: str = "") -> None:
+            self._invoker.call(
+                self._finish, job_id, INTERIOR, outcome, result, error, project_id, written
+            )
+
+        try:
+            jobs.update_progress(job_id, 0.1, tr("Loading {part}").format(part=tr("Body")))
+            body_input = self._part_input("body", body, sources["body"])
+            if cancelled():
+                return finish("cancelled")
+            jobs.update_progress(job_id, 0.3, tr("Loading the interior scan"))
+            scan_state = PartState("body", None, None, "single", "", interior_scan.model, None)
+            interior_input = self._part_input(
+                "body-interior", scan_state, sources["interior"], upright_only=False
+            )
+            if cancelled():
+                return finish("cancelled")
+            jobs.update_progress(job_id, 0.55, tr("Aligning the interior by the rim"))
+            result = merger(body_input, interior_input)
+            if cancelled():
+                return finish("cancelled")
+            jobs.update_progress(job_id, 0.9, tr("Writing the body with its interior"))
+            folder = layout.path("derived", "parts")
+            target = write_cloud(folder, "body-interior", result.points, result.colors)
+            written.append(target)
+            if cancelled():
+                return finish("cancelled")
+            counts = np.bincount(result.source_index, minlength=2)
+            record.update(
+                status="merged",
+                reason=None,
+                artifact_path=f"derived/parts/{target.name}",
+                file_sha256=_sha256(target),
+                file_stat=_stat(target),
+                point_order="body_points_then_interior_points",
+                point_counts={"body": int(counts[0]), "interior": int(counts[1])},
+                source_ids=list(result.source_ids),
+                matrix=_jsonable(result.matrix),
+                rim={k: float(v) for k, v in result.rim.items()},
+                rim_overlap=float(result.rim_overlap),
+                rmse_mm=_jsonable(float(result.rmse_mm)),
+                yaw_determined=bool(result.yaw_determined),
+                reachability={k: _jsonable(v) for k, v in vars(result.reachability).items()},
+                interior_depth_mm=float(result.reachability.depth_mm),
+                deepest_covered_mm=float(result.deepest_covered_mm),
+                bands=[
+                    {
+                        "top_mm": band.top_mm,
+                        "bottom_mm": band.bottom_mm,
+                        "coverage": band.coverage,
+                        "points": band.points,
+                        "kind": band.kind,  # covered / missing / base (under the floor)
+                        "missing": band.kind == "missing",
+                    }
+                    for band in result.bands
+                ],
+                missing=[list(item) for item in result.missing],
+                wall_mm=_jsonable(float(result.wall_mm)),
+                wall_noise_mm=_jsonable(float(result.wall_noise_mm)),
+                floor_depth_mm=result.floor_depth_mm,
+                interior_provenance=result.interior_provenance,
+                unscanned_depth_filled=False,
+                body_design_model_affected=False,
+            )
+            finish("merged", record)
+        except (InteriorMergeError, PartPlacementError) as error:
+            if cancelled():
+                return finish("cancelled")
+            record.update(status="refused", reason=str(error), codes=list(error.codes))
+            finish("refused", record)
+        except Exception as error:  # the job reports it; Studio stays usable
+            if cancelled():
+                return finish("cancelled")
+            finish("failed", error=f"{type(error).__name__}: {error}")
+
     def _finish(
         self,
         job_id: str,
@@ -911,7 +1181,7 @@ class ScenePanel(QWidget):
         written: list[Path],
     ) -> None:
         token = self._cancel.get(part)
-        placing = part == PLACEMENT
+        placing, interior = part == PLACEMENT, part == INTERIOR
         state = self.jobs.get(job_id).state
         if (token is not None and token.is_set()) or state in (
             JobState.CANCELLING,
@@ -922,10 +1192,13 @@ class ScenePanel(QWidget):
         if record is not None and (metadata is None or metadata.project_id != project_id):
             outcome, error, record = "failed", "project changed while combining", None
         committed = False
+        previous = self.projects.interior_merge() if interior and record is not None else None
         if record is not None:
             try:
                 if placing:
                     self.projects.record_part_placement(record)
+                elif interior:
+                    self.projects.record_interior_merge(record)
                 else:
                     self.projects.record_part_merge(part, record)
                 committed = True
@@ -933,6 +1206,9 @@ class ScenePanel(QWidget):
                 outcome, error = "failed", str(failure)
         if not committed:
             self._discard(written)
+        elif previous and previous.get("artifact_path") and self.projects.layout is not None:
+            old = str(previous["artifact_path"]).removeprefix("derived/")
+            self._discard([self.projects.layout.path("derived", old)])  # replaced: orphaned
         if outcome == "cancelled":
             self.jobs.finish_cancel(job_id)
         elif outcome == "failed":
@@ -940,13 +1216,15 @@ class ScenePanel(QWidget):
         elif self.jobs.get(job_id).state not in TERMINAL_STATES:
             message = (
                 tr(STATUS_TEXT.get(outcome, outcome))
-                if outcome in ("combined", "placed")
+                if outcome in ("combined", "placed", "merged")
                 else tr("refused: {reason}").format(reason=record["reason"] if record else "")
             )
             self.jobs.succeed(job_id, message)
         self.refresh()
         if placing:
             self.placement_finished.emit(outcome)
+        elif interior:
+            self.interior_finished.emit(outcome)
         else:
             self.combine_finished.emit(part, outcome)
 
@@ -960,6 +1238,8 @@ class ScenePanel(QWidget):
         }
         placement = self.projects.part_placement() if root is not None else None
         kept |= {str(path) for path in (placement or {}).get("artifacts", {}).values()}
+        merged = self.projects.interior_merge() if root is not None else None
+        kept.add(str((merged or {}).get("artifact_path")))
         for path in written:
             if f"derived/parts/{path.name}" not in kept:
                 path.unlink(missing_ok=True)
@@ -969,6 +1249,8 @@ __all__ = [
     "PartScan",
     "PartState",
     "ScenePanel",
+    "depth_ranges",
+    "interior_state",
     "marker_scale",
     "part_scans",
     "part_states",
