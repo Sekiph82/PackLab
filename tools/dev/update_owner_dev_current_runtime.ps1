@@ -79,7 +79,7 @@ $releasesRoot = Join-Path $OwnerRoot 'releases'
 Get-ChildItem -LiteralPath $releasesRoot -Directory -Force -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -cmatch '^[0-9a-f]{40}-[0-9a-f]{32}$' -and $_.Name -ne $RuntimeId } |
     ForEach-Object {
-        $releasePrefix = $_.FullName + ''
+        $releasePrefix = $_.FullName + [IO.Path]::DirectorySeparatorChar
         $inUse = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($releasePrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
         if ($inUse.Count -gt 0) { Write-Warning "Release $($_.Name) is in use; kept."; return }
         try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop; Write-Output "OWNER_DEV_OLD_RELEASE_REMOVED $($_.Name)" }
