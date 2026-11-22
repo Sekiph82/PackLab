@@ -68,9 +68,21 @@ try {
 # folders are regenerated runtime snapshots (source of a published commit + venv); a failed
 # cleanup never fails the promotion.
 Get-ChildItem -LiteralPath $OwnerRoot -Directory -Force -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match '^previous-[0-9a-f]{32}$' -and (-not $previous -or $_.FullName -ne $previous) } |
+    Where-Object { $_.Name -cmatch '^previous-[0-9a-f]{32}$' -and (-not $previous -or $_.FullName -ne $previous) } |
     ForEach-Object {
         try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop; Write-Output "OWNER_DEV_OLD_PREVIOUS_REMOVED $($_.Name)" }
         catch { Write-Warning "Could not remove old rollback copy $($_.Name): $($_.Exception.Message)" }
+    }
+# Owner request (2026-11-22): keep only the release that is now current. Releases are
+# regenerated from published commits; one still used by a running process is kept.
+$releasesRoot = Join-Path $OwnerRoot 'releases'
+Get-ChildItem -LiteralPath $releasesRoot -Directory -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -cmatch '^[0-9a-f]{40}-[0-9a-f]{32}$' -and $_.Name -ne $RuntimeId } |
+    ForEach-Object {
+        $releasePrefix = $_.FullName + ''
+        $inUse = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($releasePrefix, [StringComparison]::OrdinalIgnoreCase) -ge 0 })
+        if ($inUse.Count -gt 0) { Write-Warning "Release $($_.Name) is in use; kept."; return }
+        try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop; Write-Output "OWNER_DEV_OLD_RELEASE_REMOVED $($_.Name)" }
+        catch { Write-Warning "Could not remove old release $($_.Name): $($_.Exception.Message)" }
     }
 Write-Output "OWNER_DEV_CURRENT_READY $($manifest.source_commit) $RuntimeId $current"
