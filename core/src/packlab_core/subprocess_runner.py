@@ -13,6 +13,9 @@ from pathlib import Path
 
 LineCallback = Callable[[str], None]
 
+# Windows: GUI (pythonw) children must not flash a console window per engine call.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
 
 @dataclass(frozen=True)
 class ProcessResult:
@@ -38,6 +41,7 @@ def _stop_process(process: subprocess.Popen[str]) -> str | None:
                 check=False,
                 shell=False,
                 timeout=1.0,
+                creationflags=NO_WINDOW,
             )
             if completed.returncode != 0:
                 cleanup_error = f"taskkill failed with exit code {completed.returncode}"
@@ -105,7 +109,7 @@ def run_process(
             stderr=subprocess.PIPE,
             text=True,
             shell=False,
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | NO_WINDOW,
         )
     else:
         process = subprocess.Popen(

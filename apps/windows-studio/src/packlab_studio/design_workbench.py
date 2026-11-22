@@ -105,6 +105,7 @@ from packlab_core.starter_material_catalog import (
     StarterMaterialPresetRevision,
     create_starter_packaging_material_catalog,
 )
+from packlab_core.subprocess_runner import NO_WINDOW
 
 from .engineering_export import DesignModelExportSource, export_dimension_sheet
 from .version import current_build_info
@@ -455,6 +456,7 @@ def _build_revision() -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            creationflags=NO_WINDOW,
             check=False,
             shell=False,
         )
@@ -512,7 +514,12 @@ class MockupJob:
         if self.cancelled:
             raise DesignWorkbenchError("Mockup render cancelled.")
         process = subprocess.Popen(
-            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=False
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            shell=False,
+            creationflags=NO_WINDOW,
         )
         self._process = process
         try:

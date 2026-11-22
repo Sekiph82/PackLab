@@ -33,6 +33,7 @@ from packlab_core.engine_probe import (
     probe_engine,
     probe_openmvs,
 )
+from packlab_core.subprocess_runner import NO_WINDOW
 
 from .build_model import SUPPORTED_COLMAP_VERSIONS, BuildModelView
 from .capture_inbox import CaptureInboxView
@@ -153,6 +154,7 @@ def _probe_runner(executable: Path, arguments: Sequence[str]) -> tuple[int, str,
             check=False,
             shell=False,
             timeout=5.0,
+            creationflags=NO_WINDOW,
             cwd=scratch,
         )
         stdout = completed.stdout or "".join(

@@ -209,3 +209,26 @@ def test_shell_is_not_used_by_default():
         )
     )
     assert result.returncode == 0
+
+
+def test_windows_children_get_no_console_window(monkeypatch):
+    import os
+    import subprocess as sp
+    import sys
+
+    from packlab_core import subprocess_runner as runner
+
+    seen = {}
+    real_popen = sp.Popen
+
+    def spy(*args, **kwargs):
+        seen["flags"] = kwargs.get("creationflags", 0)
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(runner.subprocess, "Popen", spy)
+    result = runner.run_process([sys.executable, "-c", "print('ok')"], timeout=30)
+    assert result.returncode == 0
+    if os.name == "nt":
+        assert seen["flags"] & sp.CREATE_NO_WINDOW
+    else:
+        assert runner.NO_WINDOW == 0
