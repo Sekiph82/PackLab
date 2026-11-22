@@ -266,3 +266,43 @@ def test_mostly_floaters_is_too_noisy() -> None:
     with pytest.raises(InteriorMergeError) as error:
         merge_interior(body, PartInput("interior", np.r_[interior.points, _moved(rng, floaters)]))
     assert error.value.codes == ("too_noisy",)
+
+
+@pytest.mark.parametrize("seed", [20, 21, 22])
+def test_real_wall_then_outside_the_body_refused(seed) -> None:
+    """10 mm of a real 1.5 mm wall, then walls at r 42 outside the r 40 body: never merged."""
+    rng = np.random.default_rng(seed)
+    points = outer_scan(rng, wall=1.5)
+    body = PartInput("body", points + rng.normal(0, 0.15, points.shape))
+    mixed = np.r_[
+        _disc(rng, R - 1.5, R, H, d=2.0),
+        _cyl(rng, R, H - 10, H),
+        _cyl(rng, R - 1.5, H - 10, H),
+        _cyl(rng, 42.0, 20, H - 10),
+    ]
+    with pytest.raises(InteriorMergeError) as error:
+        merge_interior(body, PartInput("interior", _moved(rng, mixed)))
+    assert error.value.codes == ("interior_wall_implausible",)
+
+
+def test_thick_wall_scales_with_the_rim_radius() -> None:
+    """r 80 jar with a 6 mm wall merges (bound 8 mm); the same wall on r 40 is refused."""
+    rng = np.random.default_rng(44)
+    big = 80.0
+    points = outer_scan(rng, r=big, wall=6.0)
+    body = PartInput("body", points + rng.normal(0, 0.15, points.shape))
+    interior = PartInput("interior", _moved(rng, interior_scan(rng, 60.0, r=big, wall=6.0)))
+    result = merge_interior(body, interior)
+    assert result.wall_mm == pytest.approx(6.0, abs=0.4)
+    assert result.deepest_covered_mm == pytest.approx(60.0, abs=2.5)
+
+
+def test_rim_only_with_floaters_is_too_noisy() -> None:
+    rng = np.random.default_rng(45)
+    body = PartInput("body", outer_scan(rng))
+    xy = rng.uniform(-30, 30, (3000, 2))
+    floaters = np.c_[xy, rng.uniform(5, 90, 3000)][np.linalg.norm(xy, axis=1) < 34]
+    rim = np.r_[_disc(rng, R - WALL, R, H, d=2.0), _cyl(rng, R, H - 10, H), floaters]
+    with pytest.raises(InteriorMergeError) as error:
+        merge_interior(body, PartInput("interior", _moved(rng, rim)))
+    assert error.value.codes == ("too_noisy",)

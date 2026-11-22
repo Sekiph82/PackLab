@@ -82,8 +82,11 @@ class InteriorThresholds:
     min_rim_overlap: float = 0.6  # interior rim-band points with a body point near
     max_gap_mm: float = 2.0  # uncovered depth tolerated inside the covered run (stays missing)
     min_support: int = 4  # neighbours within max(2 mm, 4 spacings) for a surface point
-    max_wall_mm: float = 4.0  # thicker "wall" (and > max_wall_ratio x rim radius): foreign
-    max_wall_ratio: float = 0.08
+    # Wall bound = min(cap, max(max_wall_mm, ratio x rim radius)): 4 mm for a r 40 jar (a 6 mm
+    # inset there is a different jar), 8 mm for r 80, at most 12 mm. Raise for thick-walled jars.
+    max_wall_mm: float = 4.0
+    max_wall_ratio: float = 0.1
+    max_wall_cap_mm: float = 12.0
     max_floaters: int = 1000  # isolated points below the rim before "too noisy" (and share)
     max_floater_share: float = 0.1
     wall_variation_mm: float = 2.0  # per depth band, around the median wall
@@ -226,9 +229,10 @@ def reachability(body: PartInput, t: InteriorThresholds = InteriorThresholds()) 
 
 def _outer_radius(
     body: np.ndarray, rim: _Rim, spacing: float, band: float
-) -> tuple[np.ndarray, float]:
-    """(height band x sector) median radius of the body's outer wall (nan where unseen) and the
-    robust sigma of the wall points about it (mm)."""
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """(height band x sector) median radius of the body's outer wall (nan where unseen), the
+    robust sigma of its points about it per height band (nearest seen band where unseen) and
+    overall (mm)."""
 
     limits = replace(AlignmentThresholds(), spacing_mm=spacing)
     try:
@@ -243,13 +247,39 @@ def _outer_radius(
     flat = np.full(rows * SECTORS, np.nan)
     for key in np.unique(cell):
         flat[key] = np.median(radius[cell == key])
-    noise = max(0.05, 1.4826 * float(np.median(np.abs(radius - flat[cell]))))
+    spread = np.abs(radius - flat[cell])
+    noise = max(0.05, 1.4826 * float(np.median(spread)))
+    row_noise = np.full(rows, np.nan)
+    for row in np.unique(level):
+        here = level == row
+        if here.sum() >= 10:
+            row_noise[row] = max(0.05, 1.4826 * float(np.median(spread[here])))
     table = flat.reshape(rows, SECTORS)
     seen = np.nonzero(~np.isnan(table).all(axis=1))[0]
     if len(seen):  # floor / rim heights the shell band skips: nearest seen height band
         table[: seen[0]] = table[seen[0]]
         table[seen[-1] + 1 :] = table[seen[-1]]
-    return table, noise
+    known = np.nonzero(np.isfinite(row_noise))[0]
+    if len(known):
+        row_noise = row_noise[known[np.abs(known[None] - np.arange(rows)[:, None]).argmin(1)]]
+    else:
+        row_noise[:] = noise
+    return table, row_noise, noise
+
+
+def _scattered(moved: np.ndarray, inner: np.ndarray, in_below: np.ndarray) -> bool:
+    """True when most of the "inner wall" is not a surface (floaters / noise clouds): share of
+    points whose 10-neighbour spread is flat (smallest / middle eigenvalue < 0.3) under half."""
+
+    pool = moved[in_below]
+    points = moved[inner]
+    if len(points) < 30 or len(pool) < 10:
+        return False
+    neighbours = pool[_nearest(pool)(points, 10)[0]]
+    centred = neighbours - neighbours.mean(axis=1, keepdims=True)
+    values = np.linalg.eigvalsh(np.einsum("nki,nkj->nij", centred, centred))
+    flat = values[:, 0] < 0.3 * np.maximum(values[:, 1], 1e-12)
+    return bool(flat.mean() < 0.5)
 
 
 def _two_walls(
@@ -371,7 +401,7 @@ def merge_interior(
     rel = moved[:, :2] - b_rim.centre[:2]
     radius = np.linalg.norm(rel, axis=1)
     band = t.band_mm
-    table, noise = _outer_radius(b_pts, b_rim, spacing, band)
+    table, row_noise, noise = _outer_radius(b_pts, b_rim, spacing, band)
     level = np.clip((moved[:, 2] / band).astype(int), 0, len(table) - 1)
     gap = table[level, _sector(rel)] - radius  # inward distance from the outer wall, nan unseen
     below = np.nonzero(
@@ -380,6 +410,7 @@ def merge_interior(
     # Surface support first: floaters (isolated points) are never written as interior, and a
     # scan that is mostly floaters is refused as too noisy.
     support = max(2.0, 4.0 * spacing)
+    dropped = 0
     if len(below) > t.min_support:
         kth = _nearest(moved[below])(moved[below], t.min_support + 1)[1][:, -1]
         dropped = int((kth >= support).sum())
@@ -395,7 +426,11 @@ def merge_interior(
         nz[below] = np.abs(_normals(moved[below])[:, 2])
     in_below = np.zeros(len(moved), bool)
     in_below[below] = True
-    wallish = in_below & (nz < 0.5)
+    # Outside the body's outer wall (its own radius and noise per height band, before the wall
+    # fit so such points cannot skew it): physically impossible, never interior; many of them
+    # refuse the merge (different jar or misaligned scan).
+    outside = in_below & (gap < -np.maximum(4 * row_noise[level], max(0.5, 0.5 * spacing)))
+    wallish = in_below & (nz < 0.5) & ~outside
     # Wall thickness from the data: the interior scan's inner wall sits ``wall`` inside the
     # body's outer wall, any outer wall it also saw sits near 0 (two-cluster fit), so 0.5-2.5 mm
     # walls separate without a fixed margin.
@@ -407,13 +442,21 @@ def merge_interior(
         )
     wall, split, noise = walls
     inner = wallish & (gap > split)
-    outside = wallish & (gap < -max(1.0, 3 * noise, spacing))
-    bound = max(t.max_wall_mm, t.max_wall_ratio * b_rim.radius)
+    bound = min(t.max_wall_cap_mm, max(t.max_wall_mm, t.max_wall_ratio * b_rim.radius))
     implausible = []
     if wall > bound:
         implausible.append(f"wall {wall:.1f} mm > {bound:.1f} mm")
     if outside.sum() > max(30, t.max_outside_share * inner.sum()):
         implausible.append(f"{int(outside.sum())} wall points outside the body's outer wall")
+    scattered = wall > bound and _scattered(moved, inner, in_below)
+    if implausible and (dropped > t.max_floaters / 2 or scattered):
+        raise InteriorMergeError(
+            f"interior merge refused: {dropped} floaters, inner points "
+            f"{'not' if scattered else ''} a surface, implausible wall ("
+            + "; ".join(implausible)
+            + ") - too noisy; light the inside evenly and rescan",
+            ("too_noisy",),
+        )
     if implausible:
         raise InteriorMergeError(
             "interior merge refused: interior_wall_implausible ("
@@ -427,7 +470,7 @@ def merge_interior(
             "interior merge refused: " + "; ".join(profile) + " - different jar?",
             ("interior_profile_mismatch",),
         )
-    candidate = np.nonzero(in_below & (gap > split))[0]
+    candidate = np.nonzero(in_below & ~outside & (gap > split))[0]
     depth = b_rim.height - moved[candidate, 2]
     sectors = _sector(rel[candidate])
     floor = (nz[candidate] > 0.8) & (radius[candidate] < 0.8 * (b_rim.radius - wall / 2))
