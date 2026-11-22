@@ -828,6 +828,32 @@ class ProjectManager:
         next_state["part_merges"] = {**(merges if isinstance(merges, dict) else {}), part: record}
         return self.commit_edit(next_state, expected_revision=self.metadata.revision)
 
+    def part_placement(self) -> dict[str, Any] | None:
+        """Latest closure-on-body placement record (PL-0484), placed or refused."""
+        if self.layout is None:
+            return None
+        _, state = self._read_authority(self.layout)
+        value = state.get("part_placement")
+        return value if isinstance(value, dict) else None
+
+    def record_part_placement(self, record: dict[str, Any]) -> ProjectMetadata:
+        """Store a placement result; an artifact record, not an undoable selection."""
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        artifacts = record.get("artifacts")
+        if record.get("status") not in ("placed", "refused") or not isinstance(artifacts, dict):
+            raise ProjectError("part placement record is invalid")
+        for part, artifact in artifacts.items():
+            if part not in ("body", "closure") or not (
+                isinstance(artifact, str)
+                and re.fullmatch(rf"derived/parts/{part}-placed-[0-9a-f]{{16}}\.ply", artifact)
+            ):
+                raise ProjectError("placed part cloud path is invalid")
+        _, state = self._read_authority(self.layout)
+        next_state = dict(state)
+        next_state["part_placement"] = record
+        return self.commit_edit(next_state, expected_revision=self.metadata.revision)
+
     # ------------------------------------------------------------ undo / redo (PL-0456)
 
     def _open_history(self) -> None:
