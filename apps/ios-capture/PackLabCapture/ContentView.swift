@@ -1385,12 +1385,17 @@ struct ContentView: View {
             .navigationTitle("PackLab")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                // Only the primary action stays in the bar; the rest share one menu so the
+                // New Scan and History stay in the bar; the rest share one menu so the
                 // toolbar fits an iPhone portrait width.
                 ToolbarItem(placement: .topBarLeading) { Button("New Scan") { showNewScan = true } }
+                // History is used after every scan, so it is a visible button, not a menu item
+                // (menu items had no reliable hit point in UI tests, run 45039170274).
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("History", systemImage: "clock") { showHistory = true }
+                        .accessibilityIdentifier("historyButton")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button("History", systemImage: "clock") { showHistory = true }
                         // PL-0429: off by default; the paired PackLab may then request captures.
                         Button(remote.enabled ? "Stop PackLab remote capture" : "Allow PackLab to trigger captures", systemImage: "dot.radiowaves.left.and.right") { remote.enabled.toggle() }
                         Button("Protocol", systemImage: "list.bullet.rectangle") { showActiveProtocol = true }
@@ -1402,7 +1407,7 @@ struct ContentView: View {
                         Label("More", systemImage: "ellipsis.circle")
                     }
                     .accessibilityLabel("More actions")
-                    .accessibilityHint(ARPreviewFeatureFlag.isEnabled() ? "History, protocol, AR preview and debug overlay" : "History, protocol and debug overlay")
+                    .accessibilityHint(ARPreviewFeatureFlag.isEnabled() ? "Remote capture, protocol, AR preview and debug overlay" : "Remote capture, protocol and debug overlay")
                 }
             }
             .sheet(isPresented: $showNewScan) { NavigationStack { NewScanWizard(admission: runtime.admission, readiness: runtime.newScanReadiness) { draft in

@@ -52,7 +52,7 @@ final class PackLabCaptureE2EUITests: XCTestCase {
         // center), then captures 3 wedges, and Studio's Finish scan finalizes it; the finalized
         // scan is delivered automatically with no pairing step.
         tap(app.buttons["More actions"], "More")
-        tapMenuItem(app.buttons["Allow PackLab to trigger captures"], "Allow PackLab to trigger captures")
+        tap(app.buttons["Allow PackLab to trigger captures"], "Allow PackLab to trigger captures")
         try guidedScan(named: "Replay scan 2", role: "body", remoteWedges: 3)
         try requestFromStudio("finish")
         waitForLabel(app.staticTexts["remoteControlLastResult"], equal: "PackLab remote finish: finished", timeout: 60)
@@ -148,8 +148,7 @@ final class PackLabCaptureE2EUITests: XCTestCase {
     }
 
     private func openHistory() {
-        tap(app.buttons["More actions"], "More")
-        tapMenuItem(app.buttons["History"], "History")
+        tap(app.buttons["historyButton"], "History")
         XCTAssertTrue(app.navigationBars["Scan History"].waitForExistence(timeout: 10))
         shot("history")
     }
@@ -184,14 +183,6 @@ final class PackLabCaptureE2EUITests: XCTestCase {
 
     private func tap(_ element: XCUIElement, _ what: String) {
         XCTAssertTrue(element.waitForExistence(timeout: 20), "\(what) not found")
-        element.tap()
-    }
-
-    /// Toolbar menu items exist before the menu finishes animating in and then have no hit
-    /// point (run 45039170274, "History"): wait until the item is hittable, then tap once.
-    private func tapMenuItem(_ element: XCUIElement, _ what: String) {
-        XCTAssertTrue(element.waitForExistence(timeout: 20), "\(what) not found")
-        waitFor(element, "isHittable == true", timeout: 10)
         element.tap()
     }
 
