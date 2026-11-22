@@ -118,6 +118,24 @@ def test_place_closure_on_combined_body_persists_and_reopens(app, project) -> No
     reopened.open_project(root)
     again = _panel(reopened, entries)
     assert again.placement[0] == "placed" and again.placement[2] == placed
+    import hashlib
+
+    for part, path in zip(("body", "closure"), placed, strict=True):
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        assert record["artifact_sha256"][part] == digest
+    assert (
+        graph["components"][1]["placed_output"]["cloud_sha256"]
+        == record["artifact_sha256"]["closure"]
+    )
+    # Same path, new content (rebuilt assembled scan): stale, not silently reused.
+    cloud = again.states["assembled"].cloud
+    original = cloud.read_bytes()
+    cloud.write_bytes(original + b" ")
+    again.refresh()
+    assert again.placement[0] == "stale"
+    cloud.write_bytes(original)
+    again.refresh()
+    assert again.placement[0] == "placed"
     placed[1].write_bytes(b"ply\n")  # tampered placed cloud is never shown as placed
     again.refresh()
     assert again.placement[0] == "stale" and "place it again" in again.details.text()

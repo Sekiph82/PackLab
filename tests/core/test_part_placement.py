@@ -58,16 +58,16 @@ def body(rng, neck_top=80.0):
     )
 
 
-def lid(rng, radius=37.5):
+def lid(rng, radius=37.5, height=15.0):
     """Combined lid (upright + flipped): outside, top, rim and the inside seen upside down."""
     inner = radius - 1.5
     return np.concatenate(
         [
-            _cyl(rng, radius, 0, 15),
-            _disc(rng, 0, radius, 15),
+            _cyl(rng, radius, 0, height),
+            _disc(rng, 0, radius, height),
             _disc(rng, inner, radius, 0),
-            _cyl(rng, inner, 0, 13),
-            _disc(rng, 0, inner, 13),
+            _cyl(rng, inner, 0, height - 2),
+            _disc(rng, 0, inner, height - 2),
         ]
     )
 
@@ -95,13 +95,16 @@ def _move(m, points, rng):
     return out + rng.normal(0, 0.15, out.shape)
 
 
-def _inputs(seed, lid_radius=37.5):
+def _inputs(seed, lid_radius=37.5, lid_height=15.0, upside_down=False, neck_top=80.0):
     rng = np.random.default_rng(seed)
     truth_b = _pose(rng.uniform(0, 2 * np.pi), *rng.uniform(-30, 30, 2))
     truth_c = _pose(rng.uniform(0, 2 * np.pi), *rng.uniform(-30, 30, 2))
     a = PartInput("assembled", _move(np.eye(4), assembled(rng), rng))
-    b = PartInput("body", _move(np.linalg.inv(truth_b), body(rng), rng))
-    c = PartInput("closure", _move(np.linalg.inv(truth_c), lid(rng, lid_radius), rng))
+    b = PartInput("body", _move(np.linalg.inv(truth_b), body(rng, neck_top), rng))
+    closure = lid(rng, lid_radius, lid_height)
+    if upside_down:
+        closure = closure * [1, -1, -1] + [0, 0, lid_height]
+    c = PartInput("closure", _move(np.linalg.inv(truth_c), closure, rng))
     return a, b, c, truth_b, truth_c
 
 
@@ -123,7 +126,9 @@ def test_known_placement_recovered_with_lid_occluding_body_top(seed) -> None:
     assert np.abs(moved - [[0, 0, SEAT + 15], [0, 0, SEAT]]).max() < 0.8, moved
     assert result.engaged_depth_mm == pytest.approx(13.0, abs=1.0)
     assert result.clearance.status in ("CLEARANCE", "NEAR_CLEARANCE")
-    assert result.interference_share < 0.02
+    assert result.interference_point_share < 0.01 and result.interference_depth_mm < 1.0
+    assert result.observed_seat_mm == pytest.approx(SEAT, abs=1.5)
+    assert result.clearance.overlap_depth_estimate is None
     assert result.body.coverage > 0.9 and result.closure.coverage > 0.9
 
 
@@ -159,3 +164,35 @@ def test_floating_and_missing_parts_refused() -> None:
     with pytest.raises(PartPlacementError) as caught:
         place_closure_on_body(a, PartInput("tiny", b.points[:20]), c)
     assert caught.value.codes == ("part_unusable",)
+
+
+@pytest.mark.parametrize("seed", [21, 22])
+def test_short_lid_of_same_diameter_refused_by_seat_check(seed) -> None:
+    a, b, c, *_ = _inputs(seed, lid_height=12.0)  # placed 3 mm too high without the seat check
+    with pytest.raises(PartPlacementError) as caught:
+        place_closure_on_body(a, b, c)
+    assert "seat_mismatch" in caught.value.codes and "rescan" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("case", "kwargs"),
+    [("upside-down lid", {"upside_down": True}), ("tall neck", {"neck_top": 82.5})],
+)
+def test_gross_interference_refused(case, kwargs) -> None:
+    a, b, c, *_ = _inputs(21, **kwargs)
+    with pytest.raises(PartPlacementError) as caught:
+        place_closure_on_body(a, b, c)
+    assert set(caught.value.codes) & {"interference", "seat_mismatch", "free_space_conflict"}, case
+
+
+def test_part_from_scan_keeps_colours() -> None:
+    from packlab_core.multiscan_alignment import ScanInput
+    from packlab_core.part_placement import part_from_scan
+
+    rng = np.random.default_rng(31)
+    mat = np.c_[rng.uniform(-148, 148, 18000), rng.uniform(-105, 105, 18000), np.zeros(18000)]
+    points = np.r_[body(rng), mat] + rng.normal(0, 0.15, (1, 3))
+    colours = np.where(points[:, 2:3] > 1.0, [[1.0, 0.0, 0.0]], [[0.0, 0.0, 1.0]])
+    part = part_from_scan(ScanInput("b", points, colours))
+    assert part.colors is not None and len(part.colors) == len(part.points)
+    assert np.allclose(part.colors[part.points[:, 2] > 3.0], [1.0, 0.0, 0.0])

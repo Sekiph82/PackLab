@@ -16,6 +16,12 @@ e.g. merged clouds from ``multiscan_alignment.align_part_pair`` or a single scan
 Acceptance per part (like ``multiscan_alignment``): bidirectional diameter-profile check over
 the shared height bands, worst-slice coverage, RMSE, free-space conflict (placed points above
 what the assembled scan saw), yaw only when the wall profile pins it or both walls are round.
+Seat check: the skirt bottom the assembled scan shows (lowest height where its near-vertical wall
+still sits on the closure's outer radius) must match ``cut``; a lid of the wrong height (or a
+flush lid whose seam is not visible) is refused. Gross interference (closure points inside the
+placed body wall, e.g. an upside-down lid or a too-tall neck) is refused; small overlaps stay a
+CANDIDATE_OVERLAP flag. A lid seated cocked in the assembled scan is refused (free-space
+conflict / seat mismatch): seat it straight and rescan.
 Refusals raise ``PartPlacementError`` with typed ``codes``. Sizes scale with the measured point
 spacing. Deterministic. Metric values stay METRIC_UNVERIFIED; tests use synthetic proxies only.
 
@@ -51,6 +57,7 @@ from .multiscan_alignment import (
     _free_space_conflict,
     _is_round,
     _nearest,
+    _normals,
     _Part,
     _Pose,
     _pose_for_flip,
@@ -67,6 +74,8 @@ METHOD = "assembled_reference_cut_height_yaw_sweep_bounded_tilt_icp_v1"
 METRIC_STATUS = "METRIC_UNVERIFIED"
 GRAPH_CONTRACT = "packlab.scan-part-assembly-graph.v1"
 PROFILE_BANDS = 6
+MAX_INTERFERENCE_SHARE = 0.05  # refused above: not a thread engagement
+CANDIDATE_INTERFERENCE_SHARE = 0.01  # flagged CANDIDATE_OVERLAP above
 _DEFERRED = "DEFERRED_OWNER_VALIDATION"
 
 
@@ -82,6 +91,7 @@ class PartPlacementError(ValueError):
 class PartInput:
     part_id: str
     points: np.ndarray  # (N, 3) object points in the part's own mat frame, mm, z up
+    colors: np.ndarray | None = None  # (N, 3) in [0, 1]
 
 
 @dataclass(frozen=True)
@@ -105,7 +115,9 @@ class ClosurePlacement:
     closure_on_body: np.ndarray  # 4x4 rigid: closure frame -> body frame
     heights_mm: dict[str, float]  # assembled / body / closure
     engaged_depth_mm: float  # body height hidden inside the closure (H_b + H_c - H_a)
-    interference_share: float  # closure points inside the body's outer wall (beyond tolerance)
+    observed_seat_mm: float  # skirt bottom seen in the assembled scan (expected: H_a - H_c)
+    interference_point_share: float  # closure points inside the body wall beyond tolerance
+    interference_depth_mm: float  # 95th percentile penetration of those points (0 if none)
     clearance: PairClearanceDiagnostic  # radial closure-to-body wall estimate, candidate only
     aabb_clearance_mm: float
     aabb_overlap_mm: float
@@ -125,7 +137,8 @@ def part_from_scan(
         part = _prepare(scan, limits)
     except MultiScanAlignmentError as error:
         raise PartPlacementError(str(error), ("part_unusable",)) from None
-    return PartInput(scan.scan_id, part.points)
+    colors = None if scan.colors is None else np.asarray(scan.colors)[part.index]
+    return PartInput(scan.scan_id, part.points, colors)
 
 
 def _part(item: PartInput | None, role: str, limits: AlignmentThresholds) -> _Part:
@@ -250,7 +263,8 @@ def _fit(
             (
                 "free_space_conflict",
                 f"{role} free-space conflict {conflict:.3g} > {limits.max_free_space_conflict} "
-                "(placed surfaces where the assembled scan saw empty space)",
+                "(placed surfaces where the assembled scan saw empty space; if the lid sits "
+                "cocked in the assembled scan, seat it straight and rescan)",
             )
         )
     if pose.coverage < limits.min_slice_coverage:
@@ -282,9 +296,10 @@ def _fit(
 
 def _radial_clearance(
     body: _Part, closure_points: np.ndarray, limits: AlignmentThresholds
-) -> tuple[float, float | None]:
-    """(share of closure points inside the body's outer wall beyond tolerance, 5th percentile
-    radial gap mm) over (height band, 10 degree) cells where the placed body wall exists.
+) -> tuple[float, float, float | None]:
+    """(share of closure points inside the body's outer wall beyond tolerance, their 95th
+    percentile penetration depth mm, 5th percentile radial gap mm) over (height band, 10 degree)
+    cells where the placed body wall exists.
 
     ponytail: radial about the body axis, so only round-ish necks; thread engagement within the
     tolerance reads as clearance. Upgrade: signed distance to the meshed body surface."""
@@ -306,10 +321,37 @@ def _radial_clearance(
     slot = np.clip(np.searchsorted(keys, closure_keys), 0, len(keys) - 1)
     hit = keys[slot] == closure_keys
     if not hit.any():
-        return 0.0, None
+        return 0.0, 0.0, None
     gap = closure_radius[hit] - outer[slot[hit]]
     tolerance = max(limits.width_tolerance_mm, 0.5 * limits.spacing_mm) + 0.5 * limits.spacing_mm
-    return float((gap < -tolerance).mean()), float(np.percentile(gap, 5))
+    inside = gap < -tolerance
+    depth = float(np.percentile(-gap[inside], 95)) if inside.any() else 0.0
+    return float(inside.mean()), depth, float(np.percentile(gap, 5))
+
+
+def _observed_seat(
+    assembled: _Part, closure_shell: np.ndarray, start: float, limits: AlignmentThresholds
+) -> float:
+    """Lowest height of the contiguous run (walking down from ``start``) of bands where the
+    assembled scan's near-vertical surfaces cover at least half of 36 sectors at the placed
+    closure's outer radius. Shoulders and rims (horizontal normals excluded) do not count."""
+
+    centre = _centre(closure_shell)
+    radius = float(np.median(np.linalg.norm(closure_shell[:, :2] - centre, axis=1)))
+    sample = assembled.points[_voxel_first(assembled.points, limits.voxel_mm)]
+    wall = sample[np.abs(_normals(sample)[:, 2]) < 0.5]
+    rel = wall[:, :2] - centre
+    tolerance = max(limits.width_tolerance_mm, limits.dimension_tolerance_ratio * radius)
+    on = np.abs(np.linalg.norm(rel, axis=1) - radius) < tolerance + 0.5 * limits.spacing_mm
+    sector = ((np.arctan2(rel[:, 1], rel[:, 0]) + np.pi) / (2 * np.pi) * 36).astype(int) % 36
+    step = max(0.5, 0.5 * limits.spacing_mm)
+    z = start
+    while z - step > 0:
+        band = on & (wall[:, 2] >= z - step) & (wall[:, 2] < z)
+        if len(np.unique(sector[band])) < 18:
+            break
+        z -= step
+    return z
 
 
 def _bounds(points: np.ndarray) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
@@ -393,10 +435,37 @@ def place_closure_on_body(
         b, points=_apply(body_fit.matrix, b.points), shell=_apply(body_fit.matrix, b.shell)
     )
     placed_closure = _apply(closure_fit.matrix, c.points)
-    interference, radial = _radial_clearance(placed_body, placed_closure, limits)
+    seat = _observed_seat(a, _apply(closure_fit.matrix, c.shell), cut + gap, limits)
+    seat_tolerance = max(1.5, 2.0 * limits.spacing_mm)
+    interference, depth, radial = _radial_clearance(placed_body, placed_closure, limits)
+    failures = []
+    if abs(seat - cut) > seat_tolerance:
+        failures.append(
+            (
+                "seat_mismatch",
+                f"closure skirt bottom seen at z={seat:.1f} mm in the assembled scan, placed at "
+                f"{cut:.1f} mm (tolerance {seat_tolerance:.1f}; engaged depth {engaged:.1f} vs "
+                f"seen {b.height - seat:.1f} mm): wrong closure height, flush seam not visible, "
+                "or lid not seated straight - seat it straight and rescan",
+            )
+        )
+    if interference > MAX_INTERFERENCE_SHARE:
+        failures.append(
+            (
+                "interference",
+                f"closure intersects the body: {interference:.0%} of closure points up to "
+                f"{depth:.1f} mm inside the body wall (> {MAX_INTERFERENCE_SHARE:.0%}): wrong "
+                "part, upside-down closure or wrong body",
+            )
+        )
+    if failures:
+        raise PartPlacementError(
+            "closure placement refused: " + "; ".join(m for _, m in failures),
+            tuple(k for k, _ in failures),
+        )
     if radial is None:
         status = PairDiagnosticStatus.UNKNOWN_PROXY_UNSUPPORTED
-    elif interference > 0.02:
+    elif interference > CANDIDATE_INTERFERENCE_SHARE:
         status = PairDiagnosticStatus.CANDIDATE_OVERLAP
     elif radial <= limits.width_tolerance_mm:
         status = PairDiagnosticStatus.NEAR_CLEARANCE
@@ -407,7 +476,7 @@ def place_closure_on_body(
         AssemblyComponentRole.CLOSURE,
         status,
         radial,
-        interference if interference > 0 else None,
+        depth if depth > 0 else None,  # mm, as in assembly_clearance
         "SCAN_POINT_RADIAL_WALL_GAP_P5_ESTIMATE",
         (AssemblyComponentRole.BODY, AssemblyComponentRole.CLOSURE) if radial is None else (),
     )
@@ -421,7 +490,9 @@ def place_closure_on_body(
         np.linalg.inv(body_fit.matrix) @ closure_fit.matrix,
         {"assembled": a.height, "body": b.height, "closure": c.height},
         float(engaged),
+        float(seat),
         interference,
+        depth,
         clearance,
         float(aabb_clearance),
         float(aabb_overlap),
@@ -443,7 +514,10 @@ def _matrix(matrix: np.ndarray) -> tuple[float, ...]:
 
 
 def scan_assembly_graph(
-    result: ClosurePlacement, sources: Mapping[str, Mapping[str, object]], reason: str
+    result: ClosurePlacement,
+    sources: Mapping[str, Mapping[str, object]],
+    reason: str,
+    outputs: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Container + closure graph with placements and diagnostics; ``sources`` maps
     assembled/body/closure to JSON provenance (cloud path, sha256, scale source...).
@@ -473,6 +547,7 @@ def scan_assembly_graph(
                 "role": role,
                 "assembly_role": assembly_role.value,
                 "source": source,
+                "placed_output": dict((outputs or {}).get(assembly_role.value, {})),
                 "placement": pin.as_dict(),
                 "residuals": {
                     "coverage": _num(placement.coverage),
@@ -501,7 +576,9 @@ def scan_assembly_graph(
         ],
         "diagnostics": {
             "heights_mm": dict(result.heights_mm),
-            "interference_share": result.interference_share,
+            "observed_seat_mm": result.observed_seat_mm,
+            "interference_point_share": result.interference_point_share,
+            "interference_depth_mm": result.interference_depth_mm,
             "pair": result.clearance.as_dict(),
             "aabb_clearance_mm": result.aabb_clearance_mm,
             "aabb_overlap_mm": result.aabb_overlap_mm,

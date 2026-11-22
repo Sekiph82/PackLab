@@ -184,13 +184,21 @@ def part_states(
     return states
 
 
+def _scale_key(state: PartState) -> list[Any] | None:
+    """Scales a combined part was built with (None for a single scan)."""
+    if state.status != "combined" or state.record is None:
+        return None
+    return [source.get("mm_per_unit") for source in state.record.get("sources", [])]
+
+
 def placement_state(
     manager: ProjectManager, states: dict[str, PartState]
 ) -> tuple[str, dict[str, Any] | None, tuple[Path, ...]]:
     """(none / placed / refused / stale, record, placed body + closure clouds).
 
-    Stale when a part now shows a different cloud than the placement used, or a placed cloud
-    is missing or changed on disk.
+    Stale when a part now shows a different cloud (path, content digest, combined/single status
+    or combine scale) than the placement used, or a placed cloud is missing or changed on disk.
+    A single scan's marker scale is a function of its build, so its cloud digest covers it.
     """
     layout, record = manager.layout, manager.part_placement()
     if layout is None or record is None:
@@ -198,8 +206,15 @@ def placement_state(
     sources = record.get("sources")
     for part in ("assembled", "body", "closure"):
         state = states.get(part)
-        cloud = None if state is None or state.cloud is None else _rel(layout.root, state.cloud)
-        if not isinstance(sources, dict) or (sources.get(part) or {}).get("cloud_path") != cloud:
+        if state is None or state.cloud is None or not isinstance(sources, dict):
+            return "stale", record, ()
+        stored = sources.get(part) or {}
+        if (
+            stored.get("cloud_path") != _rel(layout.root, state.cloud)
+            or stored.get("status") != state.status
+            or stored.get("scale_key") != _scale_key(state)
+            or stored.get("cloud_sha256") != _cached_sha(state.cloud)
+        ):
             return "stale", record, ()
     if record.get("status") != "placed":
         return "refused", record, ()
@@ -795,7 +810,7 @@ class ScenePanel(QWidget):
             source["cloud_sha256"] = model.sha256
             if state.status == "combined":  # already object points in its mat frame, mm
                 source.update(frame="part_combine_mat_frame_mm", scale_source="part_combine")
-                return PartInput(f"{part}-{model.sha256[:12]}", model.points)
+                return PartInput(f"{part}-{model.sha256[:12]}", model.points, model.colors)
             if state.upright is None or state.cloud != state.upright.model:
                 raise PartPlacementError(
                     tr("{part}: only the upside-down scan exists; scan it upright").format(
@@ -815,12 +830,18 @@ class ScenePanel(QWidget):
                 scale_source=scale[1],
                 scale_uncertainty=float(scale[2]) if len(scale) > 2 else None,
             )
-            scan = ScanInput(f"{part}-{model.sha256[:12]}", model.points, mm_per_unit=scale[0])
+            scan = ScanInput(
+                f"{part}-{model.sha256[:12]}", model.points, model.colors, mm_per_unit=scale[0]
+            )
             return part_from_scan(scan)
 
         for part, state in states.items():  # refusals stay matched to the parts they saw
             assert state.cloud is not None
-            sources[part] = {"status": state.status, "cloud_path": _rel(root, state.cloud)}
+            sources[part] = {
+                "status": state.status,
+                "cloud_path": _rel(root, state.cloud),
+                "scale_key": _scale_key(state),
+            }
         try:
             inputs = {}
             for step, part in enumerate(("assembled", "body", "closure")):
@@ -839,23 +860,31 @@ class ScenePanel(QWidget):
                 return finish("cancelled")
             jobs.update_progress(job_id, 0.9, tr("Writing the placed parts"))
             folder = layout.path("derived", "parts")
-            stats = {}
+            stats, outputs = {}, {}
             for part, placement in (("body", result.body), ("closure", result.closure)):
                 points = np.asarray(inputs[part].points)
                 moved = points @ placement.matrix[:3, :3].T + placement.matrix[:3, 3]
-                target = write_cloud(folder, f"{part}-placed", moved, None)
+                target = write_cloud(folder, f"{part}-placed", moved, inputs[part].colors)
                 written.append(target)
                 record["artifacts"][part] = f"derived/parts/{target.name}"
                 stats[part] = _stat(target)
+                outputs[part] = {
+                    "cloud_path": record["artifacts"][part],
+                    "cloud_sha256": _sha256(target),
+                }
                 if cancelled():
                     return finish("cancelled")
             graph = scan_assembly_graph(
-                result, sources, "closure placed on body using the assembled scan (PL-0484)"
+                result,
+                sources,
+                "closure placed on body using the assembled scan (PL-0484)",
+                outputs,
             )
             record.update(
                 status="placed",
                 reason=None,
                 file_stats=stats,
+                artifact_sha256={part: item["cloud_sha256"] for part, item in outputs.items()},
                 graph=graph,
                 graph_revision_id=graph["revision_id"],
             )
