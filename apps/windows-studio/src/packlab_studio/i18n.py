@@ -521,4 +521,17 @@ TURKISH: dict[str, str] = {
     "Use selected part: {part}": "Seçili parçayı kullan: {part}",
     "Part selection": "Parça seçimi",
     "{part}: no scan yet": "{part}: henüz tarama yok",
+    # PL-0489 body interior merge
+    "merged": "birleştirildi",
+    "Merge interior": "İç yüzeyi birleştir",
+    "Merging the body interior…": "Gövde içi birleştiriliyor…",
+    "Interior merged (rim alignment, overlap {overlap:.0%}).": "İç yüzey birleştirildi (ağız kenarına göre hizalama, örtüşme {overlap:.0%}).",
+    "Interior scanned to {depth:.0f} mm of {total:.0f} mm below the rim.": "İç yüzey ağız kenarının {depth:.0f} mm altına kadar tarandı (toplam derinlik {total:.0f} mm).",
+    "Not scanned (not filled): {ranges} mm depth.": "Taranmadı (doldurulmadı): {ranges} mm derinlik.",
+    "Interior merge refused: {reason}": "İç yüzey birleştirme reddedildi: {reason}",
+    "Body or interior scan changed since the merge; merge again.": "Birleştirmeden sonra gövde veya iç tarama değişti; yeniden birleştirin.",
+    "Body interior scan present: use Merge interior.": "Gövde içi taraması var: İç yüzeyi birleştir'i kullanın.",
+    "Loading the interior scan": "İç tarama yükleniyor",
+    "Aligning the interior by the rim": "İç tarama ağız kenarına göre hizalanıyor",
+    "Writing the body with its interior": "Gövde iç yüzeyiyle birlikte yazılıyor",
 }

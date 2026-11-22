@@ -854,6 +854,32 @@ class ProjectManager:
         next_state["part_placement"] = record
         return self.commit_edit(next_state, expected_revision=self.metadata.revision)
 
+    def interior_merge(self) -> dict[str, Any] | None:
+        """Latest body-interior merge record (PL-0489), merged or refused."""
+        if self.layout is None:
+            return None
+        _, state = self._read_authority(self.layout)
+        value = state.get("interior_merge")
+        return value if isinstance(value, dict) else None
+
+    def record_interior_merge(self, record: dict[str, Any]) -> ProjectMetadata:
+        """Store an interior merge result; an artifact record, not an undoable selection."""
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        artifact = record.get("artifact_path")
+        if record.get("status") not in ("merged", "refused") or not (
+            artifact is None
+            or (
+                isinstance(artifact, str)
+                and re.fullmatch(r"derived/parts/body-interior-[0-9a-f]{16}\.ply", artifact)
+            )
+        ):
+            raise ProjectError("interior merge record is invalid")
+        _, state = self._read_authority(self.layout)
+        next_state = dict(state)
+        next_state["interior_merge"] = record
+        return self.commit_edit(next_state, expected_revision=self.metadata.revision)
+
     # ------------------------------------------------------------ undo / redo (PL-0456)
 
     def _open_history(self) -> None:
