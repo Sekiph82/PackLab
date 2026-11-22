@@ -81,6 +81,9 @@ RANDOM_SEED = 0  # --default_random_seed 0 is COLMAP's default; passed so the pl
 EXTRACTION_THREADS = 1
 MAPPER_THREADS = 1
 OPENMVS_THREADS = 0  # 0 = all cores
+# Below this share of connected photos the model is too partial to measure; stop before
+# the long dense stages and tell the owner to retake (real scan 2026-11-22: 3/17).
+MIN_REGISTERED_FRACTION = 0.5
 DETERMINISM: dict[str, object] = {
     "colmap_random_seed": RANDOM_SEED,
     "colmap_extraction_threads": EXTRACTION_THREADS,
@@ -479,7 +482,14 @@ class ColmapOpenMvsBackend:
                 )
             best = max(models, key=_registered_images)
             facts["sparse_model"] = best
-            facts["registered_images"] = _registered_images(best)
+            facts["registered_images"] = registered = _registered_images(best)
+            total = cast(int, facts.get("input_images") or 0)
+            if total and registered < MIN_REGISTERED_FRACTION * total:
+                raise BuildModelError(
+                    f"only {registered} of {total} photos could be connected - the photos are "
+                    "too far apart or do not overlap. Retake the scan following the phone's "
+                    "order (one photo every step, all heights) and keep the package in view."
+                )
             return done("sparse-mapping", result, {"model": best})
 
         def conversion(context: ReconstructionStageContext) -> ReconstructionStageExecution:

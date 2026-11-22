@@ -497,3 +497,62 @@ def test_unsupported_colmap_version_fails_closed(monkeypatch, tmp_path) -> None:
     backend = ColmapOpenMvsBackend(tmp_path / "colmap.exe", {"interface_colmap": tmp_path / "i"})
     with pytest.raises(BuildModelError, match="needs COLMAP 4.2.1"):
         backend.provenance(tmp_path)
+
+
+def test_weak_registration_stops_before_dense_stages(monkeypatch, tmp_path) -> None:
+    """Real scan 2026-11-22: 3 of 17 photos connected; refuse with retake advice."""
+    import struct
+
+    import pytest
+
+    backend = ColmapOpenMvsBackend(
+        tmp_path / "colmap.exe",
+        {
+            key: tmp_path / f"{key}.exe"
+            for key in (
+                "interface_colmap",
+                "densify_point_cloud",
+                "reconstruct_mesh",
+                "refine_mesh",
+                "texture_mesh",
+            )
+        },
+        ffmpeg=None,
+    )
+    asset = "working/reconstruction/r1"
+    sparse = tmp_path / "outputs/colmap/sparse/0"
+
+    def run(stage_id, planned, cancel):
+        (tmp_path / "outputs/colmap").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "outputs/colmap/database.db").write_bytes(b"db")
+        if stage_id == "sparse-mapping":
+            sparse.mkdir(parents=True, exist_ok=True)
+            (sparse / "images.bin").write_bytes(struct.pack("<Q", registered))
+        return ReconstructionStageResult(stage_id, StageStatus.SUCCEEDED, 0, 0.0, "", "")
+
+    monkeypatch.setattr(build_model, "_run_commands", run)
+    monkeypatch.setattr(build_model.shutil, "copyfile", lambda s, d: None)
+    names = tuple(f"{asset}/inputs/{n:02d}.jpg" for n in range(17))
+    context = type(
+        "Context",
+        (),
+        {
+            "cancel": None,
+            "job": type(
+                "Job",
+                (),
+                {"inputs": type("Inputs", (), {"image_asset_ids": names})},
+            ),
+        },
+    )
+    for registered, refused in ((3, True), (8, True), (9, False)):
+        facts: dict[str, object] = {}
+        stages = {s.stage_id: s for s in backend.stages(tmp_path, asset, facts)}
+        for stage_id in ("feature-extraction", "matching"):
+            stages[stage_id].execute(context)  # type: ignore[arg-type]
+        if refused:
+            with pytest.raises(build_model.BuildModelError, match=f"only {registered} of 17"):
+                stages["sparse-mapping"].execute(context)  # type: ignore[arg-type]
+        else:
+            stages["sparse-mapping"].execute(context)  # type: ignore[arg-type]
+            assert facts["registered_images"] == 9
