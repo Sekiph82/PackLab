@@ -37,6 +37,7 @@ from .design_workbench import (
     latest_project_design_model,
 )
 from .jobs import JobManager
+from .preferences import documents_folder
 
 if TYPE_CHECKING:
     from .shell import StudioMainWindow
@@ -230,7 +231,7 @@ class LabelsView(QWidget):
         return button
 
     def _start_folder(self) -> Path:
-        return self.project_root() or Path.home()
+        return self.project_root() or documents_folder()  # F15: not the bare home
 
     def _run(self, action: Callable[[], str]) -> None:
         try:

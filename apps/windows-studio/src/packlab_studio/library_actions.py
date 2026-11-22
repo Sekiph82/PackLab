@@ -42,6 +42,7 @@ from .i18n import tr
 from .packaging_library_backup import PackagingLibraryBackupService
 from .packaging_library_browser import PackagingLibraryBrowserService, PackagingLibraryBrowserView
 from .packaging_library_contact_sheet import PackagingLibraryContactSheetExporter
+from .preferences import documents_folder  # F15 start folder, never the bare home
 
 _FAMILY = {
     PackageFamily.JAR: PackagingFamily.JAR,
@@ -145,14 +146,17 @@ class LibraryActionsBar(QWidget):
         self.choose_backup_path: Callable[[], str] = lambda: QFileDialog.getSaveFileName(
             self,
             "Back up Packaging Library",
-            str(Path.home() / "packlab-library-backup.zip"),
+            str(documents_folder() / "packlab-library-backup.zip"),
             "Library backup (*.zip)",
         )[0]
         self.choose_archive_path: Callable[[], str] = lambda: QFileDialog.getOpenFileName(
-            self, "Restore Packaging Library backup", str(Path.home()), "Library backup (*.zip)"
+            self,
+            "Restore Packaging Library backup",
+            str(documents_folder()),
+            "Library backup (*.zip)",
         )[0]
         self.choose_directory: Callable[[str], str] = lambda title: (
-            QFileDialog.getExistingDirectory(self, title, str(Path.home()))
+            QFileDialog.getExistingDirectory(self, title, str(documents_folder()))
         )
 
         self.asset_id = QLineEdit(self)
