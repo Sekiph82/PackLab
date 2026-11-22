@@ -204,7 +204,101 @@ def test_f3_second_launch_focuses_first_and_exits_with_already_running(monkeypat
     monkeypatch.setattr(studio_app, "claim_single_instance", lambda: None)
     monkeypatch.setattr(studio_app, "activate_running_instance", lambda: focused.append(True))
     monkeypatch.setattr(studio_app, "StudioMainWindow", lambda **_kw: pytest.fail("no window"))
-    assert studio_app.run(["PackLabStudio"]) == studio_app.EXIT_ALREADY_RUNNING == 3
+    assert studio_app.run(["PackLabStudio"]) == studio_app.EXIT_ALREADY_RUNNING == 75
     assert focused == [True]
-    launcher = Path(__file__).resolve().parents[2] / "tools" / "dev" / "PackLabOwnerLauncher.cs"
-    assert "AlreadyRunningExitCode = 3" in launcher.read_text(encoding="utf-8")
+    tools = Path(__file__).resolve().parents[2] / "tools" / "dev"
+    launcher = (tools / "PackLabOwnerLauncher.cs").read_text(encoding="utf-8")
+    script = (tools / "launch_owner_packlab.ps1").read_text(encoding="utf-8")
+    main = (Path(studio_app.__file__).parent / "__main__.py").read_text(encoding="utf-8")
+    assert "AlreadyRunningExitCode = 75;" in launcher and "-eq 75) { exit 0 }" in script
+    assert "_exit_code != EXIT_ALREADY_RUNNING" in main
+    # abort()/qFatal exit 3: still a startup failure everywhere (M1).
+    assert "= 3;" not in launcher and "-eq 3)" not in script and "!= 3" not in main
+
+
+_REJECTED = (
+    "/x",
+    r"\x",
+    "/Users/escape/ESCAPED.txt",
+    r"\server\share\x",
+    r"\\server\share\x",
+    "//server/share/x",
+    r"\\?\C:\x",
+    r"\\.\PhysicalDrive0",
+    "//?/C:/x",
+    "C:x",
+    r"C:\x",
+    "c:/x",
+    "a.json:stream",
+    "dir/a.json::$DATA",
+    "..",
+    "a/../../x",
+    r"..\x",
+    ".. ",
+    "...",
+    ". .",
+    "a/b.",
+    "a/b ",
+    "CON",
+    "con.txt",
+    "dir/NUL",
+    "PRN.json",
+    "AUX.tar.gz",
+    "COM1",
+    "com9.log",
+    "LPT1.txt",
+    "lpt9",
+    "COM\u00b9",
+    "CON .txt",
+    "CONIN$",
+    "",
+)
+
+
+@pytest.mark.parametrize("value", _REJECTED)
+def test_h1_m2_unsafe_relative_paths_are_rejected(value: str) -> None:
+    from packlab_studio.project_layout import safe_relative_path
+
+    with pytest.raises(ProjectLayoutError):
+        safe_relative_path(value)
+
+
+def test_h1_safe_relative_paths_still_accepted() -> None:
+    from packlab_studio.project_layout import safe_relative_path
+
+    assert safe_relative_path("a/./b//c.json") == Path("a", "b", "c.json")
+    assert safe_relative_path(r"autosave\design-model-draft.json") == Path(
+        "autosave", "design-model-draft.json"
+    )
+    assert safe_relative_path("console.txt") == Path("console.txt")  # not a device name
+    assert safe_relative_path(".packlab-layout.json") == Path(".packlab-layout.json")
+
+
+def test_h1_reviewer_escape_call_is_refused(tmp_path) -> None:
+    root = _project(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    layout = ProjectLayout.open(root)
+    # The reviewer's call: a root-relative path ("/Users/.../ESCAPED.txt", no drive).
+    escaped = (outside / "ESCAPED.txt").as_posix()
+    rooted = "/" + escaped.split(":", 1)[-1].lstrip("/")
+    for value in (rooted, rooted.replace("/", "\\"), str(outside / "ESCAPED.txt")):
+        with pytest.raises(ProjectLayoutError):
+            target = layout.path("working", value)
+            target.write_text("escaped", encoding="utf-8")
+    assert not (outside / "ESCAPED.txt").exists()
+
+
+@windows_only
+def test_l1_junction_at_the_area_itself_is_rejected(tmp_path) -> None:
+    root = _project(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "cache").rmdir()
+    subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(root / "cache"), str(outside)],
+        check=True,
+        capture_output=True,
+    )
+    with pytest.raises(ProjectLayoutError, match="link"):
+        ProjectLayout.open(root).path("cache", "x.bin")

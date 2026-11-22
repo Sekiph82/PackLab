@@ -16,7 +16,8 @@ internal static class PackLabOwnerLauncher
     private const string OwnerRoot = "__PACKLAB_OWNER_ROOT__";
     private const int StartupStabilitySeconds = 10;
     // PackLab was already running; it brought its window to the front and this launch ends.
-    private const int AlreadyRunningExitCode = 3;
+    // Matches packlab_studio.app.EXIT_ALREADY_RUNNING; not 3, which abort()/qFatal return.
+    private const int AlreadyRunningExitCode = 75;
 
     [STAThread]
     private static int Main()

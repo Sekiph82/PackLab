@@ -24,7 +24,9 @@ ORGANIZATION_NAME = "PackLab"
 APPLICATION_NAME = "PackLab Studio"
 EXIT_SUCCESS = 0
 EXIT_STARTUP_FAILURE = 1
-EXIT_ALREADY_RUNNING = 3  # launchers treat this as success, not a startup failure
+# PackLab was already running and its window was focused. Launchers treat only this code as
+# success; it is not 3, which MSVC abort()/qFatal also return, so native crashes still fail.
+EXIT_ALREADY_RUNNING = 75
 BUILD_SMOKE_ARGUMENT = "--packlab-build-smoke"
 LOG_ROTATE_BYTES = 5 * 1024 * 1024
 
