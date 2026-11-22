@@ -43,6 +43,6 @@ $manifestPath = Join-Path (Join-Path $ownerRoot 'releases') (Join-Path $runtimeI
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $expectedSha = (& git -C $root rev-parse HEAD).Trim()
 if ($manifest.source_commit -ne $expectedSha -or $manifest.runtime_id -ne $runtimeId -or $manifest.uv_lock_sha256 -notmatch '^[0-9a-f]{64}$') { throw 'Runtime/source/dependency-lock identity differs from refreshed source HEAD.' }
-if ($refreshOutput -notmatch ('OWNER_DEV_EXE_READY ' + [regex]::Escape($expectedSha) + ' ' + [regex]::Escape($runtimeId) + ' ')) { throw 'Native Desktop owner readiness proof is missing.' }
+if ((@($refreshOutput) -join "`n") -notmatch ('OWNER_DEV_EXE_READY ' + [regex]::Escape($expectedSha) + ' ' + [regex]::Escape($runtimeId) + ' ')) { throw 'Native Desktop owner readiness proof is missing.' }
 Write-Output $refreshOutput
 Write-Output $currentOutput
