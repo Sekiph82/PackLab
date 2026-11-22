@@ -12,6 +12,7 @@ from os import PathLike
 from typing import Any
 
 from .blender_capability import BlenderCapabilityStatus, discover_blender
+from .subprocess_runner import NO_WINDOW
 
 
 class CapabilityStatus(StrEnum):
@@ -56,7 +57,13 @@ def default_probe(args: Sequence[str]) -> ProbeResult:
         return ProbeResult("missing", detail="executable not found")
     try:
         completed = subprocess.run(
-            list(args), capture_output=True, text=True, check=False, shell=False, timeout=2
+            list(args),
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+            timeout=2,
+            creationflags=NO_WINDOW,
         )
     except subprocess.TimeoutExpired:
         return ProbeResult("error", detail="probe timed out")

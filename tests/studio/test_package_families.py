@@ -457,3 +457,19 @@ def _sections(design, section_ids):
         for item in deserialize_design_model(design.design_document).cross_sections
     }
     return tuple(sections[section_id] for section_id in section_ids)
+
+
+def test_preset_logic_uses_item_data_not_translated_text(window) -> None:
+    view = _families(window)
+    view.family.setCurrentIndex(view.family.findData("jerrycan"))
+    names = list(pf.PRESETS["jerrycan"])
+    assert len(names) >= 2
+    view.preset.setCurrentIndex(1)
+    for index in range(view.preset.count()):  # what a Turkish relabel would do
+        view.preset.setItemText(index, f"translated {index}")
+    view._preset_changed()
+    assert view._preset_key() == names[1]
+    expected = pf.default_parameters("jerrycan", names[1])
+    assert all(
+        view.values()[key] == value for key, value in expected.items() if key in view.values()
+    )

@@ -127,10 +127,12 @@ def test_shell_route_and_workspace_state_follows_project_manager(monkeypatch, tm
     app = create_application(["packlab-r01-project-state"])
     window = StudioMainWindow()
     assert not bool(window.navigation_panel.list.item(2).flags() & Qt.ItemFlag.ItemIsEnabled)
-    assert window.workspace.docks[DockId.SCENE].isHidden()
+    assert not window.workspace.docks[DockId.SCENE].isEnabled()
     window.new_project(tmp_path / "project", "Project")
     assert bool(window.navigation_panel.list.item(2).flags() & Qt.ItemFlag.ItemIsEnabled)
-    assert not window.workspace.docks[DockId.SCENE].isHidden()
+    # PL-0464: the dock follows the project in enablement; visibility is the View menu's.
+    assert window.workspace.docks[DockId.SCENE].isEnabled()
+    assert window.workspace.docks[DockId.SCENE].isHidden()
     window.navigation.navigate(Route.EDITOR)
     assert window.navigation.current_route is Route.EDITOR
     window.close()

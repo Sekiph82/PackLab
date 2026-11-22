@@ -11,16 +11,22 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, QSize, Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QStackedWidget,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -33,12 +39,14 @@ from packlab_core.engine_probe import (
     probe_engine,
     probe_openmvs,
 )
+from packlab_core.subprocess_runner import NO_WINDOW
 
 from .build_model import SUPPORTED_COLMAP_VERSIONS, BuildModelView
 from .capture_inbox import CaptureInboxView
 from .design_workbench import DesignWorkbench
 from .engine_config import discover_engines
 from .engineering_export import EngineeringExportView
+from .i18n import LANGUAGES, language, tr
 from .labels_view import LabelsView
 from .mask_correction import MaskCorrectionView
 from .measure_view import MeasureDesignView
@@ -60,6 +68,92 @@ class Route(StrEnum):
     MEASURE_DESIGN = "measure-design"
     LABELS = "labels"
     PACKAGE_FAMILIES = "package-families"
+
+
+# Navigation label / page title, one-line plain-language description, standard Qt icon.
+ROUTE_TEXT: dict[Route, tuple[str, str, QStyle.StandardPixmap]] = {
+    Route.LIBRARY: (
+        "Packaging Library",
+        "Browse, search and manage your saved packaging designs (SKUs).",
+        QStyle.StandardPixmap.SP_DirHomeIcon,
+    ),
+    Route.CAPTURE_INBOX: (
+        "Capture Inbox",
+        "Receive scans from the iPhone or import a .packscan file.",
+        QStyle.StandardPixmap.SP_ArrowDown,
+    ),
+    Route.RECONSTRUCTION: (
+        "Build 3D Model",
+        "Turn the photos of an imported scan into a 3D model (COLMAP / OpenMVS).",
+        QStyle.StandardPixmap.SP_MediaPlay,
+    ),
+    Route.EDITOR: (
+        "Scan Master",
+        "Promote a cleaned scan to Scan Master, the measured reference copy of the real object.",
+        QStyle.StandardPixmap.SP_DialogApplyButton,
+    ),
+    Route.MASK_CORRECTION: (
+        "Mask Correction",
+        "Fix the object outline in a photo by painting or erasing pixels.",
+        QStyle.StandardPixmap.SP_DialogResetButton,
+    ),
+    Route.EXPORTS: (
+        "Exports",
+        "Save the Scan Master or Design Model as engineering files.",
+        QStyle.StandardPixmap.SP_DialogSaveButton,
+    ),
+    Route.SETTINGS: (
+        "Settings",
+        "Language, automatic model building, reconstruction engines and version details.",
+        QStyle.StandardPixmap.SP_FileDialogDetailedView,
+    ),
+    Route.MODEL_VIEWER: (
+        "Model Viewer",
+        "Look at a built 3D model: drag to rotate, right-drag to pan, wheel to zoom.",
+        QStyle.StandardPixmap.SP_DesktopIcon,
+    ),
+    Route.MEASURE_DESIGN: (
+        "Measure & Design",
+        "Isolate the object, set real-world scale, measure it and create a Design Model.",
+        QStyle.StandardPixmap.SP_FileDialogContentsView,
+    ),
+    Route.LABELS: (
+        "Labels",
+        "Place label zones and artwork on the Design Model and render mockups.",
+        QStyle.StandardPixmap.SP_FileIcon,
+    ),
+    Route.PACKAGE_FAMILIES: (
+        "Package Families",
+        "Create size and closure variants from parametric package family templates.",
+        QStyle.StandardPixmap.SP_DirIcon,
+    ),
+}
+
+
+class PageHeader(QWidget):
+    """Title and one-line description of the open page, above the route stack."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("packlab.page.header")
+        self.title = QLabel(self)
+        self.title.setObjectName("packlab.page.title")
+        font = QFont(self.title.font())
+        font.setPointSizeF(font.pointSizeF() * 1.5)
+        font.setBold(True)
+        self.title.setFont(font)
+        self.description = QLabel(self)
+        self.description.setObjectName("packlab.page.description")
+        self.description.setWordWrap(True)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 4)
+        layout.addWidget(self.title)
+        layout.addWidget(self.description)
+
+    def show_route(self, route: Route) -> None:
+        title, description, _icon = ROUTE_TEXT[route]
+        self.title.setText(tr(title))
+        self.description.setText(tr(description))
 
 
 class NavigationError(ValueError):
@@ -120,14 +214,42 @@ class ScanMasterEditorView(QWidget):
         self.authority_status.setObjectName("packlab.scan-master.authority-status")
         self.status = QLabel("No promotion requested.", self)
         self.status.setObjectName("packlab.scan-master.status")
+        # F13: one compact, explained card instead of full-width fields on an empty page.
+        self.authority_status.setWordWrap(True)
+        self.status.setWordWrap(True)
+        self.actor_input.setPlaceholderText("e.g. your name")
+        self.reason_input.setPlaceholderText("e.g. Cleaned jar scan, scale checked on the mat")
+        intro = QLabel(
+            "Scan Master is the official measured copy of the real object that later "
+            "designs refer to. Promote the cleaned object you selected in Measure & Design. "
+            "Your name and reason are stored in the audit history.",
+            self,
+        )
+        intro.setWordWrap(True)
+        plain = QLabel(
+            "In plain words: the dimensions are not yet confirmed on the physical object and "
+            "the model must not be used to make moulds.",
+            self,
+        )
+        plain.setWordWrap(True)
         form = QFormLayout()
-        form.addRow("Actor", self.actor_input)
-        form.addRow("Promotion reason", self.reason_input)
+        form.addRow("Your name", self.actor_input)
+        form.addRow("Reason", self.reason_input)
+        button_row = QHBoxLayout()
+        button_row.addWidget(self.promote_button)
+        button_row.addStretch(1)
+        card = QGroupBox("Promote to Scan Master", self)
+        card.setMaximumWidth(760)
+        card_layout = QVBoxLayout(card)
+        card_layout.addWidget(intro)
+        card_layout.addLayout(form)
+        card_layout.addLayout(button_row)
+        card_layout.addWidget(self.authority_status)
+        card_layout.addWidget(plain)
+        card_layout.addWidget(self.status)
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.promote_button)
-        layout.addWidget(self.authority_status)
-        layout.addWidget(self.status)
+        layout.addWidget(card)
+        layout.addStretch(1)
         self.promote_button.clicked.connect(self._request_promotion)
 
     def _request_promotion(self) -> None:
@@ -153,6 +275,7 @@ def _probe_runner(executable: Path, arguments: Sequence[str]) -> tuple[int, str,
             check=False,
             shell=False,
             timeout=5.0,
+            creationflags=NO_WINDOW,
             cwd=scratch,
         )
         stdout = completed.stdout or "".join(
@@ -219,7 +342,18 @@ class SettingsView(QWidget):
         self.recheck_button.setObjectName("packlab.settings.engines-recheck")
         self.recheck_button.clicked.connect(self.recheck_engines)
         self._engine_rows_ready.connect(self._show_engine_rows)
+        self.language = QComboBox(self)
+        self.language.setObjectName("packlab.settings.language")
+        for code, name in LANGUAGES.items():
+            self.language.addItem(name, code)
+        self.language.setCurrentIndex(self.language.findData(language()))
+        self.language_note = QLabel("", self)
+        self.language_note.setObjectName("packlab.settings.language-note")
+        language_form = QFormLayout()
+        language_form.addRow(tr("Language"), self.language)
+        language_form.addRow(self.language_note)
         layout = QVBoxLayout(self)
+        layout.addLayout(language_form)
         layout.addWidget(self.auto_build)
         layout.addWidget(QLabel("Reconstruction engines (COLMAP / OpenMVS)", self))
         layout.addWidget(self.engines)
@@ -235,7 +369,7 @@ class SettingsView(QWidget):
     def recheck_engines(self) -> None:
         """Probe versions on a worker thread; the UI stays responsive meanwhile."""
         self.recheck_button.setEnabled(False)
-        self.recheck_button.setText("Checking engines…")
+        self.recheck_button.setText(tr("Checking engines…"))
         threading.Thread(
             target=lambda: self._engine_rows_ready.emit(engine_rows(probe=True)),
             name="packlab-engine-probe",
@@ -246,7 +380,7 @@ class SettingsView(QWidget):
         self.engines.clear()
         self.engines.addItems(rows)
         self.recheck_button.setEnabled(True)
-        self.recheck_button.setText("Re-check engines")
+        self.recheck_button.setText(tr("Re-check engines"))
 
 
 # Routes that need an open project. Navigation and view gating both read this set.
@@ -269,13 +403,30 @@ class NavigationPanel(QWidget):
         self.setObjectName("packlab.navigation.panel")
         self.list = QListWidget(self)
         self.list.setObjectName("packlab.navigation.routes")
+        self.list.setIconSize(QSize(20, 20))
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list.setTextElideMode(Qt.TextElideMode.ElideNone)
+        self.list.setSpacing(2)
+        style = self.style()
         for route in Route:
-            item = QListWidgetItem(route.name.replace("_", " ").title())
+            title, description, icon = ROUTE_TEXT[route]
+            item = QListWidgetItem(style.standardIcon(icon), tr(title))
+            item.setToolTip(tr(description))
             item.setData(0x0100, route.value)
             self.list.addItem(item)
         self.list.currentItemChanged.connect(self._on_item_changed)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(4, 4, 0, 4)
         layout.addWidget(self.list)
+        self.fit_to_labels()
+
+    def fit_to_labels(self) -> None:
+        """Wide enough for the longest label plus icon at the current font (no eliding)."""
+        frame = 2 * self.list.frameWidth()
+        scrollbar = self.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent)
+        width = self.list.sizeHintForColumn(0) + frame + scrollbar + 16
+        self.list.setMinimumWidth(width)
+        self.setMinimumWidth(width + 4)  # panel layout: 4 px left margin, 0 right
 
     def set_project_available(self, available: bool) -> None:
         # Capture Inbox is per-user, not per-project: it stays reachable without a project.
@@ -359,7 +510,20 @@ class RouteStack(QStackedWidget):
             self.addWidget(view)
 
     def show_route(self, route: Route) -> None:
+        # Only the visible page counts for the minimum size, so the surrounding scroll
+        # area scrolls when *this* page needs it, not because of the tallest page.
+        for key, view in self.views.items():
+            policy = QSizePolicy.Policy.Preferred if key is route else QSizePolicy.Policy.Ignored
+            view.setSizePolicy(policy, policy)
         self.setCurrentWidget(self.views[route])
+        self.updateGeometry()
+
+    # QStackedLayout answers height-for-width with the preferred height of *all* pages, so
+    # the surrounding scroll area would scroll every page to the tallest one. Answer with
+    # the visible page's minimum height: scrolling starts only when that page is cramped.
+    def heightForWidth(self, _width: int) -> int:
+        page = self.currentWidget()
+        return -1 if page is None else page.minimumSizeHint().height()
 
     def set_project_available(self, available: bool) -> None:
         for route in PROJECT_ROUTES:

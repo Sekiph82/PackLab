@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import io
 import time
 from collections.abc import Callable
@@ -9,32 +10,80 @@ from pathlib import Path
 from typing import Any
 
 import segno
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QPixmap, QShowEvent
+from PySide6.QtCore import QDateTime, QLocale, Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QGuiApplication, QPixmap, QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QProgressBar,
     QPushButton,
+    QScrollArea,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
 
 from packlab_core.pairing import PairingOffer
 
+from .i18n import language, tr
 from .receiver_session import InboxEntry, ReceiverSession
 from .remote_control import RemoteControlError
 
+QR_SIZE_PX = 260  # logical pixels; whole-module scaling keeps it crisp at any DPI
+_SOURCES = {"network": "iPhone Wi-Fi", "picker": "File", "drop": "File"}
 
-def qr_pixmap(payload: str, *, scale: int = 5) -> QPixmap:
+
+def qr_pixmap(payload: str, *, scale: int | None = None, target: int = QR_SIZE_PX) -> QPixmap:
+    qr = segno.make(payload, error="m")
+    ratio = QGuiApplication.primaryScreen().devicePixelRatio() if scale is None else 1.0
+    if scale is None:
+        modules = qr.symbol_size(scale=1, border=4)[0]
+        scale = max(2, int(int(target * ratio) // modules))
     buffer = io.BytesIO()
-    segno.make(payload, error="m").save(buffer, kind="png", scale=scale, border=4)
+    qr.save(buffer, kind="png", scale=scale, border=4)
     pixmap = QPixmap()
     pixmap.loadFromData(buffer.getvalue())
+    pixmap.setDevicePixelRatio(ratio)
     return pixmap
+
+
+def local_time(epoch: float | None) -> str:
+    """Short local date/time; Turkish format when the UI language is Turkish."""
+    if epoch is None:
+        return tr("never")
+    locale = QLocale(QLocale.Language.Turkish) if language() == "tr" else QLocale()
+    stamp = QDateTime.fromSecsSinceEpoch(int(epoch))
+    return locale.toString(stamp, locale.dateTimeFormat(QLocale.FormatType.ShortFormat))
+
+
+def inbox_row(entry: InboxEntry) -> tuple[str, str]:
+    """Plain-language row text and a tooltip carrying the technical audit identifiers."""
+    name = (
+        tr("Scan from {model}").format(model=entry.device_model)
+        if entry.device_model
+        else (tr("Scan"))
+    )
+    parts = [name]
+    if entry.imported_at is not None:
+        parts.append(local_time(entry.imported_at))
+    if entry.image_count is not None:
+        parts.append(tr("Photos: {count}").format(count=entry.image_count))
+    parts.append(tr(_SOURCES.get(entry.source_channel, entry.source_channel or "?")))
+    if entry.status != "imported":
+        parts.append(entry.status)
+    details = [
+        f"capture_id: {entry.capture_id}",
+        f"status: {entry.status}",
+        f"source_channel: {entry.source_channel or '?'}",
+        f"capture_mode: {entry.capture_mode or '?'}",
+        f"sha256: {entry.package_sha256}",
+    ]
+    return "   ·   ".join(parts), "<br>".join(html.escape(line) for line in details)
 
 
 class CaptureInboxView(QWidget):
@@ -71,14 +120,32 @@ class CaptureInboxView(QWidget):
         self._shown_entries: list[InboxEntry] = []
         self._known_imports: set[str] | None = None
 
-        self.receive_button = QPushButton("Receive from iPhone", self)
+        self.receive_button = QPushButton(tr("Receive from iPhone"), self)
         self.new_code_button = QPushButton("New code", self)
         self.stop_button = QPushButton("Stop receiving", self)
         self.stop_button.setEnabled(False)
         self.new_code_button.setEnabled(False)
         self.import_button = QPushButton("Import .packscan file…", self)
         self.qr_label = QLabel(self)
-        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.qr_label.setObjectName("packlab.capture-inbox.qr")
+        self.qr_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.qr_label.setFixedSize(QR_SIZE_PX + 8, QR_SIZE_PX + 8)
+        self.qr_label.hide()
+        # Explicit receiving state instead of only a greyed-out button (PL-0464).
+        self.receiving_label = QLabel("", self)
+        self.receiving_label.setObjectName("packlab.capture-inbox.receiving")
+        self.receiving_label.setWordWrap(True)
+        self.receiving_label.setTextFormat(Qt.TextFormat.PlainText)
+        bold = QFont(self.receiving_label.font())
+        bold.setBold(True)
+        self.receiving_label.setFont(bold)
+        self.receiving_label.hide()
+        self.code_refresh = QProgressBar(self)
+        self.code_refresh.setObjectName("packlab.capture-inbox.code-refresh")
+        self.code_refresh.setTextVisible(False)
+        self.code_refresh.setMaximumHeight(8)
+        self.code_refresh.setFixedWidth(260)
+        self.code_refresh.hide()
         self.pairing_label = QLabel(
             "Press Receive from iPhone, then in the iPhone app choose Send to PackLab > "
             "Scan QR offer. The phone and this PC must be on the same Wi-Fi.",
@@ -91,11 +158,12 @@ class CaptureInboxView(QWidget):
         self.status_label.setTextFormat(Qt.TextFormat.PlainText)
         self.inbox_list = QListWidget(self)
         self.inbox_list.setObjectName("packlab.capture-inbox.list")
+        self.inbox_list.setMinimumHeight(140)
         # Phones paired once send later scans automatically; Revoke unpairs one.
         self.devices_list = QListWidget(self)
         self.devices_list.setObjectName("packlab.capture-inbox.devices")
         self.devices_list.setMaximumHeight(90)
-        self.revoke_button = QPushButton("Revoke", self)
+        self.revoke_button = QPushButton(tr("Revoke"), self)
         self.revoke_button.clicked.connect(self.revoke_selected_device)
         # PL-0429: a connected paired phone can be asked to capture / finish its scan.
         self.remote_label = QLabel("", self)
@@ -113,6 +181,9 @@ class CaptureInboxView(QWidget):
         self.build_button.setObjectName("packlab.capture-inbox.build")
         self.build_button.setEnabled(False)
 
+        # Grouped sections inside a scroll area so nothing is cut off on small windows.
+        content = QWidget(self)
+        content.setObjectName("packlab.capture-inbox.content")
         buttons = QHBoxLayout()
         for button in (
             self.receive_button,
@@ -122,29 +193,50 @@ class CaptureInboxView(QWidget):
         ):
             buttons.addWidget(button)
         buttons.addStretch(1)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Capture Inbox"))
-        layout.addLayout(buttons)
-        layout.addWidget(self.qr_label)
-        layout.addWidget(self.pairing_label)
-        layout.addWidget(self.status_label)
-        layout.addWidget(QLabel("Paired devices"))
-        devices_row = QHBoxLayout()
+        pairing_text = QVBoxLayout()
+        pairing_text.addWidget(self.receiving_label)
+        pairing_text.addWidget(self.pairing_label)
+        pairing_text.addWidget(self.code_refresh, 0, Qt.AlignmentFlag.AlignLeft)
+        pairing_text.addWidget(self.status_label)
+        pairing_text.addStretch(1)
+        pairing_row = QHBoxLayout()
+        pairing_row.addWidget(
+            self.qr_label, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
+        )
+        pairing_row.addLayout(pairing_text, 1)
+        receive_box = QGroupBox(tr("Receive scans"), content)
+        receive_layout = QVBoxLayout(receive_box)
+        receive_layout.addLayout(buttons)
+        receive_layout.addLayout(pairing_row)
+        devices_box = QGroupBox(tr("Paired devices"), content)
+        devices_row = QHBoxLayout(devices_box)
         devices_row.addWidget(self.devices_list, 1)
         devices_row.addWidget(self.revoke_button, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addLayout(devices_row)
-        layout.addWidget(QLabel("Remote capture"))
-        remote_row = QHBoxLayout()
+        remote_box = QGroupBox(tr("Remote capture"), content)
+        remote_row = QHBoxLayout(remote_box)
         remote_row.addWidget(self.remote_label, 1)
         remote_row.addWidget(self.capture_now_button, 0, Qt.AlignmentFlag.AlignTop)
         remote_row.addWidget(self.finish_scan_button, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addLayout(remote_row)
-        layout.addWidget(QLabel("Received scans"))
-        layout.addWidget(self.inbox_list, 1)
+        scans_box = QGroupBox(tr("Received scans"), content)
+        scans_layout = QVBoxLayout(scans_box)
+        scans_layout.addWidget(self.inbox_list, 1)
         build_row = QHBoxLayout()
         build_row.addWidget(self.build_button)
         build_row.addStretch(1)
-        layout.addLayout(build_row)
+        scans_layout.addLayout(build_row)
+        content_layout = QVBoxLayout(content)
+        content_layout.addWidget(receive_box)
+        content_layout.addWidget(devices_box)
+        content_layout.addWidget(remote_box)
+        content_layout.addWidget(scans_box, 1)
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setObjectName("packlab.capture-inbox.scroll")
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.scroll_area.setWidget(content)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.scroll_area)
 
         self._shut_down = False
         self.timer = QTimer(self)
@@ -210,15 +302,19 @@ class CaptureInboxView(QWidget):
         self.receive_button.setEnabled(False)
         self.new_code_button.setEnabled(True)
         self.stop_button.setEnabled(True)
-        self.status_label.setText(
-            f"Listening on {session.lan_host}:{session.port}. If Windows asks, allow "
-            "PackLab on private networks."
+        self.receive_button.setText(tr("Receiving…"))
+        self.receiving_label.setText(
+            tr("Receiving on {address} — scan the QR code in the iPhone app.").format(
+                address=f"{session.lan_host}:{session.port}"
+            )
         )
+        self.receiving_label.show()
+        self.status_label.setText(tr("If Windows asks, allow PackLab on private networks."))
         if issue_code:
             self.new_code()
         else:  # auto-start for paired phones: no pairing code until the owner asks
             self.pairing_label.setText(
-                "Paired phones can send now. Press New code to pair another."
+                tr("Paired phones can send now. Press New code to pair another.")
             )
         self.timer.start()
 
@@ -229,8 +325,12 @@ class CaptureInboxView(QWidget):
             self._session.stop()
         self.offer = None
         self.qr_label.clear()
-        self.pairing_label.setText("Not receiving.")
-        self.status_label.setText("Receiver stopped.")
+        self.qr_label.hide()
+        self.code_refresh.hide()
+        self.receiving_label.hide()
+        self.receive_button.setText(tr("Receive from iPhone"))
+        self.pairing_label.setText(tr("Not receiving."))
+        self.status_label.setText(tr("Receiver stopped."))
         self.receive_button.setEnabled(True)
         self.new_code_button.setEnabled(False)
         self.stop_button.setEnabled(False)
@@ -242,6 +342,10 @@ class CaptureInboxView(QWidget):
             return
         self.offer = session.new_offer()
         self.qr_label.setPixmap(qr_pixmap(self.offer.qr_payload()))
+        self.qr_label.show()
+        lifetime = max(1, int(self.offer.expires_at - time.time()))
+        self.code_refresh.setRange(0, lifetime)
+        self.code_refresh.show()
         self._update_pairing_text()
 
     def _update_pairing_text(self) -> None:
@@ -249,9 +353,14 @@ class CaptureInboxView(QWidget):
             return
         remaining = max(0, int(self.offer.expires_at - time.time()))
         code = self.offer.pairing_code
+        # A calm countdown bar instead of "expires in 2 s"; a new code appears by itself.
+        self.code_refresh.setValue(min(remaining, self.code_refresh.maximum()))
         self.pairing_label.setText(
-            f"Pairing code {code[:4]}-{code[4:]}  |  {self.offer.host}:{self.offer.port}  |  "
-            f"expires in {remaining} s"
+            tr("Pairing code: {code}").format(code=f"{code[:4]}-{code[4:]}")
+            + "\n"
+            + tr("Address: {address}").format(address=f"{self.offer.host}:{self.offer.port}")
+            + "\n"
+            + tr("The code refreshes automatically.")
         )
 
     def _tick(self) -> None:
@@ -273,8 +382,15 @@ class CaptureInboxView(QWidget):
         if shown == [device.device_id for device in devices]:
             return
         self.devices_list.clear()
+        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
         for device in devices:
-            item = QListWidgetItem(f"{device.device_name}  (paired {time.ctime(device.paired_at)})")
+            item = QListWidgetItem(
+                icon,
+                f"{device.device_name}  —  "
+                + tr("paired {when}").format(when=local_time(device.paired_at))
+                + "  —  "
+                + tr("last seen {when}").format(when=local_time(device.last_seen_at)),
+            )
             item.setData(Qt.ItemDataRole.UserRole, device.device_id)
             self.devices_list.addItem(item)
 
@@ -287,16 +403,16 @@ class CaptureInboxView(QWidget):
         self._remote_device = None if item is None else str(item.data(Qt.ItemDataRole.UserRole))
         ready = False
         if session is None or not session.running or self._remote_device is None:
-            text = "Start receiving and select a paired phone to control its capture."
+            text = tr("Start receiving and select a paired phone to control its capture.")
         elif not session.receiver.control.connected(self._remote_device):
-            text = (
+            text = tr(
                 "Phone not connected. On the iPhone start a scan and turn on "
                 "Allow PackLab to trigger captures."
             )
         else:
             status = session.receiver.control.status(self._remote_device)
             if status is None or not status.scan_active:
-                text = "Phone connected, no active scan."
+                text = tr("Phone connected, no active scan.")
             elif not status.control_enabled:
                 text = f"{status.scan_name}: remote capture is turned off on the phone."
             else:
@@ -357,12 +473,17 @@ class CaptureInboxView(QWidget):
         self._shown_records = records
         self._shown_entries = session.entries()
         self.inbox_list.clear()
+        style = self.style()
         for entry in self._shown_entries:
-            images = "" if entry.image_count is None else f", {entry.image_count} images"
-            self.inbox_list.addItem(
-                f"{entry.capture_id}  [{entry.status}{images}, {entry.source_channel or '?'}]  "
-                f"sha256 {entry.package_sha256[:12]}"
+            text, details = inbox_row(entry)
+            icon = style.standardIcon(
+                QStyle.StandardPixmap.SP_DialogApplyButton
+                if entry.status == "imported"
+                else QStyle.StandardPixmap.SP_MessageBoxWarning
             )
+            item = QListWidgetItem(icon, text)
+            item.setToolTip(details)  # technical identifiers stay available for audit
+            self.inbox_list.addItem(item)
         imported = {e.package_sha256 for e in self._shown_entries if e.status == "imported"}
         if self._known_imports is None:
             self._known_imports = imported

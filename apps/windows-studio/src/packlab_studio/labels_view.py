@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -36,6 +37,7 @@ from .design_workbench import (
     latest_project_design_model,
 )
 from .jobs import JobManager
+from .preferences import documents_folder
 
 if TYPE_CHECKING:
     from .shell import StudioMainWindow
@@ -94,10 +96,8 @@ class LabelsView(QWidget):
         model_box = QGroupBox("Design Model", self)
         model_layout = QVBoxLayout(model_box)
         model_layout.addWidget(self.model_summary)
-        model_row = QHBoxLayout()
-        model_row.addWidget(self.project_model_button)
-        model_row.addWidget(self.open_button)
-        model_layout.addLayout(model_row)
+        model_layout.addWidget(self.project_model_button)
+        model_layout.addWidget(self.open_button)
 
         self.kind = QComboBox(self)
         self.kind.setObjectName("packlab.labels.zone-kind")
@@ -107,8 +107,10 @@ class LabelsView(QWidget):
         self.variant.setObjectName("packlab.labels.variant")
         self.variant.setPlaceholderText("variant name, e.g. front, back, wrap-v2")
         self.boundary: dict[str, QDoubleSpinBox] = {}
-        boundary_row = QHBoxLayout()
-        for name, value in (("u_min", 0.0), ("v_min", 0.1), ("u_max", 1.0), ("v_max", 0.9)):
+        boundary_row = QGridLayout()  # 2x2 so the page fits 1280 px screens (PL-0464)
+        for index, (name, value) in enumerate(
+            (("u_min", 0.0), ("v_min", 0.1), ("u_max", 1.0), ("v_max", 0.9))
+        ):
             spin = QDoubleSpinBox(self)
             spin.setObjectName(f"packlab.labels.boundary.{name}")
             spin.setRange(0.0, 1.0)
@@ -117,14 +119,17 @@ class LabelsView(QWidget):
             spin.setValue(value)
             spin.setPrefix(f"{name} ")
             self.boundary[name] = spin
-            boundary_row.addWidget(spin)
+            boundary_row.addWidget(spin, index // 2, index % 2)
         self.suggest_button = self._button("Suggest zone", "suggest", self.suggest_zone)
         self.add_zone_button = self._button("Add label zone", "add-zone", self.add_zone)
-        zone_box = QGroupBox("Label zone (curvature-checked on the exact CAD surface)", self)
+        zone_box = QGroupBox("Label zone", self)
         zone_form = QFormLayout(zone_box)
+        zone_hint = QLabel("Curvature-checked on the exact CAD surface.", self)
+        zone_hint.setWordWrap(True)
+        zone_form.addRow(zone_hint)
         zone_form.addRow("Kind", self.kind)
         zone_form.addRow("Variant", self.variant)
-        zone_form.addRow("Placement (0..1 of the host face)", boundary_row)
+        zone_form.addRow("Placement (0..1)", boundary_row)
         buttons = QHBoxLayout()
         buttons.addWidget(self.suggest_button)
         buttons.addWidget(self.add_zone_button)
@@ -152,10 +157,10 @@ class LabelsView(QWidget):
         labels_layout.addWidget(self.zones)
         row = QHBoxLayout()
         row.addWidget(QLabel("Fit", self))
-        row.addWidget(self.fit)
-        row.addWidget(self.import_button)
-        row.addWidget(self.dieline_button)
+        row.addWidget(self.fit, 1)
         labels_layout.addLayout(row)
+        labels_layout.addWidget(self.import_button)
+        labels_layout.addWidget(self.dieline_button)
         labels_layout.addWidget(self.artwork_preview)
 
         self.material = QComboBox(self)
@@ -168,8 +173,15 @@ class LabelsView(QWidget):
         self.mockup_preview.setObjectName("packlab.labels.mockup-preview")
         self.mockup_preview.setMinimumSize(QSize(240, 240))
         self.mockup_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        render_box = QGroupBox("Material and mockup (visual reference only)", self)
+        render_box = QGroupBox("Material and mockup", self)
         render_form = QFormLayout(render_box)
+        render_hint = QLabel("Visual reference only.", self)
+        render_hint.setWordWrap(True)
+        render_form.addRow(render_hint)
+        self.material.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
+        self.material.setMinimumContentsLength(14)
         render_form.addRow("Material", self.material)
         self.cancel_render_button = self._button(
             "Cancel render", "cancel-render", self.cancel_render
@@ -219,7 +231,7 @@ class LabelsView(QWidget):
         return button
 
     def _start_folder(self) -> Path:
-        return self.project_root() or Path.home()
+        return self.project_root() or documents_folder()  # F15: not the bare home
 
     def _run(self, action: Callable[[], str]) -> None:
         try:
@@ -546,7 +558,7 @@ def install_design_workbench(window: StudioMainWindow) -> None:
         )
         library_layout = library.layout()
         if isinstance(library_layout, QVBoxLayout):
-            library_layout.insertWidget(0, bar)
+            library_layout.addWidget(bar)  # below the browser, not above search
 
 
 __all__ = ["LabelsView", "install_design_workbench"]

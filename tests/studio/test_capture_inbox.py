@@ -124,8 +124,11 @@ def test_receive_from_iphone_pairs_uploads_and_lists_scan(monkeypatch, tmp_path,
         assert ack["verified"] is True
         view._tick()
         rows = [view.inbox_list.item(i).text() for i in range(view.inbox_list.count())]
-        assert len(rows) == 1 and "loopback-capture" in rows[0] and "imported" in rows[0]
-        assert "network" in rows[0]
+        tips = [view.inbox_list.item(i).toolTip() for i in range(view.inbox_list.count())]
+        # PL-0464: plain-language row; technical identifiers move to the tooltip.
+        assert len(rows) == 1 and "iPhone Wi-Fi" in rows[0] and "Photos: " in rows[0]
+        assert "loopback-capture" in tips[0] and "status: imported" in tips[0]
+        assert "source_channel: network" in tips[0]
         previous = view.offer
         view.new_code_button.click()
         assert view.offer is not None and view.offer.pairing_id != previous.pairing_id
@@ -146,7 +149,9 @@ def test_import_packscan_file_uses_same_inbox(monkeypatch, tmp_path, repo_root) 
         view.import_button.click()
         assert "reported" in view.status_label.text()
         rows = [view.inbox_list.item(i).text() for i in range(view.inbox_list.count())]
-        assert len(rows) == 1 and "loopback-capture" in rows[0] and "picker" in rows[0]
+        tips = [view.inbox_list.item(i).toolTip() for i in range(view.inbox_list.count())]
+        assert len(rows) == 1 and "File" in rows[0]
+        assert "loopback-capture" in tips[0] and "source_channel: picker" in tips[0]
         view.import_button.click()
         assert "duplicate" in view.status_label.text()
         assert view.session is not None and not view.session.running

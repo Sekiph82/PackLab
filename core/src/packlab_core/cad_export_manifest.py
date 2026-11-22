@@ -16,6 +16,7 @@ from .cad_adapter import CadRuntimeDiagnostics
 from .cad_brep import CadBrepRepresentationRevision
 from .cad_validation import CadBrepValidationReport
 from .design_model import DesignModelRevision
+from .subprocess_runner import NO_WINDOW
 
 CAD_EXPORT_MANIFEST_CONTRACT = "packlab.cad-export-manifest.v1"
 _SHA_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -252,6 +253,7 @@ def resolve_packlab_commit() -> str:
             check=True,
             text=True,
             timeout=2,
+            creationflags=NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise CadExportManifestError("cad_export_manifest_packlab_commit_unavailable") from error
