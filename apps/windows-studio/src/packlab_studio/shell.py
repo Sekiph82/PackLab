@@ -688,7 +688,11 @@ class StudioMainWindow(QMainWindow):
         except Exception:  # unreadable inbox index: show an empty list, never crash
             entries = []
         layout = self.project_manager.layout
-        builds.refresh_history(entries, None if layout is None else layout.root)
+        try:
+            roles = self.project_manager.scan_part_roles()
+        except Exception:  # unreadable project state: manifest roles still show
+            roles = {}
+        builds.refresh_history(entries, None if layout is None else layout.root, roles)
 
     def resume_paired_receiver(self) -> None:
         """Pair once: a paired phone can send without the owner opening Capture Inbox.

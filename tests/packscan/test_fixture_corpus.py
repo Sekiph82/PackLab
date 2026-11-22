@@ -19,6 +19,7 @@ def test_current_manifest_fixture_corpus_is_accepted(repo_root: Path) -> None:
         "manifest-valid-turntable.json",
         "manifest-derived-present.json",
         "manifest-derived-omitted.json",
+        "manifest-valid-part-role-body-flipped.json",
     )
     for name in accepted:
         value = json.loads((fixture_dir / name).read_text(encoding="utf-8"))
@@ -34,6 +35,7 @@ def test_negative_manifest_fixture_corpus_is_rejected(repo_root: Path) -> None:
         "manifest-invalid-turntable-guided.json",
         "manifest-derived-mismatched.json",
         "manifest-derived-corrupt.json",
+        "manifest-invalid-part-role.json",
     )
     for name in rejected:
         value = json.loads((fixture_dir / name).read_text(encoding="utf-8"))

@@ -34,7 +34,27 @@ DESIGN_MODEL_DOCUMENT_CONTRACT = "packlab.studio-design-model-revision.v1"
 _SELECTION_EVENTS = {
     "active_scan_master_revision_id": "scan_master_selection_events",
     "active_design_model_revision_id": "design_model_selection_events",
+    # PL-0482: {package_sha256: part_role} owner assignments; the whole map is the value.
+    "scan_part_roles": "scan_part_role_events",
 }
+_PACKAGE_DIGEST = re.compile(r"[0-9a-f]{64}")
+_PART_ROLE_EVENT_LIMIT = 200
+
+
+def _valid_part_roles(value: object) -> tuple[dict[str, str], int]:
+    """Well-formed {digest: role} entries and the number of ignored malformed ones."""
+    from packlab_core.packscan.part_roles import is_part_role
+
+    if value is None:
+        return {}, 0
+    if not isinstance(value, dict):
+        return {}, 1
+    valid = {
+        digest: str(role)
+        for digest, role in value.items()
+        if isinstance(digest, str) and _PACKAGE_DIGEST.fullmatch(digest) and is_part_role(role)
+    }
+    return valid, len(value) - len(valid)
 
 
 class ProjectError(RuntimeError):
@@ -114,6 +134,7 @@ class ProjectManager:
         self.recovery: RecoveryManager | None = None
         self.recovery_items: tuple[RecoveryItem, ...] = ()
         self.history: HistoryManager | None = None
+        self.scan_part_roles_ignored = 0  # malformed role entries skipped on last read
         self._listeners: list[Callable[[ProjectMetadata | None], None]] = []
 
     @property
@@ -689,6 +710,56 @@ class ProjectManager:
         if document.get("design_model_revision_id") != revision_id:
             raise ProjectError("design model document does not match its record")
         return record, document
+
+    # ------------------------------------------------------------ scan part roles (PL-0482)
+
+    def scan_part_roles(self) -> dict[str, str]:
+        """Owner role assignments {package_sha256: role}; unassigned scans use the manifest.
+
+        Malformed entries (tampered project file) are ignored and counted in
+        ``scan_part_roles_ignored`` so the UI can say so; they never raise.
+        """
+        self.scan_part_roles_ignored = 0
+        if self.layout is None:
+            return {}
+        _, state = self._read_authority(self.layout)
+        valid, self.scan_part_roles_ignored = _valid_part_roles(state.get("scan_part_roles"))
+        return valid
+
+    def set_scan_part_role(self, package_sha256: str, role: str) -> ProjectMetadata:
+        """Record which part a scan shows in this project (undoable selection)."""
+        from packlab_core.packscan.part_roles import is_part_role
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        if not isinstance(package_sha256, str) or not _PACKAGE_DIGEST.fullmatch(package_sha256):
+            raise ProjectError("package digest is invalid")
+        if not is_part_role(role):
+            raise ProjectError("scan part role is unknown")
+        _, state = self._read_authority(self.layout)
+        before = state.get("scan_part_roles")
+        valid, _ignored = _valid_part_roles(before)
+        if valid.get(package_sha256) == role and before == valid:
+            return self.metadata  # same role again: no revision, no undo step
+        after = {**valid, package_sha256: role}  # malformed tampered entries are dropped
+        events = state.get("scan_part_role_events", [])
+        next_state = dict(state)
+        next_state["scan_part_roles"] = after
+        # Compact events (scan, old, new), bounded; full maps live only in undo history.
+        next_state["scan_part_role_events"] = [
+            *(events if isinstance(events, list) else []),
+            {
+                "project_revision": self.metadata.revision + 1,
+                "package_sha256": package_sha256,
+                "previous_role": valid.get(package_sha256),
+                "role": role,
+                "actor_id": "studio-owner",
+                "reason": "role_changed",
+            },
+        ][-_PART_ROLE_EVENT_LIMIT:]
+        committed = self.commit_edit(next_state, expected_revision=self.metadata.revision)
+        self._record_selection("scan_part_roles", before, after)
+        return committed
 
     # ------------------------------------------------------------ undo / redo (PL-0456)
 

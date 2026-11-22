@@ -470,6 +470,7 @@ ROUTE_FACTORIES: dict[Route, RouteFactory] = {
         ingest_controller=s.get("ingest_controller"),
         receiver=s.get("receiver"),
         session_factory=s.get("receiver_session_factory"),
+        project_manager=s.get("project_manager"),
     ),
     Route.RECONSTRUCTION: lambda s: BuildModelView(s.get("job_manager")),
     Route.EDITOR: lambda s: ScanMasterEditorView(),

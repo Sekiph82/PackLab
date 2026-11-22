@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from packlab_core.packscan import PackScanReport
+from packlab_core.packscan.part_roles import manifest_part_role
 
 
 def _safe_transfer_provenance(value: dict[str, str] | None) -> dict[str, str] | None:
@@ -54,6 +55,8 @@ class ImportReport:
     warnings: list[dict[str, str]]
     raw_location: str | None
     transfer_provenance: dict[str, str] | None
+    # PL-0482: role the manifest declared; None = not declared (reads as assembled).
+    part_role: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -72,6 +75,7 @@ class ImportReport:
             "warnings": self.warnings,
             "raw_location": self.raw_location,
             "transfer_provenance": self.transfer_provenance,
+            "part_role": self.part_role,
         }
 
 
@@ -141,6 +145,7 @@ def build_import_report(
         image_bytes=sum(_report_integer(item.get("size_bytes", 0)) for item in images),
         photo_metadata_count=photo_count,
         capture_mode=str(capture_mode_value.get("mode", "unknown")),
+        part_role=manifest_part_role(manifest) if "part_role" in manifest else None,
         device_summary={
             key: str(device_value.get(key, "")) for key in ("platform", "model", "os_version")
         },
