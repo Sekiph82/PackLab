@@ -24,6 +24,7 @@ from .label_metric_surface_binding import (
     LabelMetricSurfaceBinding,
     LabelMetricSurfaceBindingError,
     create_label_metric_surface_binding,
+    disc_binding_options,
 )
 from .label_zone_placement import LabelZonePlacementRevision
 
@@ -61,7 +62,7 @@ class LabelRenderOverlayBinding:
     def __post_init__(self) -> None:
         if (
             self.contract != LABEL_RENDER_OVERLAY_CONTRACT
-            or self.mapping_mode not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP"}
+            or self.mapping_mode not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC"}
             or self.coordinate_unit != "mm_unverified"
             or self.renderer_only_offset_mm_unverified != RENDERER_ONLY_OFFSET_MM_UNVERIFIED
             or self.revision_id != "label-render-overlay:" + _digest(self._identity())
@@ -165,7 +166,12 @@ def create_label_render_overlay_binding(
         raise LabelRenderOverlayError("label_render_overlay_media_type_unsupported")
     try:
         verified = create_label_metric_surface_binding(
-            model, representation, placement, analysis, metric_binding.analysis_region_id
+            model,
+            representation,
+            placement,
+            analysis,
+            metric_binding.analysis_region_id,
+            **disc_binding_options(metric_binding),
         )
     except (CadAdapterError, LabelMetricSurfaceBindingError, TypeError, ValueError) as error:
         raise LabelRenderOverlayError("label_render_overlay_host_resolution_failed") from error
@@ -217,6 +223,8 @@ def create_label_render_overlay_binding(
         geometry = _planar_geometry(face, placement, drawn)
     elif metric_binding.mapping_mode == "CYLINDRICAL_WRAP":
         geometry = _cylindrical_geometry(face, placement, assignment, drawn)
+    elif metric_binding.mapping_mode == "PLANAR_DISC":
+        geometry = _disc_geometry(metric_binding, placement)
     else:
         raise LabelRenderOverlayError("label_render_overlay_mapping_unsupported")
     scale = 0.001 if model.coordinate_unit == "mm_unverified" else 1.0
@@ -448,6 +456,42 @@ def _cylindrical_geometry(
         "uv_domain": [0.0, 1.0],
         "source_face_identity_persisted": False,
         "source_zone_kind": zone.zone_kind.value,
+    }
+
+
+def _disc_geometry(
+    binding: LabelMetricSurfaceBinding, placement: LabelZonePlacementRevision
+) -> dict[str, object]:
+    """Flat annulus/disc on the top face; zone uv spans the host square (side 2 x radius).
+
+    A zone uv (u, v) sits at centre + (u - 0.5) * 2R * u_axis + (v - 0.5) * 2R * v_axis;
+    u/v axes are the canonical -X/-Y turned by the binding's rotation about +Z.
+    """
+    parameters = dict(binding.mapping_parameters)
+    host = float(parameters["host_outer_radius_mm_unverified"])
+    angle = math.radians(float(parameters["rotation_degrees"]))
+    cos_a, sin_a = math.cos(angle), math.sin(angle)
+    boundary = placement.boundary
+    return {
+        "mode": "PLANAR_DISC",
+        "center_mm_unverified": [0.0, 0.0, float(parameters["plane_z_mm_unverified"])],
+        "surface_normal": [0.0, 0.0, 1.0],
+        "u_axis": [-cos_a, -sin_a, 0.0],
+        "v_axis": [sin_a, -cos_a, 0.0],
+        "host_outer_radius_mm_unverified": host,
+        "outer_radius_mm_unverified": float(parameters["label_outer_radius_mm_unverified"]),
+        "inner_radius_mm_unverified": float(parameters["label_inner_radius_mm_unverified"]),
+        "rotation_degrees": float(parameters["rotation_degrees"]),
+        "placement_boundary_normalized_uv": [
+            boundary.u_min,
+            boundary.v_min,
+            boundary.u_max,
+            boundary.v_max,
+        ],
+        "overlay_kind": "BOUNDED_SEGMENTED_ANNULUS",
+        "uv_domain": [0.0, 1.0],
+        "source_face_identity_persisted": False,
+        "source_zone_kind": placement.label_zone.zone_kind.value,
     }
 
 

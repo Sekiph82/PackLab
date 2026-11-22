@@ -41,7 +41,7 @@ from .engineering_export import (
 from .history import Operation
 from .i18n import LANGUAGES, SETTINGS_KEY, set_language, tr, translate_widget_tree
 from .jobs import JobManager
-from .labels_view import install_design_workbench
+from .labels_view import LabelsView, install_design_workbench
 from .mask_correction import MaskCorrectionView
 from .measure_view import MeasureDesignView
 from .model_viewer import ModelViewerView
@@ -714,7 +714,12 @@ class StudioMainWindow(QMainWindow):
         measure = self.route_stack.views[Route.MEASURE_DESIGN]
         if isinstance(measure, MeasureDesignView):
             label = None if part is None else tr(str(part).capitalize())
+            measure.part_key = None if part is None else str(part)
             measure.show_part(label, self.scene_panel.selected_cloud() is not None)
+        labels = self.route_stack.views[Route.LABELS]
+        if isinstance(labels, LabelsView):
+            labels.placement_provider = lambda: self.scene_panel.placement
+            labels.show_part(None if part is None else str(part))
         if isinstance(viewer, ModelViewerView) and paths:
             viewer.load(*paths)
 

@@ -8,7 +8,7 @@ import math
 from dataclasses import dataclass
 from xml.sax.saxutils import escape
 
-from .label_metric_surface_binding import LabelDielineRevision
+from .label_metric_surface_binding import LabelDielineRevision, disc_radii
 from .label_zone_placement import LabelZonePlacementRevision
 from .reconstruction import ScaleState
 
@@ -146,12 +146,24 @@ def export_label_dieline_svg(
     attrs = " ".join(
         f'data-{key}="{escape(value, {chr(34): "&quot;"})}"' for key, value in provenance.items()
     )
-    paths = [
-        _path("source-outline", source_points),
-        _path("safe-boundary", safe_points),
-        _path("bleed-boundary", bleed_points),
-        _scale_mark(view_x_min, mark_y),
-    ]
+    if dieline.mapping_mode == "PLANAR_DISC":
+        # Disc/annulus (closure top): circles about the axis; an annulus' inner edge moves
+        # inward for safe area and outward (towards the hole) for bleed.
+        outer, inner = disc_radii(dieline.binding)
+        safe, bleed = dieline.safe_margin_mm_unverified, dieline.bleed_mm_unverified
+        paths = [
+            _rings("source-outline", outer, inner),
+            _rings("safe-boundary", outer - safe, inner + safe if inner > 0.0 else 0.0),
+            _rings("bleed-boundary", outer + bleed, max(inner - bleed, 0.0)),
+            _scale_mark(view_x_min, mark_y),
+        ]
+    else:
+        paths = [
+            _path("source-outline", source_points),
+            _path("safe-boundary", safe_points),
+            _path("bleed-boundary", bleed_points),
+            _scale_mark(view_x_min, mark_y),
+        ]
     svg_text = "\n".join(
         (
             '<?xml version="1.0" encoding="UTF-8"?>',
@@ -191,6 +203,24 @@ def _path(layer: str, points: tuple[tuple[float, float], ...]) -> str:
         f"{'M' if index == 0 else 'L'} {_n(x)} {_n(y)}" for index, (x, y) in enumerate(points)
     )
     return f'<path id="{layer}" d="{coordinates} Z" />'
+
+
+def _circle(radius: float) -> str:
+    """Closed circle about the origin as two SVG arcs (vector path, no <circle>)."""
+    return (
+        f"M {_n(radius)} 0 A {_n(radius)} {_n(radius)} 0 1 0 {_n(-radius)} 0 "
+        f"A {_n(radius)} {_n(radius)} 0 1 0 {_n(radius)} 0 Z"
+    )
+
+
+def _rings(layer: str, outer: float, inner: float) -> str:
+    if not outer > inner >= 0.0:
+        raise LabelDielineSvgExportError("label_dieline_svg_disc_radii_invalid")
+    data = _circle(outer) + (f" {_circle(inner)}" if inner > 0.0 else "")
+    return (
+        f'<path id="{layer}" data-outer-radius-mm-unverified="{_n(outer)}" '
+        f'data-inner-radius-mm-unverified="{_n(inner)}" fill-rule="evenodd" d="{data}" />'
+    )
 
 
 def _scale_mark(x: float, y: float) -> str:

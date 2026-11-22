@@ -200,7 +200,7 @@ class LabelArtworkAssignmentRevision:
             self.contract != LABEL_ARTWORK_ASSIGNMENT_CONTRACT
             or not isinstance(self.variant_id, str)
             or not _VARIANT_ID.fullmatch(self.variant_id)
-            or self.zone_kind not in {"front", "back", "wrap"}
+            or self.zone_kind not in {"front", "back", "wrap", "top"}
             or not isinstance(self.zone_id, str)
             or not self.zone_id
             or not isinstance(self.placement_revision_id, str)

@@ -95,6 +95,9 @@ class MeasureDesignView(QWidget):
         self.part_provider: Callable[[], Path | None] | None = None
         self.part_label: str | None = None  # selected Scene part, None = no selection
         self.part_record: dict[str, Any] | None = None  # set when a combined part is loaded
+        # PL-0487: Scene part key (closure/body/assembled) and the part the loaded model is.
+        self.part_key: str | None = None
+        self.loaded_part: str | None = None
 
         self.viewer = ModelViewerView()
         self.viewer.open_button.hide()
@@ -375,22 +378,29 @@ class MeasureDesignView(QWidget):
         """Load ``path`` (a just-finished build) or the newest build in the open project."""
 
         layout = getattr(self.project_manager, "layout", None)
+        part = None
         if path is None and self.part_label is not None and self.part_provider is not None:
             path = self.part_provider()
             if path is None:  # never fall back to another build behind the owner's back
                 self.status.setText(tr("{part}: no scan yet").format(part=self.part_label))
                 return False
+            part = self.part_key if self.part_key in ("closure", "body") else None
         if path is None and layout is not None:
             path = md.latest_built_model(layout.root)
         if path is None:
             self.status.setText("No built model in this project yet: run Build model first.")
             return False
         if self.model is not None and self.model.path == Path(path):
+            self.loaded_part = part
             return True
-        return self.load(Path(path))
+        loaded = self.load(Path(path))
+        if loaded:
+            self.loaded_part = part  # its Design Model becomes that part's (PL-0487)
+        return loaded
 
     def load(self, path: Path) -> bool:
         def action() -> str:
+            self.loaded_part = None
             self.model = md.load_model(path)
             companion = md.companion_mesh_path(path) if self.model.triangles is None else None
             self.part_record = self._combined_part(path)
@@ -644,8 +654,23 @@ class MeasureDesignView(QWidget):
             request = self.promotion_request(self.actor.text().strip(), self.reason.text().strip())
             if request is None:
                 raise md.MeasureDesignError("isolate and scale the object first")
+            assert self.model is not None and self.frame is not None
+            # PL-0487: the cloud -> Scan Master (= Design Model) frame, so placed parts can be
+            # composed into Design Model frames later.
+            source_frame = {
+                "source_cloud_sha256": self.model.sha256,
+                "source_frame": (
+                    "part_combine_mat_frame_mm"
+                    if self.part_record is not None
+                    else "reconstruction_units"
+                ),
+                "part": self.loaded_part,
+                "source_to_scan_master": [float(v) for v in self.frame.matrix.ravel()],
+            }
             revision = ScanMasterPromotionAction(manager).promote(
-                request, expected_project_revision=manager.current.revision
+                request,
+                expected_project_revision=manager.current.revision,
+                source_frame=source_frame,
             )
             self.scan_master = revision
             self._show_scan_master()
@@ -737,11 +762,16 @@ class MeasureDesignView(QWidget):
             if getattr(manager, "current", None) is not None:
                 # Project authority writes derived/design_model/<id>.json create-only and
                 # selects it as the project's current Design Model (lineage: Scan Master).
+                part = self.loaded_part
                 record = manager.persist_design_model_revision(
-                    design.as_dict(), expected_revision=manager.current.revision
+                    design.as_dict(),
+                    expected_revision=manager.current.revision,
+                    **({"part": part} if part else {}),
                 )
                 target = manager.layout.root / record["artifact_path"]
                 note = "now the project's current Design Model"
+                if part:
+                    note += tr(" and the {part} Design Model").format(part=tr(part.capitalize()))
             else:
                 chosen = self._choose_save(self, f"design-model-{name}")
                 if not chosen:

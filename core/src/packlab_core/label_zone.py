@@ -32,6 +32,8 @@ class LabelZoneKind(StrEnum):
     FRONT = "front"
     BACK = "back"
     WRAP = "wrap"
+    # Flat disc/annulus on a planar circular top face centred on the revolve axis (PL-0487).
+    TOP = "top"
 
 
 @dataclass(frozen=True, slots=True)
