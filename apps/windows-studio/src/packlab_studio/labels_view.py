@@ -177,16 +177,12 @@ class LabelsView(QWidget):
         self.disc_outer = self._spin("disc-outer", 0.0, 1000.0, " mm", "0 = whole top face")
         self.disc_inner = self._spin("disc-inner", 0.0, 1000.0, " mm", "0 = no hole")
         self.disc_rotation = self._spin("disc-rotation", -360.0, 360.0, " deg", "")
-        self.disc_row = QWidget(self)
-        disc_layout = QHBoxLayout(self.disc_row)
+        self.disc_row = QWidget(self)  # one narrow column (1280 px fit)
+        disc_layout = QFormLayout(self.disc_row)
         disc_layout.setContentsMargins(0, 0, 0, 0)
-        for label, spin in (
-            ("Outer", self.disc_outer),
-            ("Inner", self.disc_inner),
-            ("Rotation", self.disc_rotation),
-        ):
-            disc_layout.addWidget(QLabel(label, self))
-            disc_layout.addWidget(spin, 1)
+        disc_layout.addRow("Outer radius", self.disc_outer)
+        disc_layout.addRow("Inner radius", self.disc_inner)
+        disc_layout.addRow("Rotation", self.disc_rotation)
         zone_form.addRow("Top disc", self.disc_row)
         self._sync_kind_widgets()
         buttons = QHBoxLayout()
@@ -807,7 +803,7 @@ class LabelsView(QWidget):
         spin.setDecimals(2)
         spin.setSuffix(suffix)
         if special:
-            spin.setSpecialValueText(special)
+            spin.setToolTip(tr(special))
         return spin
 
     def _kind_changed(self, _index: int) -> None:

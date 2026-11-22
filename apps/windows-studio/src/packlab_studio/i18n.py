@@ -542,9 +542,9 @@ TURKISH: dict[str, str] = {
     "Assembled: Body and Closure with {count} label(s), closure seated by assembly {revision}.": "Kapaklı ambalaj: Gövde ve Kapak, {count} etiketle; kapak {revision} montajıyla oturtuldu.",
     " and the {part} Design Model": " ve {part} Tasarım Modeli",
     "Not saved in the project: the open Design Model is not the {part} Design Model.": "Projeye kaydedilmedi: açık Tasarım Modeli {part} Tasarım Modeli değil.",
-    "Outer": "Dış",
-    "Inner": "İç",
     "Rotation": "Döndürme",
     "0 = whole top face": "0 = tüm üst yüzey",
     "0 = no hole": "0 = delik yok",
+    "Outer radius": "Dış yarıçap",
+    "Inner radius": "İç yarıçap",
 }
