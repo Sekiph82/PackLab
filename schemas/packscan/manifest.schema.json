@@ -55,7 +55,8 @@
         "canonicalization": {"const": "sha256_32_bytes_lowercase_hex_64_chars_v1"}
       }
     },
-    "calibration_profile_ref": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,256}$"}
+    "calibration_profile_ref": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,256}$"},
+    "part_role": {"enum": ["closure", "closure_flipped", "body", "body_flipped", "assembled", "assembled_flipped", "body_interior"]}
   },
   "$defs": {
     "freehand_mode": {

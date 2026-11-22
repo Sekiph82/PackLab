@@ -461,4 +461,20 @@ TURKISH: dict[str, str] = {
         "RECONSTRUCTION_OBSERVATION durumundadır (göreli birimde gözlem; gerçek mm değil); "
         "Scan Master değildir."
     ),
+    # PL-0482 scan part roles
+    "Closure": "Kapak",
+    "Closure (upside down)": "Kapak (ters)",
+    "Body": "Gövde",
+    "Body (upside down)": "Gövde (ters)",
+    "Assembled": "Kapaklı ambalaj",
+    "Assembled (upside down)": "Kapaklı ambalaj (ters)",
+    "Body interior": "Gövde içi",
+    "Scan role:": "Tarama rolü:",
+    "Parts:": "Parçalar:",
+    "upright": "düz",
+    "upside down": "ters",
+    "interior": "iç",
+    "present": "var",
+    "missing": "eksik",
+    "Scan role not saved: {error}": "Tarama rolü kaydedilmedi: {error}",
 }

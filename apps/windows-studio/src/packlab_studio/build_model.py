@@ -54,7 +54,7 @@ from packlab_core.reconstruction_orchestrator import (
 )
 from packlab_core.reconstruction_process import run_reconstruction_stage
 
-from .capture_inbox import inbox_row, local_time
+from .capture_inbox import effective_role, inbox_row, local_time, parts_summary_text
 from .engine_config import DiscoveryStatus, discover_engines
 from .i18n import tr
 from .jobs import TERMINAL_STATES, JobManager, JobState
@@ -959,6 +959,11 @@ class BuildModelView(QWidget):
         history_box = QGroupBox(tr("Scans and builds"), self)
         history_layout = QVBoxLayout(history_box)
         history_layout.addWidget(self.history, 1)
+        # PL-0482: which part scans (closure/body/assembled, upright/upside down) exist.
+        self.parts_label = QLabel("", self)
+        self.parts_label.setObjectName("packlab.reconstruction.parts")
+        self.parts_label.setTextFormat(Qt.TextFormat.PlainText)
+        history_layout.addWidget(self.parts_label)
         history_layout.addLayout(history_buttons)
         layout.addWidget(history_box, 1)
         self.history.currentRowChanged.connect(lambda _row: self._history_selected())
@@ -1015,14 +1020,20 @@ class BuildModelView(QWidget):
         if self.result is not None and self.result.model_path is not None:
             self.open_model_requested.emit(self.result.model_path)
 
-    def refresh_history(self, entries: list[Any], project_root: Path | None) -> None:
+    def refresh_history(
+        self,
+        entries: list[Any],
+        project_root: Path | None,
+        roles: dict[str, str] | None = None,
+    ) -> None:
         """One row per imported scan with the status of its latest build in this project."""
         builds = latest_builds(project_root)
         self.history.clear()
+        self.parts_label.setText(parts_summary_text(entries, roles))
         for entry in entries:
             if entry.status != "imported":
                 continue
-            text, details = inbox_row(entry)
+            text, details = inbox_row(entry, effective_role(entry, roles))
             build = builds.get(entry.package_sha256)
             if build is None:
                 state = tr("not built yet")

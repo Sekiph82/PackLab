@@ -13,6 +13,7 @@ import segno
 from PySide6.QtCore import QDateTime, QLocale, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QGuiApplication, QPixmap, QShowEvent
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QGroupBox,
     QHBoxLayout,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from packlab_core.packscan.part_roles import PART_ROLES, PART_VIEWS, parts_summary
 from packlab_core.pairing import PairingOffer
 
 from .i18n import language, tr
@@ -61,14 +63,49 @@ def local_time(epoch: float | None) -> str:
     return locale.toString(stamp, locale.dateTimeFormat(QLocale.FormatType.ShortFormat))
 
 
-def inbox_row(entry: InboxEntry) -> tuple[str, str]:
+ROLE_LABELS = {
+    "closure": "Closure",
+    "closure_flipped": "Closure (upside down)",
+    "body": "Body",
+    "body_flipped": "Body (upside down)",
+    "assembled": "Assembled",
+    "assembled_flipped": "Assembled (upside down)",
+    "body_interior": "Body interior",
+}
+_PART_LABELS = {"closure": "Closure", "body": "Body", "assembled": "Assembled"}
+_VIEW_LABELS = {"upright": "upright", "flipped": "upside down", "interior": "interior"}
+assert tuple(ROLE_LABELS) == PART_ROLES and tuple(_PART_LABELS) == tuple(PART_VIEWS)
+
+
+def effective_role(entry: InboxEntry, overrides: dict[str, str] | None = None) -> str:
+    """The project's role assignment for a scan, else the role its manifest declared."""
+    return (overrides or {}).get(entry.package_sha256, entry.part_role)
+
+
+def parts_summary_text(entries: list[InboxEntry], overrides: dict[str, str] | None = None) -> str:
+    """One line per part: which of its scans (upright/upside down/interior) are present."""
+    summary = parts_summary(
+        effective_role(entry, overrides) for entry in entries if entry.status == "imported"
+    )
+    lines = [tr("Parts:")]
+    for part, views in summary.items():
+        states = ", ".join(
+            f"{tr(_VIEW_LABELS[view])} {tr('present') if present else tr('missing')}"
+            for view, present in views.items()
+        )
+        lines.append(f"{tr(_PART_LABELS[part])}: {states}")
+    return "\n".join(lines)
+
+
+def inbox_row(entry: InboxEntry, role: str | None = None) -> tuple[str, str]:
     """Plain-language row text and a tooltip carrying the technical audit identifiers."""
     name = (
         tr("Scan from {model}").format(model=entry.device_model)
         if entry.device_model
         else (tr("Scan"))
     )
-    parts = [name]
+    role = role or entry.part_role
+    parts = [name, tr(ROLE_LABELS.get(role, role))]
     if entry.imported_at is not None:
         parts.append(local_time(entry.imported_at))
     if entry.image_count is not None:
@@ -81,6 +118,7 @@ def inbox_row(entry: InboxEntry) -> tuple[str, str]:
         f"status: {entry.status}",
         f"source_channel: {entry.source_channel or '?'}",
         f"capture_mode: {entry.capture_mode or '?'}",
+        f"part_role: {role} (manifest: {entry.part_role})",
         f"sha256: {entry.package_sha256}",
     ]
     return "   ·   ".join(parts), "<br>".join(html.escape(line) for line in details)
@@ -99,12 +137,14 @@ class CaptureInboxView(QWidget):
         receiver: Any = None,
         session_factory: Callable[[], ReceiverSession] | None = None,
         file_chooser: Callable[[QWidget], str] | None = None,
+        project_manager: Any = None,
     ) -> None:
         super().__init__()
         self.setObjectName("packlab.view.capture-inbox")
         self.ingest_controller = ingest_controller
         self.receiver = receiver
         self._session_factory = session_factory
+        self.project_manager = project_manager
         self._session: ReceiverSession | None = None
         self._choose_file = file_chooser or (
             lambda parent: QFileDialog.getOpenFileName(
@@ -180,6 +220,16 @@ class CaptureInboxView(QWidget):
         self.build_button = QPushButton("Build model", self)
         self.build_button.setObjectName("packlab.capture-inbox.build")
         self.build_button.setEnabled(False)
+        # PL-0482: which part the selected scan shows; saved in the open project.
+        self.role_label = QLabel(tr("Scan role:"), self)
+        self.role_combo = QComboBox(self)
+        self.role_combo.setObjectName("packlab.capture-inbox.role")
+        for role, label in ROLE_LABELS.items():
+            self.role_combo.addItem(tr(label), role)
+        self.role_combo.setEnabled(False)
+        self.parts_label = QLabel("", self)
+        self.parts_label.setObjectName("packlab.capture-inbox.parts")
+        self.parts_label.setTextFormat(Qt.TextFormat.PlainText)
 
         # Grouped sections inside a scroll area so nothing is cut off on small windows.
         content = QWidget(self)
@@ -222,8 +272,11 @@ class CaptureInboxView(QWidget):
         scans_layout.addWidget(self.inbox_list, 1)
         build_row = QHBoxLayout()
         build_row.addWidget(self.build_button)
+        build_row.addWidget(self.role_label)
+        build_row.addWidget(self.role_combo)
         build_row.addStretch(1)
         scans_layout.addLayout(build_row)
+        scans_layout.addWidget(self.parts_label)
         content_layout = QVBoxLayout(content)
         content_layout.addWidget(receive_box)
         content_layout.addWidget(devices_box)
@@ -247,12 +300,10 @@ class CaptureInboxView(QWidget):
         self.stop_button.clicked.connect(self.stop_receiving)
         self.import_button.clicked.connect(self.import_file)
         self.build_button.clicked.connect(self._request_build)
-        self.inbox_list.currentRowChanged.connect(
-            lambda row: self.build_button.setEnabled(
-                0 <= row < len(self._shown_entries)
-                and self._shown_entries[row].status == "imported"
-            )
-        )
+        self.inbox_list.currentRowChanged.connect(self._row_selected)
+        self.role_combo.activated.connect(lambda _index: self._change_role())
+        if project_manager is not None and hasattr(project_manager, "add_listener"):
+            project_manager.add_listener(lambda _metadata: self._project_changed())
         for button in (self.receive_button, self.import_button):
             button.setEnabled(session_factory is not None)
 
@@ -474,8 +525,10 @@ class CaptureInboxView(QWidget):
         self._shown_entries = session.entries()
         self.inbox_list.clear()
         style = self.style()
+        overrides = self._overrides()
+        self.parts_label.setText(parts_summary_text(self._shown_entries, overrides))
         for entry in self._shown_entries:
-            text, details = inbox_row(entry)
+            text, details = inbox_row(entry, effective_role(entry, overrides))
             icon = style.standardIcon(
                 QStyle.StandardPixmap.SP_DialogApplyButton
                 if entry.status == "imported"
@@ -494,6 +547,55 @@ class CaptureInboxView(QWidget):
                 known.add(entry.package_sha256)
                 self.scan_imported.emit(entry.capture_id, entry.package_sha256)
         self._known_imports = known
+
+    def _overrides(self) -> dict[str, str]:
+        if self.project_manager is None:
+            return {}
+        try:
+            return self.project_manager.scan_part_roles()
+        except Exception:  # unreadable project: show manifest roles, never crash
+            return {}
+
+    def _selected_entry(self) -> InboxEntry | None:
+        row = self.inbox_list.currentRow()
+        if 0 <= row < len(self._shown_entries):
+            entry = self._shown_entries[row]
+            return entry if entry.status == "imported" else None
+        return None
+
+    def _row_selected(self, _row: int = -1) -> None:
+        entry = self._selected_entry()
+        self.build_button.setEnabled(entry is not None)
+        project_open = getattr(self.project_manager, "layout", None) is not None
+        self.role_combo.setEnabled(entry is not None and project_open)
+        if entry is not None:
+            index = self.role_combo.findData(effective_role(entry, self._overrides()))
+            self.role_combo.setCurrentIndex(max(index, 0))
+
+    def _change_role(self) -> None:
+        entry = self._selected_entry()
+        if entry is None or self.project_manager is None:
+            return
+        role = str(self.role_combo.currentData())
+        try:
+            self.project_manager.set_scan_part_role(entry.package_sha256, role)
+        except Exception as error:
+            self.status_label.setText(tr("Scan role not saved: {error}").format(error=error))
+        self._project_changed()
+
+    def _project_changed(self) -> None:
+        """Roles live in the project: redraw rows even when the inbox index is unchanged."""
+        if self._shut_down:
+            return
+        try:
+            self._shown_records = None
+            row = self.inbox_list.currentRow()
+            self.refresh_inbox()
+            if 0 <= row < self.inbox_list.count():
+                self.inbox_list.setCurrentRow(row)
+            self._row_selected()
+        except RuntimeError:  # widget already deleted; a project commit must not fail
+            self._shut_down = True
 
     def _request_build(self) -> None:
         row = self.inbox_list.currentRow()

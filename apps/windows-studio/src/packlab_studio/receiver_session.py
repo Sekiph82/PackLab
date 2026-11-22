@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from packlab_core.packscan.part_roles import DEFAULT_PART_ROLE, is_part_role
 from packlab_core.pairing import PairedDevice, PairingOffer
 from packlab_core.transfer_security import ensure_receiver_tls_identity
 
@@ -51,6 +52,7 @@ class InboxEntry:
     capture_mode: str = ""
     device_model: str = ""  # from the import report; display only
     imported_at: float | None = None  # import report write time (epoch seconds)
+    part_role: str = DEFAULT_PART_ROLE  # manifest role (PL-0482); old reports = assembled
 
 
 class ReceiverSession:
@@ -144,6 +146,7 @@ class ReceiverSession:
             report_path = self.data_root / record.report_location
             report = json.loads(report_path.read_text("utf-8"))
             device = report.get("device_summary")
+            role = report.get("part_role")
             entry = InboxEntry(
                 record.capture_id,
                 record.package_sha256,
@@ -153,6 +156,7 @@ class ReceiverSession:
                 str(report.get("capture_mode", "")),
                 str(device.get("model", "")) if isinstance(device, dict) else "",
                 report_path.stat().st_mtime,
+                str(role) if is_part_role(role) else DEFAULT_PART_ROLE,
             )
         except (OSError, ValueError, TypeError):
             return InboxEntry(record.capture_id, record.package_sha256, "report unreadable")
