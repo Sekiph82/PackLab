@@ -129,6 +129,8 @@ def scan(
     scale_error=1.0,
     role="given",
     density=0.5,
+    clutter=False,
+    wall_gap=False,
     **shape_args,
 ):
     """Return (ScanInput, object->camera-units 4x4) for an upright or upside-down capture.
@@ -140,6 +142,8 @@ def scan(
     height, faces = shape(_Gen(rng, density), **shape_args)
     hidden = "top" if flipped else "bottom"  # face on the mat is not seen
     obj = np.concatenate([p for name, p in faces.items() if name != hidden])
+    if wall_gap:  # glossy band of the part the MVS missed: splits the wall into two clusters
+        obj = obj[(obj[:, 2] < 50) | (obj[:, 2] > 60)]
     if keep_frac < 1.0:  # only the part of the object nearest the camera (top in mat frame)
         z_mat = height - obj[:, 2] if flipped else obj[:, 2]
         obj = obj[z_mat > (1 - keep_frac) * height]
@@ -149,6 +153,9 @@ def scan(
     count = int(18000 * density / 0.5)
     mat = np.c_[rng.uniform(-148, 148, count), rng.uniform(-105, 105, count), np.zeros(count)]
     pts = np.r_[_apply(place, obj), mat] + rng.normal(0, 0.15, (len(obj) + count, 3))
+    if clutter:  # a bigger box standing on the table beside (not on) the A4 mat
+        box = rng.uniform([170, -60, 0], [260, 60, 60], (int(20000 * density), 3))
+        pts = np.r_[pts, box]
     if floaters:  # MVS-like stray points floating above the part
         pts = np.r_[pts, rng.uniform([-60, -60, height + 5], [60, 60, height + 60], (floaters, 3))]
     if subsample < 1.0:
@@ -221,9 +228,9 @@ def test_n_scans_general_api():
         ({"r": 43.0}, "diameter mismatch"),
         ({"h": 90.0}, "height mismatch"),
         ({"scale_error": 1.05}, "height mismatch"),
-        ({"keep_frac": 0.1}, "too little overlapping side wall"),
+        ({"keep_frac": 0.1}, "object not found on the mat"),
     ],
-    ids=["radius+3mm", "height+10mm", "scale+5pct", "little-overlap"],
+    ids=["radius+3mm", "height+10mm", "scale+5pct", "floating-partial-scan"],
 )
 def test_wrong_object_scale_or_overlap_refused(options, reason):
     with pytest.raises(MultiScanAlignmentError, match=reason):
@@ -345,20 +352,56 @@ def _yaw_tilt_shift(result, truths):
 
 @pytest.mark.parametrize("shape", [body, closure])
 @pytest.mark.parametrize("density", [0.5, 0.2, 0.1, 0.05])
-def test_density_sweep_aligns_without_wrong_claims(shape, density):
-    """Point spacing drives eps / slices / distances; sparse clouds still align. Yaw that the
-    data cannot pin is flagged, never claimed: a determined yaw is within the probe angle."""
+@pytest.mark.parametrize("seeds", [(1, 2), (5, 6)])
+def test_density_sweep_never_accepts_a_wrong_yaw(shape, density, seeds):
+    """Point spacing drives eps / slices / distances. A non-round part is accepted only with its
+    yaw pinned (within yaw_probe_deg); otherwise it is refused, never merged at a guessed yaw."""
     (up, t_up), (fl, t_fl) = (
-        scan(shape, False, 1, density=density),
-        scan(shape, True, 2, density=density),
+        scan(shape, False, seeds[0], density=density),
+        scan(shape, True, seeds[1], density=density),
     )
-    result = align_part_pair(up, fl)
+    try:
+        result = align_part_pair(up, fl)
+    except MultiScanAlignmentError as error:
+        assert density < 0.5 and "yaw undetermined on a non-symmetric part" in str(error)
+        return
     yaw, tilt, shift = _yaw_tilt_shift(result, (t_up, t_fl))
-    assert tilt < 1.0 and shift < 0.5, (yaw, tilt, shift)
-    if result.alignments[1].yaw_determined:
-        assert yaw < AlignmentThresholds().yaw_probe_deg, yaw
+    pair = result.alignments[1]
+    assert pair.yaw_determined and pair.yaw_uncertainty_deg <= 5.0
+    assert yaw < 5.0 and tilt < 1.0 and shift < 0.5, (yaw, tilt, shift)
     if density == 0.5:
-        assert result.alignments[1].yaw_determined and yaw < 1.0
+        assert yaw < 1.0
+
+
+@pytest.mark.parametrize("seeds", [(1, 2), (3, 4), (10, 11), (20, 21)])
+def test_sparse_boss_body_aligns_within_5_degrees_or_is_refused(seeds):
+    up, t_up = scan(body, False, seeds[0], density=0.05)
+    fl, t_fl = scan(body, True, seeds[1], density=0.05)
+    try:
+        result = align_part_pair(up, fl)
+    except MultiScanAlignmentError as error:
+        assert "yaw undetermined" in str(error)
+        return
+    assert _yaw_tilt_shift(result, (t_up, t_fl))[0] < 5.0
+
+
+def test_round_part_is_accepted_with_yaw_flagged_at_sparse_density():
+    up, t_up = scan(cylinder, False, 1, density=0.05)
+    fl, t_fl = scan(cylinder, True, 2, density=0.05)
+    result = align_part_pair(up, fl)
+    assert not result.alignments[1].yaw_determined
+    _, tilt, shift = _yaw_tilt_shift(result, (t_up, t_fl))
+    assert tilt < 1.0 and shift < 0.5
+
+
+def test_object_selection_ignores_off_mat_clutter_and_joins_split_wall():
+    """The part standing on the mat wins over a bigger box beside the mat; a side wall split by
+    an unreconstructed band (two clusters) is joined back over the same footprint."""
+    up, t_up = scan(body, False, 1, clutter=True, wall_gap=True)
+    fl, t_fl = scan(body, True, 2, clutter=True, wall_gap=True)
+    result = align_part_pair(up, fl)
+    _assert_recovered(result, (t_up, t_fl))
+    assert np.ptp(result.points[:, 0]) < 100  # no clutter merged in
 
 
 def test_rigid_moved_subsampled_copy_self_aligns_with_invariant_shell():
