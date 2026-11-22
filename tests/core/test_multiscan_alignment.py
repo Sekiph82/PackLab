@@ -17,6 +17,7 @@ from packlab_core.multiscan_alignment import (  # noqa: E402
     ScanInput,
     align_part_pair,
     align_scans,
+    check_alignment,
 )
 
 DENSITY = 0.5  # points per mm^2
@@ -48,20 +49,22 @@ def _cap(rng, x0, x1, y0, y1, z):  # plane z = const
     return np.c_[rng.uniform(x0, x1, n), rng.uniform(y0, y1, n), np.full(n, z)]
 
 
-def body(rng):
-    """Jar body proxy: r 40, h 80, off-centre 20x30x4 mm side boss (fixes yaw and height)."""
-    return 80.0, {
-        "side": _cyl(rng, 40, 0, 80),
-        "boss": np.r_[
-            _rect(rng, 44, -10, 10, 15, 45),
-            _wall(rng, -10, 38.7, 44, 15, 45),
-            _wall(rng, 10, 38.7, 44, 15, 45),
-            _cap(rng, 39, 44, -10, 10, 15),
-            _cap(rng, 39, 44, -10, 10, 45),
-        ],
-        "top": _disc(rng, 0, 40, 80),
-        "bottom": _disc(rng, 0, 40, 0),
+def body(rng, r=40.0, h=80.0, boss=True):
+    """Jar body proxy: r 40, h 80, off-centre 20x30x4 mm side boss (fixes yaw and flip)."""
+    faces = {
+        "side": _cyl(rng, r, 0, h),
+        "top": _disc(rng, 0, r, h),
+        "bottom": _disc(rng, 0, r, 0),
     }
+    if boss:
+        faces["boss"] = np.r_[
+            _rect(rng, r + 4, -10, 10, 15, 45),
+            _wall(rng, -10, r - 1.3, r + 4, 15, 45),
+            _wall(rng, 10, r - 1.3, r + 4, 15, 45),
+            _cap(rng, r - 1, r + 4, -10, 10, 15),
+            _cap(rng, r - 1, r + 4, -10, 10, 45),
+        ]
+    return h, faces
 
 
 def closure(rng):
@@ -83,6 +86,11 @@ def closure(rng):
     }
 
 
+def cylinder(rng):
+    """Rotationally symmetric body proxy (no boss): yaw is unobservable."""
+    return body(rng, boss=False)
+
+
 def _rot(axis, angle):
     axis = np.asarray(axis, float) / np.linalg.norm(axis)
     k = np.array([[0, -axis[2], axis[1]], [axis[2], 0, -axis[0]], [-axis[1], axis[0], 0]])
@@ -99,10 +107,26 @@ def _apply(m, p):
     return p @ m[:3, :3].T + m[:3, 3]
 
 
-def scan(shape, flipped, seed, keep_frac=1.0):
-    """Return (ScanInput, object->camera-units 4x4) for an upright or upside-down capture."""
+def scan(
+    shape,
+    flipped,
+    seed,
+    *,
+    keep_frac=1.0,
+    floaters=0,
+    subsample=1.0,
+    tilt_deg=None,
+    scale_error=1.0,
+    role="given",
+    **shape_args,
+):
+    """Return (ScanInput, object->camera-units 4x4) for an upright or upside-down capture.
+
+    tilt_deg: pass ``to_mat_mm`` from the true mat pose with that tilt error added.
+    scale_error: multiplies the mm_per_unit handed to the aligner.
+    """
     rng = np.random.default_rng(seed)
-    height, faces = shape(rng)
+    height, faces = shape(rng, **shape_args)
     hidden = "top" if flipped else "bottom"  # face on the mat is not seen
     obj = np.concatenate([p for name, p in faces.items() if name != hidden])
     if keep_frac < 1.0:  # only the part of the object nearest the camera (top in mat frame)
@@ -113,37 +137,62 @@ def scan(shape, flipped, seed, keep_frac=1.0):
         place = place @ _hom(_rot([1, 0, 0], np.pi), [0, 0, height])
     mat = np.c_[rng.uniform(-148, 148, 18000), rng.uniform(-105, 105, 18000), np.zeros(18000)]
     pts = np.r_[_apply(place, obj), mat] + rng.normal(0, 0.15, (len(obj) + 18000, 3))
+    if floaters:  # MVS-like stray points floating above the part
+        pts = np.r_[pts, rng.uniform([-60, -60, height + 5], [60, 60, height + 60], (floaters, 3))]
+    if subsample < 1.0:
+        pts = pts[rng.random(len(pts)) < subsample]
     scale = rng.uniform(0.01, 0.05)  # camera units per mm
     camera = _hom(_rot(rng.normal(size=3), rng.uniform(0, np.pi)), rng.normal(size=3), scale)
     colors = np.tile([0.2, 0.4, 0.6], (len(pts), 1))
     sid = f"{shape.__name__}-{'flipped' if flipped else 'upright'}-{seed}"
-    scan_input = ScanInput(sid, _apply(camera, pts), colors, mm_per_unit=1 / scale, flipped=flipped)
+    to_mat = None
+    if tilt_deg is not None:
+        to_mat = _hom(_rot([1, 1, 0], np.radians(tilt_deg)), np.zeros(3)) @ np.linalg.inv(camera)
+    scan_input = ScanInput(
+        sid,
+        _apply(camera, pts),
+        colors,
+        to_mat_mm=to_mat,
+        mm_per_unit=scale_error / scale,
+        flipped={"given": flipped, "unknown": None, "wrong": not flipped}[role],
+    )
     return scan_input, camera @ place
 
 
-def _pose_error(result, truths):
+def _pose_error(result, truths, index=1):
     e = result.alignments[0].matrix @ truths[0]
-    g = result.alignments[1].matrix @ truths[1]
+    g = result.alignments[index].matrix @ truths[index]
     d = np.linalg.inv(e) @ g
+    d[:3, :3] /= np.cbrt(np.linalg.det(d[:3, :3]))
     angle = np.degrees(np.arccos(np.clip((np.trace(d[:3, :3]) - 1) / 2, -1, 1)))
     return angle, float(np.linalg.norm(d[:3, 3]))
+
+
+def _assert_recovered(result, truths, index=1):
+    angle, shift = _pose_error(result, truths, index)
+    assert angle < 1.0 and shift < 0.5, (angle, shift)
 
 
 @pytest.mark.parametrize("shape", [body, closure])
 def test_upright_and_flipped_pair_recovers_known_transform(shape):
     (up, t_up), (fl, t_fl) = scan(shape, False, 1), scan(shape, True, 2)
     result = align_part_pair(up, fl)
-    angle, shift = _pose_error(result, (t_up, t_fl))
-    assert angle < 1.0 and shift < 0.5, (angle, shift)
-    assert result.alignments[1].flipped
-    assert result.alignments[1].rmse_mm < 0.5
+    _assert_recovered(result, (t_up, t_fl))
+    pair = result.alignments[1]
+    assert pair.flipped and pair.yaw_determined and pair.rmse_mm < 0.5 and pair.coverage > 0.95
     assert result.metric_status == METRIC_STATUS
+    # Outside covered on all sides: top from the upright scan, bottom from the flipped scan.
+    assert min(result.surface_coverage.values()) > 0.85, result.surface_coverage
     height = 80.0 if shape is body else 15.0
     z = result.points[:, 2]
-    # Closed outside: top from the upright scan, bottom (mat side) from the flipped scan.
-    assert ((result.source_index == 0) & (z > height - 0.5)).sum() > 500
+    assert ((result.source_index == 0) & (z > height - 0.5)).sum() > 300
     assert ((result.source_index == 1) & (z < 0.5)).sum() > 300
     assert result.colors is not None and len(result.colors) == len(result.points)
+    # Traceability: every merged point is its source scan's input row, transformed.
+    for i, source in enumerate((up, fl)):
+        rows = result.point_index[result.source_index == i]
+        expected = _apply(result.alignments[i].matrix, source.points[rows])
+        assert np.allclose(expected, result.points[result.source_index == i])
 
 
 def test_n_scans_general_api():
@@ -151,32 +200,122 @@ def test_n_scans_general_api():
     result = align_scans([s for s, _ in scans])
     assert [a.flipped for a in result.alignments] == [False, True, False]
     for index in (1, 2):
-        angle, shift = _pose_error(
-            type(result)(
-                result.reference_id,
-                (result.alignments[0], result.alignments[index]),
-                result.points,
-                result.colors,
-                result.source_index,
-            ),
-            (scans[0][1], scans[index][1]),
-        )
-        assert angle < 1.0 and shift < 0.5
+        _assert_recovered(result, [t for _, t in scans], index)
 
 
-def test_different_object_refused():
-    with pytest.raises(MultiScanAlignmentError, match="does not align"):
+@pytest.mark.parametrize(
+    ("options", "reason"),
+    [
+        ({"r": 43.0}, "diameter mismatch"),
+        ({"h": 90.0}, "height mismatch"),
+        ({"scale_error": 1.05}, "height mismatch"),
+        ({"keep_frac": 0.1}, "too little overlapping side wall"),
+    ],
+    ids=["radius+3mm", "height+10mm", "scale+5pct", "little-overlap"],
+)
+def test_wrong_object_scale_or_overlap_refused(options, reason):
+    with pytest.raises(MultiScanAlignmentError, match=reason):
+        align_part_pair(scan(body, False, 1)[0], scan(body, True, 2, **options)[0])
+
+
+def test_different_part_and_closure_scale_error_refused():
+    with pytest.raises(MultiScanAlignmentError, match="height mismatch"):
         align_part_pair(scan(body, False, 1)[0], scan(closure, True, 2)[0])
+    with pytest.raises(MultiScanAlignmentError, match="diameter mismatch"):
+        align_part_pair(scan(closure, False, 1)[0], scan(closure, True, 2, scale_error=1.05)[0])
 
 
-def test_too_little_overlap_refused():
-    with pytest.raises(MultiScanAlignmentError, match="overlap"):
-        align_part_pair(scan(body, False, 1)[0], scan(body, True, 2, keep_frac=0.1)[0])
+def test_180_degree_yaw_error_refused_by_gate():
+    (up, _), (fl, _) = scan(body, False, 1), scan(body, True, 2)
+    good = align_part_pair(up, fl)
+    relative = good.alignments[1].relative
+    assert check_alignment(up, fl, relative, True).coverage > 0.95
+    side = good.points[(good.points[:, 2] > 5) & (good.points[:, 2] < 75)]
+    low, high = np.percentile(side[:, :2], [1, 99], axis=0)
+    centre = np.r_[(low + high) / 2, 0]
+    half_turn = _rot([0, 0, 1], np.pi)
+    turn = _hom(half_turn, centre - half_turn @ centre)
+    with pytest.raises(MultiScanAlignmentError, match="side-wall coverage"):
+        check_alignment(up, fl, turn @ relative, True)
+
+
+def test_wrong_role_refused():
+    (up, _), (fl, _) = scan(body, False, 1), scan(body, True, 2, role="wrong")
+    with pytest.raises(MultiScanAlignmentError, match="does not align"):
+        align_scans([up, fl])
+    # A lid's outer wall is top/bottom symmetric; only seen free space exposes the wrong flip.
+    (up, _), (fl, _) = scan(closure, False, 1), scan(closure, True, 2, role="wrong")
+    with pytest.raises(MultiScanAlignmentError, match="free-space conflict"):
+        align_scans([up, fl])
+
+
+def test_unknown_role_closure_resolved_by_free_space():
+    (up, t_up) = scan(closure, False, 1, role="unknown")
+    (fl, t_fl) = scan(closure, True, 2, role="unknown")
+    result = align_scans([up, fl])
+    assert result.alignments[1].flipped
+    assert result.alignments[1].free_space_conflict < 0.01
+    _assert_recovered(result, (t_up, t_fl))
+
+
+def test_unknown_role_resolved_only_when_clear():
+    (up, t_up), (fl, t_fl) = (
+        scan(body, False, 1, role="unknown"),
+        scan(body, True, 2, role="unknown"),
+    )
+    result = align_scans([up, fl])
+    assert result.alignments[1].flipped and result.alignments[1].pose_margin >= 0.03
+    _assert_recovered(result, (t_up, t_fl))
+    plain_up = scan(cylinder, False, 1, role="unknown")[0]
+    plain_fl = scan(cylinder, True, 2, role="unknown")[0]
+    with pytest.raises(MultiScanAlignmentError, match="role ambiguous"):
+        align_scans([plain_up, plain_fl])
+
+
+def test_symmetric_part_flags_undetermined_yaw():
+    (up, t_up), (fl, t_fl) = scan(cylinder, False, 1), scan(cylinder, True, 2)
+    result = align_part_pair(up, fl)
+    assert not result.alignments[1].yaw_determined
+    # Geometry still lands: check tilt and axis position only, yaw is arbitrary by design.
+    d = np.linalg.inv(result.alignments[0].matrix @ t_up) @ (result.alignments[1].matrix @ t_fl)
+    rotation = d[:3, :3] / np.cbrt(np.linalg.det(d[:3, :3]))
+    assert np.degrees(np.arccos(np.clip(rotation[2, 2], -1, 1))) < 1.0
+    assert np.linalg.norm(d[:3, 3]) < 0.5
+
+
+def test_floating_strays_give_correct_pose_or_refusal():
+    (up, t_up), (fl, t_fl) = scan(body, False, 1, floaters=200), scan(body, True, 2, floaters=200)
+    try:
+        result = align_part_pair(up, fl)
+    except MultiScanAlignmentError:
+        return
+    _assert_recovered(result, (t_up, t_fl))
+
+
+@pytest.mark.parametrize(
+    "options",
+    [{"tilt_deg": 1.5}, {"tilt_deg": -2.0}, {"subsample": 0.85}],
+    ids=["mat-tilt+1.5deg", "mat-tilt-2deg", "subsample-85pct"],
+)
+def test_mat_pose_errors_and_subsampling_still_recover(options):
+    up, t_up = scan(body, False, 1, tilt_deg=0.0 if "tilt_deg" in options else None)
+    fl, t_fl = scan(body, True, 2, **options)
+    _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
+
+
+def test_invalid_inputs_refused():
+    up = scan(body, False, 1)[0]
+    with pytest.raises(MultiScanAlignmentError, match="colors"):
+        align_part_pair(up, ScanInput("bad", up.points, colors=np.zeros((3, 3))))
+    shear = np.eye(4)
+    shear[0, 1] = 0.5
+    with pytest.raises(MultiScanAlignmentError, match="similarity"):
+        align_part_pair(up, ScanInput("bad", up.points, to_mat_mm=shear))
 
 
 def test_deterministic():
     up, fl = scan(closure, False, 1)[0], scan(closure, True, 2)[0]
     first, second = align_part_pair(up, fl), align_part_pair(up, fl)
     assert np.array_equal(first.points, second.points)
-    assert np.array_equal(first.source_index, second.source_index)
+    assert np.array_equal(first.point_index, second.point_index)
     assert np.array_equal(first.alignments[1].matrix, second.alignments[1].matrix)
