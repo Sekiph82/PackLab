@@ -141,3 +141,31 @@ def test_cancel_merge_discards_the_result(app, project) -> None:
     release.set()
     _pump(app, lambda: project.job_manager.get(job_id).state is JobState.CANCELLED)
     assert project.interior_merge() is None
+
+
+def test_remerge_removes_the_replaced_artifact_and_shows_the_floor(app, project) -> None:
+    from dataclasses import replace
+
+    from packlab_core.interior_merge import merge_interior
+
+    rng = np.random.default_rng(26)
+    root = project.layout.root
+    calls: list[int] = []
+
+    def merger(body, interior):
+        result = merge_interior(body, interior)
+        calls.append(1)
+        return replace(result, points=result.points + 0.001 * len(calls))  # new content
+
+    floor_scan = np.r_[interior_scan(rng, 97.0, floor=True), _cyl(rng, 40.0, 0, 90, d=0.3)]
+    panel = _panel(project, _entries(root, rng, interior=floor_scan), interior_merger=merger)
+    assert _merge(app, panel) == "merged"
+    first = panel.interior[2]
+    record = project.interior_merge()
+    assert record["floor_depth_mm"] == pytest.approx(97.0, abs=1.0)
+    assert record["missing"] == [] and record["bands"][-1]["kind"] == "base"
+    assert "Inner floor at" in panel.details.text()
+    assert "Not scanned" not in panel.details.text()
+    assert _merge(app, panel) == "merged"
+    second = panel.interior[2]
+    assert second != first and second.exists() and not first.exists()

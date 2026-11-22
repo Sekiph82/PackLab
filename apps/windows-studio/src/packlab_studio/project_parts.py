@@ -581,10 +581,21 @@ class ScenePanel(QWidget):
                 tr("Interior merged (rim alignment, overlap {overlap:.0%}).").format(
                     overlap=record["rim_overlap"]
                 ),
-                tr("Interior scanned to {depth:.0f} mm of {total:.0f} mm below the rim.").format(
-                    depth=record["deepest_covered_mm"], total=record["interior_depth_mm"]
+                tr(
+                    "Interior scanned to {depth:.0f} mm below the rim (rim {rim:.0f} mm above "
+                    "the mat), wall about {wall:.1f} mm."
+                ).format(
+                    depth=record["deepest_covered_mm"],
+                    rim=record["interior_depth_mm"],
+                    wall=record.get("wall_mm") or 0.0,
                 ),
             ]
+            if record.get("floor_depth_mm") is not None:
+                lines.append(
+                    tr("Inner floor at {floor:.0f} mm below the rim; below it is the base.").format(
+                        floor=record["floor_depth_mm"]
+                    )
+                )
             missing = depth_ranges(record["bands"], "missing")
             if missing:
                 lines.append(
@@ -1051,12 +1062,7 @@ class ScenePanel(QWidget):
     def _interior_work(
         self, job_id: str, body: PartState, layout: Any, project_id: str, token: threading.Event
     ) -> None:
-        from packlab_core.interior_merge import (
-            METHOD,
-            METRIC_STATUS,
-            InteriorMergeError,
-            InteriorThresholds,
-        )
+        from packlab_core.interior_merge import METHOD, METRIC_STATUS, InteriorMergeError
         from packlab_core.interior_merge import merge_interior as core_merge
         from packlab_core.part_placement import PartPlacementError
 
@@ -1117,7 +1123,6 @@ class ScenePanel(QWidget):
             if cancelled():
                 return finish("cancelled")
             counts = np.bincount(result.source_index, minlength=2)
-            minimum = InteriorThresholds().min_band_coverage
             record.update(
                 status="merged",
                 reason=None,
@@ -1141,11 +1146,15 @@ class ScenePanel(QWidget):
                         "bottom_mm": band.bottom_mm,
                         "coverage": band.coverage,
                         "points": band.points,
-                        "missing": band.coverage < minimum,
+                        "kind": band.kind,  # covered / missing / base (under the floor)
+                        "missing": band.kind == "missing",
                     }
                     for band in result.bands
                 ],
                 missing=[list(item) for item in result.missing],
+                wall_mm=_jsonable(float(result.wall_mm)),
+                wall_noise_mm=_jsonable(float(result.wall_noise_mm)),
+                floor_depth_mm=result.floor_depth_mm,
                 interior_provenance=result.interior_provenance,
                 unscanned_depth_filled=False,
                 body_design_model_affected=False,
@@ -1183,6 +1192,7 @@ class ScenePanel(QWidget):
         if record is not None and (metadata is None or metadata.project_id != project_id):
             outcome, error, record = "failed", "project changed while combining", None
         committed = False
+        previous = self.projects.interior_merge() if interior and record is not None else None
         if record is not None:
             try:
                 if placing:
@@ -1196,6 +1206,9 @@ class ScenePanel(QWidget):
                 outcome, error = "failed", str(failure)
         if not committed:
             self._discard(written)
+        elif previous and previous.get("artifact_path") and self.projects.layout is not None:
+            old = str(previous["artifact_path"]).removeprefix("derived/")
+            self._discard([self.projects.layout.path("derived", old)])  # replaced: orphaned
         if outcome == "cancelled":
             self.jobs.finish_cancel(job_id)
         elif outcome == "failed":

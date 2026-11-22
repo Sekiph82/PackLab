@@ -36,20 +36,27 @@ def _disc(rng, r0, r1, z, d=0.6):
     return np.c_[r * np.cos(a), r * np.sin(a), np.full(n, z)]
 
 
-def outer_scan(rng, r=R, h=H):
+def outer_scan(rng, r=R, h=H, wall=WALL):
     return np.concatenate(
-        [_cyl(rng, r, 0, h), _disc(rng, r - WALL, r, h), _cyl(rng, r - WALL, h - 5, h)]
+        [_cyl(rng, r, 0, h), _disc(rng, r - wall, r, h, d=2.0), _cyl(rng, r - wall, h - 5, h)]
     )
 
 
-def interior_scan(rng, depth, r=R, h=H, floor=False):
-    parts = [_disc(rng, r - WALL, r, h), _cyl(rng, r, h - 10, h), _cyl(rng, r - WALL, h - depth, h)]
+def interior_scan(rng, depth, r=R, h=H, floor=False, wall=WALL, outer_from=None):
+    """Rim, outer wall from ``outer_from`` (default h - 10) up, inner wall down to ``depth``."""
+    outer_from = h - 10 if outer_from is None else outer_from
+    parts = [
+        _disc(rng, r - wall, r, h, d=2.0),
+        _cyl(rng, r, outer_from, h),
+        _cyl(rng, r - wall, h - depth, h),
+    ]
     if floor:
-        parts.append(_disc(rng, 0, r - WALL, 3.0))
+        parts.append(_disc(rng, 0, r - wall, 3.0))
     return np.concatenate(parts)
 
 
-def _moved(rng, points, yaw=0.5, shift=(4.0, -3.0), tilt=0.8):
+def _moved(rng, points, yaw=0.5, shift=(4.0, -3.0), tilt=0.1):
+    """Own mat frame: yaw / offset free, tilt only a residual of the mat levelling."""
     c, s = np.cos(yaw), np.sin(yaw)
     t = np.radians(tilt)
     rx = np.array([[1, 0, 0], [0, np.cos(t), -np.sin(t)], [0, np.sin(t), np.cos(t)]])
@@ -58,10 +65,10 @@ def _moved(rng, points, yaw=0.5, shift=(4.0, -3.0), tilt=0.8):
     return moved + rng.normal(0, 0.15, moved.shape)
 
 
-def _inputs(rng, depth, **kwargs):
-    points = outer_scan(rng)
+def _inputs(rng, depth, wall=WALL, **kwargs):
+    points = outer_scan(rng, wall=wall)
     body = PartInput("body", points + rng.normal(0, 0.15, points.shape))
-    interior = PartInput("interior", _moved(rng, interior_scan(rng, depth, **kwargs)))
+    interior = PartInput("interior", _moved(rng, interior_scan(rng, depth, wall=wall, **kwargs)))
     return body, interior
 
 
@@ -147,3 +154,67 @@ def test_narrow_neck_bottle_not_reachable() -> None:
     with pytest.raises(InteriorMergeError) as error:
         merge_interior(PartInput("bottle", bottle), PartInput("interior", bottle))
     assert error.value.codes == ("interior_not_reachable",)
+
+
+@pytest.mark.parametrize("wall", [2.5, 1.5, 1.0, 0.5])
+def test_thin_walls_keep_the_scanned_depth(wall) -> None:
+    """HDPE/PET walls: the outer wall seen down to the mat must not hide the inner wall."""
+    rng = np.random.default_rng(int(wall * 10))
+    body, interior = _inputs(rng, 60.0, wall=wall, outer_from=0.0)
+    result = merge_interior(body, interior)
+    assert result.wall_mm == pytest.approx(wall, abs=0.3)
+    assert result.deepest_covered_mm == pytest.approx(60.0, abs=2.5)
+    added = result.points[result.source_index == 1]
+    radius = np.linalg.norm(added[:, :2], axis=1)
+    assert np.mean(radius > R - wall / 2) < 0.1  # few outer-wall points taken as interior
+
+
+def test_floaters_are_not_interior_and_sparse_sectors_do_not_count() -> None:
+    rng = np.random.default_rng(31)
+    body, interior = _inputs(rng, 30.0)
+    # isolated floaters inside the jar below the scanned depth, one per sector and band
+    angle = np.linspace(0, 2 * np.pi, 36, endpoint=False)
+    floaters = np.concatenate(
+        [np.c_[30 * np.cos(angle), 30 * np.sin(angle), np.full(36, z)] for z in (20.0, 40.0)]
+    )
+    points = np.r_[interior.points, _moved(rng, floaters)]
+    result = merge_interior(body, PartInput("interior", points))
+    rows = result.point_index[result.source_index == 1]
+    assert rows.max() < len(interior.points)  # no floater written as interior
+    assert result.deepest_covered_mm == pytest.approx(30.0, abs=2.5)
+
+
+def test_height_offset_near_tolerance_keeps_coverage() -> None:
+    rng = np.random.default_rng(32)
+    body, interior = _inputs(rng, 60.0)
+    lifted = PartInput("interior", interior.points + [0, 0, 1.4])
+    result = merge_interior(body, lifted)
+    assert result.rim["height_offset_mm"] == pytest.approx(-1.4, abs=0.4)
+    assert result.deepest_covered_mm == pytest.approx(60.0, abs=2.5)
+    assert all(b.coverage >= 0.9 for b in result.bands if b.bottom_mm <= 58)
+
+
+def test_base_under_the_floor_is_not_reported_missing() -> None:
+    rng = np.random.default_rng(33)
+    body, interior = _inputs(rng, H - 3, floor=True)
+    result = merge_interior(body, interior)
+    assert result.floor_depth_mm == pytest.approx(H - 3, abs=0.5)
+    assert result.deepest_covered_mm == pytest.approx(H - 3, abs=0.5)
+    assert result.interior_provenance == "SCANNED_TO_FLOOR"
+    assert result.missing == ()
+    assert [b.kind for b in result.bands][-1] == "base"
+
+
+def test_different_jar_interior_refused() -> None:
+    """Same rim, but the interior narrows to a 30 mm radius well inside a 40 mm body."""
+    rng = np.random.default_rng(34)
+    body = PartInput("body", outer_scan(rng))
+    other = np.r_[
+        _disc(rng, R - WALL, R, H, d=2.0),
+        _cyl(rng, R, H - 10, H),
+        _cyl(rng, R - WALL, H - 20, H),
+        _cyl(rng, 30.0, H - 80, H - 20),
+    ]
+    with pytest.raises(InteriorMergeError) as error:
+        merge_interior(body, PartInput("interior", _moved(rng, other)))
+    assert error.value.codes == ("interior_profile_mismatch",)
