@@ -639,12 +639,24 @@ public struct CoverageRingDefinition: Codable, Sendable, Equatable, Identifiable
 public struct OrbitCoverageConfiguration: Codable, Sendable, Equatable {
     public let azimuthBinCount: Int
     public let rings: [CoverageRingDefinition]
-    public init(azimuthBinCount: Int = 8, rings: [CoverageRingDefinition] = OrbitCoverageConfiguration.standardRings) { self.azimuthBinCount = max(1, azimuthBinCount); self.rings = rings }
-    /// The lower ring looks up at the package from below its mid-height. On a tabletop that
-    /// is physically unreachable for short packages (the lens would be under the table, which
-    /// hides the package), so it is optional: captured lower wedges still count as evidence,
-    /// but guidance never targets them and completion does not wait for them.
-    public static let standardRings = [CoverageRingDefinition(id: "lower", minimumElevation: -35, maximumElevation: -10, required: false), CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15), CoverageRingDefinition(id: "upper", minimumElevation: 15, maximumElevation: 40)]
+    /// Strict capture order (see OrbitGuidance.strictOrderStep): photos must follow the rings
+    /// in order and, within a ring, neighbouring wedges in one direction so consecutive photos
+    /// overlap. Out-of-order captures are refused and never counted.
+    public let strictOrder: Bool
+    public init(azimuthBinCount: Int = 16, rings: [CoverageRingDefinition] = OrbitCoverageConfiguration.standardRings, strictOrder: Bool = false) { self.azimuthBinCount = max(1, azimuthBinCount); self.rings = rings; self.strictOrder = strictOrder }
+    private enum CodingKeys: String, CodingKey { case azimuthBinCount, rings, strictOrder }
+    /// Contexts persisted before strict order existed decode as not strict.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        azimuthBinCount = try container.decode(Int.self, forKey: .azimuthBinCount)
+        rings = try container.decode([CoverageRingDefinition].self, forKey: .rings)
+        strictOrder = try container.decodeIfPresent(Bool.self, forKey: .strictOrder) ?? false
+    }
+    /// Five tabletop-reachable rings, all required, 10 deg apart (centres 10..50 deg above the
+    /// object center). With 16 wedges (22.5 deg) per ring neighbouring photos overlap enough for
+    /// reconstruction: a 17-photo, 45-deg tabletop scan registered only 3 photos in COLMAP.
+    /// Below 5 deg (lens at or under the table) and from 55 deg up is out of range.
+    public static let standardRings = [CoverageRingDefinition(id: "h10", minimumElevation: 5, maximumElevation: 15), CoverageRingDefinition(id: "h20", minimumElevation: 15, maximumElevation: 25), CoverageRingDefinition(id: "h30", minimumElevation: 25, maximumElevation: 35), CoverageRingDefinition(id: "h40", minimumElevation: 35, maximumElevation: 45), CoverageRingDefinition(id: "h50", minimumElevation: 45, maximumElevation: 55)]
 }
 
 public struct CoverageSector: Codable, Sendable, Equatable, Hashable, Identifiable {
@@ -820,7 +832,9 @@ public struct OrbitCoverageModel: Sendable, Equatable {
             recordedObservations.append(observation); invalidIDs.append(captureID); return observation
         }
         let mapped = CoveragePoseMapper.map(captureID: captureID, pose: pose, configuration: configuration, center: center)
-        observation = CoveragePoseObservation(captureID: mapped.captureID, sector: mapped.sector, azimuthDegrees: mapped.azimuthDegrees, elevationDegrees: mapped.elevationDegrees, status: mapped.status, frameID: frameID)
+        // Strict order: a photo of any wedge other than the allowed next one is not counted.
+        let inOrder = mapped.status != "available" || !configuration.strictOrder || OrbitGuidance.allowsInOrder(mapped.sector, snapshot: snapshot())
+        observation = CoveragePoseObservation(captureID: mapped.captureID, sector: inOrder ? mapped.sector : nil, azimuthDegrees: mapped.azimuthDegrees, elevationDegrees: mapped.elevationDegrees, status: inOrder ? mapped.status : "capture_out_of_order", frameID: frameID)
         recordedObservations.append(observation)
         guard let sector = observation.sector, observation.status == "available" else { invalidIDs.append(captureID); return observation }
         if captured.contains(sector) { duplicateIDs.append(captureID) } else { captured.insert(sector) }
@@ -865,7 +879,9 @@ public struct AutoCaptureInput: Sendable, Equatable {
     public let overlapAllowed: Bool
     public let duplicateDecision: DuplicateDecision?
     public let admission: CaptureAdmissionController
-    public init(monotonicTimestamp: TimeInterval, poseEligible: Bool, targetSector: CoverageSector?, quality: QualityDecision, overlapAllowed: Bool, duplicateDecision: DuplicateDecision? = nil, admission: CaptureAdmissionController) { self.monotonicTimestamp = monotonicTimestamp; self.poseEligible = poseEligible; self.targetSector = targetSector; self.quality = quality; self.overlapAllowed = overlapAllowed; self.duplicateDecision = duplicateDecision; self.admission = admission }
+    /// False when the live pose is not on the strict-order next wedge.
+    public let inOrder: Bool
+    public init(monotonicTimestamp: TimeInterval, poseEligible: Bool, targetSector: CoverageSector?, quality: QualityDecision, overlapAllowed: Bool, duplicateDecision: DuplicateDecision? = nil, admission: CaptureAdmissionController, inOrder: Bool = true) { self.monotonicTimestamp = monotonicTimestamp; self.poseEligible = poseEligible; self.targetSector = targetSector; self.quality = quality; self.overlapAllowed = overlapAllowed; self.duplicateDecision = duplicateDecision; self.admission = admission; self.inOrder = inOrder }
 }
 
 public struct AutoCaptureDecision: Sendable, Equatable {
@@ -887,6 +903,7 @@ public struct AutoCaptureController: Sendable, Equatable {
         if input.targetSector == nil { reasons.append("coverage_target_missing") }
         if !input.quality.isAcceptable { reasons.append(contentsOf: input.quality.reasons) }
         if !input.overlapAllowed { reasons.append("overlap_not_allowed") }
+        if !input.inOrder { reasons.append("capture_out_of_order") }
         if input.duplicateDecision?.isDuplicate == true { reasons.append(input.duplicateDecision?.reasonCode ?? "near_duplicate_candidate") }
         if !input.admission.allowsCapture { reasons.append(input.admission.rejectReason() ?? "capture_admission_blocked") }
         return AutoCaptureDecision(allowed: reasons.isEmpty, reasons: reasons)
@@ -988,7 +1005,7 @@ public struct RingCoverageRequirement: Codable, Sendable, Equatable, Identifiabl
 
 public struct StandardBottleCoveragePolicy: Codable, Sendable, Equatable {
     public let requirements: [RingCoverageRequirement]
-    public init(requirements: [RingCoverageRequirement] = [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 4, required: false), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 4), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 4)]) { self.requirements = requirements }
+    public init(requirements: [RingCoverageRequirement] = OrbitCoverageConfiguration.standardRings.map { RingCoverageRequirement(ringID: $0.id, minimumSectorCount: 16) }) { self.requirements = requirements }
     public static let standard = StandardBottleCoveragePolicy()
 }
 
@@ -1242,12 +1259,12 @@ public struct PackagingPreset: Codable, Sendable, Equatable, Identifiable {
 }
 
 public enum PackagingPresetCatalog {
-    public static let matteHDPE = PackagingPreset(id: .matteHDPE, version: "1.0.0", displayName: "Matte / HDPE", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use broad diffuse lighting.", "Keep exposure stable and avoid hard shadows."], preparationGuidance: ["Use a clean matte or simple background.", "Keep the package dry and free of loose labels."], requiresPreparationAcknowledgement: false)
-    public static let glossyPET = PackagingPreset(id: .glossyPET, version: "1.0.0", displayName: "Glossy / PET", quality: QualityPolicyConfiguration(highlight: ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.005, warningFraction: 0.025, rejectFraction: 0.12)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12)), lightingGuidance: ["Use large diffuse sources and avoid direct reflections.", "Reframe if highlights spread across the package."], preparationGuidance: ["Keep the glossy surface clean.", "Use a simple non-reflective background."], requiresPreparationAcknowledgement: false)
-    public static let transparent = PackagingPreset(id: .transparent, version: "1.0.0", displayName: "Transparent", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(), lightingGuidance: ["Use diffuse lighting and avoid transparent-surface reflections."], preparationGuidance: ["Photogrammetry may fail without temporary matte treatment, textured inserts or background preparation."], requiresPreparationAcknowledgement: true)
-    public static let asymmetricJerrycan = PackagingPreset(id: .asymmetricJerrycan, version: "1.0.0", displayName: "Asymmetric / Jerrycan", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 12), asymmetricCoverage: AsymmetricCoveragePolicy()), lightingGuidance: ["Use even diffuse lighting across front, back and handle regions."], preparationGuidance: ["Keep the handle unobstructed and capture front/back/side regions."], requiresPreparationAcknowledgement: false)
+    public static let matteHDPE = PackagingPreset(id: .matteHDPE, version: "1.0.0", displayName: "Matte / HDPE", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(strictOrder: true)), lightingGuidance: ["Use broad diffuse lighting.", "Keep exposure stable and avoid hard shadows."], preparationGuidance: ["Use a clean matte or simple background.", "Keep the package dry and free of loose labels."], requiresPreparationAcknowledgement: false)
+    public static let glossyPET = PackagingPreset(id: .glossyPET, version: "1.0.0", displayName: "Glossy / PET", quality: QualityPolicyConfiguration(highlight: ClippingThresholds(luminanceCutoff: 0.98, toleratedFraction: 0.005, warningFraction: 0.025, rejectFraction: 0.12)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(strictOrder: true)), lightingGuidance: ["Use large diffuse sources and avoid direct reflections.", "Reframe if highlights spread across the package."], preparationGuidance: ["Keep the glossy surface clean.", "Use a simple non-reflective background."], requiresPreparationAcknowledgement: false)
+    public static let transparent = PackagingPreset(id: .transparent, version: "1.0.0", displayName: "Transparent", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(strictOrder: true)), lightingGuidance: ["Use diffuse lighting and avoid transparent-surface reflections."], preparationGuidance: ["Photogrammetry may fail without temporary matte treatment, textured inserts or background preparation."], requiresPreparationAcknowledgement: true)
+    public static let asymmetricJerrycan = PackagingPreset(id: .asymmetricJerrycan, version: "1.0.0", displayName: "Asymmetric / Jerrycan", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(strictOrder: true), asymmetricCoverage: AsymmetricCoveragePolicy()), lightingGuidance: ["Use even diffuse lighting across front, back and handle regions."], preparationGuidance: ["Keep the handle unobstructed and capture front/back/side regions."], requiresPreparationAcknowledgement: false)
     public static let closureCap = PackagingPreset(id: .closureCap, version: "1.0.0", displayName: "Closure / Cap", quality: QualityPolicyConfiguration(framing: FramingThresholds(minimumObjectFraction: 0.14, maximumObjectFraction: 0.65, minimumMargin: 0.05)), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 8, rings: [CoverageRingDefinition(id: "closure", minimumElevation: 10, maximumElevation: 55)]), ringRequirements: StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "closure", minimumSectorCount: 8)])), lightingGuidance: ["Use even diffuse lighting over threads, pump or cap details."], preparationGuidance: ["Move to a safe working distance and keep the cap centered without edge cropping."], requiresPreparationAcknowledgement: false)
-    public static let turntable = PackagingPreset(id: .turntable, version: "1.0.0", displayName: "Turntable", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 24)), lightingGuidance: ["Keep the camera and background static while the object rotates."], preparationGuidance: ["Use a stable turntable and record angle evidence for each frame."], requiresPreparationAcknowledgement: false)
+    public static let turntable = PackagingPreset(id: .turntable, version: "1.0.0", displayName: "Turntable", quality: QualityPolicyConfiguration(), coverage: CoveragePolicyConfiguration(orbit: OrbitCoverageConfiguration(azimuthBinCount: 24, rings: [CoverageRingDefinition(id: "lower", minimumElevation: -35, maximumElevation: -10, required: false), CoverageRingDefinition(id: "middle", minimumElevation: -10, maximumElevation: 15), CoverageRingDefinition(id: "upper", minimumElevation: 15, maximumElevation: 40)]), ringRequirements: StandardBottleCoveragePolicy(requirements: [RingCoverageRequirement(ringID: "lower", minimumSectorCount: 4, required: false), RingCoverageRequirement(ringID: "middle", minimumSectorCount: 4), RingCoverageRequirement(ringID: "upper", minimumSectorCount: 4)])), lightingGuidance: ["Keep the camera and background static while the object rotates."], preparationGuidance: ["Use a stable turntable and record angle evidence for each frame."], requiresPreparationAcknowledgement: false)
     public static func preset(for id: PackagingPresetID) -> PackagingPreset { switch id { case .glossyPET: return glossyPET; case .transparent: return transparent; case .asymmetricJerrycan: return asymmetricJerrycan; case .closureCap: return closureCap; case .turntable: return turntable; default: return matteHDPE } }
 }
 
@@ -1448,12 +1465,15 @@ public struct CaptureProtocolViewModel: Sendable {
             return ["Put the package in the middle of the turntable and keep the phone still on a stand.", "Turn the package step by step and take one photo per step (\(orbit.azimuthBinCount) steps), recording each angle."]
         }
         let heights = orbit.rings.map { OrbitGuidance.heightName(ringID: $0.id) }.joined(separator: ", ")
+        let step = 360 / Double(max(1, orbit.azimuthBinCount))
+        let stepText = step == step.rounded() ? "\(Int(step))" : "\(step)"
+        let spacing = orbit.rings.count > 1 ? " at \(orbit.rings.count) heights, \(Int((orbit.rings[1].minimumElevation - orbit.rings[0].minimumElevation).rounded()))° apart" : ""
         return [
             "Put the package on the A4 mat in the middle of a table, with room to walk all the way around it.",
             "After Start, aim the crosshair where the package touches the mat, check the package height, and tap Set object center.",
             "Walk around the package at \(orbit.rings.count == 1 ? "one height" : "\(orbit.rings.count) heights") (\(heights)), keeping the whole package in view.",
-            "Take \(orbit.azimuthBinCount) photos per height: go to the blue wedge on the dial, follow the instruction line, then tap Manual Capture.",
-            "For the low height, hold the phone at table level (lens just above the table surface), or place the package near the table edge.",
+            "Take \(orbit.azimuthBinCount) photos per height (one every \(stepText)°)\(spacing) — \(orbit.azimuthBinCount * orbit.rings.count) photos.",
+            "Go to the blue wedge on the dial, follow the instruction line, then tap Manual Capture.",
         ]
     }
 
@@ -1482,24 +1502,33 @@ public enum OrbitGuidanceInstruction: Sendable, Equatable {
         case .complete: return "All positions covered — finish the scan in History"
         case .walk(let direction, let degrees): return "Walk \(direction.rawValue) ~\(degrees)° around the package"
         case .raise(let ring): return ring == OrbitGuidance.highestRingHint ? "Raise the phone and look down at the package" : "Raise the phone to \(OrbitGuidance.heightName(ringID: ring))"
-        case .lower(let ring): return ring == "lower" ? "Hold the phone at table level (lens just above the table surface), or place the package near the table edge" : "Lower the phone to \(OrbitGuidance.heightName(ringID: ring))"
+        case .lower(let ring): return "Lower the phone to \(OrbitGuidance.heightName(ringID: ring))"
         case .holdAndCapture: return "Hold here — tap Manual Capture"
         case .pointAtPackage: return "Point the camera at the package — keep it in the middle of the screen"
         }
     }
 }
 
+public struct StrictOrderStep: Sendable, Equatable {
+    public let ringID: String
+    /// Nil while `ringID` has no photo yet: any of its wedges may start it.
+    public let next: CoverageSector?
+    public let lastCaptured: CoverageSector?
+}
+
 /// Pure orbit guidance: where the camera is relative to the object and what to do next.
 /// Azimuth increases clockwise seen from above (CoveragePoseMapper: atan2(x, -z)); for an
 /// operator facing the package, moving to a larger azimuth is walking to their left.
 public enum OrbitGuidance {
-    static let highestRingHint = "upper"
+    static let highestRingHint = "h50"
 
     public static func heightName(ringID: String) -> String {
         switch ringID {
-        case "lower": return "low (table level)"
-        case "middle": return "middle (package height)"
-        case "upper": return "high (above, looking down)"
+        case "h10": return "10° above (side view)"
+        case "h20": return "20° above"
+        case "h30": return "30° above"
+        case "h40": return "40° above"
+        case "h50": return "50° above (looking down)"
         default: return ringID
         }
     }
@@ -1542,6 +1571,14 @@ public enum OrbitGuidance {
     /// otherwise the nearest ring that still has missing wedges. Without a position the
     /// first missing sector (configuration order) is returned.
     public static func nextTarget(snapshot: OrbitCoverageSnapshot, current: CoveragePoseObservation?) -> CoverageSector? {
+        if snapshot.configuration.strictOrder {
+            guard let step = strictOrderStep(snapshot: snapshot) else { return nil }
+            if let next = step.next { return next }
+            // Ring not started yet: begin at the wedge nearest the operator's azimuth.
+            let ringMissing = snapshot.missingSectors.filter { $0.ringID == step.ringID }
+            guard let azimuth = current?.azimuthDegrees else { return ringMissing.first }
+            return ringMissing.min { abs(signedDelta(from: azimuth, to: wedgeCenter(azimuthIndex: $0.azimuthIndex, configuration: snapshot.configuration))) < abs(signedDelta(from: azimuth, to: wedgeCenter(azimuthIndex: $1.azimuthIndex, configuration: snapshot.configuration))) }
+        }
         let missing = snapshot.missingSectors
         guard let current, let azimuth = current.azimuthDegrees, let elevation = current.elevationDegrees else { return missing.first }
         let configuration = snapshot.configuration
@@ -1552,6 +1589,31 @@ public enum OrbitGuidance {
             let left = (ringDistance(lhs), turn(lhs)), right = (ringDistance(rhs), turn(rhs))
             return left.0 != right.0 ? left.0 < right.0 : left.1 < right.1
         }
+    }
+
+    /// Strict order position: the first ring (configuration order) with missing wedges; within
+    /// it the first accepted photo fixes the start wedge and photos follow increasing azimuth
+    /// index (walking left), wrapping. Nil when the order is not strict or coverage is complete.
+    public static func strictOrderStep(snapshot: OrbitCoverageSnapshot) -> StrictOrderStep? {
+        let configuration = snapshot.configuration
+        guard configuration.strictOrder, let ring = configuration.rings.first(where: { ring in snapshot.missingSectors.contains { $0.ringID == ring.id } }) else { return nil }
+        let accepted = snapshot.observations.compactMap { $0.status == "available" ? $0.sector : nil }
+        guard let start = accepted.first(where: { $0.ringID == ring.id }) else { return StrictOrderStep(ringID: ring.id, next: nil, lastCaptured: accepted.last) }
+        let count = configuration.azimuthBinCount
+        let next = (0..<count).map { CoverageSector(ringID: ring.id, azimuthIndex: (start.azimuthIndex + $0) % count) }.first { !snapshot.capturedSectors.contains($0) }
+        return StrictOrderStep(ringID: ring.id, next: next, lastCaptured: accepted.last)
+    }
+
+    /// Whether a photo of `sector` keeps the strict order: the next wedge, any wedge of a ring
+    /// not started yet, or a retake of the last captured wedge (not counted twice). Always
+    /// true when the order is not strict.
+    public static func allowsInOrder(_ sector: CoverageSector?, snapshot: OrbitCoverageSnapshot) -> Bool {
+        guard snapshot.configuration.strictOrder else { return true }
+        guard let sector else { return false }
+        guard let step = strictOrderStep(snapshot: snapshot) else { return snapshot.capturedSectors.contains(sector) }
+        if sector == step.lastCaptured { return true }
+        guard let next = step.next else { return sector.ringID == step.ringID }
+        return sector == next
     }
 
     /// Half-angle of the cone around the camera's viewing direction in which the object
