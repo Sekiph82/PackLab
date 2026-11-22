@@ -612,3 +612,28 @@ def test_compatibility_current_runtime_switch_keeps_only_current_release(tmp_pat
     kept_runtime = json.loads((previous_copies[0] / "owner-dev-runtime.json").read_text())
     assert kept_runtime["runtime_id"] == second_id
     assert not second_release.exists() and third_release.is_dir()
+
+
+def test_refresh_success_check_accepts_multi_line_current_output() -> None:
+    """update_owner_dev_current_runtime.ps1 prints cleanup lines before READY (PR #35)."""
+    if not shutil.which("powershell.exe"):
+        return
+    post = (ROOT / "tools/dev/post_codex_owner_dev_refresh.ps1").read_text(encoding="utf-8")
+    line = next(item for item in post.splitlines() if "OWNER_DEV_CURRENT_READY" in item)
+    condition = line[line.index("if (") + 4 : line.rindex(") { throw")]
+    script = (
+        "$LASTEXITCODE = 0; $sha = 'a' * 40; $runtimeId = $sha + '-' + ('b' * 32);"
+        "$currentOutput = @('OWNER_DEV_OLD_PREVIOUS_REMOVED previous-x',"
+        " 'OWNER_DEV_OLD_RELEASE_REMOVED old',"
+        " ('OWNER_DEV_CURRENT_READY ' + $sha + ' ' + $runtimeId + ' C:\o\current'));"
+        f"if ({condition}) {{ 'FAIL' }} else {{ 'OK' }};"
+        "$currentOutput = @('OWNER_DEV_OLD_RELEASE_REMOVED old');"
+        f"if ({condition}) {{ 'FAIL' }} else {{ 'OK' }}"
+    )
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-Command", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.split() == ["OK", "FAIL"], result.stdout + result.stderr
