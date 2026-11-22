@@ -24,7 +24,7 @@ from packlab_studio.project_parts import ScenePanel  # noqa: E402
 from packlab_studio.receiver_session import InboxEntry  # noqa: E402
 from packlab_studio.shell import StudioMainWindow  # noqa: E402
 
-SCALE = lambda _model: (1.0, "synthetic_known_mm")  # noqa: E731
+SCALE = lambda _model: (1.0, "synthetic_known_mm", 0.001)  # noqa: E731
 
 
 def _jar(rng: np.random.Generator, flipped: bool) -> np.ndarray:
@@ -292,3 +292,69 @@ def test_part_strings_have_turkish_entries() -> None:
     texts |= set(project_parts.STATUS_TEXT.values()) | set(project_parts.PART_LABELS.values())
     texts |= {"Use selected part: {part}"}
     assert texts - set(i18n.TURKISH) == set()
+
+
+def test_combined_part_measures_promotes_and_fits_in_its_mat_frame(app, tmp_path) -> None:
+    from packlab_studio import measure_design as md
+
+    window = StudioMainWindow(
+        diagnostics_root=tmp_path / "diagnostics",
+        packaging_library_root=tmp_path / "library",
+    )
+    try:
+        manager = window.project_manager
+        manager.new_project(tmp_path / "jar", "Jar")
+        rng = np.random.default_rng(6)
+        root = manager.layout.root
+        entries = [
+            _entry(_build(root, "body-up", _jar(rng, False)), "body"),
+            _entry(_build(root, "body-flip", _jar(rng, True)), "body_flipped"),
+            _entry(_build(root, "lid-up", _jar(rng, False)), "closure"),
+        ]
+        panel = window.scene_panel
+        panel.entries_provider, panel.scale_for = (lambda: entries), SCALE
+        panel.refresh()
+        outcomes = []
+        panel.combine_finished.connect(lambda part, outcome: outcomes.append(outcome))
+        panel.tree.setCurrentItem(panel.items["body"])
+        panel.combine("body")
+        _pump(app, lambda: outcomes)
+        assert outcomes == ["combined"], manager.part_merges()
+        record = manager.part_merges()["body"]
+        assert record["mesh_artifact_path"].startswith("derived/parts/body-mesh-")
+
+        view = window.route_stack.views[Route.MEASURE_DESIGN]
+        assert isinstance(view, MeasureDesignView)
+        assert view.use_latest_build() and view.part_record is not None, view.status.text()
+        view.isolate_button.click()
+        assert view.isolation is not None, view.status.text()
+        assert view.isolation.method == md.PART_FRAME_METHOD  # no mat search
+        scale = view.scale
+        assert scale is not None and scale.source == "part_combine" and scale.mm_per_unit == 1.0
+        assert scale.provenance.scale_state.value == "metric-unverified"
+        assert [r["scale_source"] for r in scale.provenance.physical_references] == [
+            "synthetic_known_mm",
+            "synthetic_known_mm",
+        ]
+        view.measure_button.click()
+        result = view.measurements
+        assert result is not None, view.status.text()
+        assert result.get("height").value_mm == pytest.approx(80.0, abs=1.5)
+        assert result.get("max_body_diameter").value_mm == pytest.approx(80.0, abs=2.0)
+        view.promote_button.click()
+        assert view.scan_master is not None, view.status.text()
+        view.owner_review.setChecked(True)
+        view.fit_button.click()
+        assert view.design is not None, view.status.text()
+        z = np.asarray(view.scan_master.mesh.vertices)[:, 2]
+        assert np.ptp(z) == pytest.approx(80.0, abs=1.5)  # top and bottom both present
+        assert 70.0 < view.design.height <= 81.5  # fitted revolved profile, not a measurement
+
+        # A single-scan part keeps the mat-based flow (plane search, marker / manual scale).
+        panel.tree.setCurrentItem(panel.items["closure"])
+        assert view.use_latest_build() and view.part_record is None
+        view.isolate_button.click()
+        assert view.isolation is not None and view.isolation.method == md.ISOLATION_METHOD
+        assert view.scale is None
+    finally:
+        window.close()

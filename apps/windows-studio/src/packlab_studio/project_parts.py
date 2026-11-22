@@ -161,7 +161,7 @@ def part_states(
 # ---------------------------------------------------------------- combine job
 
 
-def marker_scale(model: Any) -> tuple[float, str]:
+def marker_scale(model: Any) -> tuple[float, str, float]:
     """mm per reconstruction unit from the A4 mat markers of the scan's own build."""
     from . import measure_design as md
 
@@ -172,7 +172,7 @@ def marker_scale(model: Any) -> tuple[float, str]:
     isolation = md.isolate_object(model, cameras)
     revision = "camera-" + md._sha256_file(workspace[1] / "images.bin")[:40]
     result = md.estimate_marker_scale(model, isolation, cameras, workspace[0], revision)
-    return result.mm_per_unit, result.source
+    return result.mm_per_unit, result.source, result.uncertainty
 
 
 def _jsonable(value: Any) -> Any:
@@ -185,24 +185,52 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def write_cloud(folder: Path, part: str, points: np.ndarray, colors: np.ndarray | None) -> Path:
-    """Atomic PLY write; the file name carries its content digest (immutable artifact)."""
-    import open3d as o3d
-
+def _write_atomic(folder: Path, name: str, write: Callable[[Path], bool]) -> Path:
+    """Write via ``write(temp)`` then rename to ``<name>-<sha16>.ply`` (immutable artifact)."""
     folder.mkdir(parents=True, exist_ok=True)
-    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
-    if colors is not None:
-        cloud.colors = o3d.utility.Vector3dVector(colors)
-    fd, temporary = tempfile.mkstemp(prefix=f".{part}-", suffix=".ply", dir=folder)
+    fd, temporary = tempfile.mkstemp(prefix=f".{name}-", suffix=".ply", dir=folder)
     os.close(fd)
     try:
-        if not o3d.io.write_point_cloud(Path(temporary), cloud):
-            raise OSError("merged cloud could not be written")
-        target = folder / f"{part}-{_sha256(Path(temporary))[:16]}.ply"
+        if not write(Path(temporary)):
+            raise OSError(f"{name} could not be written")
+        target = folder / f"{name}-{_sha256(Path(temporary))[:16]}.ply"
         os.replace(temporary, target)
     finally:
         Path(temporary).unlink(missing_ok=True)
     return target
+
+
+def write_cloud(folder: Path, part: str, points: np.ndarray, colors: np.ndarray | None) -> Path:
+    import open3d as o3d
+
+    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+    if colors is not None:
+        cloud.colors = o3d.utility.Vector3dVector(colors)
+    return _write_atomic(folder, part, lambda path: o3d.io.write_point_cloud(path, cloud))
+
+
+MESH_METHOD = "poisson_depth8_outward_normals_density_trim_q05_v1"
+
+
+def write_mesh(folder: Path, part: str, points: np.ndarray) -> Path:
+    """Surface of the merged cloud, so Measure & Design can promote a Scan Master from it."""
+    import open3d as o3d
+
+    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+    cloud.estimate_normals(o3d.geometry.KDTreeSearchParamKNN(30))
+    # ponytail: outward = away from the centroid, then made consistent along the surface;
+    # deep recesses (closure underside) may still flip locally. Upgrade: visibility-based.
+    cloud.orient_normals_towards_camera_location(points.mean(axis=0))
+    cloud.normals = o3d.utility.Vector3dVector(-np.asarray(cloud.normals))
+    cloud.orient_normals_consistent_tangent_plane(15)
+    mesh, raw_density = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(cloud, depth=8)
+    density = np.asarray(raw_density)
+    mesh.remove_vertices_by_mask(density < np.quantile(density, 0.05))
+    if len(mesh.triangles) < 20:
+        raise OSError("merged part surface could not be meshed")
+    return _write_atomic(
+        folder, f"{part}-mesh", lambda path: o3d.io.write_triangle_mesh(path, mesh)
+    )
 
 
 class ScenePanel(QWidget):
@@ -217,7 +245,7 @@ class ScenePanel(QWidget):
         job_manager: JobManager,
         entries_provider: Callable[[], list[Any]],
         *,
-        scale_for: Callable[[Any], tuple[float, str]] = marker_scale,
+        scale_for: Callable[[Any], tuple[Any, ...]] = marker_scale,
         aligner: Callable[..., Any] | None = None,
     ) -> None:
         super().__init__()
@@ -485,7 +513,9 @@ class ScenePanel(QWidget):
                 }
                 sources.append(source)
                 try:
-                    source["mm_per_unit"], source["scale_source"] = self.scale_for(model)
+                    scale = self.scale_for(model)  # (mm_per_unit, source[, uncertainty])
+                    source["mm_per_unit"], source["scale_source"] = float(scale[0]), scale[1]
+                    source["scale_uncertainty"] = float(scale[2]) if len(scale) > 2 else None
                 except ValueError as error:
                     raise MultiScanAlignmentError(
                         f"{view} scan scale unavailable: {error}"
@@ -519,11 +549,17 @@ class ScenePanel(QWidget):
                 jobs.update_progress(job_id, 0.9, tr("Writing the merged part cloud"))
                 folder = layout.path("derived", "parts")
                 target = write_cloud(folder, part, result.points, result.colors)
+                if cancelled():
+                    return finish("cancelled")
+                mesh = write_mesh(folder, part, result.points)
                 record.update(
                     status="combined",
                     reason=None,
                     artifact_path=f"derived/parts/{target.name}",
                     file_sha256=_sha256(target),
+                    mesh_artifact_path=f"derived/parts/{mesh.name}",
+                    mesh_sha256=_sha256(mesh),
+                    mesh_method=MESH_METHOD,
                     point_count=len(result.points),
                     reference_id=result.reference_id,
                     surface_coverage={k: float(v) for k, v in result.surface_coverage.items()},

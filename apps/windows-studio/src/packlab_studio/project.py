@@ -815,12 +815,13 @@ class ProjectManager:
             raise ProjectError("no project is open")
         if part not in PROJECT_PARTS or record.get("part") != part:
             raise ProjectError("project part is unknown")
-        artifact = record.get("artifact_path")
-        if artifact is not None and not (
-            isinstance(artifact, str)
-            and re.fullmatch(r"derived/parts/[a-z]+-[0-9a-f]{16}\.ply", artifact)
-        ):
-            raise ProjectError("part cloud path is invalid")
+        for key in ("artifact_path", "mesh_artifact_path"):
+            artifact = record.get(key)
+            if artifact is not None and not (
+                isinstance(artifact, str)
+                and re.fullmatch(r"derived/parts/[a-z]+(-mesh)?-[0-9a-f]{16}\.ply", artifact)
+            ):
+                raise ProjectError("part cloud path is invalid")
         _, state = self._read_authority(self.layout)
         merges = state.get("part_merges")
         next_state = dict(state)

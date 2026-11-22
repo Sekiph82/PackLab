@@ -93,6 +93,7 @@ class MeasureDesignView(QWidget):
         self._companion: Path | None = None
         # PL-0485: the Scene panel's selected part cloud, used instead of the latest build.
         self.part_provider: Callable[[], Path | None] | None = None
+        self.part_record: dict[str, Any] | None = None  # set when a combined part is loaded
 
         self.viewer = ModelViewerView()
         self.viewer.open_button.hide()
@@ -384,6 +385,9 @@ class MeasureDesignView(QWidget):
         def action() -> str:
             self.model = md.load_model(path)
             companion = md.companion_mesh_path(path) if self.model.triangles is None else None
+            self.part_record = self._combined_part(path)
+            if self.part_record is not None:
+                companion = self._part_mesh(self.part_record)
             self.mesh_model = self.model if self.model.triangles is not None else None
             self._companion = companion
             self.workspace = md.find_colmap_workspace(path)
@@ -416,13 +420,43 @@ class MeasureDesignView(QWidget):
 
         return self._run("Open", action)
 
+    def _combined_part(self, path: Path) -> dict[str, Any] | None:
+        """The project's Combine-part record whose merged cloud is ``path`` (PL-0485)."""
+        manager, layout = self.project_manager, getattr(self.project_manager, "layout", None)
+        if layout is None or not hasattr(manager, "part_merges"):
+            return None
+        for record in manager.part_merges().values():
+            artifact = record.get("artifact_path")
+            if record.get("status") == "combined" and isinstance(artifact, str):
+                if os.path.normcase(str(layout.root / artifact)) == os.path.normcase(str(path)):
+                    return record
+        return None
+
+    def _part_mesh(self, record: dict[str, Any]) -> Path | None:
+        layout = self.project_manager.layout
+        artifact = record.get("mesh_artifact_path")
+        if not isinstance(artifact, str):
+            return None
+        mesh = layout.path("derived", artifact.removeprefix("derived/"))
+        if not mesh.is_file() or md._sha256_file(mesh) != record.get("mesh_sha256"):
+            raise md.MeasureDesignError(
+                "the part surface mesh is missing or changed; combine again"
+            )
+        return mesh
+
     def isolate(self) -> None:
         model = self.model
         if model is None:
             return
 
+        record = self.part_record
+
         def action() -> str:
-            self.isolation = isolation = md.isolate_object(model, self.cameras)
+            self.isolation = isolation = (
+                md.isolate_object(model, self.cameras)
+                if record is None
+                else md.isolate_in_mat_frame(model)
+            )
             self.scale = self.frame = self.measurements = None
             upright = md.upright_matrix(isolation)
             points = model.points[isolation.object_indices] @ upright[:3, :3].T + upright[:3, 3]
@@ -444,6 +478,10 @@ class MeasureDesignView(QWidget):
                 + "; ".join(isolation.notes)
                 + ". Manual points prefilled with the object's base and top along its axis."
             )
+            if record is not None:  # combined part: already mm, scale from its source builds
+                note = self.results.text()
+                self._set_scale(md.part_combine_scale(model, record))
+                self.results.setText(f"{note}\n{self.results.text()}")
             return "isolated"
 
         self._run("Isolate", action)
