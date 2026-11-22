@@ -357,6 +357,15 @@ def test_combined_part_measures_promotes_and_fits_in_its_mat_frame(app, tmp_path
         z = np.asarray(view.scan_master.mesh.vertices)[:, 2]
         assert np.ptp(z) == pytest.approx(80.0, abs=1.5)  # top and bottom both present
         assert 70.0 < view.design.height <= 81.5  # fitted revolved profile, not a measurement
+        # PL-0487: saving it makes it the Body's Design Model; Labels follow the selection.
+        view.save_button.click()
+        linked, _document = manager.part_design_model("body")
+        assert linked["revision_id"] == view.design.model.revision_id, view.status.text()
+        assert linked["part"] == "body" and manager.part_design_model("closure") is None
+        assert "Body Design Model" in view.status.text()
+        labels = window.route_stack.views[Route.LABELS]
+        assert labels.part == "body"
+        assert labels.workbench.session.model.revision_id == linked["revision_id"]
 
         # A part without its own cloud never silently loads another build.
         panel.tree.setCurrentItem(panel.items["assembled"])

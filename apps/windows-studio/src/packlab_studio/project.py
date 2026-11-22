@@ -40,6 +40,8 @@ _SELECTION_EVENTS = {
     "selected_part": "part_selection_events",
 }
 PROJECT_PARTS = ("closure", "body", "assembled")
+LABEL_PARTS = ("closure", "body")  # parts with their own Design Model + labels (PL-0487)
+_LABEL_ARTWORK = re.compile(r"derived/labels/[0-9a-f]{64}\.(png|svg)")
 _PACKAGE_DIGEST = re.compile(r"[0-9a-f]{64}")
 _PART_ROLE_EVENT_LIMIT = 200
 
@@ -519,9 +521,12 @@ class ProjectManager:
         return export_scan_master(request)
 
     def persist_design_model_revision(
-        self, document: dict[str, Any], *, expected_revision: int
+        self, document: dict[str, Any], *, expected_revision: int, part: str | None = None
     ) -> dict[str, Any]:
         """Write a create-only Design Model document and select it in project authority.
+
+        ``part`` (closure/body, PL-0487): the revision was fitted to that project part's
+        cloud and also becomes the part's Design Model (``part_design_models``).
 
         The file stays at ``derived/design_model/<id>.json`` (studio contract v1); the
         authority record adds its digest and the lineage to a persisted Scan Master, or, for
@@ -554,6 +559,8 @@ class ProjectManager:
             or document.get("physical_accuracy_validation_status") != "DEFERRED_OWNER_VALIDATION"
         ):
             raise ProjectError("design model document is invalid for this project")
+        if part not in (None, *LABEL_PARTS):
+            raise ProjectError("project part is unknown")
         disk_metadata, state = self._read_authority(self.layout)
         if (
             disk_metadata.project_id != self.metadata.project_id
@@ -613,8 +620,13 @@ class ProjectManager:
             "mold_use_authorized": False,
             "actor_id": model.get("actor_id"),
             "project_revision": expected_revision + 1,
+            "part": part,
         }
         next_state = dict(state)
+        if part is not None:
+            linked = state.get("part_design_models")
+            linked = linked if isinstance(linked, dict) else {}
+            next_state["part_design_models"] = {**linked, part: revision_id}
         next_state["design_model_revisions"] = [*records, record]
         next_state["active_design_model_revision_id"] = revision_id
         next_state["design_model_selection_events"] = [
@@ -689,8 +701,24 @@ class ProjectManager:
             raise ProjectError("no project is open")
         _, state = self._read_authority(self.layout)
         revision_id = state.get("active_design_model_revision_id")
-        if revision_id is None:
-            return None
+        return None if revision_id is None else self._design_model(state, revision_id)
+
+    def part_design_model(self, part: str) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        """(record, verified document) of the Design Model saved for closure/body (PL-0487)."""
+
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        if part not in LABEL_PARTS:
+            raise ProjectError("project part is unknown")
+        _, state = self._read_authority(self.layout)
+        linked = state.get("part_design_models")
+        revision_id = linked.get(part) if isinstance(linked, dict) else None
+        return None if revision_id is None else self._design_model(state, revision_id)
+
+    def _design_model(
+        self, state: dict[str, Any], revision_id: object
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        assert self.layout is not None
         records = state.get("design_model_revisions", [])
         matching = [
             item
@@ -713,6 +741,69 @@ class ProjectManager:
         if document.get("design_model_revision_id") != revision_id:
             raise ProjectError("design model document does not match its record")
         return record, document
+
+    # ------------------------------------------------------------ part labels (PL-0487)
+
+    def part_labels(self, part: str) -> dict[str, Any] | None:
+        """Latest label document of closure/body (zones + artwork refs), or None."""
+        if self.layout is None or part not in LABEL_PARTS:
+            return None
+        _, state = self._read_authority(self.layout)
+        value = state.get("part_labels")
+        document = value.get(part) if isinstance(value, dict) else None
+        return document if isinstance(document, dict) else None
+
+    def record_part_labels(self, part: str, document: dict[str, Any]) -> ProjectMetadata:
+        """Store a part's label document; an artifact record, not an undoable selection."""
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        labels = document.get("labels")
+        if (
+            part not in LABEL_PARTS
+            or document.get("part") != part
+            or not isinstance(document.get("design_model_revision_id"), str)
+            or not isinstance(labels, list)
+            or not all(isinstance(item, dict) for item in labels)
+            or any(
+                item.get("artwork") is not None
+                and not _LABEL_ARTWORK.fullmatch(str(item["artwork"].get("path")))
+                for item in labels
+            )
+        ):
+            raise ProjectError("part label document is invalid")
+        _, state = self._read_authority(self.layout)
+        value = state.get("part_labels")
+        next_state = dict(state)
+        next_state["part_labels"] = {**(value if isinstance(value, dict) else {}), part: document}
+        return self.commit_edit(next_state, expected_revision=self.metadata.revision)
+
+    def store_label_artwork(self, content: bytes, media_type: str) -> str:
+        """Content-addressed, create-only artwork file; returns its project-relative path."""
+        if self.layout is None:
+            raise ProjectError("no project is open")
+        suffix = {"image/png": "png", "image/svg+xml": "svg"}.get(media_type)
+        if suffix is None:
+            raise ProjectError("label artwork must be PNG or SVG")
+        name = f"{hashlib.sha256(content).hexdigest()}.{suffix}"
+        target = self.layout.path("derived", f"labels/{name}")
+        if not target.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._write_new_bytes(target, content)
+        return f"derived/labels/{name}"
+
+    def read_label_artwork(self, relative: str, sha256: str) -> bytes:
+        """Artwork bytes, verified against the digest the label document recorded."""
+        if self.layout is None:
+            raise ProjectError("no project is open")
+        if not _LABEL_ARTWORK.fullmatch(relative):
+            raise ProjectError("label artwork path is invalid")
+        try:
+            content = self.layout.path("derived", relative.removeprefix("derived/")).read_bytes()
+        except OSError as error:
+            raise ProjectError(f"label artwork {relative} is missing") from error
+        if hashlib.sha256(content).hexdigest() != sha256:
+            raise ProjectError(f"label artwork {relative} changed on disk")
+        return content
 
     # ------------------------------------------------------------ scan part roles (PL-0482)
 

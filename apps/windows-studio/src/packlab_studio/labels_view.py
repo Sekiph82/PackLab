@@ -8,6 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from PySide6.QtCore import QByteArray, QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
@@ -31,13 +32,19 @@ from packlab_core.label_zone import LabelZoneBoundary, LabelZoneKind
 from .design_workbench import (
     DESIGN_DOCUMENT_SUFFIX,
     DesignWorkbench,
+    DesignWorkbenchError,
     LabelZoneEntry,
     LabelZoneSuggestion,
     MockupJob,
+    label_preview_points,
     latest_project_design_model,
 )
+from .i18n import tr
 from .jobs import JobManager
+from .model_viewer import ModelViewerView
 from .preferences import documents_folder
+from .project import LABEL_PARTS, PROJECT_PARTS
+from .viewport import MeshGeometry, PointCloudGeometry, SceneObjectKind, ViewportService
 
 if TYPE_CHECKING:
     from .shell import StudioMainWindow
@@ -45,6 +52,26 @@ if TYPE_CHECKING:
 
 def _text_error(error: Exception) -> str:
     return str(error) or type(error).__name__
+
+
+PART_CHOICES = (
+    (None, "Project Design Model"),
+    ("closure", "Closure"),
+    ("body", "Body"),
+    ("assembled", "Assembled"),
+)
+TOP_DISC = "top"  # closure top: no core planar-disc zone yet, refused with a reason
+# Zone kinds per part: closure skirt = wrap; body side wall = wrap / front / back panels.
+PART_KINDS: dict[str | None, tuple[tuple[str, str], ...]] = {
+    None: (("wrap", "Wrap"), ("front", "Front"), ("back", "Back")),
+    "body": (("wrap", "Wrap (side wall)"), ("front", "Front"), ("back", "Back")),
+    "closure": (("wrap", "Wrap (skirt)"), (TOP_DISC, "Top disc")),
+}
+
+
+def _display(points: np.ndarray) -> tuple[tuple[float, float, float], ...]:
+    """Design Model z-up mm -> viewer y-up."""
+    return tuple((float(x), float(z), float(-y)) for x, y, z in points)
 
 
 class LabelsView(QWidget):
@@ -72,6 +99,11 @@ class LabelsView(QWidget):
         self._render_thread: threading.Thread | None = None
         self._mockup_job: MockupJob | None = None
         self._loaded_project_key: str | None = None
+        # PL-0487: the project part the page works on (None = project's current Design Model).
+        self.part: str | None = None
+        self.placement_provider: Callable[[], tuple[str, Any, Any]] = lambda: ("none", None, ())
+        self.stale_document: dict[str, Any] | None = None
+        self.assembled_geometry: list[tuple[str, SceneObjectKind, Any]] = []
         # Injectable choosers keep every action drivable offscreen.
         self.choose_design_model_path: Callable[[], str] = lambda: QFileDialog.getOpenFileName(
             self,
@@ -93,16 +125,28 @@ class LabelsView(QWidget):
         self.project_model_button = self._button(
             "Use project Design Model", "use-project-design-model", self.use_project_model
         )
+        self.part_selector = QComboBox(self)
+        self.part_selector.setObjectName("packlab.labels.part")
+        for key, text in PART_CHOICES:
+            self.part_selector.addItem(tr(text), key)
+        self.reapply_button = self._button(
+            "Re-apply labels to the new Design Model", "reapply", self.reapply_labels
+        )
+        self.reapply_button.hide()
         model_box = QGroupBox("Design Model", self)
         model_layout = QVBoxLayout(model_box)
+        part_row = QHBoxLayout()
+        part_row.addWidget(QLabel("Part", self))
+        part_row.addWidget(self.part_selector, 1)
+        model_layout.addLayout(part_row)
         model_layout.addWidget(self.model_summary)
+        model_layout.addWidget(self.reapply_button)
         model_layout.addWidget(self.project_model_button)
         model_layout.addWidget(self.open_button)
 
         self.kind = QComboBox(self)
         self.kind.setObjectName("packlab.labels.zone-kind")
-        for kind in (LabelZoneKind.WRAP, LabelZoneKind.FRONT, LabelZoneKind.BACK):
-            self.kind.addItem(kind.value.title(), kind.value)
+        self._set_kinds(None)
         self.variant = QLineEdit(self)
         self.variant.setObjectName("packlab.labels.variant")
         self.variant.setPlaceholderText("variant name, e.g. front, back, wrap-v2")
@@ -206,8 +250,15 @@ class LabelsView(QWidget):
         left.addWidget(model_box)
         left.addWidget(zone_box)
         left.addWidget(labels_box)
+        # Assembled (PL-0487): both parts' Design Models + labels, placed (preview only).
+        self.assembled_viewer = ModelViewerView()
+        self.assembled_viewer.setObjectName("packlab.labels.assembled-viewer")
+        self.assembled_viewer.open_button.hide()
+        self.assembled_viewer.setMinimumSize(QSize(320, 320))
+        self.assembled_viewer.hide()
         right = QVBoxLayout()
         right.addWidget(render_box)
+        right.addWidget(self.assembled_viewer, 1)
         right.addStretch(1)
         columns = QHBoxLayout()
         columns.addLayout(left, 3)
@@ -220,6 +271,9 @@ class LabelsView(QWidget):
         self.material.currentIndexChanged.connect(self._material_changed)
         self.kind.currentIndexChanged.connect(self._kind_changed)
         self.zones.currentRowChanged.connect(lambda _row: self._show_artwork())
+        self.part_selector.currentIndexChanged.connect(
+            lambda _index: self.show_part(self.part_selector.currentData())
+        )
         self.mockup_finished.connect(self._mockup_done)
         workbench.changed.connect(self.refresh)
         self.refresh()
@@ -309,7 +363,7 @@ class LabelsView(QWidget):
 
     def suggest_zone(self) -> None:
         def action() -> str:
-            kind = LabelZoneKind(self.kind.currentData())
+            kind = self._zone_kind()
             self.suggestion = self.workbench.suggest_label_zone(kind)
             for name, value in self.suggestion.boundary.as_dict().items():
                 self.boundary[name].setValue(value)
@@ -326,7 +380,7 @@ class LabelsView(QWidget):
 
     def add_zone(self) -> None:
         def action() -> str:
-            kind = LabelZoneKind(self.kind.currentData())
+            kind = self._zone_kind()
             if self.suggestion is None or self.suggestion.kind is not kind:
                 self.suggestion = self.workbench.suggest_label_zone(kind)
             boundary = LabelZoneBoundary(*(self.boundary[name].value() for name in self.boundary))
@@ -338,7 +392,10 @@ class LabelsView(QWidget):
             self.zones.setCurrentRow(len(self.workbench.labels) - 1)
             self.variant.clear()
             width, height = entry.size_mm
-            return f"Added {entry.variant_id} label: {width:.1f} x {height:.1f} mm_unverified."
+            return (
+                f"Added {entry.variant_id} label: {width:.1f} x {height:.1f} mm_unverified."
+                + self._save_part_labels()
+            )
 
         self._run(action)
 
@@ -355,7 +412,7 @@ class LabelsView(QWidget):
             artwork = self.workbench.import_artwork(entry, path, fit_mode=self.fit.currentData())
             return (
                 f"Placed {Path(path).name} ({artwork.asset.media_type}) on {entry.variant_id}, "
-                f"fit {artwork.mapping.fit_mode}."
+                f"fit {artwork.mapping.fit_mode}." + self._save_part_labels()
             )
 
         self._run(action)
@@ -416,6 +473,263 @@ class LabelsView(QWidget):
     def wait_for_render(self, timeout: float | None = None) -> None:
         if self._render_thread is not None:
             self._render_thread.join(timeout)
+
+    # ------------------------------------------------------------------ project parts (PL-0487)
+    def _zone_kind(self) -> LabelZoneKind:
+        value = self.kind.currentData()
+        if value == TOP_DISC:
+            raise DesignWorkbenchError(
+                tr(
+                    "Top-disc labels need a flat round label zone, which PackLab's label "
+                    "geometry does not support yet; use a wrap label on the closure skirt."
+                )
+            )
+        return LabelZoneKind(value)
+
+    def _set_kinds(self, part: str | None) -> None:
+        self.kind.blockSignals(True)
+        self.kind.clear()
+        for value, text in PART_KINDS.get(part, PART_KINDS[None]):
+            self.kind.addItem(tr(text), value)
+        self.kind.blockSignals(False)
+        self.suggestion = None
+
+    def show_part(self, part: str | None) -> None:
+        """Follow the Scene selection: work on that part's Design Model and labels."""
+        part = part if part in PROJECT_PARTS else None
+        index = self.part_selector.findData(part)
+        if self.part_selector.currentIndex() != index:
+            self.part_selector.blockSignals(True)
+            self.part_selector.setCurrentIndex(index)
+            self.part_selector.blockSignals(False)
+        if part == self.part:
+            return self.project_changed()
+        self.part = part
+        self._loaded_project_key = None
+        self.stale_document = None
+        self._set_kinds(part)
+        self.assembled_viewer.setVisible(part == "assembled")
+        self.mockup_preview.setVisible(part != "assembled")
+        self.project_changed()
+
+    def project_changed(self) -> None:
+        """Project revision changed (save, undo, label edit): reload only what changed."""
+        if self.part is None:
+            self.use_project_model(automatic=True)
+        elif self.part == "assembled":
+            self.show_assembled()
+        else:
+            self._open_part(self.part)
+
+    def _manager_ready(self) -> bool:
+        manager = self.project_manager
+        return (
+            manager is not None
+            and getattr(manager, "layout", None) is not None
+            and callable(getattr(manager, "part_design_model", None))
+        )
+
+    def _open_part(self, part: str) -> None:
+        name = tr(part.capitalize())
+        try:
+            found = self.project_manager.part_design_model(part) if self._manager_ready() else None
+        except Exception as error:  # tampered/missing authority file is shown, not hidden
+            self.status.setText(f"Not done: {_text_error(error)}")
+            return
+        if found is None:
+            self._loaded_project_key = None
+            self.stale_document = None
+            if self.workbench.session is not None:
+                self.workbench.close_document()
+            else:
+                self.refresh()
+            self.status.setText(
+                tr(
+                    "No Design Model for {part} yet: select {part} in Scene, then Measure & "
+                    "Design > Use selected part, fit and Save."
+                ).format(part=name)
+            )
+            return
+        record, document = found
+        key = f"{part}:{record['revision_id']}"
+        if key == self._loaded_project_key:
+            return  # same part revision (e.g. our own label save): keep the session
+        self._loaded_project_key = key
+        self.stale_document = None
+
+        def action() -> str:
+            self.workbench.open_document(json.dumps(document).encode("utf-8"), part_name=part)
+            labels = self.project_manager.part_labels(part)
+            revision = str(record["revision_id"])
+            if labels is None or not labels.get("labels"):
+                return tr("{part} Design Model {revision} opened; no labels yet.").format(
+                    part=name, revision=revision[:32]
+                )
+            if labels.get("design_model_revision_id") != revision:
+                self.stale_document = labels
+                self.refresh()
+                return tr(
+                    "Labels on {part} are STALE: placed on Design Model {old}, the part's "
+                    "Design Model is now {new}. Re-apply labels to place them on the new model."
+                ).format(
+                    part=name,
+                    old=str(labels.get("design_model_revision_id"))[:32],
+                    new=revision[:32],
+                )
+            problems = self.workbench.restore_labels(
+                labels, self.project_manager.read_label_artwork
+            )
+            text = tr("{part}: {count} label(s) restored on Design Model {revision}.").format(
+                part=name, count=len(self.workbench.labels), revision=revision[:32]
+            )
+            return text + ("" if not problems else " " + "; ".join(problems))
+
+        self._run(action)
+
+    def _save_part_labels(self) -> str:
+        """Persist the part's label document (status suffix; empty when not in part mode)."""
+        part, manager = self.part, self.project_manager
+        if part not in LABEL_PARTS or not self._manager_ready():
+            return ""
+        session = self.workbench.session
+        if session is None or self._loaded_project_key != f"{part}:{session.model.revision_id}":
+            # e.g. a file opened with Open Design Model while a part is selected
+            return " " + tr(
+                "Not saved in the project: the open Design Model is not the {part} Design Model."
+            ).format(part=tr(str(part).capitalize()))
+        document = self.workbench.label_document(str(part), manager.store_label_artwork)
+        self.stale_document = None
+        manager.record_part_labels(str(part), document)
+        self.refresh()
+        return " " + tr("Saved in the project ({part} labels, Design Model {revision}).").format(
+            part=tr(str(part).capitalize()),
+            revision=document["design_model_revision_id"][:32],
+        )
+
+    def reapply_labels(self) -> None:
+        """Place stale labels (same kind, placement, artwork) on the part's new Design Model."""
+        stale = self.stale_document
+        if stale is None or self.workbench.session is None:
+            return
+
+        def action() -> str:
+            self.workbench.labels = []
+            problems = self.workbench.restore_labels(stale, self.project_manager.read_label_artwork)
+            text = tr("{count} label(s) re-applied.").format(count=len(self.workbench.labels))
+            text += self._save_part_labels()
+            return text + ("" if not problems else " " + "; ".join(problems))
+
+        self._run(action)
+
+    def _part_workbench(self, part: str) -> tuple[DesignWorkbench | None, str]:
+        """A workbench with ``part``'s Design Model and current labels (for Assembled)."""
+        name = tr(part.capitalize())
+        found = self.project_manager.part_design_model(part)
+        if found is None:
+            return None, tr("{part} has no Design Model yet").format(part=name)
+        record, document = found
+        workbench = DesignWorkbench()
+        workbench.open_document(json.dumps(document).encode("utf-8"), part_name=part)
+        labels = self.project_manager.part_labels(part)
+        if labels is None:
+            return workbench, ""
+        if labels.get("design_model_revision_id") != record["revision_id"]:
+            return workbench, tr("{part} labels are stale (re-apply them on {part})").format(
+                part=name
+            )
+        problems = workbench.restore_labels(labels, self.project_manager.read_label_artwork)
+        return workbench, "; ".join(problems)
+
+    def show_assembled(self) -> None:
+        """Both parts' Design Models and labels, the closure seated by the PL-0484 placement.
+
+        The Blender mockup renders one Design Model, so Assembled shows a combined preview
+        here instead. Placement: the assembly's closure-on-body transform, applied coaxially
+        (each Design Model's revolve axis is its part axis at the origin, Measure & Design
+        frame). Preview only; geometry authority stays with each part's Design Model.
+        """
+        self.assembled_geometry = []
+        self.assembled_viewer.service = ViewportService(self.assembled_viewer.service.adapter)
+        self.assembled_viewer.redraw()
+        if self.workbench.session is not None:
+            self.workbench.close_document()  # editing happens on Body / Closure
+        self._loaded_project_key = None
+        mockup_note = tr(
+            "The Blender mockup renders one Design Model at a time: select Body or Closure "
+            "to render each part. Assembled shows both parts with their labels below."
+        )
+        if not self._manager_ready():
+            self.status.setText(tr("Open a project with Body and Closure parts first."))
+            return
+        status, record, _placed = self.placement_provider()
+        if status != "placed" or record is None:
+            self.status.setText(
+                tr(
+                    "Assembled labels need the closure placed on the body: select Assembled "
+                    "in Scene and use Place closure on body."
+                )
+                + " "
+                + mockup_note
+            )
+            return
+        try:
+            parts = {part: self._part_workbench(part) for part in ("body", "closure")}
+        except Exception as error:
+            self.status.setText(f"Not done: {_text_error(error)}")
+            return
+        missing = [note for workbench, note in parts.values() if workbench is None]
+        if missing:
+            self.status.setText("; ".join(missing) + ". " + mockup_note)
+            return
+        matrix = np.asarray(record["graph"]["relationships"][0]["closure_on_body"], float)
+        closure_on_body = matrix.reshape(4, 4).copy()
+        closure_on_body[:2, 3] = 0.0  # coaxial: seated closure shares the body axis
+        transforms = {"body": np.eye(4), "closure": closure_on_body}
+        service = ViewportService(self.assembled_viewer.service.adapter)
+        notes, count = [], 0
+        for part, (workbench, note) in parts.items():
+            assert workbench is not None and workbench.session is not None
+            session = workbench.session
+            transform = transforms[part]
+
+            def placed(points: np.ndarray, transform: np.ndarray = transform) -> np.ndarray:
+                return np.asarray(points, float) @ transform[:3, :3].T + transform[:3, 3]
+
+            mesh = session.label_preview.mesh
+            kind = SceneObjectKind.DESIGN_MODEL if part == "body" else SceneObjectKind.CAP
+            geometry: Any = MeshGeometry(
+                _display(placed(np.asarray(mesh.vertices))), tuple(map(tuple, mesh.triangles))
+            )
+            self.assembled_geometry.append((part, kind, geometry))
+            for index, entry in enumerate(workbench.labels):
+                points, colors = label_preview_points(session, entry)
+                if not len(points):
+                    continue
+                geometry = PointCloudGeometry(
+                    _display(placed(points)), tuple(map(tuple, colors.tolist()))
+                )
+                self.assembled_geometry.append(
+                    (f"{part}-label-{index}", SceneObjectKind.LABEL, geometry)
+                )
+                count += 1
+            if note:
+                notes.append(note)
+        for object_id, kind, geometry in self.assembled_geometry:
+            service.add_geometry(object_id, kind, geometry)
+        self.assembled_viewer.service = service
+        self.assembled_viewer.fit()
+        self.assembled_viewer.status.setText(
+            tr("Assembled preview: Body + Closure Design Models, mm_unverified; visual only.")
+        )
+        self.status.setText(
+            tr(
+                "Assembled: Body and Closure with {count} label(s), closure seated by "
+                "assembly {revision}."
+            ).format(count=count, revision=str(record["graph"]["revision_id"])[:32])
+            + (" " + "; ".join(notes) if notes else "")
+            + " "
+            + mockup_note
+        )
 
     # ------------------------------------------------------------------ state
     def _job_start(self, mockup: MockupJob) -> str | None:
@@ -480,6 +794,10 @@ class LabelsView(QWidget):
 
     def refresh(self) -> None:
         self.model_summary.setText(self.workbench.summary())
+        self.reapply_button.setVisible(self.stale_document is not None)
+        self.reapply_button.setEnabled(
+            self.stale_document is not None and self.workbench.session is not None
+        )
         has_model = self.workbench.session is not None
         for widget in (self.suggest_button, self.add_zone_button, self.render_button):
             widget.setEnabled(has_model)
@@ -545,7 +863,7 @@ def install_design_workbench(window: StudioMainWindow) -> None:
         workbench.changed.connect(exports.refresh_source)
     labels = stack.views[Route.LABELS]
     if isinstance(labels, LabelsView):
-        manager.add_listener(lambda _metadata: labels.use_project_model(automatic=True))
+        manager.add_listener(lambda _metadata: labels.project_changed())
     library = stack.views[Route.LIBRARY]
     service = window.packaging_library_service
     if isinstance(library, PackagingLibraryBrowserView) and isinstance(

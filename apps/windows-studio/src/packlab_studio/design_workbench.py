@@ -13,12 +13,14 @@ import math
 import re
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
+import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from packlab_core.blender_capability import (
@@ -26,6 +28,7 @@ from packlab_core.blender_capability import (
     _select_executable,
     discover_blender,
 )
+from packlab_core.blender_label_render_overlay import create_label_render_overlay_binding
 from packlab_core.blender_render import render_standard_views, run_blender_render
 from packlab_core.blender_scene_package import (
     BlenderArtworkBinding,
@@ -114,6 +117,8 @@ DESIGN_DOCUMENT_SUFFIX = ".packlab-design.json"
 # Measure & Design saves revisions here (project "derived" area) with this contract.
 PROJECT_DESIGN_MODEL_DIR = Path("derived") / "design_model"
 STUDIO_REVISION_CONTRACT = "packlab.studio-design-model-revision.v1"
+PART_LABELS_CONTRACT = "packlab.studio-part-labels.v1"  # labels of one project part
+_BOUNDARY_KEYS = ("u_min", "v_min", "u_max", "v_max")
 # Labels are refused on regions curving tighter than this (|k| <= 0.05/mm, radius >= 20 mm).
 LABEL_MAXIMUM_ABSOLUTE_CURVATURE_PER_MM = 0.05
 # Exports: only numerically identical radii are merged into one face (no shape change).
@@ -575,6 +580,89 @@ class DesignWorkbench(QObject):
         self.changed.emit()
         return session
 
+    def close_document(self) -> None:
+        """No Design Model (e.g. the selected part has none yet)."""
+        self.session = None
+        self.labels = []
+        self.changed.emit()
+
+    def label_document(
+        self, part: str, store_artwork: Callable[[bytes, str], str]
+    ) -> dict[str, Any]:
+        """Persistable label document of ``part`` (PL-0487), traceable to the Design Model.
+
+        Each label keeps the inputs that re-create it (kind, boundary, variant, artwork file
+        + fit) and the revision ids it was created with; ``store_artwork`` saves the artwork
+        bytes in the project and returns their project-relative path.
+        """
+        session = self.require_session()
+        labels = []
+        for entry in self.labels:
+            artwork = None
+            if entry.artwork is not None:
+                asset = entry.artwork.asset
+                artwork = {
+                    "path": store_artwork(entry.artwork.content, asset.media_type),
+                    "sha256": asset.content_sha256,
+                    "media_type": asset.media_type,
+                    "fit_mode": entry.artwork.mapping.fit_mode,
+                    "artwork_revision_id": asset.revision_id,
+                    "assignment_revision_id": entry.artwork.assignment.revision_id,
+                }
+            width, height = entry.size_mm
+            labels.append(
+                {
+                    "variant_id": entry.variant_id,
+                    "kind": entry.kind.value,
+                    "boundary": entry.placement.boundary.as_dict(),
+                    "zone_id": entry.placement.label_zone.zone_id,
+                    "placement_revision_id": entry.placement.revision_id,
+                    "metric_binding_revision_id": entry.metric_binding.revision_id,
+                    "size_mm_unverified": [width, height],
+                    "artwork": artwork,
+                }
+            )
+        return {
+            "contract": PART_LABELS_CONTRACT,
+            "part": part,
+            "design_model_revision_id": session.model.revision_id,
+            "design_document_sha256": session.document_sha256,
+            "label_host_brep_revision_id": session.label_representation.revision_id,
+            "coordinate_unit": "mm_unverified",
+            "physical_accuracy_validation_status": "DEFERRED_OWNER_VALIDATION",
+            "updated_at_utc": _utc_now(),
+            "labels": labels,
+        }
+
+    def restore_labels(
+        self, document: dict[str, Any], read_artwork: Callable[[str, str], bytes]
+    ) -> list[str]:
+        """Re-create the labels of a label document on the open Design Model.
+
+        Every zone goes through the same curvature-checked suggestion and core binding as
+        a new one; labels the model no longer takes are skipped and reported.
+        """
+        self.require_session()
+        problems = []
+        for item in document.get("labels", []):
+            try:
+                kind = LabelZoneKind(item["kind"])
+                boundary = LabelZoneBoundary(
+                    **{key: float(item["boundary"][key]) for key in _BOUNDARY_KEYS}
+                )
+                entry = self.add_label_zone(
+                    self.suggest_label_zone(kind),
+                    boundary=boundary,
+                    variant_id=str(item["variant_id"]),
+                )
+                artwork = item.get("artwork")
+                if artwork is not None:
+                    content = read_artwork(str(artwork["path"]), str(artwork["sha256"]))
+                    self.import_artwork(entry, content, fit_mode=str(artwork["fit_mode"]))
+            except Exception as error:  # one bad label must not hide the others
+                problems.append(f"{item.get('variant_id', '?')}: {error}")
+        return problems
+
     def require_session(self) -> DesignModelSession:
         if self.session is None:
             raise DesignWorkbenchError("Open a Design Model first.")
@@ -919,6 +1007,79 @@ def _new_directory(folder: Path, stem: str) -> Path:
     raise DesignWorkbenchError("Too many mockup folders in that location.")
 
 
+def label_preview_points(
+    session: DesignModelSession, entry: LabelZoneEntry, *, step_mm: float = 0.75
+) -> tuple[np.ndarray, np.ndarray]:
+    """Artwork-coloured points on the label's exact host patch (mm, Design Model frame).
+
+    Geometry is the core render overlay (``create_label_render_overlay_binding``), the same
+    one the Blender mockup uses; points sit 0.2 mm off the surface so the viewer shows them
+    over the model. Transparent artwork pixels are left out. Preview only.
+    """
+    from PySide6.QtGui import QImage
+
+    if entry.artwork is None:
+        return np.zeros((0, 3)), np.zeros((0, 3), dtype=np.uint8)
+    png = _render_png(entry.artwork, entry.size_mm)
+    asset = ingest_label_artwork(png)
+    mapping = map_label_artwork_to_metric_surface(
+        asset, entry.placement, entry.metric_binding, fit_mode=entry.artwork.mapping.fit_mode
+    )
+    assignment = create_label_artwork_assignment(
+        mapping,
+        entry.placement,
+        variant_id=entry.variant_id,
+        wrap_seam_u_normalized=0.0 if entry.kind is LabelZoneKind.WRAP else None,
+    )
+    overlay = create_label_render_overlay_binding(
+        session.model,
+        session.label_representation,
+        entry.analysis,
+        entry.metric_binding,
+        entry.placement,
+        mapping,
+        assignment,
+        asset,
+    )
+    geometry = dict(overlay.geometry)
+    width_mm, height_mm = entry.size_mm
+    columns = int(min(240, max(8, width_mm / step_mm)))
+    rows = int(min(120, max(4, height_mm / step_mm)))
+    s, t = np.meshgrid(np.linspace(0, 1, columns), np.linspace(0, 1, rows))
+    s, t = s.ravel(), t.ravel()
+    lift = 0.2
+    if geometry["mode"] == "CYLINDRICAL_WRAP":
+        cx, cy, _cz = (float(v) for v in geometry["center_mm_unverified"])
+        radius = float(geometry["radius_mm_unverified"]) + lift
+        theta0 = float(geometry["angular_start_radians"])
+        theta1 = float(geometry["angular_end_radians"])
+        z0 = float(geometry["axial_start_mm_unverified"])
+        z1 = float(geometry["axial_end_mm_unverified"])
+        theta = theta0 + s * (theta1 - theta0)  # seam +Y, azimuth +Y towards +X
+        points = np.column_stack(
+            [cx + radius * np.sin(theta), cy + radius * np.cos(theta), z0 + t * (z1 - z0)]
+        )
+    else:
+        corners = np.asarray(geometry["zone_corners_mm_unverified"], dtype=float)
+        normal = np.asarray(geometry["surface_normal"], dtype=float)
+        points = (
+            corners[0]
+            + s[:, None] * (corners[1] - corners[0])
+            + t[:, None] * (corners[3] - corners[0])
+            + lift * normal
+        )
+    image = QImage.fromData(png).convertToFormat(QImage.Format.Format_RGBA8888)
+    w, h = image.width(), image.height()
+    pixels = np.frombuffer(image.constBits(), np.uint8).reshape(h, image.bytesPerLine())
+    pixels = pixels[:, : w * 4].reshape(h, w, 4)
+    rgba = pixels[
+        np.round((1.0 - t) * (h - 1)).astype(int),  # artwork rows start at the top
+        np.round(s * (w - 1)).astype(int),
+    ]
+    keep = rgba[:, 3] > 0
+    return points[keep], rgba[keep, :3]
+
+
 def _render_png(artwork: LabelArtwork, size_mm: tuple[float, float]) -> bytes:
     """Blender textures need PNG; an SVG is rasterised (render-only, ~8 px/mm, <= 2048 px)."""
     if artwork.asset.media_type == "image/png":
@@ -955,6 +1116,7 @@ __all__ = [
     "LabelZoneSuggestion",
     "MockupJob",
     "find_blender",
+    "label_preview_points",
     "latest_project_design_model",
     "load_design_model_session",
     "nominal_jar_design_document",
