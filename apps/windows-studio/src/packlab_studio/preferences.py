@@ -9,7 +9,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-PREFERENCES_SCHEMA_VERSION = 1
+# v2 (PL-0464): new default dock layout; older saved dock states are dropped on load.
+PREFERENCES_SCHEMA_VERSION = 2
 DEFAULT_GEOMETRY = (80, 80, 1280, 800)
 
 
@@ -117,9 +118,12 @@ class PreferencesStore:
         version = value.get("schema_version", 0)
         if version == PREFERENCES_SCHEMA_VERSION:
             return value
-        if version == 0:
+        if version in (0, 1):
             migrated = dict(value)
             migrated["schema_version"] = PREFERENCES_SCHEMA_VERSION
-            migrated["last_route"] = migrated.pop("last_page", "library")
+            if version == 0:
+                migrated["last_route"] = migrated.pop("last_page", "library")
+            # Old dock states show the empty Scene/Properties docks and a tall Jobs dock.
+            migrated["dock_state"] = ""
             return migrated
         return None

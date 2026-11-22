@@ -9,8 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -18,6 +21,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid
 
 from packlab_core.design_model import PackageFamily
 from packlab_core.packaging_asset import (
@@ -34,9 +38,11 @@ from packlab_core.packaging_asset import (
 from packlab_core.reconstruction import ScaleState
 
 from .design_workbench import DesignModelSession, DesignWorkbench
+from .i18n import tr
 from .packaging_library_backup import PackagingLibraryBackupService
 from .packaging_library_browser import PackagingLibraryBrowserService, PackagingLibraryBrowserView
 from .packaging_library_contact_sheet import PackagingLibraryContactSheetExporter
+from .preferences import documents_folder  # F15 start folder, never the bare home
 
 _FAMILY = {
     PackageFamily.JAR: PackagingFamily.JAR,
@@ -140,25 +146,26 @@ class LibraryActionsBar(QWidget):
         self.choose_backup_path: Callable[[], str] = lambda: QFileDialog.getSaveFileName(
             self,
             "Back up Packaging Library",
-            str(Path.home() / "packlab-library-backup.zip"),
+            str(documents_folder() / "packlab-library-backup.zip"),
             "Library backup (*.zip)",
         )[0]
         self.choose_archive_path: Callable[[], str] = lambda: QFileDialog.getOpenFileName(
-            self, "Restore Packaging Library backup", str(Path.home()), "Library backup (*.zip)"
+            self,
+            "Restore Packaging Library backup",
+            str(documents_folder()),
+            "Library backup (*.zip)",
         )[0]
         self.choose_directory: Callable[[str], str] = lambda title: (
-            QFileDialog.getExistingDirectory(self, title, str(Path.home()))
+            QFileDialog.getExistingDirectory(self, title, str(documents_folder()))
         )
 
         self.asset_id = QLineEdit(self)
         self.asset_id.setObjectName("packlab.library.new-asset.id")
-        self.asset_id.setPlaceholderText("asset ID")
+        self.asset_id.setPlaceholderText("e.g. jar-500ml-a1b2c3d4")
         self.asset_name = QLineEdit(self)
         self.asset_name.setObjectName("packlab.library.new-asset.name")
-        self.asset_name.setPlaceholderText("display name")
-        self.create_button = self._button(
-            "Add to library (Design Model / Scan Master)", "new-asset.create", self.create_asset
-        )
+        self.asset_name.setPlaceholderText("e.g. Jar 500 ml")
+        self.create_button = self._button("Add to library", "new-asset.create", self.create_asset)
         self.backup_button = self._button("Back up library…", "backup", self.backup)
         self.restore_button = self._button("Restore backup into folder…", "restore", self.restore)
         self.contact_button = self._button(
@@ -170,22 +177,60 @@ class LibraryActionsBar(QWidget):
         self.status.setObjectName("packlab.library.actions-status")
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        create_row = QHBoxLayout()
-        create_row.addWidget(self.asset_id)
-        create_row.addWidget(self.asset_name, 1)
-        create_row.addWidget(self.create_button)
-        file_row = QHBoxLayout()
-        file_row.addWidget(self.backup_button)
-        file_row.addWidget(self.restore_button)
-        file_row.addWidget(self.contact_button)
-        file_row.addStretch(1)
+        create_row = QFormLayout()  # labelled fields (PL-0464)
+        create_row.addRow("Asset ID", self.asset_id)
+        create_row.addRow("Display name", self.asset_name)
+        create_button_row = QHBoxLayout()
+        create_button_row.addWidget(self.create_button)
+        create_button_row.addStretch(1)
+        create_row.addRow("", create_button_row)
+        file_row = QGridLayout()  # two columns: fits 1280 px screens in Turkish too
+        file_row.addWidget(self.backup_button, 0, 0)
+        file_row.addWidget(self.restore_button, 0, 1)
+        file_row.addWidget(self.contact_button, 1, 0)
+        file_row.setColumnStretch(2, 1)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(create_row)
         layout.addLayout(file_row)
         layout.addWidget(self.status)
         workbench.changed.connect(self._prefill)
+        # F12: impossible actions are disabled, with the reason in the tooltip.
+        workbench.changed.connect(self.update_enabled)
+        browser.item_view.currentItemChanged.connect(lambda *_args: self.update_enabled())
+        model = browser.item_view.model()
+        model.rowsInserted.connect(lambda *_args: self.update_enabled())
+        model.rowsRemoved.connect(lambda *_args: self.update_enabled())
+        model.modelReset.connect(lambda *_args: self.update_enabled())
         self._prefill()
+        self.update_enabled()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        super().showEvent(event)
+        self.update_enabled()  # the project's Scan Master may have changed meanwhile
+
+    def update_enabled(self) -> None:
+        if not isValid(self) or not isValid(self.browser.item_view):
+            return  # model signals can fire while the window is being destroyed
+        can_add = self.workbench.session is not None or self._scan_master() is not None
+        self.create_button.setEnabled(can_add)
+        self.create_button.setToolTip(
+            tr("Adds the open Design Model and the project's Scan Master as a library asset.")
+            if can_add
+            else tr(
+                "Open a Design Model (Labels page) or promote a Scan Master in the project first."
+            )
+        )
+        selected = self.browser.selected_asset_id is not None
+        self.browser.create_sku_button.setEnabled(selected)
+        self.browser.create_sku_button.setToolTip(
+            "" if selected else tr("Select a packaging asset in the list first.")
+        )
+        has_assets = self.browser.item_view.count() > 0
+        self.contact_button.setEnabled(has_assets)
+        self.contact_button.setToolTip(
+            "" if has_assets else tr("The library is empty: add an asset first.")
+        )
 
     def _button(self, text: str, name: str, slot: Callable[[], object]) -> QPushButton:
         button = QPushButton(text, self)

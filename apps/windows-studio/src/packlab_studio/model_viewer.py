@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 from PySide6.QtCore import QPoint, QSize, Qt
 from PySide6.QtGui import QMouseEvent, QPixmap, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import (
@@ -18,7 +20,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .viewport import PointCloudGeometry, SceneObjectKind, ViewportLoadError, ViewportService
+from .viewport import (
+    PointCloudGeometry,
+    SceneObjectKind,
+    ViewportCamera,
+    ViewportLoadError,
+    ViewportService,
+)
 from .viewport_lod import LODPolicy, display_geometry, geometry_count
 
 MODEL_FILTER = "3D models (*.ply *.obj *.xyz *.pts *.pcd)"
@@ -26,6 +34,8 @@ MODEL_FILTER = "3D models (*.ply *.obj *.xyz *.pts *.pcd)"
 # points); meshes still draw per triangle in Python, so they get a small budget.
 POINT_DISPLAY_BUDGET = 400_000
 MESH_DISPLAY_BUDGET = 20_000
+# Camera distance per model radius: the model spans about 80 % of the shorter side.
+FIT_DISTANCE_PER_RADIUS = 2.0
 
 
 class ViewportCanvas(QLabel):
@@ -116,14 +126,42 @@ class ModelViewerView(QWidget):
         return True
 
     def fit(self) -> None:
-        if self.service.scene.visible_objects():
-            self.service.fit_to_view()
-            # Bounds.radius clamps to 1 unit (mm scenes); reconstructions in arbitrary
-            # SfM units are often smaller, so zoom in to the true extent.
-            extent = self.service.scene.bounds().extent
-            true_radius = sum(value * value for value in extent) ** 0.5 / 2
-            if 0 < true_radius < 1.0:
-                self.service.zoom(true_radius)
+        """Centre on the model and fill the view (F8).
+
+        Uses the 2nd-98th percentile box of the shown points so a few far SfM outliers
+        cannot shrink the model or push it off-centre; works for any unit scale.
+        """
+        points = [
+            point
+            for item in self.service.scene.visible_objects()
+            if item.geometry is not None
+            for point in (
+                item.geometry.points
+                if isinstance(item.geometry, PointCloudGeometry)
+                else item.geometry.vertices
+            )
+        ]
+        if points:
+            values = np.asarray(points, dtype=float)
+            # Clouds: robust box against outliers. Meshes have uneven vertex density
+            # (a fine cap ring), so they use their full extent.
+            robust = all(
+                isinstance(item.geometry, PointCloudGeometry)
+                for item in self.service.scene.visible_objects()
+            )
+            low = np.percentile(values, 2 if robust else 0, axis=0)
+            high = np.percentile(values, 98 if robust else 100, axis=0)
+            radius = max(float(np.linalg.norm(high - low)) / 2, 1e-6)
+            camera = self.service.state.camera
+            self.service.state = replace(
+                self.service.state,
+                camera=ViewportCamera(
+                    tuple(float(value) for value in (low + high) / 2),  # type: ignore[arg-type]
+                    radius * FIT_DISTANCE_PER_RADIUS,
+                    camera.yaw_degrees,
+                    camera.pitch_degrees,
+                ),
+            )
         self.redraw()
 
     def orbit(self, yaw: float, pitch: float) -> None:

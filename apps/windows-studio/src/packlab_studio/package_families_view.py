@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEventLoop, Qt, Signal
 from PySide6.QtGui import QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -36,9 +37,10 @@ from packlab_core.design_model import FeatureKind
 from . import package_families as pf
 from .closure_workflow import ClosureWorkflowController
 from .engineering_export import DesignModelExportSource
+from .i18n import tr
 from .measure_view import _display
 from .model_viewer import ModelViewerView
-from .viewport import MeshGeometry, SceneObjectKind, ViewportService
+from .viewport import MeshGeometry, SceneObjectKind, ViewportRenderMode, ViewportService
 
 CAPTURED = "captured"
 STANDALONE = "standalone"
@@ -121,6 +123,11 @@ class PackageFamiliesView(QWidget):
         self.status = QLabel("")
         self.status.setObjectName("packlab.families.status")
         self.status.setWordWrap(True)
+        self.busy = QProgressBar()
+        self.busy.setObjectName("packlab.families.busy")
+        self.busy.setRange(0, 0)  # indeterminate
+        self.busy.setMaximumHeight(10)
+        self.busy.hide()
 
         family_box = QGroupBox("Package family")
         family_form = QFormLayout(family_box)
@@ -163,6 +170,7 @@ class PackageFamiliesView(QWidget):
         layout.addWidget(scroll)
         right = QVBoxLayout()
         right.addWidget(self.status)
+        right.addWidget(self.busy)
         right.addWidget(self.viewer, 1)
         right.addWidget(self.details)
         layout.addLayout(right, 1)
@@ -214,6 +222,12 @@ class PackageFamiliesView(QWidget):
 
     def _run(self, label: str, action: Callable[[], str]) -> bool:
         QGuiApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        # F7: visible busy state before the (UI-thread) work starts; repaint once.
+        self.status.setText(
+            tr("{label}: working, this can take up to a minute…").format(label=label)
+        )
+        self.busy.show()
+        QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents)
         try:
             self.status.setText(f"{label}: {action()}")
             return True
@@ -221,6 +235,7 @@ class PackageFamiliesView(QWidget):
             self.status.setText(f"{label} failed: {error}")
             return False
         finally:
+            self.busy.hide()
             QGuiApplication.restoreOverrideCursor()
             self._sync()
 
@@ -234,6 +249,7 @@ class PackageFamiliesView(QWidget):
 
     def _family_changed(self, *_args: object) -> None:
         family = self.family_key
+        self.status.clear()  # F7: no stale message from the previous family
         self.source.blockSignals(True)
         self.source.clear()
         if family not in pf.STANDALONE_ONLY:
@@ -244,7 +260,8 @@ class PackageFamiliesView(QWidget):
         self.source.blockSignals(False)
         self.preset.blockSignals(True)
         self.preset.clear()
-        self.preset.addItems(list(pf.PRESETS[family]))
+        for name in pf.PRESETS[family]:
+            self.preset.addItem(name, name)  # data = logic key; text may be translated
         self.preset.blockSignals(False)
         while self.parameters_form.rowCount():
             self.parameters_form.removeRow(0)
@@ -259,13 +276,17 @@ class PackageFamiliesView(QWidget):
             self.parameters_form.addRow(label, spin)
         self._preset_changed()
 
+    def _preset_key(self) -> str:
+        data = self.preset.currentData()
+        return data if isinstance(data, str) else self.preset.currentText()
+
     def _preset_changed(self, *_args: object) -> None:
         family = self.family_key
-        values: dict[str, Any] = pf.default_parameters(family, self.preset.currentText())
+        values: dict[str, Any] = pf.default_parameters(family, self._preset_key())
         if family == "closure":
             try:
                 _model, context = pf.container_context(self._container_document())
-                values = pf.closure_defaults(context, self.preset.currentText())
+                values = pf.closure_defaults(context, self._preset_key())
             except Exception as error:
                 self.status.setText(f"Closure: {error}")
         for name, spin in self.spins.items():
@@ -308,6 +329,7 @@ class PackageFamiliesView(QWidget):
                 SceneObjectKind.DESIGN_MODEL,
                 MeshGeometry(_display(np.asarray(mesh.vertices)), mesh.triangles),
             )
+        service.set_render_mode(ViewportRenderMode.SHADED)  # no wireframe look (F7)
         self.viewer.service = service
         self.closure_controller = ClosureWorkflowController(service)
         self.viewer.fit()
@@ -360,7 +382,7 @@ class PackageFamiliesView(QWidget):
 
     def create_design(self) -> None:
         def action() -> str:
-            family, preset, actor = self.family_key, self.preset.currentText(), self._actor()
+            family, preset, actor = self.family_key, self._preset_key(), self._actor()
             manager = self._manager()
             if family == "closure":
                 design = pf.create_closure(

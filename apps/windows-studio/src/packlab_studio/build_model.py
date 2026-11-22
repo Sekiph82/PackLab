@@ -9,6 +9,7 @@ inside a project-scoped ReconstructionWorkspace whose source is the RAW_CAPTURE.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -23,8 +24,11 @@ from typing import Any, Protocol, cast
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
+    QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
@@ -50,7 +54,9 @@ from packlab_core.reconstruction_orchestrator import (
 )
 from packlab_core.reconstruction_process import run_reconstruction_stage
 
+from .capture_inbox import inbox_row, local_time
 from .engine_config import DiscoveryStatus, discover_engines
+from .i18n import tr
 from .jobs import TERMINAL_STATES, JobManager, JobState
 from .project import ProjectManager
 from .reconstruction_execution import ReconstructionExecutionService
@@ -879,6 +885,7 @@ class BuildModelView(QWidget):
 
     open_model_requested = Signal(object)  # Path
     route_requested = Signal(str)
+    build_requested = Signal(str, str)  # capture_id, package_sha256 (F16 scan list)
 
     def __init__(self, jobs: JobManager | None = None) -> None:
         super().__init__()
@@ -927,7 +934,27 @@ class BuildModelView(QWidget):
         layout.addLayout(buttons)
         layout.addWidget(self.next_steps)
         layout.addWidget(self.steps_row)
-        layout.addStretch(1)
+        # F16: the project's scans and their latest build, not only the running one.
+        self.history = QListWidget(self)
+        self.history.setObjectName("packlab.reconstruction.history")
+        self.history.setMinimumHeight(140)
+        self.build_selected_button = QPushButton(tr("Build selected scan"), self)
+        self.build_selected_button.setObjectName("packlab.reconstruction.build-selected")
+        self.open_selected_button = QPushButton(tr("Open selected model"), self)
+        self.open_selected_button.setObjectName("packlab.reconstruction.open-selected")
+        history_buttons = QHBoxLayout()
+        history_buttons.addWidget(self.build_selected_button)
+        history_buttons.addWidget(self.open_selected_button)
+        history_buttons.addStretch(1)
+        history_box = QGroupBox(tr("Scans and builds"), self)
+        history_layout = QVBoxLayout(history_box)
+        history_layout.addWidget(self.history, 1)
+        history_layout.addLayout(history_buttons)
+        layout.addWidget(history_box, 1)
+        self.history.currentRowChanged.connect(lambda _row: self._history_selected())
+        self.build_selected_button.clicked.connect(self._build_selected)
+        self.open_selected_button.clicked.connect(self._open_selected)
+        self._history_selected()
         self.cancel_button.clicked.connect(self._cancel)
         self.open_button.clicked.connect(self._open)
         if jobs is not None:
@@ -977,6 +1004,84 @@ class BuildModelView(QWidget):
     def _open(self) -> None:
         if self.result is not None and self.result.model_path is not None:
             self.open_model_requested.emit(self.result.model_path)
+
+    def refresh_history(self, entries: list[Any], project_root: Path | None) -> None:
+        """One row per imported scan with the status of its latest build in this project."""
+        builds = latest_builds(project_root)
+        self.history.clear()
+        for entry in entries:
+            if entry.status != "imported":
+                continue
+            text, details = inbox_row(entry)
+            build = builds.get(entry.package_sha256)
+            if build is None:
+                state = tr("not built yet")
+            else:
+                state = tr(BUILD_STATE_TEXT.get(str(build["state"]), str(build["state"])))
+                state += f" {local_time(build['time'])}"
+            item = QListWidgetItem(f"{text}   ·   {state}")
+            item.setToolTip(details)
+            item.setData(Qt.ItemDataRole.UserRole, (entry.capture_id, entry.package_sha256))
+            item.setData(Qt.ItemDataRole.UserRole + 1, None if build is None else build["model"])
+            self.history.addItem(item)
+        if not self.history.count():
+            self.history.addItem(tr("No imported scans yet: use Capture Inbox first."))
+        self._history_selected()
+
+    def _history_selected(self) -> None:
+        item = self.history.currentItem()
+        scan = None if item is None else item.data(Qt.ItemDataRole.UserRole)
+        model = None if item is None else item.data(Qt.ItemDataRole.UserRole + 1)
+        self.build_selected_button.setEnabled(bool(scan))
+        self.open_selected_button.setEnabled(model is not None)
+
+    def _build_selected(self) -> None:
+        item = self.history.currentItem()
+        scan = None if item is None else item.data(Qt.ItemDataRole.UserRole)
+        if scan:
+            self.build_requested.emit(str(scan[0]), str(scan[1]))
+
+    def _open_selected(self) -> None:
+        item = self.history.currentItem()
+        model = None if item is None else item.data(Qt.ItemDataRole.UserRole + 1)
+        if model is not None:
+            self.open_model_requested.emit(Path(model))
+
+
+BUILD_STATE_TEXT = {
+    "active": "building or interrupted",
+    "succeeded": "built",
+    "failed": "build failed",
+    "cancelled": "build cancelled",
+}
+_MODEL_CANDIDATES = ("outputs/mvs/scene_dense.ply", "outputs/mvs/scene_dense_mesh.ply")
+
+
+def latest_builds(project_root: Path | None) -> dict[str, dict[str, Any]]:
+    """Latest reconstruction workspace per source package digest (read-only scan)."""
+    latest: dict[str, dict[str, Any]] = {}
+    root = None if project_root is None else project_root / "working" / "reconstruction"
+    if root is None or not root.is_dir():
+        return latest
+    for manifest_path in root.glob("*/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            when = manifest_path.stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        digest = manifest.get("source_digest") if isinstance(manifest, dict) else None
+        if not isinstance(digest, str) or (digest in latest and latest[digest]["time"] > when):
+            continue
+        model = next(
+            (
+                manifest_path.parent / name
+                for name in _MODEL_CANDIDATES
+                if (manifest_path.parent / name).is_file()
+            ),
+            None,
+        )
+        latest[digest] = {"state": manifest.get("state"), "time": when, "model": model}
+    return latest
 
 
 __all__ = [
