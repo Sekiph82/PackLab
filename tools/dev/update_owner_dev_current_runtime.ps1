@@ -64,4 +64,13 @@ try {
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     throw
 }
+# Owner request (2026-11-22): keep only the newest rollback copy. Older previous-<guid>
+# folders are regenerated runtime snapshots (source of a published commit + venv); a failed
+# cleanup never fails the promotion.
+Get-ChildItem -LiteralPath $OwnerRoot -Directory -Force -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -match '^previous-[0-9a-f]{32}$' -and (-not $previous -or $_.FullName -ne $previous) } |
+    ForEach-Object {
+        try { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction Stop; Write-Output "OWNER_DEV_OLD_PREVIOUS_REMOVED $($_.Name)" }
+        catch { Write-Warning "Could not remove old rollback copy $($_.Name): $($_.Exception.Message)" }
+    }
 Write-Output "OWNER_DEV_CURRENT_READY $($manifest.source_commit) $RuntimeId $current"

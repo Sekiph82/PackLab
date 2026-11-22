@@ -591,4 +591,13 @@ def test_compatibility_current_runtime_switch_preserves_releases(tmp_path: Path)
     assert second.returncode == 0, second.stdout + second.stderr
     assert current.is_dir() and not current.is_symlink()
     assert json.loads((current / "owner-dev-runtime.json").read_text())["runtime_id"] == second_id
+    # Only the newest rollback copy is kept (owner request 2026-11-22): it holds the first runtime.
+    kept = list(owner_root.glob("previous-*"))
+    assert len(kept) == 1, kept
+    assert json.loads((kept[0] / "owner-dev-runtime.json").read_text())["runtime_id"] == first_id
+    unrelated = owner_root / "previous-notes"
+    unrelated.mkdir()
+    third = switch(first_id)
+    assert third.returncode == 0, third.stdout + third.stderr
+    assert len(list(owner_root.glob("previous-[0-9a-f]*"))) == 1 and unrelated.is_dir()
     assert (first_release / "owner-dev-runtime.json").is_file()
