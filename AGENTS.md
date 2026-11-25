@@ -1,3 +1,7 @@
+## Owner POVU brand usage directive (2026-11-25)
+
+Read root TASKS.md `PL-POVU-VAULT-*` before POVU packaging work. Consume canonical PRIVATE `Sekiph82/POVU-Brand-Vault` originals: two heroes, seven villains, Bactro Gang group, latest unmodified POVU logo and original ICO pack. Hash-verify and use read-only in POVU product art. Do not replace PackLab's own `PackLab.ico` or app logo. Vault currently PUBLIC, so do not copy proprietary masters to any public repo. Existing Claude sole-executor, technical and owner gates remain unchanged.
+
 # PackLab | Agent entry point (Claude Code exclusive, owner decision 2026-11-10)
 
 **Claude Code is the sole authorized new-work executor and orchestrator.** The previous Codex-owned plan and agent instructions are superseded. Do not start new Codex PackLab tasks. Original Codex commits/logs and historical ChatGPT audits remain immutable evidence.
