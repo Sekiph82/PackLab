@@ -962,3 +962,11 @@ Audit: coordination/sessions/M18-C001/PL-0450_STUDIO_REAL_WINDOW_AUDIT_V01.md (o
 8. Repository is currently PUBLIC; no secrets, signing materials, confidential Kenya scans, supplier/customer assets or unlicensed dataset redistribution. Formal legal/factory rollout, real device measurement and genuine Apple signing remain evidence gates; no force push, broad clean, destructive reset, silent stash, privilege bypass or account-billing changes.
 9. Task descriptions and all mandatory pre-read technical contracts retain precedence for product correctness. Full current Claude operating contract is `CLAUDE.md`, `AGENTS.md`, `coordination/AUTONOMOUS_EXECUTION_POLICY.md`, `coordination/AUTONOMOUS_CLAUDE_GOAL.md`.
 10. Continue through available session/runtime capacity; on interruption, persist exact executable next task, unresolved external gates, test/review/sync evidence to this sole tracker. No imaginary background daemon is implied.
+
+
+## Codex ImageGen V3 integration (owner directive; open)
+
+- [ ] **IMG-V3-01 — Repository integration:** Consume shared POVU brand vault read-only, verify original logo and nine masters by SHA-256; combine measured geometry/dielines with concepts, verified text and human print approval.
+- [ ] **IMG-V3-02 — Provider and safety:** Use global codex-imagegen, local Windows CLI and owner ChatGPT authentication only; no paid API fallback, no GitHub Actions, no secret logging. Shared persistent queue, bounded retries, deduplication, atomic outputs, project routing and concise reports. Never overwrite approved assets.
+- [ ] **IMG-V3-03 — Verification:** Test routing, failures, duplicates, recovery; run actual local Codex smoke test and application visual QA with screenshots. Preserve approval gates and report SHA and genuine blockers.
+- [ ] **IMG-V3-04 — Handoff:** Update tracker each cycle, commit/push and synchronize local checkout; continue independent tasks autonomously. No fabricated PASS.
