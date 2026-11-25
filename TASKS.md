@@ -970,3 +970,10 @@ Audit: coordination/sessions/M18-C001/PL-0450_STUDIO_REAL_WINDOW_AUDIT_V01.md (o
 - [ ] **IMG-V3-02 — Provider and safety:** Use global codex-imagegen, local Windows CLI and owner ChatGPT authentication only; no paid API fallback, no GitHub Actions, no secret logging. Shared persistent queue, bounded retries, deduplication, atomic outputs, project routing and concise reports. Never overwrite approved assets.
 - [ ] **IMG-V3-03 — Verification:** Test routing, failures, duplicates, recovery; run actual local Codex smoke test and application visual QA with screenshots. Preserve approval gates and report SHA and genuine blockers.
 - [ ] **IMG-V3-04 — Handoff:** Update tracker each cycle, commit/push and synchronize local checkout; continue independent tasks autonomously. No fabricated PASS.
+
+
+## POVU owner-approved Brand Vault and unchanged reference art (2026-11-25)
+
+- [ ] **PL-POVU-VAULT-001:** Integrate verified PRIVATE `Sekiph82/POVU-Brand-Vault` release as read-only import into POVU packaging projects. Source: `C:\Users\sekip\Desktop\Character Reference Sheets\Character Refence Sheets`; two heroes, seven villains, one separate Bactro Gang group, newest POVU logo and original ICO package. Hash-verify, never transform canonical master files.
+- [ ] **PL-POVU-VAULT-002:** Use the new exact POVU logo and approved character cutouts in POVU label/packaging concepts and product mockups; preserve measurable geometry, dielines and legal claim validation. Explicitly **DO NOT** replace `apps/windows-studio/assets/branding/PackLab.ico`, PackLab app logo or its standalone product identity.
+- [ ] **PL-POVU-VAULT-003:** Implement approval/rollback evidence, missing-or-changed SHA failure, export QA and real Windows app screenshots; keep offline synthetic data separate from real owner packaging evidence. No proprietary image binaries in public PackLab git history.
