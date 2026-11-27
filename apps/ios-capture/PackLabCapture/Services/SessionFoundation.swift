@@ -324,7 +324,8 @@ public actor SessionGalleryStore {
 
     /// Builds the package contract only from accepted gallery records, their
     /// immutable source bytes, and the persisted photo metadata contract.
-    public func finalizeCanonicalAcceptedSession(destination: URL, finalizer: SessionFinalizer = SessionFinalizer()) throws {
+    @discardableResult
+    public func finalizeCanonicalAcceptedSession(destination: URL, finalizer: SessionFinalizer = SessionFinalizer()) throws -> FinalizationOutcome {
         let records = try canonicalRecords()
         guard let metadata = try? Data(contentsOf: layout.photoMetadata),
               let document = try? JSONDecoder().decode(PackScanPhotoMetadataDocument.self, from: metadata),
@@ -348,7 +349,7 @@ public actor SessionGalleryStore {
               let draft = try? JSONDecoder().decode(NewScanDraft.self, from: draftData),
               draft.sessionID == layout.sessionID else { throw FinalizationError.invalidManifest }
         let manifest = try Self.packScanManifest(draft: draft, payloads: payloads)
-        try CanonicalSessionFinalizationWorkflow(finalizer: finalizer).finalize(layout: layout, records: records, immutableSourceBytes: immutable, manifest: manifest, payloads: payloads, destination: destination)
+        return try CanonicalSessionFinalizationWorkflow(finalizer: finalizer).finalize(layout: layout, records: records, immutableSourceBytes: immutable, manifest: manifest, payloads: payloads, destination: destination)
     }
 
     /// Manifest conforming to schemas/packscan/manifest.schema.json, the contract
@@ -579,7 +580,21 @@ public actor ActiveScanSessionRegistry {
     public func clear() { active = nil }
 }
 
-public enum FinalizationError: Error, Sendable, Equatable { case missingPhoto, invalidMetadataBinding, checksumFailure, invalidManifest, packagingFailed }
+public enum FinalizationError: Error, Sendable, Equatable, LocalizedError {
+    /// `detail` is the plain-words cause (e.g. not enough free space), shown to the operator.
+    case missingPhoto, invalidMetadataBinding, checksumFailure, invalidManifest, packagingFailed(detail: String)
+    public var errorDescription: String? {
+        switch self {
+        case .missingPhoto: return "the scan has no accepted photos"
+        case .invalidMetadataBinding: return "the photo records do not match the saved photos"
+        case .checksumFailure: return "a photo changed after it was accepted (checksum mismatch)"
+        case .invalidManifest: return "the scan description is invalid or has no accepted photos"
+        case .packagingFailed(let detail): return "the scan package could not be written: \(detail)"
+        }
+    }
+}
+/// `alreadyFinalized`: the committed package still matches its record, so nothing was rewritten.
+public enum FinalizationOutcome: Sendable, Equatable { case committed, alreadyFinalized }
 public struct FinalizationInput: Sendable { public let manifest: Data; public let payloads: [String: Data]; public let destination: URL; public let sessionRoot: URL?; public init(manifest: Data, payloads: [String: Data], destination: URL, sessionRoot: URL? = nil) { self.manifest = manifest; self.payloads = payloads; self.destination = destination; self.sessionRoot = sessionRoot } }
 
 /// Production finalization source: accepted records and immutable bytes are
@@ -604,9 +619,42 @@ public struct CanonicalFinalizationSource: Sendable {
 }
 public struct SessionFinalizer: Sendable {
     private let failureInjector: (@Sendable (String) -> Bool)?
-    public init(failureInjector: (@Sendable (String) -> Bool)? = nil) { self.failureInjector = failureInjector }
-    public func finalize(source: CanonicalFinalizationSource, manifest: Data, payloads: [String: Data], destination: URL) throws {
+    private let availableBytes: @Sendable (URL) -> Int64?
+    /// `availableBytes` reports free space on the session volume (nil = unknown, check skipped).
+    public init(failureInjector: (@Sendable (String) -> Bool)? = nil, availableBytes: (@Sendable (URL) -> Int64?)? = nil) {
+        self.failureInjector = failureInjector
+        if let availableBytes { self.availableBytes = availableBytes } else {
+            self.availableBytes = { url in (try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?.volumeAvailableCapacityForImportantUsage }
+        }
+    }
+    @discardableResult
+    public func finalize(source: CanonicalFinalizationSource, manifest: Data, payloads: [String: Data], destination: URL) throws -> FinalizationOutcome {
         try finalize(source.input(manifest: manifest, payloads: payloads, destination: destination))
+    }
+    /// The committed record when `destination` is this session's exported package and its
+    /// bytes still match the recorded size and SHA-256; nil when missing, stale or corrupt.
+    public static func intactExport(sessionRoot: URL, destination: URL) -> SessionFinalizationRecord? {
+        guard let data = try? Data(contentsOf: sessionRoot.appendingPathComponent("finalization.json")),
+              let record = try? JSONDecoder().decode(SessionFinalizationRecord.self, from: data),
+              record.state == .exported, record.sessionID == sessionRoot.lastPathComponent, record.packagePath == destination.path,
+              let sha = record.packageSHA256, let package = try? Data(contentsOf: destination),
+              package.count == record.packageBytes, SourceIntegrity.digest(package) == sha else { return nil }
+        return record
+    }
+    static func outOfSpaceDetail(neededBytes: Int64, availableBytes: Int64?) -> String {
+        let mb: (Int64) -> Int64 = { ($0 + 1_048_575) / 1_048_576 }
+        let free = availableBytes.map { ", \(mb($0)) MB free" } ?? ""
+        return "Not enough free space on the iPhone (needs about \(mb(neededBytes)) MB\(free)). Free up space and finalize again."
+    }
+    /// Plain-words cause of an unexpected (non-FinalizationError) failure.
+    static func plainDetail(_ error: Error, neededBytes: Int64) -> String {
+        let ns = error as NSError
+        let posix = (ns.userInfo[NSUnderlyingErrorKey] as? NSError).flatMap { $0.domain == NSPOSIXErrorDomain ? $0 : nil } ?? ns
+        if (ns.domain == NSCocoaErrorDomain && ns.code == CocoaError.fileWriteOutOfSpace.rawValue) || (posix.domain == NSPOSIXErrorDomain && posix.code == Int(ENOSPC)) {
+            return outOfSpaceDetail(neededBytes: neededBytes, availableBytes: nil)
+        }
+        if let writer = error as? PackScanWriterError { return "package writer error \(writer)" }
+        return "\(ns.localizedDescription) (\(ns.domain) \(ns.code))"
     }
     public func validate(_ input: FinalizationInput) throws {
         guard let object = try? JSONSerialization.jsonObject(with: input.manifest) as? [String: Any], object["schema_version"] as? String == PackScanWriter.schemaVersion, let captureID = object["capture_id"] as? String, !captureID.isEmpty, let declared = object["payloads"] as? [[String: Any]], declared.count >= 2, let checksums = object["checksums"] as? [String: Any], checksums["algorithm"] as? String == "sha256", checksums["canonicalization"] as? String == PackScanWriter.checksumCanonicalization else { throw FinalizationError.invalidManifest }
@@ -623,13 +671,21 @@ public struct SessionFinalizer: Sendable {
             guard let digest = item["sha256"] as? String, digest.count == 64, digest == digest.lowercased(), digest == SourceIntegrity.digest(bytes) else { throw FinalizationError.checksumFailure }
         }
     }
-    public func finalize(_ input: FinalizationInput) throws {
+    @discardableResult
+    public func finalize(_ input: FinalizationInput) throws -> FinalizationOutcome {
+        // ponytail: ~3x payload covers the in-memory archive, the .partial file and the record; tune if real devices disagree.
+        let neededBytes = Int64(input.payloads.values.reduce(0) { $0 + $1.count }) * 3
         do {
             try validate(input)
             let fileManager = FileManager.default
             guard let sessionRoot = input.sessionRoot else {
                 try PackScanWriter().write(manifestJSON: input.manifest, payloads: input.payloads, to: input.destination)
-                return
+                return .committed
+            }
+            // Finalizing an already exported session again is a no-op while its package is intact.
+            if Self.intactExport(sessionRoot: sessionRoot, destination: input.destination) != nil { return .alreadyFinalized }
+            if let available = availableBytes(sessionRoot), available < neededBytes {
+                throw FinalizationError.packagingFailed(detail: Self.outOfSpaceDetail(neededBytes: neededBytes, availableBytes: available))
             }
             let finalizationURL = sessionRoot.appendingPathComponent("finalization.json")
             let packageTemp = input.destination.deletingLastPathComponent().appendingPathComponent(".packscan-\(UUID().uuidString).partial")
@@ -637,20 +693,21 @@ public struct SessionFinalizer: Sendable {
             let oldRecord = try? Data(contentsOf: finalizationURL)
             var packageCommitted = false
             do {
-                if failureInjector?("finalization.packageWrite") == true { throw FinalizationError.packagingFailed }
+                if failureInjector?("finalization.packageWrite") == true { throw FinalizationError.packagingFailed(detail: "injected failure") }
                 try PackScanWriter().write(manifestJSON: input.manifest, payloads: input.payloads, to: packageTemp)
                 let record = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: .exported, packagePath: input.destination.path, packageBytes: nil, packageSHA256: nil)
-                if failureInjector?("finalization.record") == true { throw FinalizationError.packagingFailed }
+                if failureInjector?("finalization.record") == true { throw FinalizationError.packagingFailed(detail: "injected failure") }
                 try JSONEncoder().encode(record).write(to: recordTemp, options: .atomic)
-                guard !fileManager.fileExists(atPath: input.destination.path) else { throw FinalizationError.packagingFailed }
-                if failureInjector?("finalization.packageMove") == true { throw FinalizationError.packagingFailed }
-                if failureInjector?("finalization.packageCommit") == true { throw FinalizationError.packagingFailed }
-                try fileManager.moveItem(at: packageTemp, to: input.destination)
+                if failureInjector?("finalization.packageMove") == true { throw FinalizationError.packagingFailed(detail: "injected failure") }
+                if failureInjector?("finalization.packageCommit") == true { throw FinalizationError.packagingFailed(detail: "injected failure") }
+                // A package already at the destination is missing from, or no longer matches, the
+                // record (intact ones returned above): replace it atomically instead of failing.
+                if fileManager.fileExists(atPath: input.destination.path) { _ = try fileManager.replaceItemAt(input.destination, withItemAt: packageTemp, backupItemName: nil, options: []) } else { try fileManager.moveItem(at: packageTemp, to: input.destination) }
                 packageCommitted = true
                 let packageData = try Data(contentsOf: input.destination)
                 if failureInjector?("finalization.checksum") == true { throw FinalizationError.checksumFailure }
                 let committedRecord = SessionFinalizationRecord(sessionID: sessionRoot.lastPathComponent, state: .exported, packagePath: input.destination.path, packageBytes: packageData.count, packageSHA256: SourceIntegrity.digest(packageData))
-                if failureInjector?("finalization.recordCommit") == true { throw FinalizationError.packagingFailed }
+                if failureInjector?("finalization.recordCommit") == true { throw FinalizationError.packagingFailed(detail: "injected failure") }
                 try JSONEncoder().encode(committedRecord).write(to: recordTemp, options: .atomic)
                 if fileManager.fileExists(atPath: finalizationURL.path) { _ = try fileManager.replaceItemAt(finalizationURL, withItemAt: recordTemp, backupItemName: nil, options: .usingNewMetadataOnly) } else { try fileManager.moveItem(at: recordTemp, to: finalizationURL) }
             } catch {
@@ -661,9 +718,10 @@ public struct SessionFinalizer: Sendable {
                 else { try? fileManager.removeItem(at: finalizationURL) }
                 throw error
             }
+            return .committed
         }
         catch let error as FinalizationError { throw error }
-        catch { throw FinalizationError.packagingFailed }
+        catch { throw FinalizationError.packagingFailed(detail: Self.plainDetail(error, neededBytes: neededBytes)) }
     }
 
     private func safePayloadPath(_ path: String) -> Bool { !path.isEmpty && !path.hasPrefix("/") && !path.contains("\\") && !path.contains(":") && !path.split(separator: "/", omittingEmptySubsequences: false).contains { $0.isEmpty || $0 == "." || $0 == ".." } }
@@ -675,9 +733,10 @@ public struct SessionFinalizer: Sendable {
 public struct CanonicalSessionFinalizationWorkflow: Sendable {
     private let finalizer: SessionFinalizer
     public init(finalizer: SessionFinalizer = SessionFinalizer()) { self.finalizer = finalizer }
-    public func finalize(layout: SessionStorageLayout, records: [AcceptedCaptureRecord], immutableSourceBytes: [String: Data], manifest: Data, payloads: [String: Data], destination: URL) throws {
+    @discardableResult
+    public func finalize(layout: SessionStorageLayout, records: [AcceptedCaptureRecord], immutableSourceBytes: [String: Data], manifest: Data, payloads: [String: Data], destination: URL) throws -> FinalizationOutcome {
         let source = try CanonicalFinalizationSource(layout: layout, records: records, immutableSourceBytes: immutableSourceBytes)
-        try finalizer.finalize(source: source, manifest: manifest, payloads: payloads, destination: destination)
+        return try finalizer.finalize(source: source, manifest: manifest, payloads: payloads, destination: destination)
     }
 }
 
@@ -1034,6 +1093,7 @@ public struct LocalScanHistoryView: View {
     @State private var showShare = false
     @State private var transferSelection: FinalizedTransferSelection?
     @State private var finalizationMessage: String?
+    @State private var finalizingIDs: Set<String> = []
     @State private var photoSession: PhotoSessionSelection?
     @StateObject private var shareCoordinator = PackScanSharePresentationCoordinator()
     private let store: LocalScanHistoryStore
@@ -1079,21 +1139,26 @@ public struct LocalScanHistoryView: View {
                             if let record = finalizationRecord(for: entry), sync.enqueue(record) { return }
                             presentTransfer(for: entry)
                         }.buttonStyle(.borderless)
-                    } else if entry.exportState == SessionFinalizationState.inProgress.rawValue {
+                    } else if entry.exportState == SessionFinalizationState.inProgress.rawValue || entry.degradedReason == "missing_exported_package" {
+                        // A finalized scan whose package went missing can be finalized again (rebuilt).
                         Button("Finalize") {
+                            finalizingIDs.insert(entry.id)
                             Task {
+                                defer { finalizingIDs.remove(entry.id) }
                                 do {
-                                    let record = try await ProductionScanFinalizeAction(root: store.rootURL).finalize(sessionID: entry.id)
+                                    let result = try await ProductionScanFinalizeAction(root: store.rootURL).finalizeReportingOutcome(sessionID: entry.id)
                                     onFinalized?(entry.id)
-                                    // Paired phones deliver every finalized scan without further taps.
-                                    sync.enqueue(record)
+                                    // Paired phones deliver every finalized scan without further taps (deduplicated if already sent).
+                                    sync.enqueue(result.record)
+                                    finalizationMessage = result.outcome == .alreadyFinalized ? "Already finalized" : nil
                                     entries = await store.load()
                                 } catch FinalizationError.invalidManifest {
                                     finalizationMessage = "Finalize failed: no accepted photos yet. Take photos with Manual Capture first."
-                                } catch { finalizationMessage = "Finalize failed: \(error)" }
+                                } catch { finalizationMessage = "Finalize failed: \(error.localizedDescription)" }
                             }
                         }
                         .buttonStyle(.borderless)
+                        .disabled(finalizingIDs.contains(entry.id))
                     }
                 }
                 .font(.subheadline).lineLimit(1)
@@ -1106,7 +1171,7 @@ public struct LocalScanHistoryView: View {
             .sheet(item: $transferSelection) { selection in NavigationStack { FinalizedTransferWorkflowView(share: selection.share, finalization: selection.finalization) } }
             .overlay(alignment: .bottom) {
                 if let finalizationMessage {
-                    Text(finalizationMessage).foregroundStyle(.red).padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8)).padding()
+                    Text(finalizationMessage).foregroundStyle(finalizationMessage.hasPrefix("Finalize failed") ? Color.red : Color.primary).padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8)).padding()
                 }
             }
             .navigationTitle("Scan History")
@@ -1233,14 +1298,21 @@ public struct ProductionScanFinalizeAction: Sendable {
     private let sharedCopyDirectory: URL?
     public init(root: URL, sharedCopyDirectory: URL? = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first) { self.root = root; self.sharedCopyDirectory = sharedCopyDirectory }
     public func finalize(sessionID: String, destination: URL? = nil) async throws -> SessionFinalizationRecord {
+        try await finalizeReportingOutcome(sessionID: sessionID, destination: destination).record
+    }
+    /// As `finalize`, also telling whether the intact committed package was simply kept.
+    public func finalizeReportingOutcome(sessionID: String, destination: URL? = nil) async throws -> (record: SessionFinalizationRecord, outcome: FinalizationOutcome) {
         let layout = SessionStorageLayout(root: root, sessionID: sessionID)
         let packageURL = destination ?? root.appendingPathComponent("exports", isDirectory: true).appendingPathComponent("\(sessionID).packscan")
-        try await SessionGalleryStore(layout: layout).finalizeCanonicalAcceptedSession(destination: packageURL)
+        // Checked before rebuilding payloads so a repeat Finalize does not reread every photo.
+        let outcome: FinalizationOutcome
+        if SessionFinalizer.intactExport(sessionRoot: layout.sessionRoot, destination: packageURL) != nil { outcome = .alreadyFinalized }
+        else { outcome = try await SessionGalleryStore(layout: layout).finalizeCanonicalAcceptedSession(destination: packageURL) }
         guard let data = try? Data(contentsOf: layout.finalization),
               let record = try? JSONDecoder().decode(SessionFinalizationRecord.self, from: data),
               record.sessionID == sessionID,
               record.state == .exported,
-              record.packagePath == packageURL.path else { throw FinalizationError.packagingFailed }
+              record.packagePath == packageURL.path else { throw FinalizationError.packagingFailed(detail: "the finalization record was not saved") }
         // ponytail: best-effort pickup copy; the committed package and record above stay the
         // authority, so a failed copy is retried by finalizing again, not surfaced as an error.
         if let shared = sharedCopyDirectory {
@@ -1250,7 +1322,7 @@ public struct ProductionScanFinalizeAction: Sendable {
             try? FileManager.default.copyItem(at: packageURL, to: copy)
             try? FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication], ofItemAtPath: copy.path)
         }
-        return record
+        return (record, outcome)
     }
 }
 

@@ -1473,7 +1473,7 @@ struct ContentView: View {
                 } catch FinalizationError.invalidManifest {
                     return .refused(command, "no_accepted_photos", "no accepted photos yet")
                 } catch {
-                    return RemoteCommandResult(commandID: command.commandID, action: .finish, outcome: .failed, reasons: ["finalize_failed"], message: "finalize failed")
+                    return RemoteCommandResult(commandID: command.commandID, action: .finish, outcome: .failed, reasons: ["finalize_failed"], message: "finalize failed: \(error.localizedDescription)")
                 }
             }
         }
