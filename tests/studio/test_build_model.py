@@ -370,7 +370,7 @@ def test_command_plan_fixes_colmap_seeds_and_mapper_threads(monkeypatch, tmp_pat
     stages = {stage.stage_id: stage for stage in backend.stages(tmp_path, asset, {})}
     for stage_id in ("feature-extraction", "matching", "sparse-mapping"):
         stages[stage_id].execute(context)  # type: ignore[arg-type]
-    assert copied == ["a.jpg", "b.jpg", "c.jpg"]  # sorted, not package order
+    assert copied == ["a.jpg", "b.jpg", "c.jpg"]  # no capture sequence: sorted by name
 
     def option(stage_id: str, name: str) -> str:
         args = commands[stage_id][-1]
@@ -452,6 +452,10 @@ def test_builds_run_up_to_the_limit_in_order_and_duplicates_are_ignored(
         settings = window.route_stack.views[Route.SETTINGS]
         assert isinstance(settings, SettingsView)
         assert settings.concurrent_builds.value() == 2 == window.build_model.max_concurrent
+        assert settings.build_quality.currentData() == "fast" == window.build_model.quality
+        settings.build_quality.setCurrentIndex(settings.build_quality.findData("high"))
+        assert window.build_model.quality == "high"
+        settings.build_quality.setCurrentIndex(settings.build_quality.findData("fast"))
         _import(inbox, packages[0])
         first_job = window.job_manager.jobs()[0].job_id
         digest = hashlib.sha256(packages[0].read_bytes()).hexdigest()

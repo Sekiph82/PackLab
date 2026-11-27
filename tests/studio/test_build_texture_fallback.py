@@ -57,7 +57,7 @@ def _texture_stage(monkeypatch, tmp_path: Path, outcomes: list[str], cancel: Can
 
     monkeypatch.setattr(build_model, "run_reconstruction_stage", fake)
     backend = ColmapOpenMvsBackend(
-        tmp_path / "colmap.exe", {"texture_mesh": tmp_path / "TextureMesh.exe"}
+        tmp_path / "colmap.exe", {"texture_mesh": tmp_path / "TextureMesh.exe"}, quality="high"
     )
     facts: dict[str, object] = {}
     stage = {s.stage_id: s for s in backend.stages(tmp_path, "w/r1", facts)}["texture-mesh"]

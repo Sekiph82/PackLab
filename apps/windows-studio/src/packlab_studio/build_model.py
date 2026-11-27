@@ -18,6 +18,7 @@ import struct
 import threading
 import time
 import uuid
+import zipfile
 from collections.abc import Callable, Sequence
 from contextlib import closing
 from dataclasses import dataclass, field, replace
@@ -64,7 +65,18 @@ from .project import ProjectManager
 from .reconstruction_execution import ReconstructionExecutionService
 from .reconstruction_workspace import ReconstructionWorkspace, ReconstructionWorkspaceManager
 
-BUILD_PRESET = "studio-cpu-v1"
+BUILD_PRESET = "studio-cpu-v1"  # High quality: the original pipeline
+# Build quality presets (Settings > Build quality). Fast cuts an 81-photo CPU build from ~2 h:
+# match only capture-order neighbour pairs instead of every pair, densify one resolution
+# level lower and texture the ReconstructMesh output without RefineMesh.
+BUILD_QUALITIES = {"fast": "studio-cpu-fast-v1", "high": BUILD_PRESET}
+DEFAULT_BUILD_QUALITY = "fast"
+# Fast pair list: the iOS guide takes RING_SIZE photos per height ring in capture order.
+# ponytail: ring size is a calibration knob for the current guide; read it from the package
+# if the guide ever records rings.
+FAST_MATCH_OVERLAP = 12
+RING_SIZE = 16
+FAST_DENSIFY_RESOLUTION_LEVEL = 2
 MAX_IMAGE_SIZE = 2000  # long side; keeps CPU-only laptops at minutes, not hours
 HEIC_SUFFIXES = {".heic", ".heif"}
 COPY_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
@@ -115,18 +127,30 @@ def worker_threads(builds_running: int) -> int:
     return max(1, (os.cpu_count() or 1) // max(1, builds_running))
 
 
-def determinism(max_concurrent_builds: int = 1) -> dict[str, object]:
+def determinism(
+    max_concurrent_builds: int = 1, quality: str = DEFAULT_BUILD_QUALITY
+) -> dict[str, object]:
     """The recorded seeds, thread policy and concurrency of one build (DETERMINISM block)."""
+    fast = quality == "fast"
     return {
+        "build_quality": quality,
+        "matching": (
+            f"pair list: capture-order overlap {FAST_MATCH_OVERLAP} + quadratic, "
+            f"ring closure and adjacent rings (ring size {RING_SIZE})"
+            if fast
+            else "exhaustive"
+        ),
+        "densify_resolution_level": FAST_DENSIFY_RESOLUTION_LEVEL if fast else 1,
+        "mesh_refinement": "skipped (texture the reconstructed mesh)" if fast else "RefineMesh",
         "colmap_random_seed": RANDOM_SEED,
         "colmap_mapper_threads": MAPPER_THREADS,
         "cpu_count": os.cpu_count() or 1,
         # extraction, matching, densify and refine; each stage's stdout ends with its count
         "worker_threads": "cpu_count // builds running at stage start",
         "max_concurrent_builds": max_concurrent_builds,
-        "image_order": "sorted_working_name",
+        "image_order": "capture_sequence",  # working names start with the capture position
         "image_ids": "canonical_sorted_name",
-        "texture_fallback": "default, then seam leveling off, then untextured refined mesh",
+        "texture_fallback": "default, then seam leveling off, then untextured mesh",
     }
 
 
@@ -173,6 +197,49 @@ def canonicalize_image_ids(database: Path) -> None:
                 db.execute(
                     f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new, old + offset)
                 )
+
+
+def fast_match_pairs(count: int) -> list[tuple[int, int]]:
+    """Image index pairs (capture order) for the Fast preset, i < j, sorted.
+
+    Neighbours within FAST_MATCH_OVERLAP, quadratic jumps beyond it (like COLMAP's
+    sequential matcher), the wrap-around of each height ring, and the same azimuth wedge
+    in the adjacent ring (index +/- RING_SIZE). No vocabulary tree is bundled, so there is
+    no loop detection.
+    """
+    pairs: set[tuple[int, int]] = set()
+    for i in range(count):
+        pairs.update((i, j) for j in range(i + 1, min(count, i + FAST_MATCH_OVERLAP + 1)))
+        step = 1
+        while i + step < count:
+            if step > FAST_MATCH_OVERLAP:
+                pairs.add((i, i + step))
+            step *= 2
+        if i + RING_SIZE < count:
+            pairs.add((i, i + RING_SIZE))
+        start = i - i % RING_SIZE
+        for k in (1, 2):  # ring closure: the last photos of a ring meet its first ones
+            j = start + (i - start + RING_SIZE - k) % RING_SIZE
+            if i < j < count:
+                pairs.add((i, j))
+    return sorted(pairs)
+
+
+def capture_sequence(package: Path) -> dict[str, int]:
+    """{"images/<file>": sequence} from the package's metadata/photos.json; {} if absent.
+
+    Only orders photos; a package without sequences falls back to name order.
+    """
+    try:
+        with zipfile.ZipFile(package) as archive:
+            photos = json.loads(archive.read("metadata/photos.json")).get("photos")
+        return {
+            photo["image_path"]: photo["sequence"]
+            for photo in photos
+            if isinstance(photo.get("image_path"), str) and type(photo.get("sequence")) is int
+        }
+    except (OSError, KeyError, ValueError, TypeError, AttributeError, zipfile.BadZipFile):
+        return {}
 
 
 _COLMAP_VERSION = re.compile(r"COLMAP (\d+\.\d+\.\d+)")
@@ -351,6 +418,7 @@ class ColmapOpenMvsBackend:
     openmvs: dict[str, Path]
     ffmpeg: Path | None = None
     max_concurrent_builds: int = 1
+    quality: str = DEFAULT_BUILD_QUALITY
     builds_running: Callable[[], int] = lambda: 1  # read at every stage start
 
     @classmethod
@@ -432,6 +500,8 @@ class ColmapOpenMvsBackend:
             out / "colmap/sparse",
         )
         mvs = out / "mvs"
+        fast = self.quality == "fast"
+        mesh_ply = mvs / ("scene_dense_mesh.ply" if fast else "scene_refined.ply")
         colmap = str(self.colmap)
         tool = {key: str(value) for key, value in self.openmvs.items()}
         used: dict[str, int] = {}
@@ -468,22 +538,28 @@ class ColmapOpenMvsBackend:
         def features(context: ReconstructionStageContext) -> ReconstructionStageExecution:
             images.mkdir(parents=True, exist_ok=True)
             commands: list[tuple[Sequence[str], Path]] = []
-            sources = sorted(
-                (
-                    w / Path(item).relative_to(workspace_asset)
-                    for item in context.job.inputs.image_asset_ids
-                ),
-                key=working_image_name,
-            )
-            for source in sources:
+            # Capture order (photos.json sequence), then name. The working name starts with
+            # the position, so COLMAP's sorted-name image ids follow the capture too.
+            sequence = cast(dict[str, int], facts.get("capture_sequence") or {})
+            inputs = f"{workspace_asset}/inputs"
+
+            def order(item: str) -> tuple[int, str]:
+                key = Path(item).relative_to(inputs).as_posix()
+                return (sequence.get(key, 1 << 62), working_image_name(Path(item)))
+
+            sources = [
+                w / Path(item).relative_to(workspace_asset)
+                for item in sorted(context.job.inputs.image_asset_ids, key=order)
+            ]
+            for position, source in enumerate(sources):
                 suffix = source.suffix.lower()
+                name = f"{position:04d}_{working_image_name(source)}"
                 if suffix in HEIC_SUFFIXES:
                     if self.ffmpeg is None:
                         raise BuildModelError("HEIC photos need ffmpeg; set PACKLAB_FFMPEG_PATH")
-                    target = images / working_image_name(source)
-                    commands.append((heic_decode_command(self.ffmpeg, source, target), w))
+                    commands.append((heic_decode_command(self.ffmpeg, source, images / name), w))
                 elif suffix in COPY_SUFFIXES:
-                    shutil.copyfile(source, images / working_image_name(source))
+                    shutil.copyfile(source, images / name)
                 else:
                     raise BuildModelError(f"unsupported photo type: {source.name}")
             facts["input_images"] = len(sources)
@@ -519,13 +595,24 @@ class ColmapOpenMvsBackend:
             return done("feature-extraction", result, {"database": database, "images": images})
 
         def matching(context: ReconstructionStageContext) -> ReconstructionStageExecution:
+            matcher: tuple[str, ...] = ("exhaustive_matcher",)
+            if fast:
+                names = sorted(path.name for path in images.glob("*"))  # capture order
+                pair_list = out / "colmap/match_pairs.txt"
+                pair_list.parent.mkdir(parents=True, exist_ok=True)
+                pair_list.write_text(
+                    "".join(f"{names[i]} {names[j]}\n" for i, j in fast_match_pairs(len(names))),
+                    encoding="utf-8",
+                )
+                matcher = ("matches_importer", "--match_list_path", str(pair_list))
+                matcher += ("--match_type", "pairs")
             result = _run_commands(
                 "matching",
                 [
                     (
                         (
                             colmap,
-                            "exhaustive_matcher",
+                            *matcher,
                             "--database_path",
                             str(database),
                             "--FeatureMatching.use_gpu",
@@ -640,7 +727,7 @@ class ColmapOpenMvsBackend:
                             tool["densify_point_cloud"],
                             "scene.mvs",
                             "--resolution-level",
-                            "1",
+                            str(FAST_DENSIFY_RESOLUTION_LEVEL if fast else 1),
                             "--max-threads",
                             threads("dense-point-cloud"),
                         ),
@@ -664,6 +751,12 @@ class ColmapOpenMvsBackend:
             return done("mesh-reconstruction", result, {"mesh": mvs / "scene_dense_mesh.ply"})
 
         def refine(context: ReconstructionStageContext) -> ReconstructionStageExecution:
+            if fast:  # RefineMesh took ~22 of ~120 min on an 81-photo CPU build
+                note = "[packlab] mesh-refinement skipped (Fast preset); texturing the mesh\n"
+                skipped = ReconstructionStageResult(
+                    "mesh-refinement", StageStatus.SUCCEEDED, 0, 0.0, note, ""
+                )
+                return done("mesh-refinement", skipped, {"mesh": mesh_ply})
             # Light CPU preset (~2 min on Test-333): one scale at quarter resolution.
             result = _run_commands(
                 "mesh-refinement",
@@ -694,7 +787,7 @@ class ColmapOpenMvsBackend:
             # OpenMVS 2.4.0 TextureMesh can crash (0xC0000005) in seam leveling on real scans
             # (owner build 2026-11-27, 81 photos); the same scene textures with leveling off.
             def attempt(name: str, *extra: str) -> ReconstructionStageResult:
-                args = (tool["texture_mesh"], "scene_dense.mvs", "-m", "scene_refined.ply")
+                args = (tool["texture_mesh"], "scene_dense.mvs", "-m", mesh_ply.name)
                 return _run_commands(
                     "texture-mesh",
                     [((*args, "-o", f"{name}.mvs", "--export-type", "obj", *extra), mvs)],
@@ -739,15 +832,15 @@ class ColmapOpenMvsBackend:
                 "\n".join([result.stdout[-8_000:], *notes, note]),
                 result.stderr[-8_000:],
             )
-            return done("texture-mesh", result, {"mesh": mvs / "scene_refined.ply"})
+            return done("texture-mesh", result, {"mesh": mesh_ply})
 
         executors = (features, matching, mapping, conversion, densify, mesh, refine, texture)
         return _definitions(
             executors,
             {
-                "preset": BUILD_PRESET,
+                "preset": BUILD_QUALITIES[self.quality],
                 "max_image_size": MAX_IMAGE_SIZE,
-                **determinism(self.max_concurrent_builds),
+                **determinism(self.max_concurrent_builds, self.quality),
             },
         )
 
@@ -825,6 +918,7 @@ class BuildModelController(QObject):
         self._backend = backend
         self._invoker = MainThreadInvoker()
         self.max_concurrent = DEFAULT_MAX_CONCURRENT_BUILDS
+        self.quality = DEFAULT_BUILD_QUALITY
         self._queue: list[tuple[str, str, Callable[[], None]]] = []  # FIFO, not yet started
         self._running: set[str] = set()
         self._by_package: dict[str, str] = {}  # package sha256 -> latest job id
@@ -850,12 +944,13 @@ class BuildModelController(QObject):
         layout = self.projects.layout
         metadata = self.projects.metadata
 
-        recorded = determinism(self.max_concurrent)
+        recorded = determinism(self.max_concurrent, self.quality)
         worker = backend
         if isinstance(worker, ColmapOpenMvsBackend):
             worker = replace(
                 worker,
                 max_concurrent_builds=self.max_concurrent,
+                quality=self.quality,
                 builds_running=lambda: len(self._running),
             )
 
@@ -882,6 +977,10 @@ class BuildModelController(QObject):
         self.build_started.emit(job.job_id, capture_id)
         self._start_next()
         return job.job_id
+
+    def set_quality(self, quality: object) -> None:
+        """Applies to builds started afterwards; unknown values fall back to Fast."""
+        self.quality = str(quality) if str(quality) in BUILD_QUALITIES else DEFAULT_BUILD_QUALITY
 
     def set_max_concurrent(self, limit: int) -> None:
         self.max_concurrent = max(1, limit)
@@ -950,6 +1049,7 @@ class BuildModelController(QObject):
                 source_digest=package_sha256,
             )
             working_set = workspaces.materialize_working_set(workspace)
+            facts["capture_sequence"] = capture_sequence(layout.root / source_asset)
             if cancelled():
                 workspaces.cancel(workspace, "cancelled before start")
                 jobs.finish_cancel(job_id)
@@ -970,6 +1070,7 @@ class BuildModelController(QObject):
                 return replace(definition, execute=execute)
 
             stages = tuple(with_progress(index, item) for index, item in enumerate(definitions))
+            preset = BUILD_QUALITIES[str(recorded["build_quality"])]
             request = ReconstructionOrchestrationRequest(
                 ReconstructionJobSpec(
                     job_id,
@@ -977,7 +1078,7 @@ class BuildModelController(QObject):
                     metadata.revision,
                     working_set.inputs,
                     ReconstructionBackendId.COLMAP_OPENMVS,
-                    configuration={"preset": BUILD_PRESET, "capture_id": capture_id, **recorded},
+                    configuration={"preset": preset, "capture_id": capture_id, **recorded},
                     requested_capabilities=(
                         ReconstructionCapability.SPARSE,
                         ReconstructionCapability.DENSE,
@@ -988,7 +1089,7 @@ class BuildModelController(QObject):
                 workspace.relative_path,
                 provenance,
                 stages,
-                configuration={"preset": BUILD_PRESET, **recorded},
+                configuration={"preset": preset, **recorded},
             )
             execution = ReconstructionExecutionService(jobs, workspaces).execute(
                 job_id, workspace, request, cancel=token

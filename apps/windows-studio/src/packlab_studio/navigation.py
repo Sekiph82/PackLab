@@ -42,7 +42,7 @@ from packlab_core.engine_probe import (
 )
 from packlab_core.subprocess_runner import NO_WINDOW
 
-from .build_model import SUPPORTED_COLMAP_VERSIONS, BuildModelView
+from .build_model import DEFAULT_BUILD_QUALITY, SUPPORTED_COLMAP_VERSIONS, BuildModelView
 from .capture_inbox import CaptureInboxView
 from .design_workbench import DesignWorkbench
 from .engine_config import discover_engines
@@ -341,6 +341,11 @@ class SettingsView(QWidget):
         self.concurrent_builds.setObjectName("packlab.settings.concurrent-builds")
         self.concurrent_builds.setRange(1, 4)
         self.concurrent_builds.setValue(2)
+        self.build_quality = QComboBox(self)
+        self.build_quality.setObjectName("packlab.settings.build-quality")
+        self.build_quality.addItem("Fast (default)", "fast")
+        self.build_quality.addItem("High quality", "high")
+        self.build_quality.setCurrentIndex(self.build_quality.findData(DEFAULT_BUILD_QUALITY))
         self.engines = QListWidget(self)
         self.engines.setObjectName("packlab.settings.engines")
         self.recheck_button = QPushButton("Re-check engines", self)
@@ -358,6 +363,7 @@ class SettingsView(QWidget):
         language_form.addRow(tr("Language"), self.language)
         language_form.addRow(self.language_note)
         language_form.addRow("Model builds at the same time", self.concurrent_builds)
+        language_form.addRow("Build quality", self.build_quality)
         layout = QVBoxLayout(self)
         layout.addLayout(language_form)
         layout.addWidget(self.auto_build)
