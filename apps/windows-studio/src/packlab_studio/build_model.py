@@ -87,6 +87,23 @@ DEFAULT_MAX_CONCURRENT_BUILDS = 2  # scans are separate objects; never merged in
 # Below this share of connected photos the model is too partial to measure; stop before
 # the long dense stages and tell the owner to retake (real scan 2026-11-22: 3/17).
 MIN_REGISTERED_FRACTION = 0.5
+# TextureMesh tries in order; any abnormal exit moves on, the last resort is no texture.
+TEXTURE_ATTEMPTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("scene_textured", ()),
+    ("scene_textured_noseam", ("--global-seam-leveling", "0", "--local-seam-leveling", "0")),
+)
+TEXTURE_OUTCOMES = {  # facts["texture"]; 0 = every attempt failed
+    1: "textured",
+    2: "textured with seam leveling off (default texturing crashed)",
+    0: "texture unavailable (texturing crashed twice; untextured mesh)",
+}
+TEXTURE_NOTES = {
+    TEXTURE_OUTCOMES[2]: "Texture made with seam leveling off after the texturing engine crashed.",
+    TEXTURE_OUTCOMES[0]: (
+        "Texture unavailable: the texturing engine crashed, so the model has no colour "
+        "texture. The shape is not affected."
+    ),
+}
 
 
 def worker_threads(builds_running: int) -> int:
@@ -109,6 +126,7 @@ def determinism(max_concurrent_builds: int = 1) -> dict[str, object]:
         "max_concurrent_builds": max_concurrent_builds,
         "image_order": "sorted_working_name",
         "image_ids": "canonical_sorted_name",
+        "texture_fallback": "default, then seam leveling off, then untextured refined mesh",
     }
 
 
@@ -673,26 +691,55 @@ class ColmapOpenMvsBackend:
             return done("mesh-refinement", result, {"mesh": mvs / "scene_refined.ply"})
 
         def texture(context: ReconstructionStageContext) -> ReconstructionStageExecution:
-            result = _run_commands(
-                "texture-mesh",
-                [
-                    (
-                        (
-                            tool["texture_mesh"],
-                            "scene_dense.mvs",
-                            "-m",
-                            "scene_refined.ply",
-                            "-o",
-                            "scene_textured.mvs",
-                            "--export-type",
-                            "obj",
-                        ),
-                        mvs,
+            # OpenMVS 2.4.0 TextureMesh can crash (0xC0000005) in seam leveling on real scans
+            # (owner build 2026-11-27, 81 photos); the same scene textures with leveling off.
+            def attempt(name: str, *extra: str) -> ReconstructionStageResult:
+                args = (tool["texture_mesh"], "scene_dense.mvs", "-m", "scene_refined.ply")
+                return _run_commands(
+                    "texture-mesh",
+                    [((*args, "-o", f"{name}.mvs", "--export-type", "obj", *extra), mvs)],
+                    context.cancel,
+                )
+
+            def produced(result: ReconstructionStageResult, name: str) -> bool:
+                obj = mvs / f"{name}.obj"
+                return (
+                    result.status is StageStatus.SUCCEEDED
+                    and obj.is_file()
+                    and obj.stat().st_size > 0
+                )
+
+            notes: list[str] = []
+            seconds = 0.0
+            for number, (name, extra) in enumerate(TEXTURE_ATTEMPTS, start=1):
+                result = attempt(name, *extra)
+                seconds += result.duration_seconds
+                if result.status is StageStatus.CANCELLED:
+                    return done("texture-mesh", result, {})
+                if produced(result, name):
+                    facts["texture"] = TEXTURE_OUTCOMES[number]
+                    note = f"[packlab] texture-mesh: attempt {number} ({name}) produced the model"
+                    result = replace(
+                        result,
+                        duration_seconds=seconds,
+                        stdout="\n".join([result.stdout, *notes, note]),
                     )
-                ],
-                context.cancel,
+                    return done("texture-mesh", result, {"textured_mesh": mvs / f"{name}.obj"})
+                notes.append(
+                    f"[packlab] texture-mesh: attempt {number} ({name}) failed: "
+                    f"{result.failure_reason or 'no textured mesh written'}"
+                )
+            facts["texture"] = TEXTURE_OUTCOMES[0]
+            note = "[packlab] texture-mesh: texture unavailable; the model is the untextured mesh"
+            result = ReconstructionStageResult(
+                "texture-mesh",
+                StageStatus.SUCCEEDED,
+                0,
+                seconds,
+                "\n".join([result.stdout[-8_000:], *notes, note]),
+                result.stderr[-8_000:],
             )
-            return done("texture-mesh", result, {"textured_mesh": mvs / "scene_textured.obj"})
+            return done("texture-mesh", result, {"mesh": mvs / "scene_refined.ply"})
 
         executors = (features, matching, mapping, conversion, densify, mesh, refine, texture)
         return _definitions(
@@ -988,9 +1035,11 @@ class BuildModelController(QObject):
             if registered is not None
             else ""
         )
+        note = TEXTURE_NOTES.get(str(facts.get("texture")))
         finish(
             "succeeded",
-            f"Model built: {count}{time.monotonic() - started:.0f} s.",
+            f"Model built: {count}{time.monotonic() - started:.0f} s."
+            + ("" if note is None else " " + tr(note)),
             model_path=model,
             textured_mesh_path=paths.get("texture-mesh:textured_mesh"),
         )

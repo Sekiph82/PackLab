@@ -194,6 +194,7 @@ def companion_mesh_path(model_path: Path) -> Path | None:
         "scene_dense_mesh.ply",
         "scene_refined.ply",
         "scene_textured.obj",
+        "scene_textured_noseam.obj",
         "scene_mesh.ply",
     ):
         candidate = Path(model_path).with_name(name)
@@ -210,7 +211,11 @@ def latest_built_model(project_root: Path) -> Path | None:
         return None
     candidates = [
         path
-        for pattern in ("*/outputs/mvs/scene_dense.ply", "*/outputs/mvs/scene_textured.obj")
+        for pattern in (
+            "*/outputs/mvs/scene_dense.ply",
+            "*/outputs/mvs/scene_textured.obj",
+            "*/outputs/mvs/scene_textured_noseam.obj",
+        )
         for path in builds.glob(pattern)
         if path.is_file()
     ]
