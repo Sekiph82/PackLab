@@ -67,16 +67,28 @@ from .reconstruction_workspace import ReconstructionWorkspace, ReconstructionWor
 
 BUILD_PRESET = "studio-cpu-v1"  # High quality: the original pipeline
 # Build quality presets (Settings > Build quality). Fast cuts an 81-photo CPU build from ~2 h:
-# match only capture-order neighbour pairs instead of every pair, densify one resolution
-# level lower and texture the ReconstructMesh output without RefineMesh.
+# match only capture-order neighbour pairs instead of every pair, densify at 750 px
+# depth maps and texture a decimated ReconstructMesh output without RefineMesh.
 BUILD_QUALITIES = {"fast": "studio-cpu-fast-v1", "high": BUILD_PRESET}
 DEFAULT_BUILD_QUALITY = "fast"
-# Fast pair list: the iOS guide takes RING_SIZE photos per height ring in capture order.
+# Fast pair list: the iOS guide takes about RING_SIZE photos per height ring in capture
+# order (owner scan 2026-11-27: rings of 16-17 photos), so the adjacent-ring partner of a
+# photo is index +/- RING_SIZE, give or take one.
 # ponytail: ring size is a calibration knob for the current guide; read it from the package
 # if the guide ever records rings.
 FAST_MATCH_OVERLAP = 12
 RING_SIZE = 16
-FAST_DENSIFY_RESOLUTION_LEVEL = 2
+# 2000 px photos: level 1 gives 1000 px depth maps; Fast caps them at 750 px. (Level 2
+# alone changes nothing: 500 px is under OpenMVS's --min-resolution 640.) Owner scan
+# 2026-11-27: 750 px densified in 8 min vs 13 min and kept the 35-40 mm cap; 500 px
+# took about as long and widened the measured base slice by 5 mm.
+DENSIFY_ARGS = {
+    "fast": ("--resolution-level", "1", "--max-resolution", "750"),
+    "high": ("--resolution-level", "1"),
+}
+# Without RefineMesh (which decimates, ~370k faces on the 81-photo scan) the raw ~2M-face
+# ReconstructMesh surface made TextureMesh take 35 min; Fast decimates it to this size.
+FAST_MESH_FACES = 400_000
 MAX_IMAGE_SIZE = 2000  # long side; keeps CPU-only laptops at minutes, not hours
 HEIC_SUFFIXES = {".heic", ".heif"}
 COPY_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
@@ -140,8 +152,12 @@ def determinism(
             if fast
             else "exhaustive"
         ),
-        "densify_resolution_level": FAST_DENSIFY_RESOLUTION_LEVEL if fast else 1,
-        "mesh_refinement": "skipped (texture the reconstructed mesh)" if fast else "RefineMesh",
+        "densify": " ".join(DENSIFY_ARGS[quality]),
+        "mesh_refinement": (
+            f"skipped; reconstructed mesh decimated to {FAST_MESH_FACES} faces"
+            if fast
+            else "RefineMesh"
+        ),
         "colmap_random_seed": RANDOM_SEED,
         "colmap_mapper_threads": MAPPER_THREADS,
         "cpu_count": os.cpu_count() or 1,
@@ -215,8 +231,7 @@ def fast_match_pairs(count: int) -> list[tuple[int, int]]:
             if step > FAST_MATCH_OVERLAP:
                 pairs.add((i, i + step))
             step *= 2
-        if i + RING_SIZE < count:
-            pairs.add((i, i + RING_SIZE))
+        pairs.update((i, j) for j in range(i + RING_SIZE - 1, i + RING_SIZE + 2) if j < count)
         start = i - i % RING_SIZE
         for k in (1, 2):  # ring closure: the last photos of a ring meet its first ones
             j = start + (i - start + RING_SIZE - k) % RING_SIZE
@@ -726,8 +741,7 @@ class ColmapOpenMvsBackend:
                         (
                             tool["densify_point_cloud"],
                             "scene.mvs",
-                            "--resolution-level",
-                            str(FAST_DENSIFY_RESOLUTION_LEVEL if fast else 1),
+                            *DENSIFY_ARGS[self.quality],
                             "--max-threads",
                             threads("dense-point-cloud"),
                         ),
@@ -745,7 +759,18 @@ class ColmapOpenMvsBackend:
         def mesh(context: ReconstructionStageContext) -> ReconstructionStageExecution:
             result = _run_commands(
                 "mesh-reconstruction",
-                [((tool["reconstruct_mesh"], "scene_dense.mvs", "-p", "scene_dense.ply"), mvs)],
+                [
+                    (
+                        (
+                            tool["reconstruct_mesh"],
+                            "scene_dense.mvs",
+                            "-p",
+                            "scene_dense.ply",
+                            *(("--target-face-num", str(FAST_MESH_FACES)) if fast else ()),
+                        ),
+                        mvs,
+                    )
+                ],
                 context.cancel,
             )
             return done("mesh-reconstruction", result, {"mesh": mvs / "scene_dense_mesh.ply"})

@@ -58,7 +58,7 @@ def test_pair_list_covers_neighbours_rings_and_is_far_below_exhaustive() -> None
     assert {(0, 1), (0, 12), (0, 16), (0, 32), (0, 64), (64, 80)} <= set(pairs)
     assert (0, 13) not in pairs  # beyond the overlap only quadratic / ring pairs
     assert {(0, 15), (0, 14), (1, 15), (16, 31), (64, 79)} <= set(pairs)  # ring closure
-    assert {(16, 32), (17, 33)} <= set(pairs)  # same wedge, adjacent ring (index +/- 16)
+    assert {(16, 31), (16, 32), (16, 33)} <= set(pairs)  # same wedge, adjacent ring
     assert len(pairs) < 81 * 80 // 2 // 2
     assert fast_match_pairs(1) == [] and fast_match_pairs(2) == [(0, 1)]
 
@@ -110,7 +110,11 @@ def test_fast_plan_matches_pair_list_densifies_lower_and_skips_refine(monkeypatc
 
     stages["dense-point-cloud"].execute(_context([]))
     densify = commands["dense-point-cloud"][0]
-    assert densify[densify.index("--resolution-level") + 1] == "2"
+    assert densify[densify.index("--max-resolution") + 1] == "750"
+
+    stages["mesh-reconstruction"].execute(_context([]))
+    mesh = commands["mesh-reconstruction"][0]
+    assert mesh[mesh.index("--target-face-num") + 1] == str(build_model.FAST_MESH_FACES)
 
     mvs = tmp_path / "outputs/mvs"
     mvs.mkdir(parents=True)
@@ -141,7 +145,10 @@ def test_high_quality_plan_is_the_original_pipeline(monkeypatch, tmp_path) -> No
     assert commands["matching"][0][1] == "exhaustive_matcher"
     densify = commands["dense-point-cloud"][0]
     assert densify[densify.index("--resolution-level") + 1] == "1"
+    assert "--max-resolution" not in densify
     assert commands["mesh-refinement"][0][0].endswith("refine_mesh.exe")
+    stages["mesh-reconstruction"].execute(_context([]))
+    assert "--target-face-num" not in commands["mesh-reconstruction"][0]
     texture = commands["texture-mesh"][0]
     assert texture[texture.index("-m") + 1] == "scene_refined.ply"
     assert stages["matching"].configuration["preset"] == "studio-cpu-v1"
