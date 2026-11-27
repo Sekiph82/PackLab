@@ -589,3 +589,34 @@ def test_scan_missing_its_top_is_refused_with_the_reason():
         MultiScanAlignmentError, match=r"upright-1 most likely misses the top 1[56] mm"
     ):
         align_part_pair(up, fl)
+
+
+@pytest.mark.parametrize("short", ["upright", "flipped"])
+def test_scan_missing_its_free_end_is_completed_from_the_other_scan(short):
+    """Real Fast flipped build: 165 of 173 mm, its base end lost. Open end, walls agree."""
+    (up, t_up) = scan(body, False, 1, cut_top=8.0 if short == "upright" else 0.0)
+    (fl, t_fl) = scan(body, True, 2, cut_top=8.0 if short == "flipped" else 0.0)
+    result = align_part_pair(up, fl)
+    _assert_recovered(result, (t_up, t_fl))
+    pair = result.alignments[1]
+    missing, other = (up, fl) if short == "upright" else (fl, up)
+    assert len(pair.limitations) == 1, pair.limitations
+    assert (
+        f"end completed from scan {other.scan_id}: scan {missing.scan_id} misses its free"
+        in (pair.limitations[0])
+    )
+    assert pair.free_space_conflict < 0.01  # the unseen end is not "seen empty" space
+    heights = sorted(a.height_mm for a in result.alignments)
+    assert abs(heights[0] - 72) < 1.0 and abs(heights[1] - 80) < 0.5, heights
+    z = result.points[:, 2]
+    assert z.max() > 78 and z.min() < 2.0  # walls to both ends (a mat side is never seen)
+
+
+def test_closed_shorter_top_or_scale_error_is_still_refused_with_heights():
+    with pytest.raises(MultiScanAlignmentError, match="saw a face closing its top") as error:
+        align_part_pair(scan(body, False, 1)[0], scan(body, True, 2, h=88.0)[0])
+    assert sorted(round(h) for h in error.value.heights_mm.values()) == [80, 88]
+    with pytest.raises(MultiScanAlignmentError, match="section mismatch"):
+        align_part_pair(
+            scan(body, False, 1)[0], scan(body, True, 2, cut_top=8, scale_error=1.05)[0]
+        )

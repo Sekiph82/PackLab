@@ -11,7 +11,7 @@ such as a closure recess are seen by one scan only and are never compared).
 
 Registration to the reference (first) scan: 180 degree flip about a horizontal axis from the
 PL-0482 role (both poses when unknown), height fixed by mat contact (flipped: mat side ->
-the top height either scan measured), yaw sweep with yaw + in-plane ICP (the printed label's
+the taller scan's top), yaw sweep with yaw + in-plane ICP (the printed label's
 lighting-normalised texture decides, only when significant, between yaws the wall fits
 equally, e.g. a flat oval turned 180 degrees), then damped tilt + yaw + in-plane
 point-to-plane ICP bounded by ``max_refine_deg`` / ``max_refine_mm`` (height stays on the mat
@@ -22,7 +22,9 @@ dropped, and if both poses remain within ``ambiguity_margin`` the scan is refuse
 ambiguous. Acceptance also compares both scans' heights (own mat frames), their aligned
 section walls bin by bin around the axis (shape-aware for oval parts) and the free-space
 conflict, so different objects, scale errors and wrong roles are
-refused with the failed check named. Yaw of rotationally symmetric parts is flagged
+refused with the failed check named. One exception: a scan whose free end MVS missed (its top
+open, no closing face seen, walls agreeing elsewhere, gap <= ``max_missing_end_ratio``) is
+accepted with the end completed from the other scan, recorded in ``limitations``. Yaw of rotationally symmetric parts is flagged
 (``yaw_determined=False``), not guessed silently. Deterministic (seeded RANSAC, exact
 KNN, numpy solves). Metric values stay METRIC_UNVERIFIED until owner caliper evidence; tests use
 synthetic proxies only.
@@ -44,7 +46,11 @@ Query = Callable[..., tuple[np.ndarray, np.ndarray]]  # (points, k=1) -> (indice
 
 
 class MultiScanAlignmentError(ValueError):
-    """Raised when scans cannot be aligned reliably; the message names the failed check."""
+    """Raised when scans cannot be aligned reliably; the message names the failed check.
+
+    ``heights_mm``: each prepared scan's own mat-frame height, when known (diagnostics)."""
+
+    heights_mm: dict[str, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +76,8 @@ class AlignmentThresholds:
     min_profile_share: float = 0.5  # of the diameter bands either scan has, seen by both
     ambiguity_margin: float = 0.03  # score gap needed between flip / no-flip when role unknown
     max_free_space_conflict: float = 0.05  # share of points above the other scan's seen top
+    max_missing_end_ratio: float = 0.15  # longest open end completed from the other scan
+    closed_top_share: float = 0.08  # top band points inside half its radius: a seen top face
     yaw_probe_deg: float = 5.0  # max yaw uncertainty for yaw_determined
     max_refine_deg: float = 5.0
     max_refine_mm: float = 5.0
@@ -94,6 +102,8 @@ class ScanAlignment:
     yaw_determined: bool  # False only for parts shown round: yaw (label seam) is arbitrary
     free_space_conflict: float = 0.0  # see _free_space_conflict
     yaw_uncertainty_deg: float = 0.0  # half width of the fine yaw coverage plateau
+    height_mm: float = float("nan")  # this scan's own mat-frame height
+    limitations: tuple[str, ...] = ()  # accepted with these (e.g. an end completed from a scan)
     dof: str = "tilt_yaw_xy_bounded_refine_height_from_mat_contact"
 
 
@@ -596,10 +606,12 @@ def _pose_for_flip(
 ) -> _Pose:
     size = float(np.linalg.norm(np.ptp(target.shell, axis=0)))
     coarse: list[_Pose] = []
-    # Flipped: its mat contact (z = 0) is the reference top face, at the height either scan
-    # measured - a scan whose top MVS missed (real upright: 153 of 173 mm) understates it, and
-    # the tapering side walls pick the true one. The gate still compares both heights.
-    for contact in {target.height, source.height} if flipped else {0.0}:
+    # Flipped: its mat contact (z = 0) is the reference top face, at the full part height. A
+    # scan can miss its free end (real upright: 153 of 173 mm; flipped Fast: 165 of 173 mm)
+    # but not extend past the part, so that is the taller scan's height. (The walls are no
+    # judge: two real builds' walls differ by a +-1 mm height-dependent flare, which picked
+    # the short contact.) The gate checks the height difference.
+    for contact in {max(target.height, source.height)} if flipped else {0.0}:
         base = np.diag([1.0, -1.0, -1.0, 1.0]) if flipped else np.eye(4)  # 180 deg about mat x
         base[2, 3] = contact
         for step in range(limits.yaw_steps):
@@ -854,11 +866,32 @@ def _radial_offset(mine: np.ndarray, theirs: np.ndarray) -> tuple[float, float]:
     return float(np.median(b[both] - a[both])), float(np.median(a[both]))
 
 
+def _closed_top(part: _Part, limits: AlignmentThresholds) -> bool:
+    """Did the scan see a face closing its top (cap, base, lid)? Share of the top 3 mm band
+    inside half the band's radius: a disc puts ~20 % there, a wall that just ends (MVS lost the
+    rest) ~0. ponytail: an open-mouthed part (body rim) reads open too, so a different, taller
+    open body with the same walls passes as a missing end; the recorded limitation names it."""
+
+    band = part.points[part.points[:, 2] > part.height - 3]
+    if len(band) < 15:
+        return False
+    radius = np.linalg.norm(band[:, :2] - _centre(band), axis=1)
+    return bool((radius < 0.5 * np.percentile(radius, 95)).mean() >= limits.closed_top_share)
+
+
 def _dimension_failures(
-    reference: _Part, other: _Part, matrix: np.ndarray, limits: AlignmentThresholds
+    reference: _Part,
+    other: _Part,
+    matrix: np.ndarray,
+    limits: AlignmentThresholds,
+    limitations: list[str] | None = None,
 ) -> list[str]:
     """Height (each scan's own mat frame) and section size after alignment. The rigid pose
-    cannot absorb a scale error or a different part: their walls sit consistently in or out."""
+    cannot absorb a scale error or a different part: their walls sit consistently in or out.
+
+    A height difference passes (noted in ``limitations``) only as a missing end: the shorter
+    scan's top is open (no closing face seen), every section both scans have agrees, and the
+    gap is at most ``max_missing_end_ratio`` of the taller scan."""
 
     failures = []
     ratio = limits.dimension_tolerance_ratio
@@ -897,15 +930,31 @@ def _dimension_failures(
             f"height mismatch {other.height:.1f} vs {reference.height:.1f} mm "
             f"(tolerance {tolerance:.1f})"
         )
-        short = reference if reference.height < other.height else other
+        short, long = (reference, other) if reference.height < other.height else (other, reference)
+        missing = long.height - short.height
+        closed = _closed_top(short, limits)
         # Same walls up to near the shorter top, different height: that scan lost its top.
         if valid and all(z > short.height - 10 for z, _ in sections):
-            message += (
-                f" - the sections agree, so scan {short.scan_id} most likely misses the top "
-                f"{abs(reference.height - other.height):.0f} mm of the part (no surface there "
-                "in its cloud): rebuild or rescan it"
-            )
-        failures.append(message)
+            if (
+                limitations is not None
+                and not sections
+                and not closed
+                and missing <= limits.max_missing_end_ratio * long.height
+            ):
+                limitations.append(
+                    f"end completed from scan {long.scan_id}: scan {short.scan_id} misses its "
+                    f"free end ({missing:.0f} mm; its cloud ends open there)"
+                )
+                message = ""
+            else:
+                message += (
+                    f" - the sections agree, so scan {short.scan_id} most likely misses the top "
+                    f"{missing:.0f} mm of the part"
+                    + (" (yet it saw a face closing its top)" if closed else "")
+                    + ": rebuild or rescan it"
+                )
+        if message:
+            failures.append(message)
     failures += [message for _, message in sections]
     # Real MVS walls can be patchy: demand overlap in a share of the bands either scan has.
     needed = max(1, int(np.ceil(limits.min_profile_share * max(seen_mine, seen_theirs))))
@@ -919,16 +968,22 @@ def _dimension_failures(
 
 def _free_space_conflict(first: _Part, second: _Part, matrix: np.ndarray, cell: float) -> float:
     """Share of ``first`` points (moved by ``matrix`` into ``second``'s mat frame) lying over 2 mm
-    above the highest surface ``second`` saw in the same column (``cell`` mm, >= 3). Cameras look down on the mat,
-    so the space above a column's top was seen empty; a wrong flip puts e.g. a lid's flat top over
-    its own visible recess. ponytail: ignores oblique views; a column the scan saw only partly can
-    raise false conflicts, hence the tolerance share.
+    above the face ``second`` saw closing the same column (``cell`` mm, >= 3) from above.
+    Cameras look down on the mat, so the space above a seen top face was seen empty; a wrong
+    flip puts e.g. a lid's flat top over its own visible recess. A column whose top is only
+    where a wall ends (most of its points well below: a missing end, an open rim) proves
+    nothing about the space above and never conflicts. ponytail: ignores oblique views; a
+    column the scan saw only partly can raise false conflicts, hence the tolerance share.
     """
 
     own = np.floor(second.points[:, :2] / cell).astype(np.int64)
     keys, inverse = np.unique(own, axis=0, return_inverse=True)
+    inverse = inverse.ravel()
     top = np.full(len(keys), -np.inf)
-    np.maximum.at(top, inverse.ravel(), second.points[:, 2])
+    np.maximum.at(top, inverse, second.points[:, 2])
+    # Seen from above: at least half the column's points lie within 1.5 mm of its top.
+    near_top = np.bincount(inverse, weights=(second.points[:, 2] > top[inverse] - 1.5) * 1.0)
+    top[near_top < 0.5 * np.bincount(inverse)] = np.inf
     moved = _apply(matrix, first.points)
     cells = np.floor(moved[:, :2] / cell).astype(np.int64)
     flat_keys = keys[:, 0] * 2_000_003 + keys[:, 1]
@@ -1037,9 +1092,14 @@ def _yaw_unique(
 
 
 def _gate(
-    reference: _Part, other: _Part, pose: _Pose, query: Query, limits: AlignmentThresholds
+    reference: _Part,
+    other: _Part,
+    pose: _Pose,
+    query: Query,
+    limits: AlignmentThresholds,
+    limitations: list[str] | None = None,
 ) -> tuple[list[str], bool]:
-    failures = _dimension_failures(reference, other, pose.matrix, limits)
+    failures = _dimension_failures(reference, other, pose.matrix, limits, limitations)
     conflict = _conflict(reference, other, pose, limits)
     if conflict > limits.max_free_space_conflict:
         failures.append(
@@ -1101,12 +1161,15 @@ def _checked(
     query: Query,
     limits: AlignmentThresholds,
 ) -> ScanAlignment:
-    failures, yaw_ok = _gate(reference, other, pose, query, limits)
+    limitations: list[str] = []
+    failures, yaw_ok = _gate(reference, other, pose, query, limits, limitations)
     conflict = _conflict(reference, other, pose, limits)
     if failures:
-        raise MultiScanAlignmentError(
+        error = MultiScanAlignmentError(
             f"scan {other.scan_id} does not align to {reference.scan_id}: " + "; ".join(failures)
         )
+        error.heights_mm = {reference.scan_id: reference.height, other.scan_id: other.height}
+        raise error
     return ScanAlignment(
         other.scan_id,
         pose.matrix @ other.frame,
@@ -1118,6 +1181,8 @@ def _checked(
         yaw_ok,
         conflict,
         pose.yaw_uncertainty,
+        other.height,
+        tuple(limitations),
     )
 
 
@@ -1160,7 +1225,17 @@ def align_scans(
     reference = parts[0]
     query = _nearest(reference.shell)
     alignments = [
-        ScanAlignment(ids[0], reference.frame, np.eye(4), False, 1.0, 0.0, float("nan"), True)
+        ScanAlignment(
+            ids[0],
+            reference.frame,
+            np.eye(4),
+            False,
+            1.0,
+            0.0,
+            float("nan"),
+            True,
+            height_mm=reference.height,
+        )
     ]
     for index in range(1, len(scans)):
         roles = (scans[0].flipped, scans[index].flipped)
