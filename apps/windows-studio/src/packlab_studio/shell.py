@@ -659,7 +659,22 @@ class StudioMainWindow(QMainWindow):
                     else None
                 )
             )
+            stored_quality = self._settings.value("build/quality", "fast")
+            index = settings.build_quality.findData(str(stored_quality))
+            if index >= 0:
+                settings.build_quality.setCurrentIndex(index)
+            settings.build_quality.currentIndexChanged.connect(
+                lambda _index: (
+                    self._settings.setValue("build/quality", settings.build_quality.currentData())
+                    if self._settings is not None
+                    else None
+                )
+            )
         self.build_model.set_max_concurrent(settings.concurrent_builds.value())
+        self.build_model.set_quality(settings.build_quality.currentData())
+        settings.build_quality.currentIndexChanged.connect(
+            lambda _index: self.build_model.set_quality(settings.build_quality.currentData())
+        )
         settings.concurrent_builds.valueChanged.connect(self.build_model.set_max_concurrent)
         inbox.build_requested.connect(self.start_build)
         inbox.scan_imported.connect(
