@@ -89,25 +89,23 @@ DEFAULT_MAX_CONCURRENT_BUILDS = 2  # scans are separate objects; never merged in
 MIN_REGISTERED_FRACTION = 0.5
 
 
-def worker_threads(cpu_share: int) -> int:
-    """CPU threads for a build that starts while cpu_share builds (itself included) run."""
-    # ponytail: fixed at build start, so a build that started alone keeps all cores while a
-    # later one runs beside it (1.5x oversubscribed with two). Re-split per stage if that hurts.
-    # Measured on 16 logical cores: matching 30 photos 141 s on 16 threads vs 231 s on 8, so a
-    # lone build must not be capped at half the cores.
-    return max(1, (os.cpu_count() or 1) // max(1, cpu_share))
+def worker_threads(builds_running: int) -> int:
+    """CPU threads for one stage while builds_running builds (itself included) run."""
+    # Decided at every stage start, so running builds together use at most the cores; the only
+    # overshoot is a build that started a stage before another build began, until its next
+    # stage. A lone build keeps all cores: matching 30 photos took 141 s on 16 threads vs
+    # 231 s on 8 (16 logical cores).
+    return max(1, (os.cpu_count() or 1) // max(1, builds_running))
 
 
-def determinism(cpu_share: int = 1, max_concurrent_builds: int = 1) -> dict[str, object]:
-    """The recorded seeds, thread counts and concurrency of one build (DETERMINISM block)."""
-    threads = worker_threads(cpu_share)
+def determinism(max_concurrent_builds: int = 1) -> dict[str, object]:
+    """The recorded seeds, thread policy and concurrency of one build (DETERMINISM block)."""
     return {
         "colmap_random_seed": RANDOM_SEED,
-        "colmap_extraction_threads": threads,
-        "colmap_matching_threads": threads,
         "colmap_mapper_threads": MAPPER_THREADS,
-        "openmvs_max_threads": threads,
-        "builds_sharing_cpu_at_start": cpu_share,
+        "cpu_count": os.cpu_count() or 1,
+        # extraction, matching, densify and refine; each stage's stdout ends with its count
+        "worker_threads": "cpu_count // builds running at stage start",
         "max_concurrent_builds": max_concurrent_builds,
         "image_order": "sorted_working_name",
         "image_ids": "canonical_sorted_name",
@@ -124,19 +122,22 @@ def canonicalize_image_ids(database: Path) -> None:
     descriptors per image are identical, so renumbering gives the single-thread database.
     """
     with closing(sqlite3.connect(database)) as db, db:
+
+        def count(table: str) -> int:
+            return int(db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
         rows = db.execute("SELECT image_id, name FROM images").fetchall()
+        ids = {image_id for image_id, _ in rows}
         frames = db.execute("SELECT frame_id, data_id, sensor_type FROM frame_data").fetchall()
-        later = sum(
-            db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            for table in ("matches", "two_view_geometries", "pose_priors", "rig_sensors")
-        )
-        frame_count = db.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
-        if (
-            later
-            or frame_count != len(rows)
-            or sorted(frames) != sorted((image_id, image_id, 0) for image_id, _ in rows)
-        ):
-            raise BuildModelError("unexpected COLMAP database layout after feature extraction")
+        if count("matches") or count("two_view_geometries"):
+            raise BuildModelError("COLMAP database already has matches; renumbering refused")
+        if count("rig_sensors") or count("frames") != len(rows):
+            raise BuildModelError("COLMAP database has a multi-camera rig; renumbering refused")
+        if sorted(frames) != sorted((image_id, image_id, 0) for image_id in ids):
+            raise BuildModelError("COLMAP frames do not map one-to-one to images")
+        priors = db.execute("SELECT corr_data_id, corr_sensor_type FROM pose_priors").fetchall()
+        if any(data_id not in ids or sensor_type != 0 for data_id, sensor_type in priors):
+            raise BuildModelError("COLMAP pose priors (photo GPS) do not refer to the images")
         offset = 1_000_000_000
         columns = (
             ("images", "image_id"),
@@ -145,6 +146,7 @@ def canonicalize_image_ids(database: Path) -> None:
             ("frames", "frame_id"),
             ("frame_data", "frame_id"),
             ("frame_data", "data_id"),
+            ("pose_priors", "corr_data_id"),  # GPS priors from photo EXIF follow their image
         )
         for table, column in columns:
             db.execute(f"UPDATE {table} SET {column} = {column} + ?", (offset,))
@@ -330,7 +332,8 @@ class ColmapOpenMvsBackend:
     colmap: Path
     openmvs: dict[str, Path]
     ffmpeg: Path | None = None
-    cpu_share: int = 1  # builds running (itself included) when this one started
+    max_concurrent_builds: int = 1
+    builds_running: Callable[[], int] = lambda: 1  # read at every stage start
 
     @classmethod
     def discover(cls) -> ColmapOpenMvsBackend:
@@ -413,7 +416,11 @@ class ColmapOpenMvsBackend:
         mvs = out / "mvs"
         colmap = str(self.colmap)
         tool = {key: str(value) for key, value in self.openmvs.items()}
-        threads = str(worker_threads(self.cpu_share))
+        used: dict[str, int] = {}
+
+        def threads(stage_id: str) -> str:
+            used[stage_id] = worker_threads(self.builds_running())
+            return str(used[stage_id])
 
         def asset(path: Path) -> str:
             return f"{workspace_asset}/{path.relative_to(w).as_posix()}"
@@ -430,6 +437,9 @@ class ColmapOpenMvsBackend:
         ) -> ReconstructionStageExecution:
             if result.status is StageStatus.SUCCEEDED:
                 require(*outputs.values())
+            if stage_id in used:  # recorded with the stage result in the run manifest
+                note = f"\n[packlab] {stage_id} ran with {used[stage_id]} threads\n"
+                result = replace(result, stdout=result.stdout + note)
             return ReconstructionStageExecution(
                 stage_id,
                 result,
@@ -479,7 +489,7 @@ class ColmapOpenMvsBackend:
                         "--default_random_seed",
                         str(RANDOM_SEED),
                         "--FeatureExtraction.num_threads",
-                        threads,
+                        threads("feature-extraction"),
                     ),
                     w,
                 )
@@ -503,7 +513,7 @@ class ColmapOpenMvsBackend:
                             "--FeatureMatching.use_gpu",
                             "0",
                             "--FeatureMatching.num_threads",
-                            threads,
+                            threads("matching"),
                             "--default_random_seed",
                             str(RANDOM_SEED),
                             "--TwoViewGeometry.random_seed",
@@ -614,7 +624,7 @@ class ColmapOpenMvsBackend:
                             "--resolution-level",
                             "1",
                             "--max-threads",
-                            threads,
+                            threads("dense-point-cloud"),
                         ),
                         mvs,
                     )
@@ -653,7 +663,7 @@ class ColmapOpenMvsBackend:
                             "--scales",
                             "1",
                             "--max-threads",
-                            threads,
+                            threads("mesh-refinement"),
                         ),
                         mvs,
                     )
@@ -690,7 +700,7 @@ class ColmapOpenMvsBackend:
             {
                 "preset": BUILD_PRESET,
                 "max_image_size": MAX_IMAGE_SIZE,
-                **determinism(self.cpu_share),
+                **determinism(self.max_concurrent_builds),
             },
         )
 
@@ -768,7 +778,7 @@ class BuildModelController(QObject):
         self._backend = backend
         self._invoker = MainThreadInvoker()
         self.max_concurrent = DEFAULT_MAX_CONCURRENT_BUILDS
-        self._queue: list[tuple[str, Callable[[int], None]]] = []  # FIFO, not yet started
+        self._queue: list[tuple[str, str, Callable[[], None]]] = []  # FIFO, not yet started
         self._running: set[str] = set()
         self._by_package: dict[str, str] = {}  # package sha256 -> latest job id
         self.build_finished.connect(self._on_finished)
@@ -793,10 +803,16 @@ class BuildModelController(QObject):
         layout = self.projects.layout
         metadata = self.projects.metadata
 
-        def start(cpu_share: int) -> None:
-            worker = backend
-            if isinstance(worker, ColmapOpenMvsBackend):
-                worker = replace(worker, cpu_share=cpu_share)
+        recorded = determinism(self.max_concurrent)
+        worker = backend
+        if isinstance(worker, ColmapOpenMvsBackend):
+            worker = replace(
+                worker,
+                max_concurrent_builds=self.max_concurrent,
+                builds_running=lambda: len(self._running),
+            )
+
+        def start() -> None:
             threading.Thread(
                 target=self._work,
                 args=(
@@ -808,14 +824,14 @@ class BuildModelController(QObject):
                     source_asset,
                     package_sha256,
                     token,
-                    determinism(cpu_share, self.max_concurrent),
+                    recorded,
                 ),
                 name=f"packlab-build-{job.job_id[:8]}",
                 daemon=True,
             ).start()
 
         self._by_package[package_sha256] = job.job_id
-        self._queue.append((job.job_id, start))
+        self._queue.append((job.job_id, capture_id, start))
         self.build_started.emit(job.job_id, capture_id)
         self._start_next()
         return job.job_id
@@ -825,10 +841,16 @@ class BuildModelController(QObject):
         self._start_next()
 
     def _start_next(self) -> None:
+        dropped: list[BuildResult] = []
         while len(self._running) < self.max_concurrent and self._queue:
-            job_id, start = self._queue.pop(0)
+            job_id, capture_id, start = self._queue.pop(0)
+            if self.jobs.get(job_id).state in TERMINAL_STATES:  # cancelled while queued
+                dropped.append(BuildResult(job_id, capture_id, "cancelled", "Build cancelled."))
+                continue
             self._running.add(job_id)
-            start(len(self._running))
+            start()
+        for result in dropped:
+            self.build_finished.emit(result)
 
     def _on_finished(self, result: BuildResult) -> None:
         self._running.discard(result.job_id)
