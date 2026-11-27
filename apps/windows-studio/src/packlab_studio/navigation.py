@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPushButton,
     QSizePolicy,
+    QSpinBox,
     QStackedWidget,
     QStyle,
     QVBoxLayout,
@@ -336,6 +337,10 @@ class SettingsView(QWidget):
         self.auto_build = QCheckBox("Build model automatically after import", self)
         self.auto_build.setObjectName("packlab.settings.auto-build")
         self.auto_build.setChecked(True)
+        self.concurrent_builds = QSpinBox(self)
+        self.concurrent_builds.setObjectName("packlab.settings.concurrent-builds")
+        self.concurrent_builds.setRange(1, 4)
+        self.concurrent_builds.setValue(2)
         self.engines = QListWidget(self)
         self.engines.setObjectName("packlab.settings.engines")
         self.recheck_button = QPushButton("Re-check engines", self)
@@ -352,6 +357,7 @@ class SettingsView(QWidget):
         language_form = QFormLayout()
         language_form.addRow(tr("Language"), self.language)
         language_form.addRow(self.language_note)
+        language_form.addRow("Model builds at the same time", self.concurrent_builds)
         layout = QVBoxLayout(self)
         layout.addLayout(language_form)
         layout.addWidget(self.auto_build)

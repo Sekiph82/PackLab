@@ -377,24 +377,25 @@ def test_command_plan_fixes_colmap_seeds_and_mapper_threads(monkeypatch, tmp_pat
         return args[args.index(name) + 1]
 
     assert option("feature-extraction", "--default_random_seed") == "0"
-    assert option("feature-extraction", "--FeatureExtraction.num_threads") == "1"
+    threads = str(build_model.worker_threads(1))
+    assert option("feature-extraction", "--FeatureExtraction.num_threads") == threads
+    assert option("matching", "--FeatureMatching.num_threads") == threads
     assert option("matching", "--TwoViewGeometry.random_seed") == "0"
     assert option("sparse-mapping", "--Mapper.random_seed") == "0"
     assert option("sparse-mapping", "--Mapper.num_threads") == "1"
 
 
-def _second_package(path: Path, repo_root: Path) -> Path:
+def _second_package(path: Path, repo_root: Path, number: int = 2) -> Path:
     manifest = json.loads(
         (repo_root / "tests/fixtures/packscan/manifest-valid.json").read_text(encoding="utf-8")
     )
-    manifest["capture_id"] = "second-capture"
-    manifest["payloads"][0]["size_bytes"] = 4
-    manifest["payloads"][0]["sha256"] = hashlib.sha256(b"IMG2").hexdigest()
+    image = f"IMG{number}".encode()
+    manifest["capture_id"] = f"capture-{number}"
+    manifest["payloads"][0]["size_bytes"] = len(image)
+    manifest["payloads"][0]["sha256"] = hashlib.sha256(image).hexdigest()
     manifest["payloads"][1]["size_bytes"] = 2
     manifest["payloads"][1]["sha256"] = hashlib.sha256(b"{}").hexdigest()
-    return write_packscan(
-        path, manifest, {"images/0001.jpg": b"IMG2", "metadata/photos.json": b"{}"}
-    )
+    return write_packscan(path, manifest, {"images/0001.jpg": image, "metadata/photos.json": b"{}"})
 
 
 def test_existing_scans_never_auto_build_at_startup_with_auto_on(
@@ -437,35 +438,315 @@ def test_unreadable_index_at_startup_fails_closed(monkeypatch, tmp_path, repo_ro
         app.processEvents()
 
 
-def test_builds_run_one_at_a_time_and_duplicates_are_ignored(
+def test_builds_run_up_to_the_limit_in_order_and_duplicates_are_ignored(
     monkeypatch, tmp_path, repo_root
 ) -> None:
-    first = _package(tmp_path / "first.packscan", repo_root)
-    second = _second_package(tmp_path / "second.packscan", repo_root)
+    packages = [
+        _package(tmp_path / "first.packscan", repo_root),
+        _second_package(tmp_path / "second.packscan", repo_root),
+        _second_package(tmp_path / "third.packscan", repo_root, 3),
+    ]
     gate = threading.Event()
     app, window, inbox, _builds = _window(monkeypatch, tmp_path, FakeBackend(provenance_gate=gate))
     try:
-        _import(inbox, first)
+        settings = window.route_stack.views[Route.SETTINGS]
+        assert isinstance(settings, SettingsView)
+        assert settings.concurrent_builds.value() == 2 == window.build_model.max_concurrent
+        _import(inbox, packages[0])
         first_job = window.job_manager.jobs()[0].job_id
-        digest = hashlib.sha256(first.read_bytes()).hexdigest()
+        digest = hashlib.sha256(packages[0].read_bytes()).hexdigest()
         assert window.start_build("loopback-capture", digest) == first_job  # duplicate
-        _import(inbox, second)
-        jobs = window.job_manager.jobs()
-        assert len(jobs) == 2
-        second_job = jobs[1].job_id
-        assert window.build_model._running == first_job
-        assert window.job_manager.get(second_job).state is JobState.QUEUED
+        for package in packages[1:]:
+            _import(inbox, package)
+        jobs = [job.job_id for job in window.job_manager.jobs()]
+        assert len(jobs) == 3
+        # Two run at once (separate scans, separate workspaces); the third waits its turn.
+        assert window.build_model._running == set(jobs[:2])
+        assert [entry[0] for entry in window.build_model._queue] == jobs[2:]
+        assert window.job_manager.get(jobs[2]).state is JobState.QUEUED
+        settings.concurrent_builds.setValue(3)  # raising the limit starts the queued build
+        assert window.build_model._running == set(jobs) and not window.build_model._queue
         gate.set()
         _pump(
             app,
-            lambda: all(
-                window.job_manager.get(job_id).state is JobState.SUCCEEDED
-                for job_id in (first_job, second_job)
+            lambda: (
+                not window.build_model._running
+                and all(
+                    window.job_manager.get(job_id).state is JobState.SUCCEEDED for job_id in jobs
+                )
             ),
         )
     finally:
         window.close()
         app.processEvents()
+
+
+def test_one_build_at_a_time_when_the_limit_is_one(monkeypatch, tmp_path, repo_root) -> None:
+    gate = threading.Event()
+    app, window, inbox, _builds = _window(monkeypatch, tmp_path, FakeBackend(provenance_gate=gate))
+    try:
+        window.build_model.set_max_concurrent(1)
+        _import(inbox, _package(tmp_path / "first.packscan", repo_root))
+        _import(inbox, _second_package(tmp_path / "second.packscan", repo_root))
+        first_job, second_job = (job.job_id for job in window.job_manager.jobs())
+        assert window.build_model._running == {first_job}
+        assert window.job_manager.get(second_job).state is JobState.QUEUED
+        gate.set()
+        _pump(app, lambda: window.job_manager.get(second_job).state is JobState.SUCCEEDED)
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_a_cancelled_queued_build_never_takes_a_slot(monkeypatch, tmp_path, repo_root) -> None:
+    gate = threading.Event()
+    app, window, inbox, _builds = _window(monkeypatch, tmp_path, FakeBackend(provenance_gate=gate))
+    finished: list[str] = []
+    window.build_model.build_finished.connect(lambda result: finished.append(result.status))
+    try:
+        window.build_model.set_max_concurrent(1)
+        _import(inbox, _package(tmp_path / "first.packscan", repo_root))
+        _import(inbox, _second_package(tmp_path / "second.packscan", repo_root))
+        _import(inbox, _second_package(tmp_path / "third.packscan", repo_root, 3))
+        first_job, second_job, third_job = (job.job_id for job in window.job_manager.jobs())
+        window.job_manager.request_cancel(second_job)
+        assert window.job_manager.get(second_job).state is JobState.CANCELLED
+        started: list[str] = []
+        real_start_next = window.build_model._start_next
+
+        def spy() -> None:
+            before = set(window.build_model._running)
+            real_start_next()
+            started.extend(sorted(window.build_model._running - before))
+
+        window.build_model._start_next = spy  # type: ignore[method-assign]
+        gate.set()
+        _pump(app, lambda: window.job_manager.get(third_job).state is JobState.SUCCEEDED)
+        _pump(app, lambda: not window.build_model._running)
+        assert started == [third_job]  # the cancelled build was skipped, never started
+        assert sorted(finished) == ["cancelled", "succeeded", "succeeded"]
+        assert window.job_manager.get(first_job).state is JobState.SUCCEEDED
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_stage_provenance_matches_the_job_record_and_cores_are_shared(
+    monkeypatch, tmp_path, repo_root
+) -> None:
+    real = ColmapOpenMvsBackend(tmp_path / "colmap.exe", {}, ffmpeg=None)
+    monkeypatch.setattr(ColmapOpenMvsBackend, "discover", classmethod(lambda cls: real))
+    monkeypatch.setattr(build_model.os, "cpu_count", lambda: 16)
+    started: list[tuple[object, ...]] = []
+    app, window, inbox, _builds = _window(monkeypatch, tmp_path, None)
+    try:
+        window.build_model.set_max_concurrent(3)
+        window.build_model._work = lambda *args: started.append(args)  # type: ignore[method-assign]
+        _import(inbox, _package(tmp_path / "first.packscan", repo_root))
+        _import(inbox, _second_package(tmp_path / "second.packscan", repo_root))
+        _pump(app, lambda: len(started) == 2)
+        for args in started:
+            backend, recorded = args[2], args[8]
+            assert isinstance(backend, ColmapOpenMvsBackend) and isinstance(recorded, dict)
+            assert recorded["max_concurrent_builds"] == 3
+            stages = backend.stages(tmp_path, "working/reconstruction/r1", {})
+            # One build's provenance never contradicts itself: every stage records the job's
+            # DETERMINISM block exactly.
+            for stage in stages:
+                assert {key: stage.configuration[key] for key in recorded} == recorded
+            # Two builds running: each stage that starts now gets half of the 16 cores.
+            assert build_model.worker_threads(backend.builds_running()) == 8
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_thread_split_and_recorded_determinism(monkeypatch) -> None:
+    monkeypatch.setattr(build_model.os, "cpu_count", lambda: 16)
+    # Threads are split at every stage start, so the running builds together stay within the
+    # cores (16, 8+8, 5+5+5, 4+4+4+4).
+    assert [build_model.worker_threads(n) * n for n in (1, 2, 3, 4)] == [16, 16, 15, 16]
+    monkeypatch.setattr(build_model.os, "cpu_count", lambda: None)
+    assert build_model.worker_threads(4) == 1
+    recorded = build_model.determinism(3)
+    assert recorded["max_concurrent_builds"] == 3 and recorded["colmap_mapper_threads"] == 1
+    assert recorded["image_ids"] == "canonical_sorted_name"
+
+
+def test_each_stage_records_the_threads_it_ran_with(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(build_model.os, "cpu_count", lambda: 16)
+    backend = ColmapOpenMvsBackend(
+        tmp_path / "colmap.exe", {}, ffmpeg=None, builds_running=lambda: 2
+    )
+    monkeypatch.setattr(
+        build_model,
+        "_run_commands",
+        lambda stage_id, planned, cancel: ReconstructionStageResult(
+            stage_id, StageStatus.FAILED, 1, 0.0, "engine log", ""
+        ),
+    )
+    context = type(
+        "Context",
+        (),
+        {"cancel": None, "job": type("Job", (), {"inputs": None})},
+    )
+    stages = {stage.stage_id: stage for stage in backend.stages(tmp_path, "w/r1", {})}
+    execution = stages["matching"].execute(context)  # type: ignore[arg-type]
+    assert execution.stage_result.stdout.endswith("[packlab] matching ran with 8 threads\n")
+
+
+def _canonical_schema(db) -> None:
+    db.executescript(
+        "CREATE TABLE images (image_id INTEGER PRIMARY KEY, name TEXT UNIQUE, camera_id INT);"
+        "CREATE TABLE keypoints (image_id INTEGER PRIMARY KEY, data TEXT);"
+        "CREATE TABLE descriptors (image_id INTEGER PRIMARY KEY, data TEXT);"
+        "CREATE TABLE frames (frame_id INTEGER PRIMARY KEY, rig_id INT);"
+        "CREATE TABLE frame_data (frame_id INT, data_id INT, sensor_id INT, sensor_type INT);"
+        "CREATE TABLE matches (pair_id INTEGER PRIMARY KEY);"
+        "CREATE TABLE two_view_geometries (pair_id INTEGER PRIMARY KEY);"
+        "CREATE TABLE pose_priors (pose_prior_id INTEGER PRIMARY KEY, corr_data_id INT,"
+        " corr_sensor_id INT, corr_sensor_type INT);"
+        "CREATE TABLE rig_sensors (rig_id INT);"
+    )
+
+
+def test_multithreaded_extraction_ids_are_renumbered_by_sorted_name(tmp_path) -> None:
+    import sqlite3
+    from contextlib import closing
+
+    database = tmp_path / "database.db"
+    with closing(sqlite3.connect(database)) as db, db:
+        _canonical_schema(db)
+        for image_id, name in enumerate(["c.jpg", "a.jpg", "b.jpg"], start=1):  # completion
+            db.execute("INSERT INTO images VALUES (?, ?, 1)", (image_id, name))
+            db.execute("INSERT INTO keypoints VALUES (?, ?)", (image_id, f"kp-{name}"))
+            db.execute("INSERT INTO descriptors VALUES (?, ?)", (image_id, f"d-{name}"))
+            db.execute("INSERT INTO frames VALUES (?, 1)", (image_id,))
+            db.execute("INSERT INTO frame_data VALUES (?, ?, 1, 0)", (image_id, image_id))
+        db.execute("INSERT INTO pose_priors VALUES (1, 1, 1, 0)")  # GPS prior of c.jpg
+    build_model.canonicalize_image_ids(database)
+    with closing(sqlite3.connect(database)) as db, db:
+        names = ["a.jpg", "b.jpg", "c.jpg"]
+        assert db.execute("SELECT image_id, name FROM images ORDER BY 1").fetchall() == list(
+            enumerate(names, start=1)
+        )
+        for table, prefix in (("keypoints", "kp"), ("descriptors", "d")):
+            rows = db.execute(f"SELECT image_id, data FROM {table} ORDER BY 1").fetchall()
+            assert rows == [(i, f"{prefix}-{name}") for i, name in enumerate(names, start=1)]
+        assert db.execute("SELECT * FROM frame_data ORDER BY 1").fetchall() == [
+            (i, i, 1, 0) for i in (1, 2, 3)
+        ]
+        assert db.execute("SELECT corr_data_id FROM pose_priors").fetchall() == [(3,)]
+        db.execute("INSERT INTO matches VALUES (1)")
+    with pytest.raises(BuildModelError, match="already has matches"):
+        build_model.canonicalize_image_ids(database)  # never renumber after matching
+    with closing(sqlite3.connect(database)) as db, db:
+        db.execute("DELETE FROM matches")
+        db.execute("INSERT INTO pose_priors VALUES (2, 99, 1, 0)")
+    with pytest.raises(BuildModelError, match="pose priors"):
+        build_model.canonicalize_image_ids(database)
+
+
+def _find_colmap(repo_root: Path) -> Path | None:
+    import os
+
+    candidates = [os.environ.get("PACKLAB_COLMAP_PATH")]
+    candidates += [
+        str(folder / "OwnerDev/engines/colmap/bin/colmap.exe")
+        for folder in (repo_root, *repo_root.parents)
+    ]
+    return next((Path(item) for item in candidates if item and Path(item).is_file()), None)
+
+
+def _synthetic_bmp(path: Path, seed: int, shift: int) -> None:
+    """A 320x240 textured scene (seeded random shapes) seen with a small horizontal shift."""
+    import random
+    import struct
+
+    width, height = 320, 240
+    rng = random.Random(seed)
+    canvas = [[128] * (width + 64) for _ in range(height)]
+    for _ in range(180):
+        x, y = rng.randrange(width + 48), rng.randrange(height - 16)
+        w, h, tone = rng.randrange(4, 24), rng.randrange(4, 24), rng.randrange(256)
+        for row in range(y, min(height, y + h)):
+            canvas[row][x : x + w] = [tone] * len(canvas[row][x : x + w])
+    stride = (width * 3 + 3) & ~3
+    pixels = bytearray()
+    for row in reversed(canvas):
+        line = bytes(value for value in row[shift : shift + width] for _ in range(3))
+        pixels += line + b"\0" * (stride - len(line))
+    header = struct.pack("<2sIHHI", b"BM", 54 + len(pixels), 0, 0, 54)
+    info = struct.pack("<IiiHHIIiiII", 40, width, height, 1, 24, 0, len(pixels), 2835, 2835, 0, 0)
+    path.write_bytes(header + info + pixels)
+
+
+def test_canonicalized_real_colmap_database_equals_the_single_thread_run(
+    tmp_path, repo_root
+) -> None:
+    """Real COLMAP 4.2.1 schema: 4-thread extraction + renumbering == 1-thread extraction."""
+    import sqlite3
+    import subprocess
+    from contextlib import closing
+
+    colmap = _find_colmap(repo_root)
+    if colmap is None:
+        pytest.skip("COLMAP 4.2.1 is not installed (OwnerDev/engines or PACKLAB_COLMAP_PATH)")
+    probe = subprocess.run([str(colmap), "help"], capture_output=True, text=True, timeout=60)
+    if "COLMAP 4.2.1" not in probe.stdout:
+        pytest.skip("the found COLMAP is not 4.2.1")
+    images = tmp_path / "images"
+    images.mkdir()
+    for index, name in enumerate(["e", "c", "a", "d", "b", "f"]):
+        _synthetic_bmp(images / f"{name}.bmp", seed=7, shift=index * 6)
+
+    def extract(threads: int) -> Path:
+        database = tmp_path / f"t{threads}.db"
+        subprocess.run(
+            [
+                str(colmap),
+                "feature_extractor",
+                "--database_path",
+                str(database),
+                "--image_path",
+                str(images),
+                "--ImageReader.single_camera",
+                "1",
+                "--ImageReader.camera_model",
+                "OPENCV",
+                "--FeatureExtraction.use_gpu",
+                "0",
+                "--default_random_seed",
+                "0",
+                "--FeatureExtraction.num_threads",
+                str(threads),
+            ],
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+        build_model.canonicalize_image_ids(database)
+        return database
+
+    def content(database: Path) -> dict[str, list[tuple[object, ...]]]:
+        with closing(sqlite3.connect(database)) as db:
+            tables = [
+                name
+                for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                if name != "sqlite_sequence"
+            ]
+            return {
+                table: sorted(db.execute(f"SELECT * FROM {table}").fetchall(), key=repr)
+                for table in tables
+            }
+
+    single, multi = content(extract(1)), content(extract(4))
+    assert {"images", "keypoints", "descriptors", "frames", "frame_data"} <= set(single)
+    assert [name for _id, name, _camera in sorted(single["images"])] == [
+        f"{name}.bmp" for name in "abcdef"
+    ]
+    assert all(rows[1] > 0 for rows in single["keypoints"])  # the scenes have features
+    assert multi == single
 
 
 def test_heic_decode_is_hardened_and_names_do_not_collide(tmp_path, monkeypatch) -> None:
@@ -532,6 +813,7 @@ def test_weak_registration_stops_before_dense_stages(monkeypatch, tmp_path) -> N
 
     monkeypatch.setattr(build_model, "_run_commands", run)
     monkeypatch.setattr(build_model.shutil, "copyfile", lambda s, d: None)
+    monkeypatch.setattr(build_model, "canonicalize_image_ids", lambda database: None)
     names = tuple(f"{asset}/inputs/{n:02d}.jpg" for n in range(17))
     context = type(
         "Context",

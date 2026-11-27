@@ -647,6 +647,20 @@ class StudioMainWindow(QMainWindow):
                     else None
                 )
             )
+            stored_limit = self._settings.value("build/max_concurrent", 2)
+            try:
+                settings.concurrent_builds.setValue(int(str(stored_limit)))
+            except (TypeError, ValueError):
+                pass  # keep the default
+            settings.concurrent_builds.valueChanged.connect(
+                lambda value: (
+                    self._settings.setValue("build/max_concurrent", value)
+                    if self._settings is not None
+                    else None
+                )
+            )
+        self.build_model.set_max_concurrent(settings.concurrent_builds.value())
+        settings.concurrent_builds.valueChanged.connect(self.build_model.set_max_concurrent)
         inbox.build_requested.connect(self.start_build)
         inbox.scan_imported.connect(
             lambda capture_id, digest: (
