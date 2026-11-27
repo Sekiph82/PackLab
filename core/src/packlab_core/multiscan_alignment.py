@@ -4,20 +4,23 @@ Per scan (PL-0483): A4-mat frame in mm with +z up from the mat (caller ``to_mat_
 markers, or a seeded RANSAC plane on a 2 mm voxel subsample plus ``mm_per_unit``), then an
 iterative least-squares mat refit on the full cloud (absorbs small tilt / subsampling errors).
 Object = the DBSCAN cluster standing on the mat footprint plus clusters above it (drops floaters
-and off-mat clutter; refuses when nothing stands on the mat). Outer shell =
+and off-mat clutter; refuses when nothing stands on the mat), minus a flat white glare halo
+on the mat around its foot. Outer shell =
 near-vertical points at the outer radius of their 5 degree x 5 mm cell (caps and interior surfaces
 such as a closure recess are seen by one scan only and are never compared).
 
 Registration to the reference (first) scan: 180 degree flip about a horizontal axis from the
 PL-0482 role (both poses when unknown), height fixed by mat contact (flipped: mat side ->
-reference top), yaw sweep with yaw + in-plane ICP, then damped tilt + yaw + in-plane
+the top height either scan measured), yaw sweep with yaw + in-plane ICP (label colour decides
+between yaws the wall fits equally, e.g. a flat oval turned 180 degrees), then damped tilt + yaw + in-plane
 point-to-plane ICP bounded by ``max_refine_deg`` / ``max_refine_mm`` (height stays on the mat
 contact, which side walls cannot observe). Poses are ranked by a symmetric score: the worst 5 mm
 side-wall slice coverage over both directions (no raw one-way inlier share). With an unknown
 role, a pose putting surfaces into space the other scan saw empty (free-space conflict) is
 dropped, and if both poses remain within ``ambiguity_margin`` the scan is refused as role
-ambiguous. Acceptance also compares both scans' height and diameter profile in their own mat
-frames and the free-space conflict, so different objects, scale errors and wrong roles are
+ambiguous. Acceptance also compares both scans' heights (own mat frames), their aligned
+section walls bin by bin around the axis (shape-aware for oval parts) and the free-space
+conflict, so different objects, scale errors and wrong roles are
 refused with the failed check named. Yaw of rotationally symmetric parts is flagged
 (``yaw_determined=False``), not guessed silently. Deterministic (seeded RANSAC, exact
 KNN, numpy solves). Metric values stay METRIC_UNVERIFIED until owner caliper evidence; tests use
@@ -116,6 +119,7 @@ class _Part:
     shell: np.ndarray  # outer side-wall points, mat mm
     normals: np.ndarray  # shell normals
     spacing: float  # median nearest-neighbour distance on the working voxel grid, mm
+    colors: np.ndarray | None = None  # per ``points`` row, [0, 1]
 
 
 @dataclass(frozen=True)
@@ -125,6 +129,7 @@ class _Pose:
     coverage: float
     rmse: float
     yaw_uncertainty: float = float("inf")  # degrees, from the fine coverage scan
+    colour_resolved: bool = False  # label colour picked this yaw over a geometric twin
 
 
 def _apply(matrix: np.ndarray, points: np.ndarray) -> np.ndarray:
@@ -341,6 +346,35 @@ def _object_on_mat(
     return mask
 
 
+GLARE_HEIGHT_MM = 6.0  # mat glare / shadow halos MVS lifts off the mat stay below this
+
+
+def _mat_halo(points: np.ndarray, colors: np.ndarray | None, spacing: float) -> np.ndarray:
+    """Mask of a flat halo on the mat around the part's foot (specular glare on the white mat
+    that MVS lifts a few mm and DBSCAN joins to the part: a 97 mm skirt under a 57 mm bottle in
+    real scans). Halo = below ``GLARE_HEIGHT_MM``, over max(3 mm, 3 spacings) outside the part's
+    own section just above, and glare-white (every channel >= 0.6, grey within 0.15) when colours
+    are given (the printed mat itself is darker: median ~0.56 on the owner's scans).
+
+    ponytail: a real white foot flaring out under 6 mm is cut too; it stays in the other scan's
+    side wall, which is what the comparison needs.
+    """
+
+    low = points[:, 2] < GLARE_HEIGHT_MM
+    above = points[(points[:, 2] >= GLARE_HEIGHT_MM) & (points[:, 2] < GLARE_HEIGHT_MM + 10)]
+    if not low.any() or len(above) < 30:
+        return np.zeros(len(points), dtype=bool)
+    flat = np.c_[points[low, :2], np.zeros(int(low.sum()))]
+    reach = _nearest(np.c_[above[:, :2], np.zeros(len(above))])(flat)[1][:, 0]
+    halo = reach > max(3.0, 3.0 * spacing)
+    if colors is not None:
+        tone = colors[low]
+        halo &= (tone.min(axis=1) >= 0.6) & (np.ptp(tone, axis=1) <= 0.15)
+    mask = np.zeros(len(points), dtype=bool)
+    mask[np.nonzero(low)[0][halo]] = True
+    return mask
+
+
 def _spacing(points: np.ndarray, voxel: float) -> tuple[float, float]:
     """(median, 95th percentile) nearest-neighbour distance after the working voxel grid."""
 
@@ -417,6 +451,8 @@ def _prepare(scan: ScanInput, limits: AlignmentThresholds) -> _Part:
     except MultiScanAlignmentError as error:
         raise MultiScanAlignmentError(f"scan {scan.scan_id}: {error}") from None
     index = above[chosen]
+    tone = None if scan.colors is None else np.asarray(scan.colors, dtype=float)[index]
+    index = index[~_mat_halo(mm[index], tone, spacing)]
     points = mm[index]
     spacing = _spacing(points, limits.voxel_mm)[0]  # of the part itself, not the clutter
     height = _top(points[:, 2])
@@ -424,7 +460,8 @@ def _prepare(scan: ScanInput, limits: AlignmentThresholds) -> _Part:
         shell, normals = _shell(points, height, spacing, limits)
     except MultiScanAlignmentError as error:
         raise MultiScanAlignmentError(f"scan {scan.scan_id}: {error}") from None
-    return _Part(scan.scan_id, frame, points, index, height, shell, normals, spacing)
+    colors = None if scan.colors is None else np.asarray(scan.colors, dtype=float)[index]
+    return _Part(scan.scan_id, frame, points, index, height, shell, normals, spacing, colors)
 
 
 # ---------------------------------------------------------------- pose search and scoring
@@ -529,18 +566,20 @@ def _pose_for_flip(
     source: _Part, target: _Part, query: Query, flipped: bool, limits: AlignmentThresholds
 ) -> _Pose:
     size = float(np.linalg.norm(np.ptp(target.shell, axis=0)))
-    base = np.diag([1.0, -1.0, -1.0, 1.0]) if flipped else np.eye(4)  # 180 deg about mat x
-    if flipped:
-        base[2, 3] = target.height  # flipped scan's mat contact (z = 0) -> reference top face
-    best: _Pose | None = None
-    for step in range(limits.yaw_steps):
-        start = _yaw(2 * np.pi * step / limits.yaw_steps) @ base
-        start[:2, 3] += _centre(target.shell) - _centre(_apply(start, source.shell))
-        matrix = _icp(source.shell, target, query, start, [2, 3, 4], limits, 0.08 * size, 1e-9)
-        coverage, rmse = _score(source, matrix, target, query, limits)
-        if best is None or (coverage, -rmse) > (best.coverage, -best.rmse):
-            best = _Pose(matrix, flipped, coverage, rmse)
-    assert best is not None
+    coarse: list[_Pose] = []
+    # Flipped: its mat contact (z = 0) is the reference top face, at the height either scan
+    # measured - a scan whose top MVS missed (real upright: 153 of 173 mm) understates it, and
+    # the tapering side walls pick the true one. The gate still compares both heights.
+    for contact in {target.height, source.height} if flipped else {0.0}:
+        base = np.diag([1.0, -1.0, -1.0, 1.0]) if flipped else np.eye(4)  # 180 deg about mat x
+        base[2, 3] = contact
+        for step in range(limits.yaw_steps):
+            start = _yaw(2 * np.pi * step / limits.yaw_steps) @ base
+            start[:2, 3] += _centre(target.shell) - _centre(_apply(start, source.shell))
+            matrix = _icp(source.shell, target, query, start, [2, 3, 4], limits, 0.08 * size, 1e-9)
+            coverage, rmse = _score(source, matrix, target, query, limits)
+            coarse.append(_Pose(matrix, flipped, coverage, rmse))
+    best = _colour_yaw(source, target, coarse, limits)
     # Fine yaw + in-plane pass, then tilt + yaw + in-plane. Height stays on the mat contact: side
     # walls do not observe it (a closure's short wall let free z slide 1.3 mm in testing). Tilt
     # is kept only within bounds and when it clearly fits better: a short wall (lid) barely
@@ -550,7 +589,7 @@ def _pose_for_flip(
     )
     fine_coverage, fine_rmse = _score(source, fine, target, query, limits)
     if (fine_coverage, -fine_rmse) >= (best.coverage, -best.rmse):
-        best = _Pose(fine, flipped, fine_coverage, fine_rmse)
+        best = replace(best, matrix=fine, coverage=fine_coverage, rmse=fine_rmse)
     tilt_dof = [0, 1, 2, 3, 4]
     refined = _icp(
         source.shell, target, query, best.matrix, tilt_dof, limits, limits.max_distance_mm, 1e-2
@@ -562,8 +601,55 @@ def _pose_for_flip(
         return best  # refinement left its bounds: keep the mat-constrained pose
     coverage, rmse = _score(source, refined, target, query, limits)
     if rmse <= 0.9 * best.rmse and coverage >= best.coverage - 0.01:
-        best = _Pose(refined, flipped, coverage, rmse)
+        best = replace(best, matrix=refined, coverage=coverage, rmse=rmse)
     return _yaw_sweep_fine(source, target, query, best, limits)
+
+
+COLOUR_MARGIN = 0.2  # luminance correlation gap that picks one yaw over its geometric twin
+
+
+def _colour_agreement(
+    source: _Part, matrix: np.ndarray, target: _Part, limits: AlignmentThresholds
+) -> float:
+    """Luminance correlation of points within ``max_distance_mm`` of the other scan (NaN when
+    either side is uncoloured or flat-toned). Robust to the two scans' different exposure."""
+
+    if source.colors is None or target.colors is None:
+        return float("nan")
+    found, distance = _nearest(target.points)(_apply(matrix, source.points))
+    near = distance[:, 0] < limits.max_distance_mm
+    if near.sum() < 100:
+        return float("nan")
+    mine, theirs = source.colors[near].mean(axis=1), target.colors[found[near, 0]].mean(axis=1)
+    if mine.std() < 1e-3 or theirs.std() < 1e-3:
+        return float("nan")
+    return float(np.corrcoef(mine, theirs)[0, 1])
+
+
+def _colour_yaw(
+    source: _Part, target: _Part, coarse: list[_Pose], limits: AlignmentThresholds
+) -> _Pose:
+    """Best coarse pose; label colour decides between yaws the wall fits about equally well
+    (a flat-oval bottle fits its own shape turned 180 degrees: front and back label swap).
+
+    The colour pick is used only when it beats every geometric twin over 20 degrees away by
+    ``COLOUR_MARGIN``; otherwise the geometric best stands and the gate judges yaw as before.
+    """
+
+    best = max(coarse, key=lambda pose: (pose.coverage, -pose.rmse))
+    twins = [pose for pose in coarse if pose.coverage >= best.coverage - 0.05]
+    scores = [_colour_agreement(source, pose.matrix, target, limits) for pose in twins]
+    if np.isnan(scores).any():
+        return best
+    pick = int(np.argmax(scores))
+    rivals = [
+        score
+        for pose, score in zip(twins, scores, strict=True)
+        if _angle_deg(pose.matrix[:3, :3] @ twins[pick].matrix[:3, :3].T) > 20
+    ]
+    if rivals and scores[pick] - max(rivals) >= COLOUR_MARGIN:
+        return replace(twins[pick], colour_resolved=True)
+    return best
 
 
 def _yaw_sweep_fine(
@@ -594,7 +680,7 @@ def _yaw_sweep_fine(
         return replace(pose, yaw_uncertainty=float(uncertainty))
     matrix = _yaw(np.radians(middle), centre) @ pose.matrix
     c, r = scores[middle + 10]
-    return _Pose(matrix, pose.flipped, c, r, float(uncertainty))
+    return replace(pose, matrix=matrix, coverage=c, rmse=r, yaw_uncertainty=float(uncertainty))
 
 
 def _width(points: np.ndarray, z: float, half: float) -> float:
@@ -607,43 +693,101 @@ def _width(points: np.ndarray, z: float, half: float) -> float:
     return float(np.mean(high - low))
 
 
+def _section(points: np.ndarray, z: float, half: float) -> np.ndarray:
+    """(narrowest, widest) caliper width of the band at ``z`` over 36 directions, mm; NaN when
+    sparse. Reported so a refusal names the section sizes of a non-round part."""
+
+    band = points[np.abs(points[:, 2] - z) < half]
+    if len(band) < 15:
+        return np.full(2, np.nan)
+    angles = np.linspace(0, np.pi, 36, endpoint=False)
+    low, high = np.percentile(band[:, :2] @ np.c_[np.cos(angles), np.sin(angles)].T, [1, 99], 0)
+    return np.array([(high - low).min(), (high - low).max()])
+
+
+def _radial_offset(mine: np.ndarray, theirs: np.ndarray) -> tuple[float, float]:
+    """(median radial offset of ``theirs`` from ``mine``, typical radius), mm: per 10 degree
+    azimuth bin both bands fill, the median radius about ``mine``'s centre. Shape-aware: an oval
+    is compared bin by bin, not as one circle; medians shrug off fuzzy MVS tips. NaN when the
+    bands share under 9 bins."""
+
+    centre = _centre(mine)
+
+    def radii(band: np.ndarray) -> np.ndarray:
+        rel = band[:, :2] - centre
+        radius = np.linalg.norm(rel, axis=1)
+        azimuth = ((np.arctan2(rel[:, 1], rel[:, 0]) + np.pi) / (2 * np.pi) * 36).astype(int) % 36
+        out = np.full(36, np.nan)
+        for k in range(36):
+            if (azimuth == k).sum() >= 3:
+                out[k] = np.median(radius[azimuth == k])
+        return out
+
+    a, b = radii(mine), radii(theirs)
+    both = ~np.isnan(a) & ~np.isnan(b)
+    if both.sum() < 9:
+        return float("nan"), float("nan")
+    return float(np.median(b[both] - a[both])), float(np.median(a[both]))
+
+
 def _dimension_failures(
-    reference: _Part, other: _Part, flipped: bool, limits: AlignmentThresholds
+    reference: _Part, other: _Part, matrix: np.ndarray, limits: AlignmentThresholds
 ) -> list[str]:
+    """Height (each scan's own mat frame) and section size after alignment. The rigid pose
+    cannot absorb a scale error or a different part: their walls sit consistently in or out."""
+
     failures = []
     ratio = limits.dimension_tolerance_ratio
     tolerance = max(limits.height_tolerance_mm, ratio * reference.height)
-    if abs(reference.height - other.height) > tolerance:
-        failures.append(
-            f"height mismatch {other.height:.1f} vs {reference.height:.1f} mm "
-            f"(tolerance {tolerance:.1f})"
-        )
+    moved = _apply(matrix, other.shell)
     valid = seen_mine = seen_theirs = 0
-    # Bands stay inside both shells (which span mat margin + 2 .. height - 2 in their own frames).
     half = max(2.0, limits.slice_mm / 2.5)
     lower = limits.mat_margin_mm + 2 + half
     upper = min(reference.height, other.height) - 2 - half
     heights = np.linspace(lower, upper, PROFILE_BANDS) if upper > lower else np.full(1, upper)
+    sections: list[tuple[float, str]] = []
     for z in heights:
-        mine = _width(reference.shell, z, half)
-        theirs = _width(other.shell, other.height - z if flipped else z, half)
-        seen_mine += int(not np.isnan(mine))
-        seen_theirs += int(not np.isnan(theirs))
-        if np.isnan(mine) or np.isnan(theirs):
+        mine = reference.shell[np.abs(reference.shell[:, 2] - z) < half]
+        theirs = moved[np.abs(moved[:, 2] - z) < half]
+        seen_mine += int(len(mine) >= 15)
+        seen_theirs += int(len(theirs) >= 15)
+        if len(mine) < 15 or len(theirs) < 15:
+            continue
+        offset, radius = _radial_offset(mine, theirs)
+        if np.isnan(offset):
             continue
         valid += 1
-        # + half a spacing: percentile extents of a patchy sampled wall move by about that much
-        tolerance = max(limits.width_tolerance_mm, ratio * mine) + 0.5 * limits.spacing_mm
-        if abs(mine - theirs) > tolerance:
-            failures.append(
-                f"diameter mismatch at z={z:.0f} mm: {theirs:.1f} vs {mine:.1f} mm "
-                f"(tolerance {tolerance:.1f})"
+        # radius tolerance: half the diameter one, + half a spacing for patchy sampled walls
+        allowed = max(limits.width_tolerance_mm, ratio * 2 * radius) / 2 + 0.5 * limits.spacing_mm
+        if abs(offset) > allowed:
+            a, b = _section(mine, z, half), _section(theirs, z, half)
+            sections.append(
+                (
+                    float(z),
+                    f"section mismatch at z={z:.0f} mm: wall {offset:+.1f} mm off "
+                    f"(tolerance {allowed:.1f}; {b[0]:.1f} x {b[1]:.1f} vs {a[0]:.1f} x {a[1]:.1f} mm)",
+                )
             )
+    if abs(reference.height - other.height) > tolerance:
+        message = (
+            f"height mismatch {other.height:.1f} vs {reference.height:.1f} mm "
+            f"(tolerance {tolerance:.1f})"
+        )
+        short = reference if reference.height < other.height else other
+        # Same walls up to near the shorter top, different height: that scan lost its top.
+        if valid and all(z > short.height - 10 for z, _ in sections):
+            message += (
+                f" - the sections agree, so scan {short.scan_id} most likely misses the top "
+                f"{abs(reference.height - other.height):.0f} mm of the part (no surface there "
+                "in its cloud): rebuild or rescan it"
+            )
+        failures.append(message)
+    failures += [message for _, message in sections]
     # Real MVS walls can be patchy: demand overlap in a share of the bands either scan has.
     needed = max(1, int(np.ceil(limits.min_profile_share * max(seen_mine, seen_theirs))))
     if valid < needed:
         failures.append(
-            f"too little overlapping side wall ({valid} of {len(heights)} diameter bands, "
+            f"too little overlapping side wall ({valid} of {len(heights)} section bands, "
             f"need {needed})"
         )
     return failures
@@ -728,13 +872,19 @@ def _is_round(part: _Part, limits: AlignmentThresholds) -> bool:
 
 
 def _yaw_unique(
-    reference: _Part, other: _Part, matrix: np.ndarray, limits: AlignmentThresholds
+    reference: _Part,
+    other: _Part,
+    matrix: np.ndarray,
+    limits: AlignmentThresholds,
+    colour_resolved: bool = False,
 ) -> bool:
     """Is the chosen yaw the only one that fits the radial wall profile?
 
     Mismatch = summed |radius difference| over signature cells both scans observe (clipped at 3
     tolerances). Every yaw at least 20 degrees away must cost more than both two full-tolerance
     cells and four noise sigmas of that sum; symmetric or under-sampled walls fail this.
+    ``colour_resolved``: the label colour already beat the half turn (an oval's geometric twin),
+    so yaws within 20 degrees of 180 are not rivals.
     """
 
     centre = _centre(reference.shell)
@@ -753,14 +903,19 @@ def _yaw_unique(
     if not len(at_pose):
         return False
     noise = float(np.median(at_pose)) * np.sqrt(len(at_pose))
-    others = min(float(difference(step * 10.0).sum()) for step in range(2, SIGNATURE_BINS - 1))
+    steps = [
+        step
+        for step in range(2, SIGNATURE_BINS - 1)
+        if not (colour_resolved and abs(step * 10 - 180) <= 20)
+    ]
+    others = min(float(difference(step * 10.0).sum()) for step in steps)
     return others - float(at_pose.sum()) >= max(2 * tolerance, 4 * noise)
 
 
 def _gate(
     reference: _Part, other: _Part, pose: _Pose, query: Query, limits: AlignmentThresholds
 ) -> tuple[list[str], bool]:
-    failures = _dimension_failures(reference, other, pose.flipped, limits)
+    failures = _dimension_failures(reference, other, pose.matrix, limits)
     conflict = _conflict(reference, other, pose, limits)
     if conflict > limits.max_free_space_conflict:
         failures.append(
@@ -773,7 +928,7 @@ def _gate(
         failures.append(f"rmse_mm {pose.rmse:.3g} > {limits.max_rmse_mm}")
     # Yaw: accept only a yaw the wall profile pins, or a part shown to be round (any yaw fits).
     determined = pose.yaw_uncertainty <= limits.yaw_probe_deg and _yaw_unique(
-        reference, other, pose.matrix, limits
+        reference, other, pose.matrix, limits, pose.colour_resolved
     )
     if not determined and not (_is_round(reference, limits) and _is_round(other, limits)):
         failures.append("yaw undetermined on a non-symmetric part - need more side detail")
