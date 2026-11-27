@@ -352,8 +352,9 @@ GLARE_HEIGHT_MM = 6.0  # mat glare / shadow halos MVS lifts off the mat stay bel
 def _mat_halo(points: np.ndarray, colors: np.ndarray | None, spacing: float) -> np.ndarray:
     """Mask of a flat halo on the mat around the part's foot (specular glare on the white mat
     that MVS lifts a few mm and DBSCAN joins to the part: a 97 mm skirt under a 57 mm bottle in
-    real scans). Halo = below ``GLARE_HEIGHT_MM``, over max(3 mm, 3 spacings) outside the part's
-    own section just above, and glare-white (every channel >= 0.6, grey within 0.15) when colours
+    real scans). Halo = below ``GLARE_HEIGHT_MM``, over max(3 mm, 3 spacings) beyond the outline
+    of the part's own section just above (per 10 degree azimuth; a floor or recess inside the
+    outline stays), and glare-white (every channel >= 0.6, grey within 0.15) when colours
     are given (the printed mat itself is darker: median ~0.56 on the owner's scans).
 
     ponytail: a real white foot flaring out under 6 mm is cut too; it stays in the other scan's
@@ -364,9 +365,19 @@ def _mat_halo(points: np.ndarray, colors: np.ndarray | None, spacing: float) -> 
     above = points[(points[:, 2] >= GLARE_HEIGHT_MM) & (points[:, 2] < GLARE_HEIGHT_MM + 10)]
     if not low.any() or len(above) < 30:
         return np.zeros(len(points), dtype=bool)
-    flat = np.c_[points[low, :2], np.zeros(int(low.sum()))]
-    reach = _nearest(np.c_[above[:, :2], np.zeros(len(above))])(flat)[1][:, 0]
-    halo = reach > max(3.0, 3.0 * spacing)
+    centre = _centre(above)
+
+    def polar(xy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        rel = xy - centre
+        azimuth = ((np.arctan2(rel[:, 1], rel[:, 0]) + np.pi) / (2 * np.pi) * 36).astype(int)
+        return azimuth % 36, np.linalg.norm(rel, axis=1)
+
+    bins, radius = polar(above[:, :2])
+    outline = np.full(36, np.inf)  # unseen azimuth: nothing is called halo there
+    for k in np.unique(bins):
+        outline[k] = np.percentile(radius[bins == k], 98)
+    bins, radius = polar(points[low, :2])
+    halo = radius > outline[bins] + max(3.0, 3.0 * spacing)
     if colors is not None:
         tone = colors[low]
         halo &= (tone.min(axis=1) >= 0.6) & (np.ptp(tone, axis=1) <= 0.15)
