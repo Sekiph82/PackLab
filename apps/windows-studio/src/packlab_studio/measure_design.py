@@ -1642,7 +1642,8 @@ def fit_design_model(
                 f"not round about the measured axis (radial CV {roundness.radial_cv:.3f} > "
                 f"{OWNER_REVIEW_MAX_AXIS_CV} on the side wall, "
                 f"{roundness.axis_inlier_fraction:.0%} of side points on one circle). "
-                "Either the package is not round, or "
+                "Either the package is not round (an oval or flat bottle: use Package families > "
+                "Oval / flat bottle), or "
                 + SIDE_RECAPTURE_ADVICE[0].lower()
                 + SIDE_RECAPTURE_ADVICE[1:]
             )

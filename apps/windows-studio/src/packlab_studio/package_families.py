@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import numpy as np
+
 from packlab_core.bounding_dimensions import NormalizedMeasurementGeometry
 from packlab_core.cad_boolean import (
     PARAMETRIC_HANDLE_OPENING_PREFIX,
@@ -81,6 +83,12 @@ from packlab_core.mating_references import (
     MatingReferenceResult,
     create_neck_closure_mating_references,
 )
+from packlab_core.oval_section_fit import (
+    OvalFitRefusal,
+    SectionShapeClass,
+    fit_oval_sections,
+    section_outline,
+)
 from packlab_core.pouch_family import (
     PouchArtworkAnchor,
     PouchFamilyDimensions,
@@ -123,6 +131,7 @@ FAMILIES: dict[str, str] = {
     "trigger_pump": "Trigger / pump bottle",
     "tube": "Tube",
     "pouch": "Sachet / pouch",
+    "oval_bottle": "Oval / flat bottle (fitted to the Scan Master)",
 }
 
 # Editable key dimensions per family (mm_unverified). Labels are shown in the window.
@@ -173,6 +182,12 @@ PARAMETERS: dict[str, tuple[tuple[str, str], ...]] = {
         ("crimp_length", "Crimp length"),
         ("crimp_thickness", "Crimp thickness"),
     ),
+    "oval_bottle": (
+        ("width", "Body width (long side)"),
+        ("depth", "Body depth (short side)"),
+        ("height", "Overall height"),
+        ("neck_diameter", "Neck diameter"),
+    ),
     "pouch": (
         ("overall_width", "Overall width"),
         ("overall_height", "Overall height"),
@@ -186,6 +201,14 @@ PARAMETERS: dict[str, tuple[tuple[str, str], ...]] = {
 
 # Nominal starting points typed by PackLab, not measured products (standalone provenance).
 PRESETS: dict[str, dict[str, dict[str, float]]] = {
+    "oval_bottle": {
+        "Fit to the selected Scan Master": {
+            "width": 60.0,
+            "depth": 40.0,
+            "height": 160.0,
+            "neck_diameter": 22.0,
+        },
+    },
     "closure": {
         "Screw cap sized from the container": {},
         "38 mm screw cap": {"cap_diameter": 38.0, "cap_height": 16.0, "neck_finish_diameter": 37.0},
@@ -312,7 +335,7 @@ PRESETS: dict[str, dict[str, dict[str, float]]] = {
 
 # Families that need captured evidence for the captured path, or have no captured path.
 STANDALONE_ONLY = frozenset({"trigger_pump", "pouch"})
-CAPTURED_ONLY = frozenset({"closure"})
+CAPTURED_ONLY = frozenset({"closure", "oval_bottle"})
 
 LIMITATIONS: dict[str, tuple[str, ...]] = {
     "closure": (
@@ -330,6 +353,12 @@ LIMITATIONS: dict[str, tuple[str, ...]] = {
         "Scan Master parent",
     ),
     "tube": ("loft envelope; flexible wall deformation not claimed",),
+    "oval_bottle": (
+        "exterior envelope lofted through fitted sections; wall, thread and base punt not modelled",
+        "design frame: long side on X, front/back panels face +/-Y (rotated from the Scan "
+        "Master frame, see scan_master_to_design_frame)",
+        "METRIC_UNVERIFIED: dimensions come from the marker-scaled scan, not a caliper",
+    ),
     "pouch": (
         "visualization-only flexible pack (core): no BREP, STEP/STL not available",
         "film deformation not measured; seal zones flat",
@@ -687,6 +716,71 @@ def _closure_spec(p: Mapping[str, Any], container: DesignModelRevision) -> _Spec
     )
 
 
+def _oval_spec(p: Mapping[str, Any]) -> _Spec:
+    """Loft through the fitted sections, scaled to the edited width/depth/height/neck."""
+    _positive(p, tuple(name for name, _ in PARAMETERS["oval_bottle"]))
+    fitted, rows = p["oval_fitted"], p["oval_sections"]
+    neck = [float(row[0]) for row in rows if row[6] == "neck"]
+    _require(
+        not neck or p["neck_diameter"] < min(p["width"], p["depth"]),
+        "neck diameter must be smaller than the body width and depth",
+    )
+    sx, sy = p["width"] / fitted["width"], p["depth"] / fitted["depth"]
+    sz, sn = p["height"] / fitted["height"], p["neck_diameter"] / fitted["neck_diameter"]
+    shoulder = [float(row[0]) for row in rows if row[6] == "shoulder"]
+    low = shoulder[0] if shoulder else 0.0
+    high = neck[0] if neck else float(rows[-1][0])
+
+    def scales(z: float, zone: str) -> tuple[float, float]:
+        if zone == "neck":
+            return sn, sn
+        if zone != "shoulder" or high <= low:
+            return sx, sy
+        t = min(max((z - low) / (high - low), 0.0), 1.0)
+        return sx + t * (sn - sx), sy + t * (sn - sy)
+
+    component = "bottle-body"
+    kinds = {
+        "base": FeatureKind.BASE,
+        "body": FeatureKind.BODY,
+        "shoulder": FeatureKind.SHOULDER,
+        "neck": FeatureKind.NECK,
+    }
+    features, shapes, heights = [], [], []
+    for index, row in enumerate(rows):
+        z, cx, cy, a, b, n = (float(value) for value in row[:6])
+        zone = str(row[6])
+        fx, fy = scales(z, zone)
+        features.append(_feature(component, kinds[zone], f"oval:section-{index:02d}:{zone}:v1"))
+        shapes.append(
+            tuple(
+                SectionPoint(x, y) for x, y in section_outline(a * fx, b * fy, n, cx * fx, cy * fy)
+            )
+        )
+        heights.append(z * sz)
+    evidence = DesignModelParameter(
+        "oval_section_fit_evidence", dict(p["oval_evidence"]), ParameterType.OBJECT
+    )
+    numbers = {name: float(p[name]) for name, _ in PARAMETERS["oval_bottle"]}
+    return _Spec(
+        PackageFamily.BOTTLE,
+        tuple(features),
+        (*_numbers("oval_bottle", numbers), evidence),
+        (
+            _Loft(
+                "body",
+                False,
+                tuple(
+                    (feature.feature_id, z, section)
+                    for feature, z, section in zip(
+                        features, heights, _chain(component, tuple(shapes)), strict=True
+                    )
+                ),
+            ),
+        ),
+    )
+
+
 def _clip_profile(
     points: tuple[tuple[float, float], ...], line: float
 ) -> tuple[tuple[float, float], ...]:
@@ -929,6 +1023,8 @@ def _spec_for(
         if container is None:
             raise PackageFamilyError("select a container Design Model first")
         return _closure_spec(parameters, container)
+    if family == "oval_bottle":
+        return _oval_spec(parameters)
     raise PackageFamilyError(f"unsupported family {family}")
 
 
@@ -1055,6 +1151,103 @@ def fit_jerrycan_on_scan_master(
                 "section_heights": list(fit.section_heights),
             }
         },
+    )
+
+
+def fit_oval_bottle_on_scan_master(
+    scan_master: ScanMasterRevision, *, actor_id: str, owner_confirmed: bool
+) -> FamilyDesign:
+    """PL-0492: per-height oval / rounded-rectangle section fit lofted into a Design Model.
+
+    The core fit classifies the body; ROUND is sent to the revolved fit and every other
+    class needs the owner's explicit confirmation before a revision is created.
+    """
+    created = _now()
+    if scan_master.manifest.get("scale_state") != "metric-unverified":
+        raise PackageFamilyError(
+            "the Scan Master is not scaled to mm (METRIC_UNVERIFIED needed); scale it first"
+        )
+    try:
+        fit = fit_oval_sections(np.asarray(scan_master.mesh.vertices, dtype=np.float64))
+    except OvalFitRefusal as error:
+        raise PackageFamilyError(f"oval section fit refused ({error})") from error
+    summary = (
+        f"{fit.classification.value}: {fit.width:.1f} x {fit.depth:.1f} x {fit.height:.1f} "
+        f"mm_unverified, minor/major {fit.aspect_ratio:.2f}, exponent {fit.exponent:.2f}, "
+        f"residual {fit.relative_residual:.1%}, long side at {fit.orientation_deg:.1f} deg"
+    )
+    if fit.classification is SectionShapeClass.ROUND:
+        raise PackageFamilyError(
+            f"round_use_revolved_fit: the sections are round ({summary}); use Measure & Design "
+            "> Fit Design Model (revolved) for a round bottle or jar"
+        )
+    if not owner_confirmed:
+        raise PackageFamilyError(
+            f"detected {summary}. Tick 'Owner confirms the detected section shape' and press "
+            "Create again to make the Design Model"
+        )
+    try:
+        binding = bind_design_model_parent(
+            scan_master,
+            actor_id=actor_id,
+            reason="Oval / flat bottle section fit on the selected Scan Master.",
+            created_at_utc=created,
+        )
+    except ValueError as error:
+        raise PackageFamilyError(f"Scan Master cannot parent a Design Model: {error}") from error
+    report = fit.as_dict()
+    evidence = {
+        key: report[key]
+        for key in (
+            "method",
+            "classification",
+            "orientation_deg",
+            "scan_master_to_design_frame",
+            "aspect_ratio",
+            "exponent",
+            "relative_residual",
+            "orientation_spread_deg",
+            "thresholds",
+            "overall",
+            "zones",
+            "scale_state",
+        )
+    }
+    evidence["owner_confirmed_classification"] = {"confirmed": True, "actor_id": actor_id}
+    fitted = {
+        "width": fit.width,
+        "depth": fit.depth,
+        "height": fit.height,
+        "neck_diameter": fit.neck_diameter,
+    }
+    values: dict[str, Any] = {
+        **{key: round(value, 3) for key, value in fitted.items()},
+        "oval_fitted": fitted,
+        "oval_sections": [item.as_list() for item in fit.sections],
+        "oval_evidence": evidence,
+    }
+    spec = _oval_spec(values)
+    try:
+        model = create_design_model_revision(
+            binding,
+            package_family=spec.package_family,
+            parameters=spec.parameters,
+            features=spec.features,
+            actor_id=actor_id,
+            reason=f"Owner-confirmed {fit.classification.value} section loft fitted to the "
+            "selected Scan Master.",
+            created_at_utc=created,
+        )
+    except ValueError as error:
+        raise PackageFamilyError(f"core refused the oval Design Model: {error}") from error
+    return _realize(
+        "oval_bottle",
+        "fitted to the selected Scan Master",
+        values,
+        spec,
+        model,
+        (model.revision_id,),
+        {"oval_section_fit": report},
     )
 
 
@@ -1529,7 +1722,14 @@ def load_family_document(document: Mapping[str, Any]) -> FamilyDesign:
         key: value
         for key, value in workflow.items()
         if key
-        in {"assembly", "closure_replacement", "artwork", "pouch_family", "jerrycan_body_fit"}
+        in {
+            "assembly",
+            "closure_replacement",
+            "artwork",
+            "pouch_family",
+            "jerrycan_body_fit",
+            "oval_section_fit",
+        }
     }
     preset = str(workflow.get("preset", ""))
     if family == "pouch":
@@ -1702,6 +1902,7 @@ __all__ = [
     "describe",
     "edit",
     "fit_jerrycan_on_scan_master",
+    "fit_oval_bottle_on_scan_master",
     "load_family_document",
     "replacement_base",
 ]

@@ -38,7 +38,11 @@ from packlab_core.blender_scene_package import (
     create_blender_scene_package,
 )
 from packlab_core.cad_adapter import cad_shape_precise_bounds
-from packlab_core.cad_brep import CadBrepRepresentationRevision, revolve_design_model_to_brep
+from packlab_core.cad_brep import (
+    CadBrepRepresentationRevision,
+    loft_design_model_to_brep,
+    revolve_design_model_to_brep,
+)
 from packlab_core.cad_label_surface_analysis import (
     CadLabelSurfaceAnalysis,
     CadLabelSurfaceCandidate,
@@ -69,6 +73,7 @@ from packlab_core.design_model_binding import (
 )
 from packlab_core.design_operations import (
     DesignOperation,
+    LoftSectionInput,
     OperationKind,
     create_revolve_operation,
 )
@@ -164,7 +169,7 @@ class DesignModelSession:
     """One exact Design Model document plus the BREP/preview derived from it."""
 
     model: DesignModelRevision
-    profile: DesignProfile
+    profile: DesignProfile | None  # None: oval / flat bottle section loft (PL-0492)
     operation: DesignOperation
     representation: CadBrepRepresentationRevision
     preview: CadPreviewMeshRevision
@@ -267,6 +272,8 @@ def load_design_model_session(
         )
     if b'"revolved_fit"' in data:  # Measure & Design project revision, not a document
         data = _document_from_studio_revision(data)
+    elif b'"package_family_workflow"' in data:
+        return _oval_bottle_session(data, part_name)
     document = deserialize_design_model(data)
     revolves = [item for item in document.operations if item.kind is OperationKind.REVOLVE]
     if len(revolves) != 1:
@@ -311,6 +318,56 @@ def load_design_model_session(
         name[:80],
         label_representation,
         label_preview,
+    )
+
+
+OVAL_BOTTLE_FAMILY = "oval_bottle"
+
+
+def _oval_bottle_session(data: bytes, part_name: str) -> DesignModelSession:
+    """Labels host for a Package Families oval / flat bottle revision (PL-0492).
+
+    The exact core document's single ruled section loft is the BREP; its straight body
+    sections give planar +/-Y front/back panels. Other families stay unsupported here.
+    """
+    try:
+        record = json.loads(data)
+        family = record["package_family_workflow"]["family"]
+        document = deserialize_design_model(str(record["design_document"]).encode("utf-8"))
+    except (ValueError, KeyError, TypeError) as error:
+        raise DesignWorkbenchError("The project Design Model revision is unreadable.") from error
+    if family != OVAL_BOTTLE_FAMILY or record.get("design_model_revision_id") != (
+        document.model.revision_id
+    ):
+        raise DesignWorkbenchError("Only oval / flat bottle family revisions open here.")
+    lofts = [item for item in document.operations if item.kind is OperationKind.LOFT]
+    if len(lofts) != 1:
+        raise DesignWorkbenchError("The oval bottle Design Model needs exactly one loft.")
+    loft = lofts[0]
+    by_id = {item.section_id: item for item in document.cross_sections}
+    try:
+        inputs = tuple(
+            LoftSectionInput(feature_id, by_id[section_id], z)
+            for feature_id, section_id, z in zip(
+                loft.parent_feature_ids, loft.input_ids, loft.section_positions, strict=True
+            )
+        )
+    except (KeyError, ValueError) as error:
+        raise DesignWorkbenchError("The oval bottle loft sections are inconsistent.") from error
+    model = document.model
+    representation = loft_design_model_to_brep(model, inputs, loft, ruled=True)
+    preview = tessellate_brep_preview(model, representation)
+    name = re.sub(r"[^A-Za-z0-9 ._-]+", "_", part_name).strip() or "oval-bottle"
+    return DesignModelSession(
+        model,
+        None,
+        loft,
+        representation,
+        preview,
+        hashlib.sha256(data).hexdigest(),
+        name[:80],
+        representation,
+        preview,
     )
 
 
@@ -747,11 +804,12 @@ class DesignWorkbench(QObject):
                 " on this Design Model; a round jar or bottle takes a wrap label."
             )
 
-        # Wrap: the tallest band (regions split a face into equal rows, so a region's
-        # z-span is proportional to its face height). Then fewer trims, then the lowest.
+        # Wrap and front/back: the tallest band/panel (regions split a face into equal rows,
+        # so a region's z-span is proportional to its face height). Then fewer trims, then
+        # the lowest.
         def rank(item: CadLabelSurfaceCandidate) -> tuple[float, int, float]:
             heights = [point[2] for point in item.support_points]
-            span = max(heights) - min(heights) if kind is LabelZoneKind.WRAP else 0.0
+            span = max(heights) - min(heights)  # front/back: the tallest flat panel
             if kind is LabelZoneKind.TOP:  # the topmost up-facing face (closure top)
                 return (-round(item.center[2], 6), len(item.rejection_reasons), 0.0)
             return (-round(span, 6), len(item.rejection_reasons), round(item.center[2], 6))
