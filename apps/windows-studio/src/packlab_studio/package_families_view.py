@@ -7,9 +7,10 @@ parameters, shows the result and hands the selected part to the Exports page.
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from PySide6.QtCore import QCoreApplication, QEventLoop, Qt, Signal
@@ -33,11 +34,13 @@ from PySide6.QtWidgets import (
 
 from packlab_core.closure_workflow import ClosureWorkflowHistory
 from packlab_core.design_model import FeatureKind
+from packlab_core.oval_section_fit import SLICE_COUNT
 
 from . import package_families as pf
 from .closure_workflow import ClosureWorkflowController
 from .engineering_export import DesignModelExportSource
 from .i18n import tr
+from .jobs import JobManager, JobState
 from .measure_view import _display
 from .model_viewer import ModelViewerView
 from .viewport import MeshGeometry, SceneObjectKind, ViewportRenderMode, ViewportService
@@ -51,16 +54,27 @@ class PackageFamiliesView(QWidget):
 
     export_requested = Signal()  # owner asked to export the selected part (Exports page)
     design_changed = Signal()
+    oval_fit_finished = Signal(object)  # worker thread -> UI thread (queued)
+    oval_fit_progress = Signal(object)
 
     def __init__(
         self,
         project_manager: Any = None,
         *,
         artwork_chooser: Callable[[QWidget], str] | None = None,
+        job_manager: JobManager | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName("packlab.view.package-families")
         self.project_manager = project_manager
+        self.job_manager = job_manager
+        # PL-0492: the oval section fit runs on a worker thread; the result shown to the
+        # owner is kept (Scan Master revision id, Scan Master, fit) and Create reuses it.
+        self._oval_fit: tuple[str, Any, Any] | None = None
+        self._fit_thread: threading.Thread | None = None
+        self._fit_cancel = threading.Event()
+        self.oval_fit_finished.connect(self._oval_fit_done)
+        self.oval_fit_progress.connect(self._oval_fit_step)
         self._choose_artwork = artwork_chooser or (
             lambda parent: QFileDialog.getOpenFileName(
                 parent, "Artwork (SVG or PNG)", "", "Artwork (*.svg *.png)"
@@ -103,6 +117,8 @@ class PackageFamiliesView(QWidget):
         # PL-0492: the oval fit classifies the body; the owner confirms it before Create.
         self.confirm_shape = QCheckBox(tr("Owner confirms the detected section shape"))
         self.confirm_shape.setObjectName("packlab.families.confirm-shape")
+        self.cancel_fit_button = button("Cancel the section fit", "cancel-fit", self.cancel_fit)
+        self.cancel_fit_button.hide()
         self.show_closure = QCheckBox("Show closure / head")
         self.show_closure.setObjectName("packlab.families.show-closure")
         self.show_closure.setChecked(True)
@@ -139,6 +155,7 @@ class PackageFamiliesView(QWidget):
         family_form.addRow("Preset", self.preset)
         family_form.addRow("Actor", self.actor)
         family_form.addRow(self.confirm_shape)
+        family_form.addRow(self.cancel_fit_button)
         closure_box = QGroupBox("Closure workflow")
         closure_form = QFormLayout(closure_box)
         closure_form.addRow(self.show_closure)
@@ -199,8 +216,18 @@ class PackageFamiliesView(QWidget):
             self.viewer.service = ViewportService(self.viewer.service.adapter)
             self.viewer.redraw()
             self.details.setText("Choose a package family.")
+        if self._oval_fit is not None and self._selected_scan_master_id() != self._oval_fit[0]:
+            self._oval_fit = None  # another Scan Master: the owner must see and confirm anew
+            self.confirm_shape.setChecked(False)
         if self.design is None and current is not None:
             self._preset_changed()
+
+    def _selected_scan_master_id(self) -> str | None:
+        try:
+            value = self.project_manager.selected_scan_master_revision_id()
+        except Exception:
+            return None
+        return value if isinstance(value, str) else None
 
     # ------------------------------------------------------------------ helpers
 
@@ -280,6 +307,7 @@ class PackageFamiliesView(QWidget):
             self.parameters_form.addRow(tr(label), spin)
         self.confirm_shape.setVisible(family == "oval_bottle")
         self.confirm_shape.setChecked(False)
+        self._oval_fit = None
         self._preset_changed()
 
     def _preset_key(self) -> str:
@@ -387,6 +415,10 @@ class PackageFamiliesView(QWidget):
     # ------------------------------------------------------------------ actions
 
     def create_design(self) -> None:
+        if self.family_key == "oval_bottle" and self.captured:
+            self._create_oval()
+            return
+
         def action() -> str:
             family, preset, actor = self.family_key, self._preset_key(), self._actor()
             manager = self._manager()
@@ -400,12 +432,6 @@ class PackageFamiliesView(QWidget):
                     raise pf.PackageFamilyError("no selected Scan Master in this project")
                 if family == "jerrycan":
                     design = pf.fit_jerrycan_on_scan_master(scan_master, actor_id=actor)
-                elif family == "oval_bottle":
-                    design = pf.fit_oval_bottle_on_scan_master(
-                        scan_master,
-                        actor_id=actor,
-                        owner_confirmed=self.confirm_shape.isChecked(),
-                    )
                 else:
                     design = pf.create_tube_on_scan_master(
                         scan_master, self.values(), preset=preset, actor_id=actor
@@ -422,6 +448,126 @@ class PackageFamiliesView(QWidget):
             return f"created {design.model.revision_id[:34]}… ({design.provenance}); not saved yet"
 
         self._run("Create", action)
+
+    # ------------------------------------------------------------------ oval fit (PL-0492)
+
+    def _create_oval(self) -> None:
+        """Create from the fit the owner saw; without one, run the fit in the background."""
+        if self._fit_thread is not None and self._fit_thread.is_alive():
+            self.status.setText(tr("Create: the section fit is still running."))
+            return
+        try:
+            manager = self._manager()
+            revision_id = manager.selected_scan_master_revision_id()
+            if revision_id is None:
+                raise pf.PackageFamilyError("no selected Scan Master in this project")
+            cached = self._oval_fit
+            if cached is not None and cached[0] == revision_id:
+                scan_master, fit = cached[1], cached[2]
+                self._run("Create", lambda: self._adopt_oval(scan_master, fit))
+                return
+            scan_master = manager.selected_scan_master_revision()
+        except Exception as error:
+            self.status.setText(f"Create failed: {error}")
+            return
+        self._oval_fit = None
+        self._fit_cancel.clear()
+        job_id = self._fit_job_start()
+        self.busy.show()
+        self.cancel_fit_button.show()
+        self.create_button.setEnabled(False)
+        self.status.setText(tr("Create: fitting the oval sections in the background…"))
+        cancel = self._fit_cancel
+
+        def progress(done: int) -> None:
+            if cancel.is_set():
+                raise _FitCancelled
+            self.oval_fit_progress.emit((job_id, done))
+
+        def work() -> None:
+            try:
+                fit = pf.oval_section_fit(scan_master, progress=progress)
+                self.oval_fit_finished.emit((job_id, revision_id, scan_master, fit, None))
+            except Exception as error:  # reported on the UI thread
+                self.oval_fit_finished.emit((job_id, revision_id, scan_master, None, error))
+
+        self._fit_thread = threading.Thread(target=work, name="packlab-oval-fit", daemon=True)
+        self._fit_thread.start()
+
+    def _adopt_oval(self, scan_master: Any, fit: Any) -> str:
+        design = pf.fit_oval_bottle_on_scan_master(
+            scan_master,
+            actor_id=self._actor(),
+            owner_confirmed=self.confirm_shape.isChecked(),
+            fit=fit,
+        )
+        self._adopt(design)
+        return f"created {design.model.revision_id[:34]}… ({design.provenance}); not saved yet"
+
+    def _fit_job_start(self) -> str | None:
+        manager = self.job_manager
+        if manager is None:
+            return None
+        job = manager.create("Oval / flat bottle section fit", "oval-section-fit")
+        cancel = self._fit_cancel
+
+        def hook() -> bool:
+            cancel.set()
+            return False  # CANCELLING until the worker reports back
+
+        manager.register_cancel_hook(job.job_id, hook)
+        manager.start(job.job_id)
+        return job.job_id
+
+    def _oval_fit_step(self, payload: object) -> None:
+        job_id, done = cast(tuple[str | None, int], payload)
+        fraction = min(0.95, done / (2.0 * SLICE_COUNT))
+        self.busy.setRange(0, 100)
+        self.busy.setValue(round(100 * fraction))
+        manager = self.job_manager
+        if manager is not None and job_id is not None:
+            job = manager.get(job_id)
+            if job.state in {JobState.RUNNING, JobState.CANCELLING} and fraction >= job.progress:
+                manager.update_progress(job_id, fraction, f"{done} height slices fitted")
+
+    def _oval_fit_done(self, payload: object) -> None:
+        job_id, revision_id, scan_master, fit, error = cast(
+            tuple[str | None, str, Any, Any, Exception | None], payload
+        )
+        self.busy.hide()
+        self.busy.setRange(0, 0)
+        self.cancel_fit_button.hide()
+        self.create_button.setEnabled(True)
+        manager = self.job_manager
+        if isinstance(error, _FitCancelled):
+            if manager is not None and job_id is not None:
+                manager.finish_cancel(job_id)
+            self.status.setText(tr("Create: the section fit was cancelled."))
+            return
+        if error is not None:
+            if manager is not None and job_id is not None:
+                manager.fail(job_id, str(error))
+            self.status.setText(f"Create failed: {error}")
+            return
+        if manager is not None and job_id is not None:
+            manager.succeed(job_id, f"{fit.classification.value} section fit")
+        if self.family_key != "oval_bottle" or self._selected_scan_master_id() != revision_id:
+            self.status.setText(tr("Create: the selection changed during the fit; press Create."))
+            return
+        self._oval_fit = (revision_id, scan_master, fit)
+        self.confirm_shape.setChecked(False)  # the owner confirms the shape shown below
+        self._run("Create", lambda: self._adopt_oval(scan_master, fit))
+
+    def cancel_fit(self) -> None:
+        if self._fit_thread is not None and self._fit_thread.is_alive():
+            self._fit_cancel.set()
+            self.status.setText(tr("Create: cancelling the section fit…"))
+
+    def wait_for_fit(self, timeout: float | None = None) -> None:
+        """Join the fit worker and deliver its queued result (tests)."""
+        if self._fit_thread is not None:
+            self._fit_thread.join(timeout)
+        QCoreApplication.processEvents()
 
     def apply_dimensions(self) -> None:
         design = self.design
@@ -585,6 +731,10 @@ class PackageFamiliesView(QWidget):
             return
         self.export_active = True
         self.export_requested.emit()
+
+
+class _FitCancelled(Exception):
+    """Raised from the fit progress callback when the owner cancels."""
 
 
 def _now() -> str:

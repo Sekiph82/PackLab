@@ -147,3 +147,35 @@ def test_section_outline_is_compatible_and_has_flat_panels() -> None:
         assert x.max() == pytest.approx(a, abs=1e-6) and np.abs(y).max() == pytest.approx(b)
     with pytest.raises(ValueError):
         section_outline(0.0, 1.0, 2.0)
+
+
+def _tilted(cloud: np.ndarray, degrees: float, axis: int) -> np.ndarray:
+    t = math.radians(degrees)
+    c, s = math.cos(t), math.sin(t)
+    rotation = (
+        np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
+        if axis == 0
+        else np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+    )
+    return np.asarray(cloud @ rotation.T)
+
+
+@pytest.mark.parametrize("axis", [0, 1])
+def test_tilted_scan_is_relevelled_to_the_upright_dimensions(axis) -> None:
+    upright = fit_oval_sections(bottle(31.0, 17.0, 2.0))
+    tilted = fit_oval_sections(_tilted(bottle(31.0, 17.0, 2.0), 5.0, axis))
+    assert upright.tilt_deg == pytest.approx(0.0, abs=0.5)
+    assert tilted.tilt_deg == pytest.approx(5.0, abs=0.3)
+    for name in ("width", "depth", "height", "neck_diameter"):
+        assert getattr(tilted, name) == pytest.approx(getattr(upright, name), abs=0.3), name
+    assert tilted.width == pytest.approx(62.0, abs=0.3)
+    assert any("re-levelled" in note for note in tilted.notes)
+    frame = tilted.as_dict()["scan_master_to_design_frame"]
+    rotation = np.asarray(frame["first_rotate_row_major"]).reshape(3, 3)
+    assert rotation @ rotation.T == pytest.approx(np.eye(3), abs=1e-6)
+
+
+def test_strongly_tilted_scan_is_refused() -> None:
+    with pytest.raises(OvalFitRefusal) as leaning:
+        fit_oval_sections(_tilted(bottle(31.0, 17.0, 2.0), 25.0, 0))
+    assert leaning.value.code == "scan_not_upright"

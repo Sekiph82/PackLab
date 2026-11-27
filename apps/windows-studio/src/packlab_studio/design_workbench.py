@@ -102,6 +102,7 @@ from packlab_core.label_metric_surface_binding import (
     disc_binding_options,
     disc_radii,
     map_label_artwork_to_metric_surface,
+    prism_perimeter_path,
 )
 from packlab_core.label_zone import LabelZoneBoundary, LabelZoneKind, create_label_zone
 from packlab_core.label_zone_placement import (
@@ -148,6 +149,10 @@ _HOST_SURFACE = {
     LabelZoneKind.WRAP: "GeomAbs_Cylinder",
     LabelZoneKind.TOP: "GeomAbs_Plane",
 }
+_PRISM_KINDS = frozenset({LabelZoneKind.FRONT, LabelZoneKind.BACK, LabelZoneKind.WRAP})
+# Oval body front/back default: the side arc whose outward normal is within this of +/-Y
+# (about 50 mm along the curve on a 62 x 34 mm oval; the owner can widen it to the ends).
+PRISM_FACING_DEG = 35.0
 _DEFAULT_BOUNDARY = {
     LabelZoneKind.FRONT: LabelZoneBoundary(0.1, 0.15, 0.9, 0.85),
     LabelZoneKind.BACK: LabelZoneBoundary(0.1, 0.15, 0.9, 0.85),
@@ -177,6 +182,11 @@ class DesignModelSession:
     part_name: str
     label_representation: CadBrepRepresentationRevision
     label_preview: CadPreviewMeshRevision
+
+    @property
+    def perimeter_labels(self) -> bool:
+        """Oval / flat bottle loft (PL-0492): front/back/wrap labels follow the body band."""
+        return self.profile is None
 
     @property
     def label_band_snapped(self) -> bool:
@@ -683,6 +693,7 @@ class DesignWorkbench(QObject):
                     "placement_revision_id": entry.placement.revision_id,
                     "metric_binding_revision_id": entry.metric_binding.revision_id,
                     "size_mm_unverified": [width, height],
+                    "mapping_mode": entry.metric_binding.mapping_mode,
                     "disc": _disc_document(entry.metric_binding),
                     "artwork": artwork,
                 }
@@ -731,6 +742,15 @@ class DesignWorkbench(QObject):
                     ),
                     disc_rotation_degrees=float(disc["rotation_degrees"]) if disc else 0.0,
                 )
+                saved_mode = item.get("mapping_mode")
+                if saved_mode and saved_mode != entry.metric_binding.mapping_mode:
+                    # e.g. a flat oval panel label saved before labels followed the curve:
+                    # the same u/v range would mean another size, so it is not re-created.
+                    self.labels.remove(entry)
+                    raise DesignWorkbenchError(
+                        f"saved as {saved_mode}, the model now takes "
+                        f"{entry.metric_binding.mapping_mode}; add the label again"
+                    )
                 artwork = item.get("artwork")
                 if artwork is not None:
                     content = read_artwork(str(artwork["path"]), str(artwork["sha256"]))
@@ -774,6 +794,8 @@ class DesignWorkbench(QObject):
     def suggest_label_zone(self, kind: LabelZoneKind) -> LabelZoneSuggestion:
         """Pick a curvature-safe host region from the exact CAD label-surface analysis."""
         session = self.require_session()
+        if session.perimeter_labels and kind in _PRISM_KINDS:
+            return self._suggest_prism_zone(kind)
         # Front/back panels must face +/-Y (within 5 deg); a wrap goes all the way round.
         slope = 90.0 if kind is LabelZoneKind.WRAP else 5.0
         policy = CadLabelSurfacePolicy(
@@ -816,6 +838,54 @@ class DesignWorkbench(QObject):
 
         candidate = min(candidates, key=rank)
         return LabelZoneSuggestion(kind, analysis, candidate, _DEFAULT_BOUNDARY[kind])
+
+    def _suggest_prism_zone(self, kind: LabelZoneKind) -> LabelZoneSuggestion:
+        """Oval body (PL-0492): anchor on the flat +/-Y body panel, label along the band.
+
+        FRONT/BACK default to the part of the side arc whose surface faces within
+        ``PRISM_FACING_DEG`` of +/-Y; WRAP takes the whole perimeter.
+        """
+        session = self.require_session()
+        facing = LabelZoneKind.BACK if kind is LabelZoneKind.BACK else LabelZoneKind.FRONT
+        policy = CadLabelSurfacePolicy(
+            _TARGET_NORMAL[facing], 5.0, LABEL_MAXIMUM_ABSOLUTE_CURVATURE_PER_MM
+        )
+        analysis = analyze_cad_label_surfaces(session.model, session.label_representation, policy)
+        candidates = [
+            item
+            for item in analysis.candidates
+            if item.surface_type == "GeomAbs_Plane"
+            and item.advisory_classification == "LABEL_SAFE_CANDIDATE"
+        ]
+        if not candidates:
+            raise DesignWorkbenchError(
+                f"No flat body panel facing {'-Y' if facing is LabelZoneKind.BACK else '+Y'} "
+                "to anchor the label on this oval Design Model."
+            )
+
+        def span(item: CadLabelSurfaceCandidate) -> tuple[float, float]:
+            heights = [point[2] for point in item.support_points]
+            return (-round(max(heights) - min(heights), 6), round(item.center[2], 6))
+
+        candidate = min(candidates, key=span)
+        boundary = _DEFAULT_BOUNDARY[LabelZoneKind.WRAP]
+        suggestion = LabelZoneSuggestion(kind, analysis, candidate, boundary)
+        if kind is not LabelZoneKind.WRAP:
+            probe = self._new_entry(
+                suggestion, LabelZoneBoundary(0.0, 0.0, 1.0, 1.0), "studio-user", {}
+            )
+            path, us, _z0, _z1 = prism_perimeter_path(probe.metric_binding)
+            facing_us = [
+                (us[j], us[j + 1])
+                for j in range(len(path) - 1)
+                if _faces_side(path[j], path[j + 1], facing)
+            ]
+            if not facing_us:
+                raise DesignWorkbenchError("The oval body has no side facing the label.")
+            u0, u1 = min(a for a, _ in facing_us), max(b for _, b in facing_us)
+            boundary = LabelZoneBoundary(u0, 0.15, u1, 0.85)
+            suggestion = LabelZoneSuggestion(kind, analysis, candidate, boundary)
+        return suggestion
 
     def add_label_zone(
         self,
@@ -897,6 +967,7 @@ class DesignWorkbench(QObject):
             placement,
             suggestion.analysis,
             suggestion.candidate.analysis_region_id,
+            perimeter_wrap=session.perimeter_labels and suggestion.kind in _PRISM_KINDS,
             **options,
         )
         return LabelZoneEntry(
@@ -1135,6 +1206,16 @@ def _new_directory(folder: Path, stem: str) -> Path:
     raise DesignWorkbenchError("Too many mockup folders in that location.")
 
 
+def _faces_side(a: tuple[float, float], b: tuple[float, float], facing: LabelZoneKind) -> bool:
+    """Outward normal of a clockwise (from +Z) path segment within PRISM_FACING_DEG of
+    +Y (FRONT) or -Y (BACK)."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = math.hypot(dx, dy)
+    normal_y = dx / length  # outward normal of a clockwise segment is (-dy, dx) / length
+    sign = -1.0 if facing is LabelZoneKind.BACK else 1.0
+    return sign * normal_y >= math.cos(math.radians(PRISM_FACING_DEG))
+
+
 def _disc_document(binding: LabelMetricSurfaceBinding) -> dict[str, float] | None:
     """Top label radii in absolute mm (both) and rotation, as saved in a label document."""
     if binding.mapping_mode != "PLANAR_DISC":
@@ -1188,7 +1269,21 @@ def label_preview_points(
     grid_s, grid_t = np.meshgrid(np.linspace(0, 1, columns), np.linspace(0, 1, rows))
     s, t = grid_s.ravel(), grid_t.ravel()
     lift = 0.2
-    if geometry["mode"] == "CYLINDRICAL_WRAP":
+    if geometry["mode"] == "PRISM_PERIMETER_WRAP":
+        path = np.asarray(geometry["path_xy_mm_unverified"], dtype=float)
+        offsets = np.asarray(geometry["path_offset_direction_xy"], dtype=float)
+        path_u = np.asarray(geometry["path_u_normalized"], dtype=float)
+        zone_u = path_u[0] + s * (path_u[-1] - path_u[0])
+        z0 = float(geometry["axial_start_mm_unverified"])
+        z1 = float(geometry["axial_end_mm_unverified"])
+        points = np.column_stack(
+            [
+                np.interp(zone_u, path_u, path[:, 0] + lift * offsets[:, 0]),
+                np.interp(zone_u, path_u, path[:, 1] + lift * offsets[:, 1]),
+                z0 + t * (z1 - z0),
+            ]
+        )
+    elif geometry["mode"] == "CYLINDRICAL_WRAP":
         cx, cy, _cz = (float(v) for v in geometry["center_mm_unverified"])
         radius = float(geometry["radius_mm_unverified"]) + lift
         theta0 = float(geometry["angular_start_radians"])

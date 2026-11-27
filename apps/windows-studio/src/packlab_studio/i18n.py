@@ -605,4 +605,13 @@ TURKISH: dict[str, str] = {
     "Overall height": "Toplam yükseklik",
     "Neck diameter": "Boyun çapı",
     "Owner confirms the detected section shape": "Sahip, algılanan kesit şeklini onaylıyor",
+    "Create: the section fit is still running.": "Oluştur: kesit uydurma hâlâ çalışıyor.",
+    "Create: fitting the oval sections in the background…": (
+        "Oluştur: oval kesitler arka planda uyduruluyor…"
+    ),
+    "Create: the section fit was cancelled.": "Oluştur: kesit uydurma iptal edildi.",
+    "Create: the selection changed during the fit; press Create.": (
+        "Oluştur: uydurma sırasında seçim değişti; Oluştur'a yeniden basın."
+    ),
+    "Create: cancelling the section fit…": "Oluştur: kesit uydurma iptal ediliyor…",
 }

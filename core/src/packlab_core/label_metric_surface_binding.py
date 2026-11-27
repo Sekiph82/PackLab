@@ -25,7 +25,9 @@ from .reconstruction import ScaleState
 LABEL_METRIC_SURFACE_BINDING_CONTRACT = "packlab.label-metric-surface-binding.v1"
 LABEL_DIELINE_CONTRACT = "packlab.label-dieline-revision.v1"
 _TOLERANCE = 1e-7
-MAPPING_MODES = frozenset({"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC"})
+MAPPING_MODES = frozenset(
+    {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC", "PRISM_PERIMETER_WRAP"}
+)
 
 
 class LabelMetricSurfaceBindingError(ValueError):
@@ -237,6 +239,7 @@ def create_label_metric_surface_binding(
     *,
     disc_inner_radius_mm: float | None = None,
     disc_rotation_degrees: float = 0.0,
+    perimeter_wrap: bool = False,
 ) -> LabelMetricSurfaceBinding:
     """Bind one selected analysis region to its exact planar or cylindrical BREP face.
 
@@ -245,6 +248,10 @@ def create_label_metric_surface_binding(
     (side = 2 x face radius); its span sets the label's outer radius. ``disc_inner_radius_mm``
     (default: the face's own hole, 0 for a full disc) makes an annulus and
     ``disc_rotation_degrees`` turns the artwork about +Z. Other kinds refuse both.
+
+    ``perimeter_wrap`` (PL-0492, FRONT/BACK/WRAP): the region is one planar strip of a
+    vertical prism band (a ruled loft between identical polygon sections); the label is
+    developed along the band perimeter in true mm (``PRISM_PERIMETER_WRAP``).
     """
     _validate_inputs(model, representation, placement, analysis)
     zone = placement.label_zone
@@ -273,38 +280,18 @@ def create_label_metric_surface_binding(
         ) from error
     if verified_analysis != analysis:
         raise LabelMetricSurfaceBindingError("label_metric_analysis_revision_stale_or_tampered")
-    try:
-        if cad_shape_geometry_digest(representation.shape_handle) != representation.geometry_sha256:
-            raise LabelMetricSurfaceBindingError("label_metric_brep_digest_mismatch")
-        regions = sample_cad_surface_regions(
-            representation.shape_handle,
-            samples_per_axis=analysis.policy.samples_per_axis,
-            maximum_faces=analysis.policy.maximum_faces,
-            maximum_regions=analysis.policy.maximum_regions,
-            maximum_differential_samples=analysis.policy.maximum_differential_samples,
-        )
-    except CadAdapterError as error:
-        raise LabelMetricSurfaceBindingError("label_metric_exact_brep_analysis_failed") from error
-
-    expected_points = tuple(
-        sorted(set(tuple(round(v, 9) for v in point) for point in candidate.support_points))
+    regions, (surface_type, face) = _anchor_region(
+        representation, analysis, candidate.analysis_region_id
     )
-    matched_faces: list[tuple[str, Any]] = []
-    for region in regions:
-        observed_points = tuple(
-            sorted({tuple(round(v, 9) for v in sample.point) for sample in region.support_points})
-        )
-        if observed_points == expected_points and region._runtime_face is not None:
-            matched_faces.append((region.surface_type, region._runtime_face))
-    distinct_faces: list[tuple[str, Any]] = []
-    for surface_type, face in matched_faces:
-        if not any(face.IsSame(existing) for _, existing in distinct_faces):
-            distinct_faces.append((surface_type, face))
-    if len(distinct_faces) != 1:
-        raise LabelMetricSurfaceBindingError("label_metric_host_surface_resolution_ambiguous")
-    surface_type, face = distinct_faces[0]
 
-    if zone.zone_kind in {LabelZoneKind.FRONT, LabelZoneKind.BACK}:
+    if perimeter_wrap:
+        # The anchor is one planar strip of the prism band; the whole band is the host.
+        if zone.zone_kind not in _PRISM_START:
+            raise LabelMetricSurfaceBindingError("label_metric_zone_kind_unsupported")
+        # FRONT/BACK hosts are the side arc only, so a zone can never pass the narrow ends.
+        width, height, parameters = _prism_perimeter(_region_faces(regions), face, zone.zone_kind)
+        mapping_mode = "PRISM_PERIMETER_WRAP"
+    elif zone.zone_kind in {LabelZoneKind.FRONT, LabelZoneKind.BACK}:
         if surface_type != "GeomAbs_Plane":
             raise LabelMetricSurfaceBindingError("label_metric_planar_host_required")
         width, height, parameters = _planar_rectangle(face, zone.zone_kind)
@@ -362,6 +349,14 @@ def create_label_metric_surface_binding(
             "No bleed or safe margin is included.",
             "No material shrink or manufacturing compensation is included.",
             "No mold, manufacturing, or regulatory authorization is implied.",
+        )
+        + (
+            (
+                "Developed along the Design Model's polygonal section (planar strips); label "
+                "film stretch on the curved oval is not modelled.",
+            )
+            if mapping_mode == "PRISM_PERIMETER_WRAP"
+            else ()
         ),
     )
 
@@ -419,7 +414,7 @@ def create_label_dieline(
             (u1 * w * u_sign, v1 * h),
             (u0 * w * u_sign, v1 * h),
         )
-    elif binding.mapping_mode == "CYLINDRICAL_WRAP":
+    elif binding.mapping_mode in {"CYLINDRICAL_WRAP", "PRISM_PERIMETER_WRAP"}:
         vertices = ((u0 * w, v0 * h), (u1 * w, v0 * h), (u1 * w, v1 * h), (u0 * w, v1 * h))
     elif binding.mapping_mode == "PLANAR_DISC":
         # Square around the disc, centred on the axis; the outline itself is a circle (and
@@ -871,6 +866,237 @@ def _planar_disc(
     )
 
 
+# ------------------------------------------------------------------ prism perimeter (PL-0492)
+# A ruled loft between two identical polygon sections is a vertical prism band of planar
+# strips (the oval / flat bottle body). A label on it is developable: u runs along the
+# section perimeter in true mm (clockwise seen from +Z, i.e. +Y towards +X), v up the band.
+# FRONT spans the -X .. +X side through +Y, BACK the +X .. -X side through -Y, WRAP the
+# whole loop from its +Y point.
+_PRISM_START = {LabelZoneKind.FRONT: "-X", LabelZoneKind.BACK: "+X", LabelZoneKind.WRAP: "+Y"}
+_PRISM_END = {LabelZoneKind.FRONT: "+X", LabelZoneKind.BACK: "-X", LabelZoneKind.WRAP: "+Y"}
+_PRISM_PLANARITY_MM = 1e-6
+
+
+def _vertical_strip(
+    face: Any, modules: dict[str, Any]
+) -> tuple[tuple[float, float], tuple[float, float], float, float] | None:
+    """(bottom a, bottom b, z_low, z_high) of a vertical planar quad face, else None."""
+    topods = modules["topods"].TopoDS
+    brep = importlib.import_module("OCP.BRep").BRep_Tool
+    points: list[tuple[float, float, float]] = []
+    for vertex in _explore(
+        face, modules["topabs"].TopAbs_VERTEX, modules["topexp"].TopExp_Explorer
+    ):
+        p = brep.Pnt_s(topods.Vertex(vertex))
+        xyz = (float(p.X()), float(p.Y()), float(p.Z()))
+        if not any(_points_close(xyz, existing) for existing in points):
+            points.append(xyz)
+    if len(points) != 4:
+        return None
+    zs = sorted(point[2] for point in points)
+    low, high = zs[0], zs[3]
+    if high - low <= _TOLERANCE or zs[1] - low > _TOLERANCE or high - zs[2] > _TOLERANCE:
+        return None
+    bottom = sorted((p[0], p[1]) for p in points if p[2] - low <= _TOLERANCE)
+    top = sorted((p[0], p[1]) for p in points if high - p[2] <= _TOLERANCE)
+    if len(bottom) != 2 or len(top) != 2:
+        return None
+    if any(math.dist(b, t) > _TOLERANCE for b, t in zip(bottom, top, strict=True)):
+        return None
+    (ax, ay), (bx, by) = bottom
+    length = math.hypot(bx - ax, by - ay)
+    if length <= _TOLERANCE:
+        return None
+    nx, ny = -(by - ay) / length, (bx - ax) / length
+    adaptor = modules["adaptor"].BRepAdaptor_Surface(face, True)
+    u0, u1, v0, v1 = (float(value) for value in modules["tools"].BRepTools.UVBounds_s(face))
+    for s in (0.0, 0.5, 1.0):
+        for t in (0.0, 0.5, 1.0):
+            p = adaptor.Value(u0 + s * (u1 - u0), v0 + t * (v1 - v0))
+            x, y, z = float(p.X()), float(p.Y()), float(p.Z())
+            if (
+                abs(nx * (x - ax) + ny * (y - ay)) > _PRISM_PLANARITY_MM
+                or not low - _PRISM_PLANARITY_MM <= z <= high + _PRISM_PLANARITY_MM
+            ):
+                return None
+    return bottom[0], bottom[1], low, high
+
+
+def _closed_loop(
+    segments: list[tuple[tuple[float, float], tuple[float, float]]],
+) -> list[tuple[float, float]]:
+    """Chain undirected segments into one closed polygon or refuse."""
+    remaining = segments[1:]
+    loop = [segments[0][0], segments[0][1]]
+    while remaining:
+        end = loop[-1]
+        index = next(
+            (
+                i
+                for i, (a, b) in enumerate(remaining)
+                if math.dist(a, end) <= _TOLERANCE or math.dist(b, end) <= _TOLERANCE
+            ),
+            None,
+        )
+        if index is None:
+            raise LabelMetricSurfaceBindingError("label_metric_prism_band_not_closed")
+        a, b = remaining.pop(index)
+        loop.append(b if math.dist(a, end) <= _TOLERANCE else a)
+    if math.dist(loop[0], loop[-1]) > _TOLERANCE or len(loop) < 4:
+        raise LabelMetricSurfaceBindingError("label_metric_prism_band_not_closed")
+    return loop[:-1]
+
+
+def _loop_point(loop: list[tuple[float, float]], side: str) -> tuple[int, float]:
+    """(edge index, t) where the loop meets its +/-X or +/-Y extreme on the bbox mid-line."""
+    xs, ys = [p[0] for p in loop], [p[1] for p in loop]
+    axis = 0 if side[1] == "Y" else 1  # +/-Y: on the line x = cx; +/-X: on y = cy
+    line = (min(xs) + max(xs)) / 2 if axis == 0 else (min(ys) + max(ys)) / 2
+    hits = []
+    for index, a in enumerate(loop):
+        b = loop[(index + 1) % len(loop)]
+        da, db = a[axis] - line, b[axis] - line
+        if da * db <= 0.0 and a[axis] != b[axis]:
+            t = da / (da - db)
+            hits.append((a[1 - axis] + t * (b[1 - axis] - a[1 - axis]), index, t))
+    if not hits:
+        raise LabelMetricSurfaceBindingError("label_metric_prism_band_degenerate")
+    _value, index, t = max(hits) if side[0] == "+" else min(hits)
+    return index, t
+
+
+def _prism_perimeter(
+    faces: list[Any], anchor: Any, zone_kind: LabelZoneKind
+) -> tuple[float, float, tuple[tuple[str, float | str], ...]]:
+    if zone_kind not in _PRISM_START:
+        raise LabelMetricSurfaceBindingError("label_metric_zone_kind_unsupported")
+    modules = _ocp_modules()
+    strip = _vertical_strip(anchor, modules)
+    if strip is None:
+        raise LabelMetricSurfaceBindingError("label_metric_prism_anchor_not_vertical_strip")
+    low, high = strip[2], strip[3]
+    segments = []
+    for face in faces:
+        item = _vertical_strip(face, modules)
+        if (
+            item is not None
+            and abs(item[2] - low) <= _TOLERANCE
+            and abs(item[3] - high) <= (_TOLERANCE)
+        ):
+            segments.append((item[0], item[1]))
+    loop = _closed_loop(segments)
+    if _signed_area(tuple(loop)) > 0.0:
+        loop.reverse()  # clockwise from +Z: +Y towards +X, like the cylindrical wrap
+    count = len(loop)
+
+    def at(index: int, t: float) -> tuple[float, float]:
+        a, b = loop[index % count], loop[(index + 1) % count]
+        return (a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1]))
+
+    start_edge, start_t = _loop_point(loop, _PRISM_START[zone_kind])
+    path = [at(start_edge, start_t)]
+    if zone_kind is LabelZoneKind.WRAP:
+        path += [loop[(start_edge + k) % count] for k in range(1, count + 1)] + [path[0]]
+    else:
+        end_edge, end_t = _loop_point(loop, _PRISM_END[zone_kind])
+        steps = (end_edge - start_edge) % count
+        if steps == 0 and end_t <= start_t:
+            raise LabelMetricSurfaceBindingError("label_metric_prism_band_degenerate")
+        path += [loop[(start_edge + k) % count] for k in range(1, steps + 1)]
+        path.append(at(end_edge, end_t))
+    path = [p for i, p in enumerate(path) if i == 0 or math.dist(p, path[i - 1]) > _TOLERANCE]
+    width = sum(math.dist(a, b) for a, b in zip(path, path[1:]))
+    if width <= _TOLERANCE:
+        raise LabelMetricSurfaceBindingError("label_metric_prism_band_degenerate")
+    return (
+        width,
+        high - low,
+        (
+            ("frame", "PACKLAB_PRISM_PERIMETER"),
+            ("orientation", zone_kind.value),
+            ("path_direction", "CLOCKWISE_FROM_PLUS_Z"),
+            ("path_start", _PRISM_START[zone_kind]),
+            ("axial_start_mm_unverified", low),
+            ("axial_end_mm_unverified", high),
+            ("band_face_count", float(len(segments))),
+            ("path_xy_mm_unverified", json.dumps([[round(x, 9), round(y, 9)] for x, y in path])),
+        ),
+    )
+
+
+def prism_perimeter_path(
+    binding: LabelMetricSurfaceBinding,
+) -> tuple[tuple[tuple[float, float], ...], tuple[float, ...], float, float]:
+    """(path points, cumulative u in 0..1 per point, z_low, z_high) of a prism binding."""
+    if binding.mapping_mode != "PRISM_PERIMETER_WRAP":
+        raise LabelMetricSurfaceBindingError("label_metric_prism_binding_required")
+    parameters = dict(binding.mapping_parameters)
+    path = tuple(
+        (float(x), float(y)) for x, y in json.loads(str(parameters["path_xy_mm_unverified"]))
+    )
+    lengths = [0.0]
+    for a, b in zip(path, path[1:]):
+        lengths.append(lengths[-1] + math.dist(a, b))
+    return (
+        path,
+        tuple(value / lengths[-1] for value in lengths),
+        float(parameters["axial_start_mm_unverified"]),
+        float(parameters["axial_end_mm_unverified"]),
+    )
+
+
+def _region_faces(regions: Any) -> list[Any]:
+    faces: list[Any] = []
+    for region in regions:
+        face = region._runtime_face
+        if face is not None and not any(face.IsSame(existing) for existing in faces):
+            faces.append(face)
+    return faces
+
+
+def _anchor_region(
+    representation: CadBrepRepresentationRevision,
+    analysis: CadLabelSurfaceAnalysis,
+    analysis_region_id: str,
+) -> tuple[Any, tuple[str, Any]]:
+    candidate = next(
+        (item for item in analysis.candidates if item.analysis_region_id == analysis_region_id),
+        None,
+    )
+    if candidate is None:
+        raise LabelMetricSurfaceBindingError("label_metric_analysis_region_not_found")
+    try:
+        if cad_shape_geometry_digest(representation.shape_handle) != representation.geometry_sha256:
+            raise LabelMetricSurfaceBindingError("label_metric_brep_digest_mismatch")
+        regions = sample_cad_surface_regions(
+            representation.shape_handle,
+            samples_per_axis=analysis.policy.samples_per_axis,
+            maximum_faces=analysis.policy.maximum_faces,
+            maximum_regions=analysis.policy.maximum_regions,
+            maximum_differential_samples=analysis.policy.maximum_differential_samples,
+        )
+    except CadAdapterError as error:
+        raise LabelMetricSurfaceBindingError("label_metric_exact_brep_analysis_failed") from error
+    expected_points = tuple(
+        sorted(set(tuple(round(v, 9) for v in point) for point in candidate.support_points))
+    )
+    distinct_faces: list[tuple[str, Any]] = []
+    for region in regions:
+        observed_points = tuple(
+            sorted({tuple(round(v, 9) for v in sample.point) for sample in region.support_points})
+        )
+        face = region._runtime_face
+        if (
+            observed_points == expected_points
+            and face is not None
+            and not any(face.IsSame(existing) for _, existing in distinct_faces)
+        ):
+            distinct_faces.append((region.surface_type, face))
+    if len(distinct_faces) != 1:
+        raise LabelMetricSurfaceBindingError("label_metric_host_surface_resolution_ambiguous")
+    return regions, distinct_faces[0]
+
+
 def _ocp_modules() -> dict[str, Any]:
     return {
         "adaptor": importlib.import_module("OCP.BRepAdaptor"),
@@ -1021,4 +1247,5 @@ __all__ = [
     "create_label_metric_surface_binding",
     "disc_binding_options",
     "disc_radii",
+    "prism_perimeter_path",
 ]
