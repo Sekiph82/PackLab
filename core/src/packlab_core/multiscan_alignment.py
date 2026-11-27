@@ -11,8 +11,9 @@ such as a closure recess are seen by one scan only and are never compared).
 
 Registration to the reference (first) scan: 180 degree flip about a horizontal axis from the
 PL-0482 role (both poses when unknown), height fixed by mat contact (flipped: mat side ->
-the top height either scan measured), yaw sweep with yaw + in-plane ICP (label colour decides
-between yaws the wall fits equally, e.g. a flat oval turned 180 degrees), then damped tilt + yaw + in-plane
+the top height either scan measured), yaw sweep with yaw + in-plane ICP (the printed label's
+lighting-normalised texture decides, only when significant, between yaws the wall fits
+equally, e.g. a flat oval turned 180 degrees), then damped tilt + yaw + in-plane
 point-to-plane ICP bounded by ``max_refine_deg`` / ``max_refine_mm`` (height stays on the mat
 contact, which side walls cannot observe). Poses are ranked by a symmetric score: the worst 5 mm
 side-wall slice coverage over both directions (no raw one-way inlier share). With an unknown
@@ -129,7 +130,7 @@ class _Pose:
     coverage: float
     rmse: float
     yaw_uncertainty: float = float("inf")  # degrees, from the fine coverage scan
-    colour_resolved: bool = False  # label colour picked this yaw over a geometric twin
+    colour_resolved: bool = False  # label texture picked this yaw over a geometric twin
 
 
 def _apply(matrix: np.ndarray, points: np.ndarray) -> np.ndarray:
@@ -347,6 +348,7 @@ def _object_on_mat(
 
 
 GLARE_HEIGHT_MM = 6.0  # mat glare / shadow halos MVS lifts off the mat stay below this
+FOOT_FLARE_MM = 10.0  # widest foot flare (beyond the wall above) kept under GLARE_HEIGHT_MM
 
 
 def _mat_halo(points: np.ndarray, colors: np.ndarray | None, spacing: float) -> np.ndarray:
@@ -354,11 +356,12 @@ def _mat_halo(points: np.ndarray, colors: np.ndarray | None, spacing: float) -> 
     that MVS lifts a few mm and DBSCAN joins to the part: a 97 mm skirt under a 57 mm bottle in
     real scans). Halo = below ``GLARE_HEIGHT_MM``, over max(3 mm, 3 spacings) beyond the outline
     of the part's own section just above (per 10 degree azimuth; a floor or recess inside the
-    outline stays), and glare-white (every channel >= 0.6, grey within 0.15) when colours
-    are given (the printed mat itself is darker: median ~0.56 on the owner's scans).
+    outline stays), glare-white (every channel >= 0.6, grey within 0.15) when colours are
+    given (the printed mat itself is darker: median ~0.56 on the owner's scans), and lying as a
+    low layer not rising to the section above (a flared foot's wall does, so it stays).
 
-    ponytail: a real white foot flaring out under 6 mm is cut too; it stays in the other scan's
-    side wall, which is what the comparison needs.
+    ponytail: a foot under 4 mm tall, flaring over FOOT_FLARE_MM, or sampled under 4 points
+    per 10 degrees at its top, is cut like glare; the section check then refuses (fail-safe, never a wrong accept).
     """
 
     low = points[:, 2] < GLARE_HEIGHT_MM
@@ -377,7 +380,22 @@ def _mat_halo(points: np.ndarray, colors: np.ndarray | None, spacing: float) -> 
     for k in np.unique(bins):
         outline[k] = np.percentile(radius[bins == k], 98)
     bins, radius = polar(points[low, :2])
-    halo = radius > outline[bins] + max(3.0, 3.0 * spacing)
+    beyond = radius - outline[bins]
+    halo = beyond > max(3.0, 3.0 * spacing)
+    # A foot wall rises to the section above; glare thins out with height (owner's scans:
+    # 84 of ~600 glare points above 4 mm, scattered or in blobs 26-37 mm out). Per bin, a
+    # coherent wall top = 4+ points above GLARE_HEIGHT_MM - 2 within 1.5 mm of their median
+    # outward reach, at most FOOT_FLARE_MM out; within it stays (foot wall and ledge), beyond
+    # it is halo.
+    top = points[low, 2] >= GLARE_HEIGHT_MM - 2
+    for k in np.unique(bins[halo]):
+        member = halo & (bins == k)
+        upper = beyond[member & top]
+        if len(upper) < 4:
+            continue
+        reach = float(np.median(upper))
+        if reach <= FOOT_FLARE_MM and (np.abs(upper - reach) <= 1.5).sum() >= 4:
+            halo[member & (beyond <= reach + 1.5)] = False
     if colors is not None:
         tone = colors[low]
         halo &= (tone.min(axis=1) >= 0.6) & (np.ptp(tone, axis=1) <= 0.15)
@@ -616,49 +634,144 @@ def _pose_for_flip(
     return _yaw_sweep_fine(source, target, query, best, limits)
 
 
-COLOUR_MARGIN = 0.2  # luminance correlation gap that picks one yaw over its geometric twin
+TEXTURE_AZIMUTH_BINS = 180  # 2 degree columns of the unrolled side wall
+TEXTURE_Z_MM = 2.0
+TEXTURE_MIN_ENERGY = 0.05  # std of high-passed log luminance: about 5 % print contrast
+TEXTURE_PEAK_SIGMA = 6.0  # chosen yaw above the shift-search sidelobes, in their std
+TEXTURE_MARGIN_SIGMA = 4.0  # chosen yaw above every geometric twin, in sidelobe std
+TEXTURE_MIN_MARGIN = 0.1  # ... and at least this much correlation
 
 
-def _colour_agreement(
+def _box(values: np.ndarray, reach_az: int, reach_z: int) -> np.ndarray:
+    """Box sum over +-reach cells; azimuth (axis 0) wraps, height (axis 1) is cut at the ends."""
+
+    wrapped = np.concatenate([values[-reach_az:], values, values[:reach_az]], axis=0)
+    total = np.cumsum(np.pad(wrapped, ((1, 0), (0, 0))), axis=0)
+    rows = total[2 * reach_az + 1 :] - total[: -2 * reach_az - 1]
+    total = np.cumsum(np.pad(rows, ((0, 0), (1, 0))), axis=1)
+    upper = np.minimum(np.arange(rows.shape[1]) + reach_z + 1, rows.shape[1])
+    lower = np.maximum(np.arange(rows.shape[1]) - reach_z, 0)
+    return np.asarray(total[:, upper] - total[:, lower])
+
+
+def _texture_map(
+    points: np.ndarray, colors: np.ndarray, centre: np.ndarray, edges: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """High-passed log luminance on the unrolled side wall (azimuth x height cells) and its
+    mask. The log turns lighting (gain over the wall: one side lit) into an offset; the
+    10 degree x 6 mm high-pass and removing column and row means take it out, leaving the
+    print; the correlation's normalisation removes exposure. ponytail: assumes shading varies slower than the print; glossy highlights that
+    move with the camera are not modelled."""
+
+    rel = points[:, :2] - centre
+    column = (np.arctan2(rel[:, 1], rel[:, 0]) + np.pi) / (2 * np.pi) * TEXTURE_AZIMUTH_BINS
+    column = column.astype(int) % TEXTURE_AZIMUTH_BINS
+    row = np.searchsorted(edges, points[:, 2]) - 1
+    use = (row >= 0) & (row < len(edges) - 1)
+    shape = (TEXTURE_AZIMUTH_BINS, len(edges) - 1)
+    total, count = np.zeros(shape), np.zeros(shape)
+    np.add.at(total, (column[use], row[use]), np.log(colors[use].mean(axis=1) + 0.02))
+    np.add.at(count, (column[use], row[use]), 1.0)
+    mask = count > 0
+    mean = np.where(mask, total / np.maximum(count, 1), 0.0)
+    smooth = _box(mean, 5, 3) / np.maximum(_box(mask.astype(float), 5, 3), 1)
+    texture = np.where(mask, mean - smooth, 0.0)
+    # Remove what varies along one axis only: directional light on a wall shades whole columns
+    # (azimuth) and a light above shades whole rows; print changes along both.
+    for axis in (1, 0):
+        held = np.maximum(mask.sum(axis=axis, keepdims=True), 1)
+        texture = np.where(mask, texture - texture.sum(axis=axis, keepdims=True) / held, 0.0)
+    return texture, mask
+
+
+def _texture_curve(
     source: _Part, matrix: np.ndarray, target: _Part, limits: AlignmentThresholds
-) -> float:
-    """Luminance correlation of points within ``max_distance_mm`` of the other scan (NaN when
-    either side is uncoloured or flat-toned). Robust to the two scans' different exposure."""
+) -> np.ndarray | None:
+    """Normalised cross-correlation of the two walls' print textures for every 2 degree yaw
+    shift of ``source`` (moved by ``matrix``) about the reference axis; None without colour or
+    without print (texture energy under ``TEXTURE_MIN_ENERGY``: plain or only shaded walls)."""
 
     if source.colors is None or target.colors is None:
-        return float("nan")
-    found, distance = _nearest(target.points)(_apply(matrix, source.points))
-    near = distance[:, 0] < limits.max_distance_mm
-    if near.sum() < 100:
-        return float("nan")
-    mine, theirs = source.colors[near].mean(axis=1), target.colors[found[near, 0]].mean(axis=1)
-    if mine.std() < 1e-3 or theirs.std() < 1e-3:
-        return float("nan")
-    return float(np.corrcoef(mine, theirs)[0, 1])
+        return None
+    centre = _centre(target.shell)
+    moved = _apply(matrix, source.points)
+    lo = max(np.percentile(moved[:, 2], 1), np.percentile(target.points[:, 2], 1)) + 2
+    hi = min(np.percentile(moved[:, 2], 99), np.percentile(target.points[:, 2], 99)) - 2
+    if hi - lo < 6 * TEXTURE_Z_MM:
+        return None
+    edges = np.arange(lo, hi, TEXTURE_Z_MM)
+    radius = float(np.median(np.linalg.norm(target.shell[:, :2] - centre, axis=1)))
+
+    def wall(points: np.ndarray, colors: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        outer = np.linalg.norm(points[:, :2] - centre, axis=1) > 0.6 * radius
+        return _texture_map(points[outer], colors[outer], centre, edges)
+
+    mine, seen = wall(target.points, target.colors)
+    theirs, held = wall(moved, source.colors)
+    for texture, mask in ((mine, seen), (theirs, held)):
+        if mask.sum() < 100 or texture[mask].std() < TEXTURE_MIN_ENERGY:
+            return None
+    curve = np.full(TEXTURE_AZIMUTH_BINS, np.nan)
+    for shift in range(TEXTURE_AZIMUTH_BINS):
+        both = seen & np.roll(held, shift, axis=0)
+        if both.sum() < 100:
+            continue
+        a, b = mine[both], np.roll(theirs, shift, axis=0)[both]
+        a, b = a - a.mean(), b - b.mean()
+        curve[shift] = float(a @ b / max(np.sqrt((a @ a) * (b @ b)), 1e-12))
+    return curve
 
 
 def _colour_yaw(
     source: _Part, target: _Part, coarse: list[_Pose], limits: AlignmentThresholds
 ) -> _Pose:
-    """Best coarse pose; label colour decides between yaws the wall fits about equally well
-    (a flat-oval bottle fits its own shape turned 180 degrees: front and back label swap).
+    """Best coarse pose; the printed label decides between yaws the wall fits about equally
+    well (a flat-oval bottle fits its own shape turned 180 degrees: front and back swap).
 
-    The colour pick is used only when it beats every geometric twin over 20 degrees away by
-    ``COLOUR_MARGIN``; otherwise the geometric best stands and the gate judges yaw as before.
+    Texture shift search (``_texture_curve``) from the geometric best: the twin a label picks
+    must stand ``TEXTURE_PEAK_SIGMA`` sidelobe std above the shifts no twin explains and beat
+    every other twin over 20 degrees away by max(``TEXTURE_MIN_MARGIN``,
+    ``TEXTURE_MARGIN_SIGMA`` sidelobe std). Anything less (plain, shaded only, upside-down
+    label from a wrong role) leaves the geometric best, and the gate refuses its yaw.
     """
 
     best = max(coarse, key=lambda pose: (pose.coverage, -pose.rmse))
     twins = [pose for pose in coarse if pose.coverage >= best.coverage - 0.05]
-    scores = [_colour_agreement(source, pose.matrix, target, limits) for pose in twins]
-    if np.isnan(scores).any():
+    turns = [
+        float(np.degrees(np.arctan2(*(pose.matrix[:3, :3] @ best.matrix[:3, :3].T)[[1, 0], 0])))
+        for pose in twins
+    ]
+    if all(min(abs(t), 360 - abs(t)) <= 20 for t in turns):
+        return best  # no geometric twin: the gate judges the yaw from the wall alone
+    curve = _texture_curve(source, best.matrix, target, limits)
+    if curve is None:
         return best
+    step = 360 / TEXTURE_AZIMUTH_BINS
+    shifts = np.array([round(t / step) % TEXTURE_AZIMUTH_BINS for t in turns])
+    index = np.arange(TEXTURE_AZIMUTH_BINS)
+    near = np.zeros(TEXTURE_AZIMUTH_BINS, dtype=bool)
+    scores = []
+    for shift in shifts:
+        gap = np.minimum(abs(index - shift), TEXTURE_AZIMUTH_BINS - abs(index - shift))
+        near |= gap <= 10 / step
+        window = curve[gap <= 1]
+        scores.append(float(np.nanmax(window)) if np.isfinite(window).any() else -1.0)
+    side = curve[~near & np.isfinite(curve)]
+    if len(side) < 20:
+        return best
+    sigma, centre = float(side.std()), float(side.mean())
     pick = int(np.argmax(scores))
     rivals = [
         score
-        for pose, score in zip(twins, scores, strict=True)
-        if _angle_deg(pose.matrix[:3, :3] @ twins[pick].matrix[:3, :3].T) > 20
+        for turn, score in zip(turns, scores, strict=True)
+        if min(abs(turn - turns[pick]) % 360, 360 - abs(turn - turns[pick]) % 360) > 20
     ]
-    if rivals and scores[pick] - max(rivals) >= COLOUR_MARGIN:
+    margin = max(TEXTURE_MIN_MARGIN, TEXTURE_MARGIN_SIGMA * sigma)
+    if (
+        rivals
+        and scores[pick] >= centre + TEXTURE_PEAK_SIGMA * sigma
+        and scores[pick] - max(rivals) >= margin
+    ):
         return replace(twins[pick], colour_resolved=True)
     return best
 
@@ -894,7 +1007,7 @@ def _yaw_unique(
     Mismatch = summed |radius difference| over signature cells both scans observe (clipped at 3
     tolerances). Every yaw at least 20 degrees away must cost more than both two full-tolerance
     cells and four noise sigmas of that sum; symmetric or under-sampled walls fail this.
-    ``colour_resolved``: the label colour already beat the half turn (an oval's geometric twin),
+    ``colour_resolved``: the label texture already beat the half turn (an oval's geometric twin),
     so yaws within 20 degrees of 180 are not rivals.
     """
 

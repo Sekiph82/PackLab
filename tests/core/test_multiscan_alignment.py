@@ -472,18 +472,40 @@ def oval(rng, a=31.5, b=17.0, h=100.0):
     return h, {"side": np.c_[a * np.cos(t), b * np.sin(t), z], "top": disc(h), "bottom": disc(0)}
 
 
+_PRINT = np.random.default_rng(2026).random((72, 40)) > 0.55  # text-like 5 deg x 3 mm blocks
+
+
 def label(points):
-    """Printed front (+y) with stripes, plain back: luminance differs front to back."""
-    stripes = (points[:, 1] > 0) & (np.sin(points[:, 2] / 3.0) > 0)
-    lum = np.where(stripes, 0.85, 0.3)
+    """Printed label all round: dark text blocks on a light purple ground (no period)."""
+    angle = np.degrees(np.arctan2(points[:, 1] / 17.0, points[:, 0] / 31.5)) % 360
+    ink = _PRINT[(angle // 5).astype(int) % 72, np.clip(points[:, 2] // 3, 0, 39).astype(int)]
+    lum = np.where(ink, 0.25, 0.85)
     return np.c_[lum * 0.6, lum * 0.5, lum]
 
 
-def test_oval_bottle_yaw_resolved_by_label_colour():
+def plain(points):
+    return np.tile([0.5, 0.4, 0.6], (len(points), 1))
+
+
+def shaded(paint, light, k):
+    """One side lit (``k`` = 0..1 brightness drop away from azimuth ``light``, object frame)."""
+
+    def colours(points):
+        azimuth = np.arctan2(points[:, 1] / 17.0, points[:, 0] / 31.5)
+        return np.clip(paint(points) * (1 - k + k * np.cos(azimuth - light))[:, None], 0, 1)
+
+    return colours
+
+
+# A smooth ideal ellipse keeps wall coverage flat over about +-6 degrees of yaw, so these
+# proxies use an 8 degree probe. Production keeps ``yaw_probe_deg`` = 5: the real bottle
+# pinned 3.5 degrees, and a smooth oval at 5 is refused (yaw undetermined), never mis-yawed.
+OVAL = AlignmentThresholds(yaw_probe_deg=8.0)
+
+
+def test_oval_bottle_yaw_resolved_by_label_texture():
     (up, t_up), (fl, t_fl) = scan(oval, False, 1, paint=label), scan(oval, True, 2, paint=label)
-    # A smooth ideal ellipse keeps wall coverage flat over about +-6 degrees of yaw (the real
-    # bottle measured 3.5), so the probe is widened here; the 180 degree twin is the subject.
-    result = align_part_pair(up, fl, AlignmentThresholds(yaw_probe_deg=8.0))
+    result = align_part_pair(up, fl, OVAL)
     _assert_recovered(result, (t_up, t_fl))
     assert result.alignments[1].yaw_determined
 
@@ -491,9 +513,33 @@ def test_oval_bottle_yaw_resolved_by_label_colour():
 def test_oval_bottle_without_label_refuses_yaw_twin():
     """Same oval, flat colour: front and back are indistinguishable, so no guessed yaw."""
     with pytest.raises(MultiScanAlignmentError, match="yaw undetermined"):
-        align_part_pair(
-            scan(oval, False, 1)[0], scan(oval, True, 2)[0], AlignmentThresholds(yaw_probe_deg=8.0)
-        )
+        align_part_pair(scan(oval, False, 1)[0], scan(oval, True, 2)[0], OVAL)
+
+
+@pytest.mark.parametrize("k", [0.1, 0.3, 0.5, 0.7])
+@pytest.mark.parametrize("paint", [plain, label], ids=["plain", "label"])
+def test_one_sided_lighting_never_yields_a_wrong_yaw(paint, k):
+    """Lit front in one scan, lit back in the other: shading must not pick the yaw. A plain
+    oval is refused; a labelled one is aligned right or refused, never turned 180 degrees."""
+    for seed in (1, 3):
+        (up, t_up) = scan(oval, False, seed, paint=shaded(paint, 0.0, k))
+        (fl, t_fl) = scan(oval, True, seed + 100, paint=shaded(paint, np.pi, k))
+        try:
+            result = align_part_pair(up, fl, OVAL)
+        except MultiScanAlignmentError as error:
+            assert "yaw undetermined" in str(error)
+            continue
+        assert paint is label, "a plain oval must never get a yaw"
+        _assert_recovered(result, (t_up, t_fl))
+
+
+def test_wrong_role_labelled_oval_refused():
+    """The oval also fits itself upside down; the label then reads upside down, so neither
+    the geometry nor the print may accept the wrong role."""
+    up = scan(oval, False, 1, paint=label)[0]
+    fl = scan(oval, True, 2, paint=label, role="wrong")[0]
+    with pytest.raises(MultiScanAlignmentError):
+        align_scans([up, fl], OVAL)
 
 
 def test_oval_scale_error_refused_by_section_shape():
@@ -512,6 +558,28 @@ def test_white_glare_halo_on_mat_is_not_part_of_the_object():
     low = part.points[part.points[:, 2] < 6]
     centre = np.median(part.points[part.points[:, 2] > 20, :2], axis=0)
     assert np.linalg.norm(low[:, :2] - centre, axis=1).max() < 47  # r 40 (+ 4 mm boss foot)
+    _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
+
+
+def flared(rng):
+    """Body whose white foot flares 5 mm out below 5 mm (petaloid / skirt base)."""
+    height, faces = body(rng)
+    faces["side"] = np.r_[faces["side"], _cyl(rng, 45, 0, 5), _disc(rng, 40, 45, 5)]
+    faces["bottom"] = _disc(rng, 0, 45, 0)
+    return height, faces
+
+
+def white(points):
+    return np.full((len(points), 3), 0.92)
+
+
+def test_white_flared_foot_is_kept_not_cut_as_glare():
+    up, t_up = scan(flared, False, 1, paint=white, halo=True)
+    fl, t_fl = scan(flared, True, 2, paint=white, halo=True)
+    part = prepare_scan(up, AlignmentThresholds())
+    centre = np.median(part.points[part.points[:, 2] > 20, :2], axis=0)
+    radius = np.linalg.norm(part.points[:, :2] - centre, axis=1)
+    assert ((part.points[:, 2] < 5) & (radius > 44)).sum() > 100  # the foot wall stays
     _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
 
 
