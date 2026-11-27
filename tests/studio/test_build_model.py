@@ -377,24 +377,25 @@ def test_command_plan_fixes_colmap_seeds_and_mapper_threads(monkeypatch, tmp_pat
         return args[args.index(name) + 1]
 
     assert option("feature-extraction", "--default_random_seed") == "0"
-    assert option("feature-extraction", "--FeatureExtraction.num_threads") == "1"
+    threads = str(build_model.worker_threads(1))
+    assert option("feature-extraction", "--FeatureExtraction.num_threads") == threads
+    assert option("matching", "--FeatureMatching.num_threads") == threads
     assert option("matching", "--TwoViewGeometry.random_seed") == "0"
     assert option("sparse-mapping", "--Mapper.random_seed") == "0"
     assert option("sparse-mapping", "--Mapper.num_threads") == "1"
 
 
-def _second_package(path: Path, repo_root: Path) -> Path:
+def _second_package(path: Path, repo_root: Path, number: int = 2) -> Path:
     manifest = json.loads(
         (repo_root / "tests/fixtures/packscan/manifest-valid.json").read_text(encoding="utf-8")
     )
-    manifest["capture_id"] = "second-capture"
-    manifest["payloads"][0]["size_bytes"] = 4
-    manifest["payloads"][0]["sha256"] = hashlib.sha256(b"IMG2").hexdigest()
+    image = f"IMG{number}".encode()
+    manifest["capture_id"] = f"capture-{number}"
+    manifest["payloads"][0]["size_bytes"] = len(image)
+    manifest["payloads"][0]["sha256"] = hashlib.sha256(image).hexdigest()
     manifest["payloads"][1]["size_bytes"] = 2
     manifest["payloads"][1]["sha256"] = hashlib.sha256(b"{}").hexdigest()
-    return write_packscan(
-        path, manifest, {"images/0001.jpg": b"IMG2", "metadata/photos.json": b"{}"}
-    )
+    return write_packscan(path, manifest, {"images/0001.jpg": image, "metadata/photos.json": b"{}"})
 
 
 def test_existing_scans_never_auto_build_at_startup_with_auto_on(
@@ -437,35 +438,140 @@ def test_unreadable_index_at_startup_fails_closed(monkeypatch, tmp_path, repo_ro
         app.processEvents()
 
 
-def test_builds_run_one_at_a_time_and_duplicates_are_ignored(
+def test_builds_run_up_to_the_limit_in_order_and_duplicates_are_ignored(
     monkeypatch, tmp_path, repo_root
 ) -> None:
-    first = _package(tmp_path / "first.packscan", repo_root)
-    second = _second_package(tmp_path / "second.packscan", repo_root)
+    packages = [
+        _package(tmp_path / "first.packscan", repo_root),
+        _second_package(tmp_path / "second.packscan", repo_root),
+        _second_package(tmp_path / "third.packscan", repo_root, 3),
+    ]
     gate = threading.Event()
     app, window, inbox, _builds = _window(monkeypatch, tmp_path, FakeBackend(provenance_gate=gate))
     try:
-        _import(inbox, first)
+        settings = window.route_stack.views[Route.SETTINGS]
+        assert isinstance(settings, SettingsView)
+        assert settings.concurrent_builds.value() == 2 == window.build_model.max_concurrent
+        _import(inbox, packages[0])
         first_job = window.job_manager.jobs()[0].job_id
-        digest = hashlib.sha256(first.read_bytes()).hexdigest()
+        digest = hashlib.sha256(packages[0].read_bytes()).hexdigest()
         assert window.start_build("loopback-capture", digest) == first_job  # duplicate
-        _import(inbox, second)
-        jobs = window.job_manager.jobs()
-        assert len(jobs) == 2
-        second_job = jobs[1].job_id
-        assert window.build_model._running == first_job
-        assert window.job_manager.get(second_job).state is JobState.QUEUED
+        for package in packages[1:]:
+            _import(inbox, package)
+        jobs = [job.job_id for job in window.job_manager.jobs()]
+        assert len(jobs) == 3
+        # Two run at once (separate scans, separate workspaces); the third waits its turn.
+        assert window.build_model._running == set(jobs[:2])
+        assert [job_id for job_id, _start in window.build_model._queue] == jobs[2:]
+        assert window.job_manager.get(jobs[2]).state is JobState.QUEUED
+        settings.concurrent_builds.setValue(3)  # raising the limit starts the queued build
+        assert window.build_model._running == set(jobs) and not window.build_model._queue
         gate.set()
         _pump(
             app,
-            lambda: all(
-                window.job_manager.get(job_id).state is JobState.SUCCEEDED
-                for job_id in (first_job, second_job)
+            lambda: (
+                not window.build_model._running
+                and all(
+                    window.job_manager.get(job_id).state is JobState.SUCCEEDED for job_id in jobs
+                )
             ),
         )
     finally:
         window.close()
         app.processEvents()
+
+
+def test_one_build_at_a_time_when_the_limit_is_one(monkeypatch, tmp_path, repo_root) -> None:
+    gate = threading.Event()
+    app, window, inbox, _builds = _window(monkeypatch, tmp_path, FakeBackend(provenance_gate=gate))
+    try:
+        window.build_model.set_max_concurrent(1)
+        _import(inbox, _package(tmp_path / "first.packscan", repo_root))
+        _import(inbox, _second_package(tmp_path / "second.packscan", repo_root))
+        first_job, second_job = (job.job_id for job in window.job_manager.jobs())
+        assert window.build_model._running == {first_job}
+        assert window.job_manager.get(second_job).state is JobState.QUEUED
+        gate.set()
+        _pump(app, lambda: window.job_manager.get(second_job).state is JobState.SUCCEEDED)
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_a_build_started_beside_another_gets_its_share_of_cores(
+    monkeypatch, tmp_path, repo_root
+) -> None:
+    real = ColmapOpenMvsBackend(tmp_path / "colmap.exe", {}, ffmpeg=None)
+    monkeypatch.setattr(ColmapOpenMvsBackend, "discover", classmethod(lambda cls: real))
+    started: list[tuple[object, ...]] = []
+    app, window, inbox, _builds = _window(monkeypatch, tmp_path, None)
+    try:
+        window.build_model._work = lambda *args: started.append(args)  # type: ignore[method-assign]
+        _import(inbox, _package(tmp_path / "first.packscan", repo_root))
+        _import(inbox, _second_package(tmp_path / "second.packscan", repo_root))
+        _pump(app, lambda: len(started) == 2)
+        shares = sorted(
+            (args[2].cpu_share, args[8]["builds_sharing_cpu_at_start"])  # type: ignore[attr-defined,index]
+            for args in started
+        )
+        assert shares == [(1, 1), (2, 2)]
+        assert all(args[8]["max_concurrent_builds"] == 2 for args in started)  # type: ignore[index]
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_thread_split_and_recorded_determinism(monkeypatch) -> None:
+    monkeypatch.setattr(build_model.os, "cpu_count", lambda: 16)
+    assert build_model.worker_threads(1) == 16 and build_model.worker_threads(2) == 8
+    monkeypatch.setattr(build_model.os, "cpu_count", lambda: None)
+    assert build_model.worker_threads(4) == 1
+    monkeypatch.setattr(build_model.os, "cpu_count", lambda: 16)
+    recorded = build_model.determinism(2, 3)
+    assert recorded["colmap_extraction_threads"] == recorded["openmvs_max_threads"] == 8
+    assert recorded["builds_sharing_cpu_at_start"] == 2 and recorded["max_concurrent_builds"] == 3
+    assert recorded["colmap_mapper_threads"] == 1
+    assert recorded["image_ids"] == "canonical_sorted_name"
+
+
+def test_multithreaded_extraction_ids_are_renumbered_by_sorted_name(tmp_path) -> None:
+    import sqlite3
+    from contextlib import closing
+
+    database = tmp_path / "database.db"
+    with closing(sqlite3.connect(database)) as db, db:
+        db.executescript(
+            "CREATE TABLE images (image_id INTEGER PRIMARY KEY, name TEXT UNIQUE, camera_id INT);"
+            "CREATE TABLE keypoints (image_id INTEGER PRIMARY KEY, data TEXT);"
+            "CREATE TABLE descriptors (image_id INTEGER PRIMARY KEY, data TEXT);"
+            "CREATE TABLE frames (frame_id INTEGER PRIMARY KEY, rig_id INT);"
+            "CREATE TABLE frame_data (frame_id INT, data_id INT, sensor_id INT, sensor_type INT);"
+            "CREATE TABLE matches (pair_id INTEGER PRIMARY KEY);"
+            "CREATE TABLE two_view_geometries (pair_id INTEGER PRIMARY KEY);"
+            "CREATE TABLE pose_priors (pose_prior_id INTEGER PRIMARY KEY);"
+            "CREATE TABLE rig_sensors (rig_id INT);"
+        )
+        for image_id, name in enumerate(["c.jpg", "a.jpg", "b.jpg"], start=1):  # completion
+            db.execute("INSERT INTO images VALUES (?, ?, 1)", (image_id, name))
+            db.execute("INSERT INTO keypoints VALUES (?, ?)", (image_id, f"kp-{name}"))
+            db.execute("INSERT INTO descriptors VALUES (?, ?)", (image_id, f"d-{name}"))
+            db.execute("INSERT INTO frames VALUES (?, 1)", (image_id,))
+            db.execute("INSERT INTO frame_data VALUES (?, ?, 1, 0)", (image_id, image_id))
+    build_model.canonicalize_image_ids(database)
+    with closing(sqlite3.connect(database)) as db, db:
+        names = ["a.jpg", "b.jpg", "c.jpg"]
+        assert db.execute("SELECT image_id, name FROM images ORDER BY 1").fetchall() == list(
+            enumerate(names, start=1)
+        )
+        for table, prefix in (("keypoints", "kp"), ("descriptors", "d")):
+            rows = db.execute(f"SELECT image_id, data FROM {table} ORDER BY 1").fetchall()
+            assert rows == [(i, f"{prefix}-{name}") for i, name in enumerate(names, start=1)]
+        assert db.execute("SELECT * FROM frame_data ORDER BY 1").fetchall() == [
+            (i, i, 1, 0) for i in (1, 2, 3)
+        ]
+        db.execute("INSERT INTO matches VALUES (1)")
+    with pytest.raises(BuildModelError, match="unexpected COLMAP database layout"):
+        build_model.canonicalize_image_ids(database)  # never renumber after matching
 
 
 def test_heic_decode_is_hardened_and_names_do_not_collide(tmp_path, monkeypatch) -> None:
@@ -532,6 +638,7 @@ def test_weak_registration_stops_before_dense_stages(monkeypatch, tmp_path) -> N
 
     monkeypatch.setattr(build_model, "_run_commands", run)
     monkeypatch.setattr(build_model.shutil, "copyfile", lambda s, d: None)
+    monkeypatch.setattr(build_model, "canonicalize_image_ids", lambda database: None)
     names = tuple(f"{asset}/inputs/{n:02d}.jpg" for n in range(17))
     context = type(
         "Context",

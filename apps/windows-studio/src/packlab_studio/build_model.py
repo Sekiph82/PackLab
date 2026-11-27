@@ -13,11 +13,13 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import struct
 import threading
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from contextlib import closing
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -69,28 +71,90 @@ COPY_SUFFIXES = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 # The command plan uses COLMAP 4.x option names (FeatureExtraction.*, FeatureMatching.*);
 # 4.2.1 is the version it was verified with (Test-333) and the one PL-0444 bundles.
 SUPPORTED_COLMAP_VERSIONS = ("4.2.1",)
-# PL-0463 reproducibility: fixed COLMAP seeds (RANSAC + mapper sampling), single-threaded
-# feature extraction (COLMAP 4.2.1 numbers images in completion order otherwise; measured
-# +25 s on Test-333, then keypoints and descriptors are bit-identical), a single-threaded
+# PL-0463 reproducibility: fixed COLMAP seeds (RANSAC + mapper sampling), a single-threaded
 # mapper (threaded bundle adjustment sums in a varying order) and sorted image order.
-# Three Test-333 builds then gave bit-identical sparse models. Not fixed, documented: CPU
+# Three Test-333 builds then gave bit-identical sparse models. Feature extraction runs on
+# many threads: SIFT per image is deterministic, only COLMAP 4.2.1's image numbering follows
+# completion order, so canonicalize_image_ids() renumbers by sorted name afterwards. On an
+# 81-photo owner scan: 16 threads 199 s vs 1 thread ~17-20 min, and every database table
+# is then identical to the 1-thread run. Not fixed, documented: CPU
 # matching uses an approximate (FAISS) index that is not guaranteed repeatable (one standalone
 # repeat differed; the exact brute-force matcher took 704 s instead of 38 s), and OpenMVS
 # 2.4.0 has no seed option (densify of one identical scene gave 167,891 vs 168,892 points).
 RANDOM_SEED = 0  # --default_random_seed 0 is COLMAP's default; passed so the plan records it
-EXTRACTION_THREADS = 1
 MAPPER_THREADS = 1
-OPENMVS_THREADS = 0  # 0 = all cores
+DEFAULT_MAX_CONCURRENT_BUILDS = 2  # scans are separate objects; never merged into one model
 # Below this share of connected photos the model is too partial to measure; stop before
 # the long dense stages and tell the owner to retake (real scan 2026-11-22: 3/17).
 MIN_REGISTERED_FRACTION = 0.5
-DETERMINISM: dict[str, object] = {
-    "colmap_random_seed": RANDOM_SEED,
-    "colmap_extraction_threads": EXTRACTION_THREADS,
-    "colmap_mapper_threads": MAPPER_THREADS,
-    "openmvs_max_threads": OPENMVS_THREADS,
-    "image_order": "sorted_working_name",
-}
+
+
+def worker_threads(cpu_share: int) -> int:
+    """CPU threads for a build that starts while cpu_share builds (itself included) run."""
+    # ponytail: fixed at build start, so a build that started alone keeps all cores while a
+    # later one runs beside it (1.5x oversubscribed with two). Re-split per stage if that hurts.
+    # Measured on 16 logical cores: matching 30 photos 141 s on 16 threads vs 231 s on 8, so a
+    # lone build must not be capped at half the cores.
+    return max(1, (os.cpu_count() or 1) // max(1, cpu_share))
+
+
+def determinism(cpu_share: int = 1, max_concurrent_builds: int = 1) -> dict[str, object]:
+    """The recorded seeds, thread counts and concurrency of one build (DETERMINISM block)."""
+    threads = worker_threads(cpu_share)
+    return {
+        "colmap_random_seed": RANDOM_SEED,
+        "colmap_extraction_threads": threads,
+        "colmap_matching_threads": threads,
+        "colmap_mapper_threads": MAPPER_THREADS,
+        "openmvs_max_threads": threads,
+        "builds_sharing_cpu_at_start": cpu_share,
+        "max_concurrent_builds": max_concurrent_builds,
+        "image_order": "sorted_working_name",
+        "image_ids": "canonical_sorted_name",
+    }
+
+
+DETERMINISM = determinism()
+
+
+def canonicalize_image_ids(database: Path) -> None:
+    """Renumber a fresh COLMAP 4.2.1 database so image (and frame) ids follow sorted names.
+
+    Multi-threaded feature extraction writes images in completion order; keypoints and
+    descriptors per image are identical, so renumbering gives the single-thread database.
+    """
+    with closing(sqlite3.connect(database)) as db, db:
+        rows = db.execute("SELECT image_id, name FROM images").fetchall()
+        frames = db.execute("SELECT frame_id, data_id, sensor_type FROM frame_data").fetchall()
+        later = sum(
+            db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            for table in ("matches", "two_view_geometries", "pose_priors", "rig_sensors")
+        )
+        frame_count = db.execute("SELECT COUNT(*) FROM frames").fetchone()[0]
+        if (
+            later
+            or frame_count != len(rows)
+            or sorted(frames) != sorted((image_id, image_id, 0) for image_id, _ in rows)
+        ):
+            raise BuildModelError("unexpected COLMAP database layout after feature extraction")
+        offset = 1_000_000_000
+        columns = (
+            ("images", "image_id"),
+            ("keypoints", "image_id"),
+            ("descriptors", "image_id"),
+            ("frames", "frame_id"),
+            ("frame_data", "frame_id"),
+            ("frame_data", "data_id"),
+        )
+        for table, column in columns:
+            db.execute(f"UPDATE {table} SET {column} = {column} + ?", (offset,))
+        for new, (old, _name) in enumerate(sorted(rows, key=lambda row: row[1]), start=1):
+            for table, column in columns:
+                db.execute(
+                    f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (new, old + offset)
+                )
+
+
 _COLMAP_VERSION = re.compile(r"COLMAP (\d+\.\d+\.\d+)")
 
 
@@ -266,6 +330,7 @@ class ColmapOpenMvsBackend:
     colmap: Path
     openmvs: dict[str, Path]
     ffmpeg: Path | None = None
+    cpu_share: int = 1  # builds running (itself included) when this one started
 
     @classmethod
     def discover(cls) -> ColmapOpenMvsBackend:
@@ -348,6 +413,7 @@ class ColmapOpenMvsBackend:
         mvs = out / "mvs"
         colmap = str(self.colmap)
         tool = {key: str(value) for key, value in self.openmvs.items()}
+        threads = str(worker_threads(self.cpu_share))
 
         def asset(path: Path) -> str:
             return f"{workspace_asset}/{path.relative_to(w).as_posix()}"
@@ -413,13 +479,15 @@ class ColmapOpenMvsBackend:
                         "--default_random_seed",
                         str(RANDOM_SEED),
                         "--FeatureExtraction.num_threads",
-                        str(EXTRACTION_THREADS),
+                        threads,
                     ),
                     w,
                 )
             )
             # ponytail: photos decode one at a time; parallelize if decode dominates.
             result = _run_commands("feature-extraction", commands, context.cancel)
+            if result.status is StageStatus.SUCCEEDED:
+                canonicalize_image_ids(database)
             return done("feature-extraction", result, {"database": database, "images": images})
 
         def matching(context: ReconstructionStageContext) -> ReconstructionStageExecution:
@@ -434,6 +502,8 @@ class ColmapOpenMvsBackend:
                             str(database),
                             "--FeatureMatching.use_gpu",
                             "0",
+                            "--FeatureMatching.num_threads",
+                            threads,
                             "--default_random_seed",
                             str(RANDOM_SEED),
                             "--TwoViewGeometry.random_seed",
@@ -544,7 +614,7 @@ class ColmapOpenMvsBackend:
                             "--resolution-level",
                             "1",
                             "--max-threads",
-                            str(OPENMVS_THREADS),
+                            threads,
                         ),
                         mvs,
                     )
@@ -583,7 +653,7 @@ class ColmapOpenMvsBackend:
                             "--scales",
                             "1",
                             "--max-threads",
-                            str(OPENMVS_THREADS),
+                            threads,
                         ),
                         mvs,
                     )
@@ -616,7 +686,12 @@ class ColmapOpenMvsBackend:
 
         executors = (features, matching, mapping, conversion, densify, mesh, refine, texture)
         return _definitions(
-            executors, {"preset": BUILD_PRESET, "max_image_size": MAX_IMAGE_SIZE, **DETERMINISM}
+            executors,
+            {
+                "preset": BUILD_PRESET,
+                "max_image_size": MAX_IMAGE_SIZE,
+                **determinism(self.cpu_share),
+            },
         )
 
 
@@ -675,7 +750,7 @@ def register_raw_capture(project: ProjectManager, package: Path, package_sha256:
 
 
 class BuildModelController(QObject):
-    """Queues one background build per request and reports through JobManager."""
+    """Queues one background build per request (up to max_concurrent at once, FIFO)."""
 
     build_started = Signal(str, str)  # job_id, capture_id
     build_finished = Signal(object)  # BuildResult
@@ -692,9 +767,9 @@ class BuildModelController(QObject):
         self.projects = projects
         self._backend = backend
         self._invoker = MainThreadInvoker()
-        # ponytail: one build at a time (CPU-bound engines); FIFO of not-yet-started runs.
-        self._queue: list[tuple[str, threading.Thread]] = []
-        self._running: str | None = None
+        self.max_concurrent = DEFAULT_MAX_CONCURRENT_BUILDS
+        self._queue: list[tuple[str, Callable[[int], None]]] = []  # FIFO, not yet started
+        self._running: set[str] = set()
         self._by_package: dict[str, str] = {}  # package sha256 -> latest job id
         self.build_finished.connect(self._on_finished)
 
@@ -717,35 +792,46 @@ class BuildModelController(QObject):
         self.jobs.register_cancel_hook(job.job_id, cancel_hook)
         layout = self.projects.layout
         metadata = self.projects.metadata
-        thread = threading.Thread(
-            target=self._work,
-            args=(
-                job.job_id,
-                capture_id,
-                backend,
-                layout,
-                metadata,
-                source_asset,
-                package_sha256,
-                token,
-            ),
-            name=f"packlab-build-{job.job_id[:8]}",
-            daemon=True,
-        )
+
+        def start(cpu_share: int) -> None:
+            worker = backend
+            if isinstance(worker, ColmapOpenMvsBackend):
+                worker = replace(worker, cpu_share=cpu_share)
+            threading.Thread(
+                target=self._work,
+                args=(
+                    job.job_id,
+                    capture_id,
+                    worker,
+                    layout,
+                    metadata,
+                    source_asset,
+                    package_sha256,
+                    token,
+                    determinism(cpu_share, self.max_concurrent),
+                ),
+                name=f"packlab-build-{job.job_id[:8]}",
+                daemon=True,
+            ).start()
+
         self._by_package[package_sha256] = job.job_id
-        self._queue.append((job.job_id, thread))
+        self._queue.append((job.job_id, start))
         self.build_started.emit(job.job_id, capture_id)
         self._start_next()
         return job.job_id
 
+    def set_max_concurrent(self, limit: int) -> None:
+        self.max_concurrent = max(1, limit)
+        self._start_next()
+
     def _start_next(self) -> None:
-        if self._running is None and self._queue:
-            self._running, thread = self._queue.pop(0)
-            thread.start()
+        while len(self._running) < self.max_concurrent and self._queue:
+            job_id, start = self._queue.pop(0)
+            self._running.add(job_id)
+            start(len(self._running))
 
     def _on_finished(self, result: BuildResult) -> None:
-        if result.job_id == self._running:
-            self._running = None
+        self._running.discard(result.job_id)
         self._start_next()
 
     def _work(
@@ -758,6 +844,7 @@ class BuildModelController(QObject):
         source_asset: str,
         package_sha256: str,
         token: CancelToken,
+        recorded: dict[str, object],
     ) -> None:
         started = time.monotonic()
         jobs = cast(JobManager, _MainThreadJobs(self.jobs, self._invoker))
@@ -821,7 +908,7 @@ class BuildModelController(QObject):
                     metadata.revision,
                     working_set.inputs,
                     ReconstructionBackendId.COLMAP_OPENMVS,
-                    configuration={"preset": BUILD_PRESET, "capture_id": capture_id, **DETERMINISM},
+                    configuration={"preset": BUILD_PRESET, "capture_id": capture_id, **recorded},
                     requested_capabilities=(
                         ReconstructionCapability.SPARSE,
                         ReconstructionCapability.DENSE,
@@ -832,7 +919,7 @@ class BuildModelController(QObject):
                 workspace.relative_path,
                 provenance,
                 stages,
-                configuration={"preset": BUILD_PRESET, **DETERMINISM},
+                configuration={"preset": BUILD_PRESET, **recorded},
             )
             execution = ReconstructionExecutionService(jobs, workspaces).execute(
                 job_id, workspace, request, cancel=token
