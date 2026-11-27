@@ -150,10 +150,14 @@ def test_parts_summary_counts_only_this_projects_scans() -> None:
     # Nothing assigned or built here: foreign inbox scans never mark parts present.
     empty = parts_summary_text(entries)
     assert "present" not in empty
-    # Built in this project: declared roles count, role-less legacy scans do not.
+    # Imported into this project (PL-0490): phone roles count, role-less ones as assembled,
+    # marked "(from phone)" until the owner confirms them.
     built = parts_summary_text(entries, {}, {DIGEST, "b" * 64, "d" * 64})
-    assert "Body: upright present, upside down missing, interior present" in built
-    assert "Assembled: upright missing, upside down missing" in built
+    assert (
+        "Body: upright present (from phone), upside down missing, interior present (from phone)"
+        in built
+    )
+    assert "Assembled: upright present (from phone), upside down missing" in built
     assert "Closure: upright missing, upside down missing" in built  # "f" is foreign
     # Owner assignment counts even for a legacy scan and overrides the manifest.
     assigned = parts_summary_text(entries, {"b" * 64: "assembled", DIGEST: "body_flipped"}, set())
@@ -161,8 +165,8 @@ def test_parts_summary_counts_only_this_projects_scans() -> None:
     assert "Body: upright missing, upside down present" in assigned
     try:
         i18n.set_language("tr")
-        assert "Gövde: düz var, ters eksik, iç var" in parts_summary_text(
-            entries, {}, {DIGEST, "d" * 64}
+        assert "Gövde: düz var (telefondan), ters eksik, iç var (telefondan)" in (
+            parts_summary_text(entries, {}, {DIGEST, "d" * 64})
         )
         assert parts_summary_text([]).startswith("Bu projedeki parçalar:")
     finally:

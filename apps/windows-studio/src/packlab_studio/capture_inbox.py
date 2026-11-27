@@ -85,20 +85,20 @@ def effective_role(entry: InboxEntry, overrides: dict[str, str] | None = None) -
 def counted_role(
     entry: InboxEntry,
     overrides: dict[str, str] | None = None,
-    built_in_project: set[str] | frozenset[str] = frozenset(),
+    in_project: set[str] | frozenset[str] = frozenset(),
 ) -> str | None:
     """Role a scan contributes to the open project's Parts summary, else None.
 
     The receiver inbox is shared by every project, so only scans the owner assigned in
-    this project, or scans built in it whose manifest declared a role, count. Role-less
-    (pre-PL-0482) scans never count until the owner assigns them.
+    this project, or scans imported into it (PL-0490: queued or built here), count; an
+    imported scan whose manifest has no part_role counts as assembled.
     """
     if entry.status != "imported":
         return None
     digest = entry.package_sha256
     if overrides and digest in overrides:
         return overrides[digest]
-    if digest in built_in_project and entry.role_declared:
+    if digest in in_project:
         return entry.part_role
     return None
 
@@ -106,18 +106,30 @@ def counted_role(
 def parts_summary_text(
     entries: list[InboxEntry],
     overrides: dict[str, str] | None = None,
-    built_in_project: set[str] | frozenset[str] = frozenset(),
+    in_project: set[str] | frozenset[str] = frozenset(),
 ) -> str:
-    """One line per part: which of its scans (upright/upside down/interior) this project has."""
-    roles = (counted_role(entry, overrides, built_in_project) for entry in entries)
-    summary = parts_summary(role for role in roles if role is not None)
+    """One line per part: which of its scans (upright/upside down/interior) this project has.
+
+    Roles the owner has not confirmed in this project are marked "(from phone)".
+    """
+    confirmed: set[str] = set()
+    from_phone: set[str] = set()
+    for entry in entries:
+        role = counted_role(entry, overrides, in_project)
+        if role is not None:
+            assigned = entry.package_sha256 in (overrides or {})
+            (confirmed if assigned else from_phone).add(role)
+    summary = parts_summary(confirmed | from_phone)
+    suffix = {"upright": "", "flipped": "_flipped", "interior": "_interior"}
     lines = [tr("Parts in this project:")]
     for part, views in summary.items():
-        states = ", ".join(
-            f"{tr(_VIEW_LABELS[view])} {tr('present') if present else tr('missing')}"
-            for view, present in views.items()
-        )
-        lines.append(f"{tr(_PART_LABELS[part])}: {states}")
+        states = []
+        for view, present in views.items():
+            state = tr("present") if present else tr("missing")
+            if present and f"{part}{suffix[view]}" not in confirmed:
+                state += " " + tr("(from phone)")
+            states.append(f"{tr(_VIEW_LABELS[view])} {state}")
+        lines.append(f"{tr(_PART_LABELS[part])}: {', '.join(states)}")
     return "\n".join(lines)
 
 
@@ -592,10 +604,10 @@ class CaptureInboxView(QWidget):
         return roles
 
     def _built_in_project(self) -> set[str]:
-        from .build_model import latest_builds  # build_model imports this module
+        from .build_model import project_scan_digests  # build_model imports this module
 
         layout = getattr(self.project_manager, "layout", None)
-        return set(latest_builds(None if layout is None else layout.root))
+        return project_scan_digests(None if layout is None else layout.root)
 
     def _selected_entry(self) -> InboxEntry | None:
         row = self.inbox_list.currentRow()
@@ -618,8 +630,8 @@ class CaptureInboxView(QWidget):
         if entry is None or self.project_manager is None:
             return
         role = str(self.role_combo.currentData())
-        if counted_role(entry, self._overrides(), self._built_in_project()) == role:
-            return  # already this project's role: no revision, no undo step
+        if self._overrides().get(entry.package_sha256) == role:
+            return  # already confirmed here; choosing a phone role confirms it (PL-0490)
         try:
             self.project_manager.set_scan_part_role(entry.package_sha256, role)
         except Exception as error:

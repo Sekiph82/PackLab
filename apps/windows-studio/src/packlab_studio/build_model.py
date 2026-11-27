@@ -59,7 +59,7 @@ from packlab_core.reconstruction_process import run_reconstruction_stage
 from .capture_inbox import effective_role, inbox_row, local_time, parts_summary_text
 from .engine_config import DiscoveryStatus, discover_engines
 from .i18n import tr
-from .jobs import TERMINAL_STATES, JobManager, JobState
+from .jobs import TERMINAL_STATES, JobManager, JobRecord, JobState
 from .project import ProjectManager
 from .reconstruction_execution import ReconstructionExecutionService
 from .reconstruction_workspace import ReconstructionWorkspace, ReconstructionWorkspaceManager
@@ -1061,6 +1061,10 @@ class BuildModelView(QWidget):
         self.jobs = jobs
         self.job_id: str | None = None
         self.result: BuildResult | None = None
+        # PL-0490: every build started from this page (FIFO = queue order) and its last step.
+        self._tracked: dict[str, str] = {}  # job_id -> capture_id
+        self._steps: dict[str, str] = {}  # job_id -> last progress message ("5/8 ...")
+        self._history_args: tuple[list[Any], Path | None, dict[str, str] | None] | None = None
         self.title = QLabel("Build 3D model", self)
         self.status = QLabel(
             "Select a scan in Capture Inbox and press Build model, or import one with "
@@ -1134,26 +1138,97 @@ class BuildModelView(QWidget):
             jobs.job_changed.connect(self._job_changed)
 
     def track(self, job_id: str, capture_id: str) -> None:
-        self.job_id = job_id
+        self._tracked[job_id] = capture_id
         self.result = None
-        self.title.setText(f"Building 3D model of {capture_id}")
-        self.status.setText("Queued: preparing photos…")
-        self.progress.setValue(0)
-        self.cancel_button.setEnabled(True)
         self.open_button.setEnabled(False)
         self.next_steps.setVisible(False)
         self.steps_row.setVisible(False)
+        if self._job(job_id) is None:
+            self.job_id = job_id
+            self.title.setText(tr("Building 3D model of {captures}").format(captures=capture_id))
+            self.status.setText(tr("Queued: preparing photos…"))
+            self.progress.setValue(0)
+            self.cancel_button.setEnabled(True)
+            return
+        self._update_header()
+
+    def _job(self, job_id: str | None) -> JobRecord | None:
+        """The job record, or None (no job manager, unknown id or trimmed from history)."""
+        try:
+            return None if self.jobs is None or job_id is None else self.jobs.get(job_id)
+        except KeyError:
+            return None
+
+    def _active_jobs(self) -> tuple[list[str], list[str]]:
+        """Running (incl. cancelling) and queued tracked builds, oldest first."""
+        running: list[str] = []
+        queued: list[str] = []
+        for job_id in self._tracked:
+            job = self._job(job_id)
+            state = None if job is None else job.state
+            if state in {JobState.RUNNING, JobState.CANCELLING}:
+                running.append(job_id)
+            elif state is JobState.QUEUED:
+                queued.append(job_id)
+        return running, queued
+
+    def _live_text(self, job_id: str) -> str:
+        """'building 50% - step 5/8 ...', 'queued #2', 'cancelling', or a terminal state."""
+        assert self.jobs is not None
+        job = self.jobs.get(job_id)
+        if job.state is JobState.QUEUED:
+            _running, queued = self._active_jobs()
+            return tr("queued #{position}").format(position=queued.index(job_id) + 1)
+        if job.state is JobState.CANCELLING:
+            return tr("cancelling")
+        if job.state is JobState.RUNNING:
+            step = self._steps.get(job_id)
+            percent = int(job.progress * 100)
+            if step:
+                return tr("building {percent}% - step {step}").format(percent=percent, step=step)
+            return tr("building {percent}%").format(percent=percent)
+        if job.state is JobState.FAILED:
+            return tr("failed: {reason}").format(
+                reason=plain_failure(job.error or "", self._steps.get(job_id))
+            )
+        return tr("cancelled") if job.state is JobState.CANCELLED else tr("built")
+
+    def _update_header(self) -> None:
+        """PL-0490: the header shows every running build and the queue, oldest first."""
+        running, queued = self._active_jobs()
+        if not running and not queued:
+            return  # show_result owns the finished state
+        self.job_id = (running or queued)[0]
+        names = [self._tracked[job_id][:8] for job_id in running or queued]
+        title = "Building 3D model of {captures}" if running else "Waiting to build {captures}"
+        self.title.setText(tr(title).format(captures=", ".join(names)))
+        lines = [
+            tr("{capture}: {state}").format(
+                capture=self._tracked[job_id][:8], state=self._live_text(job_id)
+            )
+            for job_id in running
+        ]
+        if queued:
+            waiting = ", ".join(
+                f"#{index} {self._tracked[job_id][:8]}" for index, job_id in enumerate(queued, 1)
+            )
+            lines.append(tr("Queued: {captures}").format(captures=waiting))
+        if self.result is not None:
+            lines.append(tr("Last finished: {message}").format(message=self._result_text()))
+        self.status.setText("\n".join(lines))
+        assert self.jobs is not None
+        self.progress.setValue(int(self.jobs.get(self.job_id).progress * 100))
+        self.cancel_button.setEnabled(True)
 
     def _job_changed(self, job_id: str) -> None:
-        if job_id != self.job_id or self.jobs is None:
+        if job_id not in self._tracked or self.jobs is None:
             return
         job = self.jobs.get(job_id)
-        self.progress.setValue(int(job.progress * 100))
-        if job.state is JobState.CANCELLING:
-            self.status.setText("Cancelling…")
-        elif job.message and job.state is JobState.RUNNING:
-            self.status.setText(job.message)
-        self.cancel_button.setEnabled(job.state in {JobState.QUEUED, JobState.RUNNING})
+        if job.state is JobState.RUNNING and job.message:
+            self._steps[job_id] = job.message
+        self._update_header()
+        if self._history_args is not None:
+            self.refresh_history(*self._history_args)
 
     def _cancel(self) -> None:
         if self.jobs is not None and self.job_id is not None:
@@ -1161,18 +1236,34 @@ class BuildModelView(QWidget):
             if job.state not in TERMINAL_STATES:
                 self.jobs.request_cancel(self.job_id)
 
+    def _result_text(self) -> str:
+        result = self.result
+        assert result is not None
+        if result.status != "failed":
+            return result.message
+        reason = result.message.removeprefix("Build failed: ")
+        return tr("Build failed: {reason}").format(
+            reason=plain_failure(reason, self._steps.get(result.job_id))
+        )
+
     def show_result(self, result: BuildResult) -> None:
-        if result.job_id != self.job_id:
+        if result.job_id != self.job_id and result.job_id not in self._tracked:
             return
         self.result = result
-        self.cancel_button.setEnabled(False)
-        self.status.setText(result.message)
         succeeded = result.status == "succeeded" and result.model_path is not None
-        if succeeded:
-            self.progress.setValue(100)
         self.open_button.setEnabled(succeeded)
         self.next_steps.setVisible(succeeded)
         self.steps_row.setVisible(succeeded)
+        running, queued = self._active_jobs()
+        if running or queued:
+            self._update_header()
+            return
+        self.job_id = result.job_id
+        self.cancel_button.setEnabled(False)
+        self.status.setText(self._result_text())
+        self.status.setToolTip(result.message)  # the technical reason stays available
+        if succeeded:
+            self.progress.setValue(100)
 
     def _open(self) -> None:
         if self.result is not None and self.result.model_path is not None:
@@ -1184,20 +1275,21 @@ class BuildModelView(QWidget):
         project_root: Path | None,
         roles: dict[str, str] | None = None,
     ) -> None:
-        """One row per imported scan with the status of its latest build in this project."""
+        """One row per imported scan with its live build state, else its latest build here."""
+        self._history_args = (entries, project_root, roles)
+        row = self.history.currentRow()
         builds = latest_builds(project_root)
         self.history.clear()
-        self.parts_label.setText(parts_summary_text(entries, roles, set(builds)))
+        self.parts_label.setText(
+            parts_summary_text(entries, roles, project_scan_digests(project_root))
+        )
+        live = {capture: job_id for job_id, capture in self._tracked.items()}  # latest job wins
         for entry in entries:
             if entry.status != "imported":
                 continue
             text, details = inbox_row(entry, effective_role(entry, roles))
             build = builds.get(entry.package_sha256)
-            if build is None:
-                state = tr("not built yet")
-            else:
-                state = tr(BUILD_STATE_TEXT.get(str(build["state"]), str(build["state"])))
-                state += f" {local_time(build['time'])}"
+            state = self._scan_state(live.get(entry.capture_id), build)
             item = QListWidgetItem(f"{text}   ·   {state}")
             item.setToolTip(details)
             item.setData(Qt.ItemDataRole.UserRole, (entry.capture_id, entry.package_sha256))
@@ -1205,7 +1297,25 @@ class BuildModelView(QWidget):
             self.history.addItem(item)
         if not self.history.count():
             self.history.addItem(tr("No imported scans yet: use Capture Inbox first."))
+        if 0 <= row < self.history.count():
+            self.history.setCurrentRow(row)
         self._history_selected()
+
+    def _scan_state(self, job_id: str | None, build: dict[str, Any] | None) -> str:
+        """Live job state first; a workspace no job owns (e.g. after restart) is interrupted."""
+        job = self._job(job_id)
+        if job is not None and (job.state not in TERMINAL_STATES or job.state is JobState.FAILED):
+            return self._live_text(str(job_id))
+        if build is None:
+            return tr("cancelled") if job is not None else tr("not built yet")
+        state = str(build["state"])
+        if state == "succeeded":
+            return tr("built {time}").format(time=local_time(build["time"]))
+        if state == "failed":
+            return tr("failed: {reason}").format(reason=plain_failure(str(build["reason"] or "")))
+        if state == "active":
+            return tr("interrupted")
+        return tr("cancelled") if state == "cancelled" else state
 
     def _history_selected(self) -> None:
         item = self.history.currentItem()
@@ -1227,12 +1337,45 @@ class BuildModelView(QWidget):
             self.open_model_requested.emit(Path(model))
 
 
-BUILD_STATE_TEXT = {
-    "active": "building or interrupted",
-    "succeeded": "built",
-    "failed": "build failed",
-    "cancelled": "build cancelled",
+_STEP_NAMES = {
+    "feature-extraction": ("photo decoding step", "COLMAP"),
+    "matching": ("photo matching step", "COLMAP"),
+    "sparse-mapping": ("camera solving step", "COLMAP"),
+    "openmvs-conversion": ("dense scene preparation step", "OpenMVS"),
+    "dense-point-cloud": ("dense point cloud step", "OpenMVS"),
+    "mesh-reconstruction": ("mesh step", "OpenMVS"),
+    "mesh-refinement": ("mesh refinement step", "OpenMVS"),
+    "texture-mesh": ("texture step", "OpenMVS"),
 }
+# Windows NTSTATUS crash exit codes, unsigned and signed: access violation, stack overflow,
+# heap corruption, illegal instruction.
+_CRASH_CODES = frozenset(
+    (3221225477, -1073741819, 3221225725, -1073741571, 3221226356, -1073740940)
+    + (3221225501, -1073741795)
+)
+
+
+def plain_failure(reason: str, step: str | None = None) -> str:
+    """Plain words for a build failure: 'stage exited 3221225477' -> 'texture step crashed'.
+
+    ``step`` is the job's last progress message ("8/8 Texturing the mesh"); without it the
+    step is unknown. Unrecognised reasons are returned shortened, never invented.
+    """
+    label = (step or "").partition(" ")[2]
+    stage = next((key for key, value in STAGE_LABELS.items() if value == label), "")
+    name, engine = _STEP_NAMES.get(stage, ("a build step", ""))
+    where = tr(name) + (f" ({engine})" if engine else "")
+    exited = re.search(r"\bstage exited (-?\d+)", reason)
+    if exited and int(exited.group(1)) in _CRASH_CODES:
+        return tr("{step} crashed").format(step=where)
+    if exited:
+        return tr("{step} stopped with error code {code}").format(step=where, code=exited.group(1))
+    if "timed out" in reason.lower() or "timeout" in reason.lower():
+        return tr("{step} took too long and was stopped").format(step=where)
+    text = re.sub(r"^[A-Za-z]+(Error|Exception): ", "", reason.strip())
+    return (text[:117] + "…" if len(text) > 120 else text) or tr("unknown reason")
+
+
 _MODEL_CANDIDATES = ("outputs/mvs/scene_dense.ply", "outputs/mvs/scene_dense_mesh.ply")
 
 
@@ -1259,8 +1402,24 @@ def latest_builds(project_root: Path | None) -> dict[str, dict[str, Any]]:
             ),
             None,
         )
-        latest[digest] = {"state": manifest.get("state"), "time": when, "model": model}
+        latest[digest] = {
+            "state": manifest.get("state"),
+            "time": when,
+            "model": model,
+            "reason": manifest.get("reason"),
+        }
     return latest
+
+
+def project_scan_digests(project_root: Path | None) -> set[str]:
+    """Package digests imported into this project: a raw copy (queued/built) or a build."""
+    digests = set(latest_builds(project_root))
+    raw = None if project_root is None else project_root / "raw" / "captures"
+    if raw is not None and raw.is_dir():
+        digests.update(
+            path.stem for path in raw.glob("*.packscan") if re.fullmatch(r"[0-9a-f]{64}", path.stem)
+        )
+    return digests
 
 
 __all__ = [
