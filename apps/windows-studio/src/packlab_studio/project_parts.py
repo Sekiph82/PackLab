@@ -1214,12 +1214,12 @@ class ScenePanel(QWidget):
         elif outcome == "failed":
             self.jobs.fail(job_id, error)
         elif self.jobs.get(job_id).state not in TERMINAL_STATES:
-            message = (
-                tr(STATUS_TEXT.get(outcome, outcome))
-                if outcome in ("combined", "placed", "merged")
-                else tr("refused: {reason}").format(reason=record["reason"] if record else "")
-            )
-            self.jobs.succeed(job_id, message)
+            if outcome in ("combined", "placed", "merged"):
+                self.jobs.succeed(job_id, tr(STATUS_TEXT.get(outcome, outcome)))
+            else:  # a refusal is no success: the Jobs list must not show "[succeeded] 100%"
+                reason = record["reason"] if record else ""
+                refused = tr("refused: {reason}").format(reason=reason)
+                self.jobs.fail(job_id, refused, message=refused)
         self.refresh()
         if placing:
             self.placement_finished.emit(outcome)

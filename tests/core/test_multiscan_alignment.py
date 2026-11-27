@@ -131,12 +131,18 @@ def scan(
     density=0.5,
     clutter=False,
     wall_gap=False,
+    paint=None,
+    halo=False,
+    cut_top=0.0,
     **shape_args,
 ):
     """Return (ScanInput, object->camera-units 4x4) for an upright or upside-down capture.
 
     tilt_deg: pass ``to_mat_mm`` from the true mat pose with that tilt error added.
     scale_error: multiplies the mm_per_unit handed to the aligner.
+    paint: object-frame points -> RGB (a printed label); default one flat tone everywhere.
+    halo: white specular glare MVS lifted 1.6-4 mm off the mat in a ring around the foot.
+    cut_top: mm of the part's top (mat frame) the MVS missed in this scan.
     """
     rng = np.random.default_rng(seed)
     height, faces = shape(_Gen(rng, density), **shape_args)
@@ -147,22 +153,38 @@ def scan(
     if keep_frac < 1.0:  # only the part of the object nearest the camera (top in mat frame)
         z_mat = height - obj[:, 2] if flipped else obj[:, 2]
         obj = obj[z_mat > (1 - keep_frac) * height]
+    if cut_top:
+        z_mat = height - obj[:, 2] if flipped else obj[:, 2]
+        obj = obj[z_mat < height - cut_top]
     place = _hom(_rot([0, 0, 1], rng.uniform(0, 2 * np.pi)), [*rng.uniform(-30, 30, 2), 0])
     if flipped:
         place = place @ _hom(_rot([1, 0, 0], np.pi), [0, 0, height])
     count = int(18000 * density / 0.5)
     mat = np.c_[rng.uniform(-148, 148, count), rng.uniform(-105, 105, count), np.zeros(count)]
     pts = np.r_[_apply(place, obj), mat] + rng.normal(0, 0.15, (len(obj) + count, 3))
+    tone = np.array([0.2, 0.4, 0.6])
+    colors = np.r_[paint(obj) if paint else np.tile(tone, (len(obj), 1)), np.tile(tone, (count, 1))]
+    if halo:
+        foot = np.max(np.linalg.norm(obj[:, :2], axis=1))
+        n = int(2000 * density / 0.5)
+        a, r = rng.uniform(0, 2 * np.pi, n), rng.uniform(foot + 1, foot + 30, n)
+        ring = np.c_[r * np.cos(a), r * np.sin(a), rng.uniform(1.6, 4.0, n)] + place[:3, 3] * [
+            1,
+            1,
+            0,
+        ]
+        pts, colors = np.r_[pts, ring], np.r_[colors, np.full((n, 3), 0.9)]
     if clutter:  # a bigger box standing on the table beside (not on) the A4 mat
         box = rng.uniform([170, -60, 0], [260, 60, 60], (int(20000 * density), 3))
-        pts = np.r_[pts, box]
+        pts, colors = np.r_[pts, box], np.r_[colors, np.tile(tone, (len(box), 1))]
     if floaters:  # MVS-like stray points floating above the part
-        pts = np.r_[pts, rng.uniform([-60, -60, height + 5], [60, 60, height + 60], (floaters, 3))]
+        stray = rng.uniform([-60, -60, height + 5], [60, 60, height + 60], (floaters, 3))
+        pts, colors = np.r_[pts, stray], np.r_[colors, np.tile(tone, (floaters, 1))]
     if subsample < 1.0:
-        pts = pts[rng.random(len(pts)) < subsample]
+        keep = rng.random(len(pts)) < subsample
+        pts, colors = pts[keep], colors[keep]
     scale = rng.uniform(0.01, 0.05)  # camera units per mm
     camera = _hom(_rot(rng.normal(size=3), rng.uniform(0, np.pi)), rng.normal(size=3), scale)
-    colors = np.tile([0.2, 0.4, 0.6], (len(pts), 1))
     sid = f"{shape.__name__}-{'flipped' if flipped else 'upright'}-{seed}"
     to_mat = None
     if tilt_deg is not None:
@@ -225,7 +247,7 @@ def test_n_scans_general_api():
 @pytest.mark.parametrize(
     ("options", "reason"),
     [
-        ({"r": 43.0}, "diameter mismatch"),
+        ({"r": 43.0}, "section mismatch"),
         ({"h": 90.0}, "height mismatch"),
         ({"scale_error": 1.05}, "height mismatch"),
         ({"keep_frac": 0.1}, "object not found on the mat"),
@@ -240,7 +262,7 @@ def test_wrong_object_scale_or_overlap_refused(options, reason):
 def test_different_part_and_closure_scale_error_refused():
     with pytest.raises(MultiScanAlignmentError, match="height mismatch"):
         align_part_pair(scan(body, False, 1)[0], scan(closure, True, 2)[0])
-    with pytest.raises(MultiScanAlignmentError, match="diameter mismatch"):
+    with pytest.raises(MultiScanAlignmentError, match="section mismatch"):
         align_part_pair(scan(closure, False, 1)[0], scan(closure, True, 2, scale_error=1.05)[0])
 
 
@@ -427,3 +449,143 @@ def test_rigid_moved_subsampled_copy_self_aligns_with_invariant_shell():
     moved = _apply(result.alignments[0].matrix, sample)
     copied = _apply(pair.matrix, _apply(motion, sample))
     assert np.median(np.linalg.norm(moved - copied, axis=1)) < 0.2
+
+
+# ---------------------------------------------------------------- real-data regressions (PL-0483)
+# Owner's assembled flat-oval shampoo pair: a white glare halo on the mat joined the part (97 mm
+# "diameter" at z = 6 under a 57 mm bottle), the upright build lacked its top 20 mm, and the
+# oval fits itself turned 180 degrees, so only the label tells front from back.
+
+
+def oval(rng, a=31.5, b=17.0, h=100.0):
+    """Flat-oval bottle proxy: 63 x 34 mm elliptic prism as the owner's scans measured it
+    (2-fold symmetric in shape)."""
+    perimeter = np.pi * (3 * (a + b) - np.sqrt((3 * a + b) * (a + 3 * b)))
+    n = int(rng.density * perimeter * h)
+    t, z = rng.uniform(0, 2 * np.pi, n), rng.uniform(0, h, n)
+    m = int(rng.density * np.pi * a * b)
+
+    def disc(z0):
+        u, r = rng.uniform(0, 2 * np.pi, m), np.sqrt(rng.uniform(0, 1, m))
+        return np.c_[a * r * np.cos(u), b * r * np.sin(u), np.full(m, z0)]
+
+    return h, {"side": np.c_[a * np.cos(t), b * np.sin(t), z], "top": disc(h), "bottom": disc(0)}
+
+
+_PRINT = np.random.default_rng(2026).random((72, 40)) > 0.55  # text-like 5 deg x 3 mm blocks
+
+
+def label(points):
+    """Printed label all round: dark text blocks on a light purple ground (no period)."""
+    angle = np.degrees(np.arctan2(points[:, 1] / 17.0, points[:, 0] / 31.5)) % 360
+    ink = _PRINT[(angle // 5).astype(int) % 72, np.clip(points[:, 2] // 3, 0, 39).astype(int)]
+    lum = np.where(ink, 0.25, 0.85)
+    return np.c_[lum * 0.6, lum * 0.5, lum]
+
+
+def plain(points):
+    return np.tile([0.5, 0.4, 0.6], (len(points), 1))
+
+
+def shaded(paint, light, k):
+    """One side lit (``k`` = 0..1 brightness drop away from azimuth ``light``, object frame)."""
+
+    def colours(points):
+        azimuth = np.arctan2(points[:, 1] / 17.0, points[:, 0] / 31.5)
+        return np.clip(paint(points) * (1 - k + k * np.cos(azimuth - light))[:, None], 0, 1)
+
+    return colours
+
+
+# A smooth ideal ellipse keeps wall coverage flat over about +-6 degrees of yaw, so these
+# proxies use an 8 degree probe. Production keeps ``yaw_probe_deg`` = 5: the real bottle
+# pinned 3.5 degrees, and a smooth oval at 5 is refused (yaw undetermined), never mis-yawed.
+OVAL = AlignmentThresholds(yaw_probe_deg=8.0)
+
+
+def test_oval_bottle_yaw_resolved_by_label_texture():
+    (up, t_up), (fl, t_fl) = scan(oval, False, 1, paint=label), scan(oval, True, 2, paint=label)
+    result = align_part_pair(up, fl, OVAL)
+    _assert_recovered(result, (t_up, t_fl))
+    assert result.alignments[1].yaw_determined
+
+
+def test_oval_bottle_without_label_refuses_yaw_twin():
+    """Same oval, flat colour: front and back are indistinguishable, so no guessed yaw."""
+    with pytest.raises(MultiScanAlignmentError, match="yaw undetermined"):
+        align_part_pair(scan(oval, False, 1)[0], scan(oval, True, 2)[0], OVAL)
+
+
+@pytest.mark.parametrize("k", [0.1, 0.3, 0.5, 0.7])
+@pytest.mark.parametrize("paint", [plain, label], ids=["plain", "label"])
+def test_one_sided_lighting_never_yields_a_wrong_yaw(paint, k):
+    """Lit front in one scan, lit back in the other: shading must not pick the yaw. A plain
+    oval is refused; a labelled one is aligned right or refused, never turned 180 degrees."""
+    for seed in (1, 3):
+        (up, t_up) = scan(oval, False, seed, paint=shaded(paint, 0.0, k))
+        (fl, t_fl) = scan(oval, True, seed + 100, paint=shaded(paint, np.pi, k))
+        try:
+            result = align_part_pair(up, fl, OVAL)
+        except MultiScanAlignmentError as error:
+            assert "yaw undetermined" in str(error)
+            continue
+        assert paint is label, "a plain oval must never get a yaw"
+        _assert_recovered(result, (t_up, t_fl))
+
+
+def test_wrong_role_labelled_oval_refused():
+    """The oval also fits itself upside down; the label then reads upside down, so neither
+    the geometry nor the print may accept the wrong role."""
+    up = scan(oval, False, 1, paint=label)[0]
+    fl = scan(oval, True, 2, paint=label, role="wrong")[0]
+    with pytest.raises(MultiScanAlignmentError):
+        align_scans([up, fl], OVAL)
+
+
+def test_oval_scale_error_refused_by_section_shape():
+    up, fl = (
+        scan(oval, False, 1, paint=label)[0],
+        scan(oval, True, 2, paint=label, scale_error=1.05)[0],
+    )
+    with pytest.raises(MultiScanAlignmentError, match="section mismatch"):
+        align_part_pair(up, fl)
+
+
+def test_white_glare_halo_on_mat_is_not_part_of_the_object():
+    up, t_up = scan(body, False, 1, halo=True)
+    fl, t_fl = scan(body, True, 2, halo=True)
+    part = prepare_scan(up, AlignmentThresholds())
+    low = part.points[part.points[:, 2] < 6]
+    centre = np.median(part.points[part.points[:, 2] > 20, :2], axis=0)
+    assert np.linalg.norm(low[:, :2] - centre, axis=1).max() < 47  # r 40 (+ 4 mm boss foot)
+    _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
+
+
+def flared(rng):
+    """Body whose white foot flares 5 mm out below 5 mm (petaloid / skirt base)."""
+    height, faces = body(rng)
+    faces["side"] = np.r_[faces["side"], _cyl(rng, 45, 0, 5), _disc(rng, 40, 45, 5)]
+    faces["bottom"] = _disc(rng, 0, 45, 0)
+    return height, faces
+
+
+def white(points):
+    return np.full((len(points), 3), 0.92)
+
+
+def test_white_flared_foot_is_kept_not_cut_as_glare():
+    up, t_up = scan(flared, False, 1, paint=white, halo=True)
+    fl, t_fl = scan(flared, True, 2, paint=white, halo=True)
+    part = prepare_scan(up, AlignmentThresholds())
+    centre = np.median(part.points[part.points[:, 2] > 20, :2], axis=0)
+    radius = np.linalg.norm(part.points[:, :2] - centre, axis=1)
+    assert ((part.points[:, 2] < 5) & (radius > 44)).sum() > 100  # the foot wall stays
+    _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
+
+
+def test_scan_missing_its_top_is_refused_with_the_reason():
+    up, fl = scan(body, False, 1, cut_top=15)[0], scan(body, True, 2)[0]
+    with pytest.raises(
+        MultiScanAlignmentError, match=r"upright-1 most likely misses the top 1[56] mm"
+    ):
+        align_part_pair(up, fl)

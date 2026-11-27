@@ -185,9 +185,11 @@ def test_refused_alignment_is_stored_and_shown(app, project) -> None:
     panel = _panel(project, entries, aligner=refuse)
     outcomes = []
     panel.combine_finished.connect(lambda part, outcome: outcomes.append(outcome))
-    panel.combine("closure")
+    job_id = panel.combine("closure")
     _pump(app, lambda: outcomes)
     assert outcomes == ["refused"]
+    job = project.job_manager.get(job_id)  # a refusal is never listed as "[succeeded] 100%"
+    assert job.state is JobState.FAILED and "height profile mismatch" in (job.error or "")
     state = panel.states["closure"]
     assert state.status == "refused" and "height profile mismatch" in state.reason
     assert "refused: height profile mismatch" in panel.items["closure"].text(1)
