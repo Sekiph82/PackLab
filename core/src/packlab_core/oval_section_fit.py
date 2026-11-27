@@ -23,6 +23,7 @@ validation.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -38,6 +39,10 @@ ROUND_MIN_ASPECT = 0.95  # minor/major at or above: round
 RECTANGLE_MIN_EXPONENT = 2.6  # superellipse exponent at or above: rounded rectangle
 MAX_RELATIVE_RESIDUAL = 0.03  # median radial RMS / half-major on the body
 MAX_ORIENTATION_SPREAD_DEG = 10.0
+LEVEL_TOLERANCE_DEG = 0.5  # body-centre drift below this angle counts as upright
+MAX_TILT_DEG = 15.0  # a larger axis tilt is refused: the Scan Master base needs levelling
+MAX_TILT_STDERR_DEG = 1.0  # tilt standard error above this: axis not determined, refuse
+LEVEL_ITERATIONS = 4
 SECTION_TOLERANCE = 0.25  # mm: section decimation and flat-panel snapping
 MAX_SECTIONS = 16  # keeps the ruled loft under the label analysis face budget
 ARC_POINTS = 11  # per end arc; each section has 2 * ARC_POINTS + 4 points
@@ -125,6 +130,8 @@ class OvalSectionFit:
     exponent: float
     relative_residual: float
     orientation_spread_deg: float
+    tilt_deg: float  # Scan Master z axis to the fitted body axis (re-levelled first)
+    level_rotation: tuple[float, ...]  # row-major 3x3, applied to Scan Master points first
     slices: tuple[SliceFit, ...]
     zones: tuple[tuple[str, float, float], ...]
     sections: tuple[DesignSection, ...]
@@ -154,7 +161,9 @@ class OvalSectionFit:
             "seed": SEED,
             "classification": self.classification.value,
             "orientation_deg": round(self.orientation_deg, 3),
+            "tilt_deg": round(self.tilt_deg, 3),
             "scan_master_to_design_frame": {
+                "first_rotate_row_major": [round(v, 9) for v in self.level_rotation],
                 "translate_xy": [round(-v, 4) for v in self.origin_xy],
                 "translate_z": round(-self.z_base, 4),
                 "then_rotate_z_deg": round(-self.orientation_deg, 3),
@@ -168,6 +177,9 @@ class OvalSectionFit:
                 "rectangle_min_exponent": RECTANGLE_MIN_EXPONENT,
                 "max_relative_residual": MAX_RELATIVE_RESIDUAL,
                 "max_orientation_spread_deg": MAX_ORIENTATION_SPREAD_DEG,
+                "level_tolerance_deg": LEVEL_TOLERANCE_DEG,
+                "max_tilt_deg": MAX_TILT_DEG,
+                "max_tilt_stderr_deg": MAX_TILT_STDERR_DEG,
                 "min_slice_coverage": MIN_SLICE_COVERAGE,
                 "min_body_slices": MIN_BODY_SLICES,
                 "section_tolerance": SECTION_TOLERANCE,
@@ -452,13 +464,112 @@ def _decimate(points: np.ndarray, tolerance: float) -> list[int]:
     return sorted(keep)
 
 
-def fit_oval_sections(vertices: np.ndarray, *, slice_count: int = SLICE_COUNT) -> OvalSectionFit:
-    """Fit, classify and zone an upright scan; refuse with ``OvalFitRefusal`` if neither fits."""
+@dataclass(frozen=True, slots=True)
+class _FirstPass:
+    rng: np.random.Generator
+    z0: float
+    height: float
+    edges: np.ndarray
+    zs: np.ndarray
+    bands: list[np.ndarray]
+    first: list[SliceFit]
+    middle: np.ndarray
+    trusted: list[SliceFit]
+
+
+def _axis_drift(trusted: list[SliceFit]) -> tuple[np.ndarray, float, int]:
+    """Slope (dx/dz, dy/dz) of the body-prism slice centres, its standard error as an angle
+    (deg) and the number of slices used. Only slices whose half-axes match the body median
+    (3 %) count, so a shoulder leaning towards an offset neck does not read as tilt."""
+    major = float(np.median([s.half_major for s in trusted]))
+    minor = float(np.median([s.half_minor for s in trusted]))
+    body = [
+        s
+        for s in trusted
+        if abs(s.half_major - major) <= 0.03 * major and abs(s.half_minor - minor) <= 0.03 * major
+    ]
+    z = np.array([s.z for s in body])
+    if len(body) < MIN_BODY_SLICES or float(np.ptp(z)) <= 0:
+        return np.zeros(2), math.inf, len(body)
+    centres = np.array([s.center for s in body])
+    design = np.c_[z - z.mean(), np.ones_like(z)]
+    coefficients = np.linalg.lstsq(design, centres, rcond=None)[0]
+    residual = centres - design @ coefficients
+    sigma = float(np.sqrt(np.sum(residual**2) / (2 * (len(body) - 2))))
+    spread = math.sqrt(float(np.sum((z - z.mean()) ** 2)))
+    return coefficients[0], math.degrees(math.atan(sigma / spread)), len(body)
+
+
+def _levelling(slope: np.ndarray) -> np.ndarray:
+    """Rotation taking the axis direction (slope_x, slope_y, 1) onto +Z (Rodrigues)."""
+    d = np.array([slope[0], slope[1], 1.0])
+    d /= np.linalg.norm(d)
+    k = np.cross(d, (0.0, 0.0, 1.0))
+    s, c = float(np.linalg.norm(k)), float(d[2])
+    if s < 1e-12:
+        return np.eye(3)
+    k /= s
+    cross = np.array([[0.0, -k[2], k[1]], [k[2], 0.0, -k[0]], [-k[1], k[0], 0.0]])
+    return np.asarray(np.eye(3) + s * cross + (1.0 - c) * cross @ cross)
+
+
+def fit_oval_sections(
+    vertices: np.ndarray,
+    *,
+    slice_count: int = SLICE_COUNT,
+    progress: Callable[[int], None] | None = None,
+) -> OvalSectionFit:
+    """Fit, classify and zone a scan; refuse with ``OvalFitRefusal`` if neither fits.
+
+    The Scan Master z axis is not trusted blindly: when the body slice centres drift with
+    height (a tilted scan) the points are re-levelled about the fitted body axis and fitted
+    again, up to ``MAX_TILT_DEG``; a larger or badly determined tilt is refused.
+    ``progress`` gets the running count of fitted slices; raising from it cancels the fit.
+    """
     points = np.asarray(vertices, dtype=np.float64)
     if points.ndim != 2 or points.shape[1] != 3 or len(points) < MIN_SLICE_POINTS * 4:
         raise OvalFitRefusal("scan_too_small", "the Scan Master has too few points for a fit")
     if not np.all(np.isfinite(points)):
         raise OvalFitRefusal("scan_not_finite", "the Scan Master has non-finite coordinates")
+    done = 0
+
+    def tick() -> None:
+        nonlocal done
+        done += 1
+        if progress is not None:
+            progress(done)
+
+    rotation = np.eye(3)
+    for _ in range(LEVEL_ITERATIONS):
+        stage = _first_pass(points @ rotation.T, slice_count, tick)
+        slope, stderr, used = _axis_drift(stage.trusted)
+        if stderr > MAX_TILT_STDERR_DEG:
+            raise OvalFitRefusal(
+                "axis_tilt_undetermined",
+                f"the body axis direction is not well determined ({used} straight body "
+                f"sections, standard error {stderr:.1f} deg > {MAX_TILT_STDERR_DEG:g} deg); "
+                "level the Scan Master base or recapture the side",
+            )
+        if math.degrees(math.atan(float(np.hypot(*slope)))) <= LEVEL_TOLERANCE_DEG:
+            break
+        rotation = _levelling(slope) @ rotation
+        total = math.degrees(math.acos(min(1.0, float(rotation[2, 2]))))
+        if total > MAX_TILT_DEG:
+            raise OvalFitRefusal(
+                "scan_not_upright",
+                f"the body axis leans {total:.1f} deg from the Scan Master z axis "
+                f"(> {MAX_TILT_DEG:g} deg); level the Scan Master base and fit again",
+            )
+    else:
+        raise OvalFitRefusal(
+            "axis_tilt_not_converged",
+            f"re-levelling did not settle within {LEVEL_ITERATIONS} passes; level the Scan "
+            "Master base and fit again",
+        )
+    return _finish(stage, rotation, slice_count, tick)
+
+
+def _first_pass(points: np.ndarray, slice_count: int, tick: Callable[[], None]) -> _FirstPass:
     z0, z1 = (float(v) for v in np.percentile(points[:, 2], [0.05, 99.95]))
     height = z1 - z0
     if height <= 0:
@@ -470,7 +581,10 @@ def fit_oval_sections(vertices: np.ndarray, *, slice_count: int = SLICE_COUNT) -
         for low, high in zip(edges[:-1], edges[1:], strict=True)
     ]
     zs = (edges[:-1] + edges[1:]) / 2
-    first = [_fit_slice(band, float(z), rng) for band, z in zip(bands, zs, strict=True)]
+    first = []
+    for band, z in zip(bands, zs, strict=True):
+        first.append(_fit_slice(band, float(z), rng))
+        tick()
     middle = (zs >= z0 + 0.2 * height) & (zs <= z0 + 0.8 * height)
     trusted = [s for s, m in zip(first, middle, strict=True) if s.observed and m]
     if len(trusted) < MIN_BODY_SLICES:
@@ -480,6 +594,15 @@ def fit_oval_sections(vertices: np.ndarray, *, slice_count: int = SLICE_COUNT) -
             f"{MIN_SLICE_COVERAGE:.0%} of the circumference (need {MIN_BODY_SLICES}); take "
             "more photos around the side and rebuild",
         )
+    return _FirstPass(rng, z0, height, edges, zs, bands, first, middle, trusted)
+
+
+def _finish(
+    stage: _FirstPass, rotation: np.ndarray, slice_count: int, tick: Callable[[], None]
+) -> OvalSectionFit:
+    rng, z0, height, edges, zs = stage.rng, stage.z0, stage.height, stage.edges, stage.zs
+    bands, first, middle, trusted = stage.bands, stage.first, stage.middle, stage.trusted
+    tilt_deg = math.degrees(math.acos(min(1.0, float(rotation[2, 2]))))
     orientation, spread = _orientation(trusted)
     axis = (
         float(np.median([s.center[0] for s in trusted])),
@@ -487,18 +610,11 @@ def fit_oval_sections(vertices: np.ndarray, *, slice_count: int = SLICE_COUNT) -
     )
     # Pass 2 in the common frame. A slice keeps its own centre only when it was seen nearly
     # all round (an offset neck); partial rings use the body axis.
-    slices = [
-        _fit_slice(
-            band,
-            float(z),
-            rng,
-            (
-                item.center if item.observed and item.coverage >= 0.75 else axis,
-                math.radians(orientation),
-            ),
-        )
-        for band, z, item in zip(bands, zs, first, strict=True)
-    ]
+    slices = []
+    for band, z, item in zip(bands, zs, first, strict=True):
+        centre = item.center if item.observed and item.coverage >= 0.75 else axis
+        slices.append(_fit_slice(band, float(z), rng, (centre, math.radians(orientation))))
+        tick()
     observed = np.array([s.observed for s in slices])
     if int((observed & middle).sum()) < MIN_BODY_SLICES:
         raise OvalFitRefusal(
@@ -622,6 +738,11 @@ def fit_oval_sections(vertices: np.ndarray, *, slice_count: int = SLICE_COUNT) -
     )
     if tolerance > SECTION_TOLERANCE:
         notes.append(f"section decimation tolerance raised to {tolerance:.2f} mm")
+    if tilt_deg > 0.0:
+        notes.append(
+            f"the body axis leaned {tilt_deg:.2f} deg from the Scan Master z axis; the points "
+            "were re-levelled about the fitted axis first (scan_master_to_design_frame)"
+        )
     return OvalSectionFit(
         classification,
         orientation,
@@ -631,6 +752,8 @@ def fit_oval_sections(vertices: np.ndarray, *, slice_count: int = SLICE_COUNT) -
         n_med if classification is SectionShapeClass.ROUNDED_RECTANGLE else 2.0,
         residual,
         spread,
+        tilt_deg,
+        tuple(float(v) for v in rotation.ravel()),
         tuple(slices),
         tuple(zone_edges),
         sections,

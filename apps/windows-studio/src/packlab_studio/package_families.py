@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -85,6 +85,7 @@ from packlab_core.mating_references import (
 )
 from packlab_core.oval_section_fit import (
     OvalFitRefusal,
+    OvalSectionFit,
     SectionShapeClass,
     fit_oval_sections,
     section_outline,
@@ -754,7 +755,10 @@ def _oval_spec(p: Mapping[str, Any]) -> _Spec:
         features.append(_feature(component, kinds[zone], f"oval:section-{index:02d}:{zone}:v1"))
         shapes.append(
             tuple(
-                SectionPoint(x, y) for x, y in section_outline(a * fx, b * fy, n, cx * fx, cy * fy)
+                # Half-axes follow the zone (neck: the neck diameter); the section centre
+                # is a position on the body footprint, so it follows the body scales.
+                SectionPoint(x, y)
+                for x, y in section_outline(a * fx, b * fy, n, cx * sx, cy * sy)
             )
         )
         heights.append(z * sz)
@@ -1154,23 +1158,44 @@ def fit_jerrycan_on_scan_master(
     )
 
 
-def fit_oval_bottle_on_scan_master(
-    scan_master: ScanMasterRevision, *, actor_id: str, owner_confirmed: bool
-) -> FamilyDesign:
-    """PL-0492: per-height oval / rounded-rectangle section fit lofted into a Design Model.
-
-    The core fit classifies the body; ROUND is sent to the revolved fit and every other
-    class needs the owner's explicit confirmation before a revision is created.
-    """
-    created = _now()
+def oval_section_fit(
+    scan_master: ScanMasterRevision, *, progress: Callable[[int], None] | None = None
+) -> OvalSectionFit:
+    """The core oval / rounded-rectangle section fit of a mm-scaled Scan Master (slow: a
+    few seconds; Studio runs it on a worker thread). ``progress`` may raise to cancel."""
     if scan_master.manifest.get("scale_state") != "metric-unverified":
         raise PackageFamilyError(
             "the Scan Master is not scaled to mm (METRIC_UNVERIFIED needed); scale it first"
         )
     try:
-        fit = fit_oval_sections(np.asarray(scan_master.mesh.vertices, dtype=np.float64))
+        return fit_oval_sections(
+            np.asarray(scan_master.mesh.vertices, dtype=np.float64), progress=progress
+        )
     except OvalFitRefusal as error:
         raise PackageFamilyError(f"oval section fit refused ({error})") from error
+
+
+def fit_oval_bottle_on_scan_master(
+    scan_master: ScanMasterRevision,
+    *,
+    actor_id: str,
+    owner_confirmed: bool,
+    fit: OvalSectionFit | None = None,
+) -> FamilyDesign:
+    """PL-0492: per-height oval / rounded-rectangle section fit lofted into a Design Model.
+
+    The core fit classifies the body; ROUND is sent to the revolved fit and every other
+    class needs the owner's explicit confirmation before a revision is created. ``fit``
+    is a result of ``oval_section_fit`` on this same Scan Master (the one shown to the
+    owner); without it the fit runs here.
+    """
+    created = _now()
+    if fit is None:
+        fit = oval_section_fit(scan_master)
+    elif scan_master.manifest.get("scale_state") != "metric-unverified":
+        raise PackageFamilyError(
+            "the Scan Master is not scaled to mm (METRIC_UNVERIFIED needed); scale it first"
+        )
     summary = (
         f"{fit.classification.value}: {fit.width:.1f} x {fit.depth:.1f} x {fit.height:.1f} "
         f"mm_unverified, minor/major {fit.aspect_ratio:.2f}, exponent {fit.exponent:.2f}, "
@@ -1207,6 +1232,7 @@ def fit_oval_bottle_on_scan_master(
             "exponent",
             "relative_residual",
             "orientation_spread_deg",
+            "tilt_deg",
             "thresholds",
             "overall",
             "zones",
@@ -1903,6 +1929,7 @@ __all__ = [
     "edit",
     "fit_jerrycan_on_scan_master",
     "fit_oval_bottle_on_scan_master",
+    "oval_section_fit",
     "load_family_document",
     "replacement_base",
 ]

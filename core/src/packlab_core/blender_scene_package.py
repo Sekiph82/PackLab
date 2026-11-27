@@ -594,6 +594,16 @@ VIEWER_ORIENTATION_SOURCE = r'''def _viewer_orientation(overlay):
         u_axis = [float(c) for c in geometry["u_axis"]]
         v_axis = [float(c) for c in geometry["v_axis"]]
         normal = [float(c) for c in geometry["surface_normal"]]
+    elif overlay["mapping_mode"] == "PRISM_PERIMETER_WRAP":
+        u_axis = [float(c) for c in geometry["mid_u_axis"]]
+        normal = [float(c) for c in geometry["mid_normal"]]
+        sign = (
+            1.0
+            if float(geometry["axial_end_mm_unverified"])
+            >= float(geometry["axial_start_mm_unverified"])
+            else -1.0
+        )
+        v_axis = [sign * float(c) for c in geometry["axis"]]
     else:
         import math as _math
 
@@ -892,6 +902,28 @@ def _create_overlay(overlay, root, base_matrix):
         for index in range(segments):
             start = index * 2
             faces.append((start, start + 2, start + 3, start + 1))
+    elif mode == "PRISM_PERIMETER_WRAP":
+        from mathutils import Vector
+        path = geometry["path_xy_mm_unverified"]
+        path_u = geometry["path_u_normalized"]
+        offsets = geometry["path_offset_direction_xy"]
+        if not (len(path) == len(path_u) == len(offsets) >= 2):
+            raise ValueError("scene_prism_overlay_geometry_invalid")
+        z0 = float(geometry["axial_start_mm_unverified"])
+        z1 = float(geometry["axial_end_mm_unverified"])
+        lift = float(overlay["renderer_only_offset_mm_unverified"])
+        boundary = geometry["placement_boundary_normalized_uv"]
+        drawn = geometry.get("drawn_rect_normalized_uv", boundary)
+        for (x, y), u, (ox, oy) in zip(path, path_u, offsets):
+            x, y = float(x) + lift * float(ox), float(y) + lift * float(oy)
+            verts.extend((
+                tuple(base_matrix @ Vector((x, y, z0))),
+                tuple(base_matrix @ Vector((x, y, z1))),
+            ))
+            uv_coords.extend(((float(u), float(drawn[1])), (float(u), float(drawn[3]))))
+        for index in range(len(path) - 1):
+            start = index * 2
+            faces.append((start, start + 2, start + 3, start + 1))
     elif mode == "PLANAR_DISC":
         import math as _math
         from mathutils import Vector
@@ -1012,7 +1044,7 @@ def _build_scene(root, body, assets, scene, result_relative, package_revision_id
     overlay_facts = []
     assets_by_path = {item["project_relative_path"]: item for item in assets}
     for overlay in scene.get("overlays", []):
-        if overlay.get("mapping_mode") not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC"}:
+        if overlay.get("mapping_mode") not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC", "PRISM_PERIMETER_WRAP"}:
             raise ValueError("scene_overlay_mapping_unsupported")
         offset = overlay.get("renderer_only_offset_mm_unverified")
         if isinstance(offset, bool) or not isinstance(offset, (int, float)) or float(offset) != 0.001:

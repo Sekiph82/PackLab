@@ -501,7 +501,9 @@ ROUTE_FACTORIES: dict[Route, RouteFactory] = {
         project_root=partial(_project_root, s.get("project_manager")),
         project_manager=s.get("project_manager"),
     ),
-    Route.PACKAGE_FAMILIES: lambda s: PackageFamiliesView(s.get("project_manager")),
+    Route.PACKAGE_FAMILIES: lambda s: PackageFamiliesView(
+        s.get("project_manager"), job_manager=s.get("job_manager")
+    ),
 }
 
 

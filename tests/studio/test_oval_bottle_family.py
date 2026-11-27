@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 
+import numpy as np
 import pytest
 
 pytest.importorskip("cv2")
@@ -101,12 +102,17 @@ def test_oval_bottle_fit_confirm_edit_save_labels_reopen_export(window, tmp_path
     _choose(view, "oval_bottle", "Fit to the selected Scan Master", "captured")
     assert view.confirm_shape.isVisibleTo(view) and not view.confirm_shape.isChecked()
 
-    view.create_button.click()  # unconfirmed: shows the detected class, creates nothing
-    assert view.design is None
+    view.create_button.click()  # the fit runs on a worker thread (UI stays responsive)
+    assert view.busy.isVisibleTo(view) and view.cancel_fit_button.isVisibleTo(view)
+    view.wait_for_fit(60)
+    assert view.design is None  # unconfirmed: shows the detected class, creates nothing
+    jobs = [job for job in window.job_manager.jobs() if job.job_type == "oval-section-fit"]
+    assert jobs and jobs[-1].state.value == "succeeded"
     assert "detected OVAL: 60.0 x 34.0 x 160.0 mm_unverified" in view.status.text()
     view.confirm_shape.setChecked(True)
-    view.create_button.click()
+    view.create_button.click()  # reuses the fit the owner saw: no second fit job
     design = view.design
+    assert len([j for j in window.job_manager.jobs() if j.job_type == "oval-section-fit"]) == 1
     assert design is not None, view.status.text()
     assert design.model.fitted_to_scan_master_revision_id == scan.revision_id
     assert design.model.physical_accuracy_validation_status == "DEFERRED_OWNER_VALIDATION"
@@ -155,14 +161,30 @@ def test_oval_bottle_fit_confirm_edit_save_labels_reopen_export(window, tmp_path
     labels.use_project_model()
     assert "Opened project Design Model" in labels.status.text(), labels.status.text()
     workbench = labels.workbench
+    # Labels follow the curved oval body band (64 x 34 mm after the edit), not only the
+    # flat panel: front/back along the side arc facing +/-Y, wrap all the way round.
+    side = None
     for kind in (LabelZoneKind.FRONT, LabelZoneKind.BACK):
         entry = workbench.add_label_zone(workbench.suggest_label_zone(kind))
+        binding = entry.metric_binding
+        assert binding.mapping_mode == "PRISM_PERIMETER_WRAP"
         width, height = entry.size_mm
-        assert width > 5.0 and height > 50.0  # on the flat body panel facing +/-Y
-    with pytest.raises(Exception, match="cylindrical"):
-        workbench.suggest_label_zone(LabelZoneKind.WRAP)
-    svg, _export_record = workbench.export_dieline_svg(workbench.labels[0], tmp_path)
+        assert 40.0 < width < 56.0 and height > 50.0, entry.size_mm
+        side = binding.host_width_mm_unverified
+        assert 70.0 < side < 85.0  # the -X .. +X side arc, longer than the 64 mm chord
+    wrap = workbench.add_label_zone(workbench.suggest_label_zone(LabelZoneKind.WRAP))
+    a, b = 32.0, 17.0  # Ramanujan: perimeter of the 64 x 34 ellipse
+    h = ((a - b) / (a + b)) ** 2
+    perimeter = math.pi * (a + b) * (1 + 3 * h / (10 + math.sqrt(4 - 3 * h)))
+    assert wrap.metric_binding.host_width_mm_unverified == pytest.approx(perimeter, rel=0.01)
+    assert wrap.metric_binding.host_width_mm_unverified == pytest.approx(2 * side, rel=0.02)
+    svg, export = workbench.export_dieline_svg(workbench.labels[0], tmp_path)
     assert svg.read_bytes().lstrip().startswith(b"<")
+    front_width = workbench.labels[0].size_mm[0]
+    sidecar = json.loads(svg.with_suffix(".json").read_text(encoding="utf-8"))
+    assert sidecar["dieline"]["mapping_mode"] == "PRISM_PERIMETER_WRAP"
+    assert sidecar["dieline"]["width"] == pytest.approx(front_width)  # mm along the surface
+    assert export.width_mm_unverified > front_width
 
     view.design = None
     view.open_button.click()
@@ -192,3 +214,87 @@ def test_rounded_rectangle_and_round_scans(window, tmp_path) -> None:  # noqa: F
     relative = _bottle_scan_master(project_id, 30.0, 17.0, 2.0, scale_state="relative")
     with pytest.raises(pf.PackageFamilyError, match="not scaled to mm"):
         pf.fit_oval_bottle_on_scan_master(relative, actor_id="owner", owner_confirmed=True)
+
+
+def test_confirm_resets_on_scan_master_change_and_fit_cancels(window, tmp_path) -> None:  # noqa: F811
+    window.new_project(tmp_path / "project", "Oval reset")
+    manager = window.project_manager
+    first = _bottle_scan_master(manager.current.project_id, 30.0, 17.0, 2.0)
+    manager.persist_scan_master_revision(first, expected_revision=manager.current.revision)
+    view = _families(window)
+    _choose(view, "oval_bottle", "Fit to the selected Scan Master", "captured")
+    view.create_button.click()
+    view.wait_for_fit(60)
+    assert "detected OVAL" in view.status.text()
+    view.confirm_shape.setChecked(True)  # the owner confirmed the first scan's shape ...
+    second = _bottle_scan_master(manager.current.project_id, 30.0, 20.0, 4.0)
+    manager.persist_scan_master_revision(second, expected_revision=manager.current.revision)
+    assert not view.confirm_shape.isChecked()  # ... not this one
+    view.create_button.click()  # a new fit of the new Scan Master; nothing is created
+    view.cancel_fit()
+    view.wait_for_fit(60)
+    assert view.design is None
+    assert "cancelled" in view.status.text(), view.status.text()
+    fits = [job for job in window.job_manager.jobs() if job.job_type == "oval-section-fit"]
+    assert fits[-1].state.value == "cancelled"
+    view.create_button.click()
+    view.wait_for_fit(60)
+    assert "detected ROUNDED_RECTANGLE" in view.status.text(), view.status.text()
+    view.confirm_shape.setChecked(True)
+    view.create_button.click()
+    assert view.design is not None, view.status.text()
+    assert view.design.model.fitted_to_scan_master_revision_id == second.revision_id
+
+
+def test_neck_offset_scales_with_the_body_not_the_neck(window, tmp_path) -> None:  # noqa: F811
+    window.new_project(tmp_path / "project", "Neck offset")
+    scan = _bottle_scan_master(window.project_manager.current.project_id, 30.0, 17.0, 2.0)
+    design = pf.fit_oval_bottle_on_scan_master(scan, actor_id="owner", owner_confirmed=True)
+    values = dict(design.parameters)
+    values["oval_sections"] = [
+        [row[0], row[1] + (4.0 if row[6] == "neck" else 0.0), *row[2:]]
+        for row in values["oval_sections"]
+    ]
+    values["width"] = 2.0 * values["width"]  # body twice as wide, neck diameter unchanged
+    loft = pf._oval_spec(values).parts[0]
+    top = loft.sections[-1][2]
+    xs = [point.x for point in top.points]
+    assert (max(xs) + min(xs)) / 2 == pytest.approx(8.0, abs=1e-6)  # offset 4 mm x 2
+    assert max(xs) - min(xs) == pytest.approx(24.0, abs=1e-6)  # neck diameter kept
+
+
+def test_curved_labels_read_left_to_right_in_preview_and_blender(
+    window,  # noqa: F811
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Left-half-blue artwork on the curved front and back: seen from outside, the left
+    half is on the viewer's left (front: +X, back: -X); Blender uses the same function."""
+    from tests.studio.test_label_top_disc import _png
+
+    from packlab_core import blender_scene_package as package
+    from packlab_studio.design_workbench import DesignWorkbench, label_preview_points
+
+    window.new_project(tmp_path / "project", "Oval labels")
+    scan = _bottle_scan_master(window.project_manager.current.project_id, 31.0, 17.0, 2.0)
+    design = pf.fit_oval_bottle_on_scan_master(scan, actor_id="owner", owner_confirmed=True)
+    bench = DesignWorkbench()
+    bench.open_document(json.dumps(design.as_dict(), default=str).encode())
+    for kind, left_x in ((LabelZoneKind.FRONT, 1.0), (LabelZoneKind.BACK, -1.0)):
+        entry = bench.add_label_zone(bench.suggest_label_zone(kind))
+        assert entry.size_mm[0] == pytest.approx(49.6, abs=1.5)  # ~50 mm along the curve
+        bench.import_artwork(entry, _png(200, 100), fit_mode="STRETCH")
+        points, colors = label_preview_points(bench.session, entry)
+        blue = colors[:, 2] > colors[:, 0]
+        assert (np.sign(points[blue, 0]) == left_x).mean() > 0.95, kind
+        assert (np.sign(points[~blue, 0]) == -left_x).mean() > 0.95, kind
+        facing = 1.0 if kind is LabelZoneKind.FRONT else -1.0
+        assert (points[:, 1] * facing > 0).all()  # on the facing side of the curved body
+    monkeypatch.setenv("PACKLAB_BUILD_REVISION", "a" * 40)
+    fake = tmp_path / "blender.exe"
+    fake.write_bytes(b"not run")
+    job = bench.prepare_mockup(tmp_path, executable=fake)
+    overlays = job.package.manifest()["body"]["scene"]["overlays"]
+    assert [item["mapping_mode"] for item in overlays] == ["PRISM_PERIMETER_WRAP"] * 2
+    for overlay in overlays:
+        assert package.artwork_viewer_orientation(overlay) == (True, True)

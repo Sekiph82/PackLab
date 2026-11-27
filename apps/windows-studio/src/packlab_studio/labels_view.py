@@ -362,7 +362,7 @@ class LabelsView(QWidget):
             workflow = json.loads(source).get("package_family_workflow") or {}
             family = workflow.get("family_label")
             # Package Families revisions (PL-0459) are not single-revolve jars/bottles; the
-            # oval / flat bottle loft (PL-0492) takes front/back panel labels.
+            # oval / flat bottle loft (PL-0492) takes front/back/wrap labels on its body.
             if family and workflow.get("family") != "oval_bottle":
                 self.status.setText(
                     "Labels currently support Measure & Design jar/bottle revisions; this "

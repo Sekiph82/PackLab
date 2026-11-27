@@ -25,11 +25,15 @@ from .label_metric_surface_binding import (
     LabelMetricSurfaceBindingError,
     create_label_metric_surface_binding,
     disc_binding_options,
+    prism_perimeter_path,
 )
 from .label_zone_placement import LabelZonePlacementRevision
 
 LABEL_RENDER_OVERLAY_CONTRACT = "packlab.label-render-overlay-binding.v1"
 RENDERER_ONLY_OFFSET_MM_UNVERIFIED = 0.001
+OVERLAY_MAPPING_MODES = frozenset(
+    {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC", "PRISM_PERIMETER_WRAP"}
+)
 _TOLERANCE = 1e-7
 
 
@@ -62,7 +66,7 @@ class LabelRenderOverlayBinding:
     def __post_init__(self) -> None:
         if (
             self.contract != LABEL_RENDER_OVERLAY_CONTRACT
-            or self.mapping_mode not in {"PLANAR_RECTANGULAR", "CYLINDRICAL_WRAP", "PLANAR_DISC"}
+            or self.mapping_mode not in OVERLAY_MAPPING_MODES
             or self.coordinate_unit != "mm_unverified"
             or self.renderer_only_offset_mm_unverified != RENDERER_ONLY_OFFSET_MM_UNVERIFIED
             or self.revision_id != "label-render-overlay:" + _digest(self._identity())
@@ -171,6 +175,7 @@ def create_label_render_overlay_binding(
             placement,
             analysis,
             metric_binding.analysis_region_id,
+            perimeter_wrap=metric_binding.mapping_mode == "PRISM_PERIMETER_WRAP",
             **disc_binding_options(metric_binding),
         )
     except (CadAdapterError, LabelMetricSurfaceBindingError, TypeError, ValueError) as error:
@@ -218,13 +223,19 @@ def create_label_render_overlay_binding(
         or drawn[3] <= drawn[1]
     ):
         raise LabelRenderOverlayError("label_render_overlay_drawn_rect_outside_zone")
-    face = _resolve_face(representation, analysis, metric_binding.analysis_region_id)
-    if metric_binding.mapping_mode == "PLANAR_RECTANGULAR":
-        geometry = _planar_geometry(face, placement, drawn)
-    elif metric_binding.mapping_mode == "CYLINDRICAL_WRAP":
-        geometry = _cylindrical_geometry(face, placement, assignment, drawn)
+    if metric_binding.mapping_mode == "PRISM_PERIMETER_WRAP":
+        geometry = _prism_geometry(metric_binding, placement, drawn)
+        geometry["seam_u_normalized"] = float(assignment.wrap_seam_u_normalized or 0.0)
+        if geometry["seam_u_normalized"] != 0.0:
+            raise LabelRenderOverlayError("label_render_overlay_prism_seam_unsupported")
     elif metric_binding.mapping_mode == "PLANAR_DISC":
         geometry = _disc_geometry(metric_binding, placement)
+    elif metric_binding.mapping_mode == "PLANAR_RECTANGULAR":
+        face = _resolve_face(representation, analysis, metric_binding.analysis_region_id)
+        geometry = _planar_geometry(face, placement, drawn)
+    elif metric_binding.mapping_mode == "CYLINDRICAL_WRAP":
+        face = _resolve_face(representation, analysis, metric_binding.analysis_region_id)
+        geometry = _cylindrical_geometry(face, placement, assignment, drawn)
     else:
         raise LabelRenderOverlayError("label_render_overlay_mapping_unsupported")
     scale = 0.001 if model.coordinate_unit == "mm_unverified" else 1.0
@@ -457,6 +468,85 @@ def _cylindrical_geometry(
         "source_face_identity_persisted": False,
         "source_zone_kind": zone.zone_kind.value,
     }
+
+
+def _prism_geometry(
+    binding: LabelMetricSurfaceBinding,
+    placement: LabelZonePlacementRevision,
+    drawn: tuple[float, ...],
+) -> dict[str, object]:
+    """Drawn part of a prism band label (PL-0492) as a path along the exact band.
+
+    The binding was just re-derived from the exact BREP by the caller. Each path point has
+    its zone u and an outward mitred offset direction (moving by d along it moves both
+    adjacent planar strips by exactly d), so the overlay strips lie on the body faces.
+    """
+    zone = placement.label_zone
+    path, us, z_low, z_high = prism_perimeter_path(binding)
+    u0, u1 = drawn[0], drawn[2]
+    xs = [p[0] for p in path]
+    ys = [p[1] for p in path]
+
+    def point(u: float) -> tuple[float, float]:
+        return (_interp(u, us, xs), _interp(u, us, ys))
+
+    # Segment j runs from path[j] to path[j + 1]; an inner vertex joins two segments.
+    last = len(path) - 2
+    first_segment = next(j for j in range(last + 1) if us[j + 1] > u0 or j == last)
+    last_segment = next(j for j in range(last, -1, -1) if us[j] < u1 or j == 0)
+    inner = list(range(first_segment + 1, last_segment + 1))
+    sub_u = [u0, *(us[i] for i in inner), u1]
+    sub = [point(u0), *(path[i] for i in inner), point(u1)]
+    normals = [_segment_normal(path, first_segment)]
+    for i in inner:  # mitre: offsetting by d along it moves both strips by exactly d
+        n1, n2 = _segment_normal(path, i - 1), _segment_normal(path, i)
+        dot = n1[0] * n2[0] + n1[1] * n2[1]
+        normals.append(((n1[0] + n2[0]) / (1.0 + dot), (n1[1] + n2[1]) / (1.0 + dot)))
+    normals.append(_segment_normal(path, last_segment))
+    mid = (u0 + u1) / 2.0
+    normal = _segment_normal(
+        path, next(j for j in range(last + 1) if us[j + 1] >= mid or j == last)
+    )
+    boundary = placement.boundary
+    return {
+        "mode": "PRISM_PERIMETER_WRAP",
+        "host_frame": "PACKLAB_PRISM_PERIMETER",
+        "path_direction": "CLOCKWISE_FROM_PLUS_Z",
+        "path_xy_mm_unverified": [list(item) for item in sub],
+        "path_u_normalized": sub_u,
+        "path_offset_direction_xy": [list(item) for item in normals],
+        "mid_normal": [normal[0], normal[1], 0.0],
+        "mid_u_axis": [normal[1], -normal[0], 0.0],  # path direction (clockwise from +Z)
+        "axis": [0.0, 0.0, 1.0],
+        "axial_start_mm_unverified": z_low + (z_high - z_low) * drawn[1],
+        "axial_end_mm_unverified": z_low + (z_high - z_low) * drawn[3],
+        "placement_boundary_normalized_uv": [
+            boundary.u_min,
+            boundary.v_min,
+            boundary.u_max,
+            boundary.v_max,
+        ],
+        "overlay_kind": "BOUNDED_SEGMENTED_PRISM_PATCH",
+        "uv_domain": [0.0, 1.0],
+        "source_face_identity_persisted": False,
+        "source_zone_kind": zone.zone_kind.value,
+    }
+
+
+def _interp(u: float, us: tuple[float, ...], values: list[float]) -> float:
+    for j in range(len(us) - 1):
+        if us[j] <= u <= us[j + 1]:
+            span = us[j + 1] - us[j]
+            t = 0.0 if span <= 0.0 else (u - us[j]) / span
+            return values[j] + t * (values[j + 1] - values[j])
+    return values[-1] if u > us[-1] else values[0]
+
+
+def _segment_normal(path: tuple[tuple[float, float], ...], index: int) -> tuple[float, float]:
+    """Outward normal of a clockwise (from +Z) path segment."""
+    (ax, ay), (bx, by) = path[index], path[index + 1]
+    length = math.hypot(bx - ax, by - ay)
+    return (-(by - ay) / length, (bx - ax) / length)
 
 
 def _disc_geometry(
