@@ -579,6 +579,17 @@ def _validate_inputs(
         raise LabelMetricSurfaceBindingError("label_metric_brep_digest_mismatch")
 
 
+def _straight_polynomial(curve: Any, kind: str) -> bool:
+    """A degree-1, two-pole Bezier/B-spline edge (ruled-loft rulings) is a straight line."""
+    if kind == "GeomAbs_BezierCurve":
+        geometry = curve.Bezier()
+    elif kind == "GeomAbs_BSplineCurve":
+        geometry = curve.BSpline()
+    else:
+        return False
+    return bool(geometry.Degree() == 1 and geometry.NbPoles() == 2)
+
+
 def _planar_rectangle(
     face: Any, zone_kind: LabelZoneKind
 ) -> tuple[float, float, tuple[tuple[str, float | str], ...]]:
@@ -597,7 +608,7 @@ def _planar_rectangle(
     for edge in edges:
         curve = modules["adaptor"].BRepAdaptor_Curve(modules["topods"].TopoDS.Edge(edge))
         kind = getattr(curve.GetType(), "name", str(curve.GetType()).split(".")[-1])
-        if kind != "GeomAbs_Line":
+        if kind != "GeomAbs_Line" and not _straight_polynomial(curve, kind):
             raise LabelMetricSurfaceBindingError(
                 "label_metric_planar_trim_must_be_single_rectangle"
             )

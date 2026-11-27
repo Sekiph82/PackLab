@@ -100,6 +100,9 @@ class PackageFamiliesView(QWidget):
         self.open_button = button(
             "Open the project's current Design Model", "open-current", self.open_current
         )
+        # PL-0492: the oval fit classifies the body; the owner confirms it before Create.
+        self.confirm_shape = QCheckBox(tr("Owner confirms the detected section shape"))
+        self.confirm_shape.setObjectName("packlab.families.confirm-shape")
         self.show_closure = QCheckBox("Show closure / head")
         self.show_closure.setObjectName("packlab.families.show-closure")
         self.show_closure.setChecked(True)
@@ -135,6 +138,7 @@ class PackageFamiliesView(QWidget):
         family_form.addRow("Start from", self.source)
         family_form.addRow("Preset", self.preset)
         family_form.addRow("Actor", self.actor)
+        family_form.addRow(self.confirm_shape)
         closure_box = QGroupBox("Closure workflow")
         closure_form = QFormLayout(closure_box)
         closure_form.addRow(self.show_closure)
@@ -273,7 +277,9 @@ class PackageFamiliesView(QWidget):
             spin.setDecimals(0 if name == "thread_starts" else 2)
             spin.setSuffix("" if name == "thread_starts" else " mm")
             self.spins[name] = spin
-            self.parameters_form.addRow(label, spin)
+            self.parameters_form.addRow(tr(label), spin)
+        self.confirm_shape.setVisible(family == "oval_bottle")
+        self.confirm_shape.setChecked(False)
         self._preset_changed()
 
     def _preset_key(self) -> str:
@@ -394,6 +400,12 @@ class PackageFamiliesView(QWidget):
                     raise pf.PackageFamilyError("no selected Scan Master in this project")
                 if family == "jerrycan":
                     design = pf.fit_jerrycan_on_scan_master(scan_master, actor_id=actor)
+                elif family == "oval_bottle":
+                    design = pf.fit_oval_bottle_on_scan_master(
+                        scan_master,
+                        actor_id=actor,
+                        owner_confirmed=self.confirm_shape.isChecked(),
+                    )
                 else:
                     design = pf.create_tube_on_scan_master(
                         scan_master, self.values(), preset=preset, actor_id=actor

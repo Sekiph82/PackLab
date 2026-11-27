@@ -597,4 +597,12 @@ TURKISH: dict[str, str] = {
     "Inner radius": "İç yarıçap",
     "the {part} Design Model has no recorded scan frame: fit it in Measure & Design with Use selected part (promote, fit, save)": "{part} Tasarım Modelinin kayıtlı tarama çerçevesi yok: Ölçü ve Tasarım'da Seçili parçayı kullan ile uydurun (yükselt, uydur, kaydet)",
     "the {part} Design Model was fitted to another cloud than the placed one: place the closure again or refit {part}": "{part} Tasarım Modeli yerleştirilenden farklı bir buluta uydurulmuş: kapağı yeniden yerleştirin veya {part} yeniden uydurun",
+    # PL-0492: oval / flat bottle Design Model
+    "Oval / flat bottle (fitted to the Scan Master)": "Oval / yassı şişe (Scan Master'a uydurulur)",
+    "Fit to the selected Scan Master": "Seçili Scan Master'a uydur",
+    "Body width (long side)": "Gövde genişliği (uzun kenar)",
+    "Body depth (short side)": "Gövde derinliği (kısa kenar)",
+    "Overall height": "Toplam yükseklik",
+    "Neck diameter": "Boyun çapı",
+    "Owner confirms the detected section shape": "Sahip, algılanan kesit şeklini onaylıyor",
 }
