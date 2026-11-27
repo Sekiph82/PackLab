@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
 from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
@@ -31,6 +32,13 @@ class ArtifactRecord:
     parameter_digest: str
     project_revision: int
     status: ArtifactStatus
+
+
+# Concurrent model builds register artifacts from worker threads. Reads and writes of the shared
+# provenance.json go through this lock (Windows refuses os.replace over a file being read), and
+# register() merges with the file so one build never drops another build's record.
+# ponytail: in-process lock only; two Studio processes on one project are not supported.
+_FILE_LOCK = threading.RLock()
 
 
 class ProvenanceManager:
@@ -60,8 +68,10 @@ class ProvenanceManager:
             project_revision,
             ArtifactStatus.FRESH,
         )
-        self._records[artifact_id] = record
-        self._save()
+        with _FILE_LOCK:
+            self._records = {**self._records, **self._load()}
+            self._records[artifact_id] = record
+            self._save()
         return record
 
     def get(self, artifact_id: str) -> ArtifactRecord:
@@ -165,10 +175,15 @@ class ProvenanceManager:
             self._save()
 
     def _load(self) -> dict[str, ArtifactRecord]:
-        if not self.path.exists():
-            return {}
+        with _FILE_LOCK:
+            if not self.path.exists():
+                return {}
+            try:
+                text = self.path.read_text(encoding="utf-8")
+            except OSError as error:
+                raise ValueError("provenance metadata is corrupt") from error
         try:
-            value = json.loads(self.path.read_text(encoding="utf-8"))
+            value = json.loads(text)
             return {
                 item["artifact_id"]: ArtifactRecord(
                     item["artifact_id"],
@@ -186,6 +201,10 @@ class ProvenanceManager:
             raise ValueError("provenance metadata is corrupt") from error
 
     def _save(self) -> None:
+        with _FILE_LOCK:
+            self._write()
+
+    def _write(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         value = {
             "schema_version": 1,
