@@ -391,6 +391,13 @@ TURKISH: dict[str, str] = {
         "3B yeniden yapılandırma motorları (COLMAP / OpenMVS)"
     ),
     "Build 3D model": "3B model oluştur",
+    "Texture made with seam leveling off after the texturing engine crashed.": (
+        "Doku motoru çöktüğü için doku, dikiş dengeleme kapalı olarak oluşturuldu."
+    ),
+    "Texture unavailable: the texturing engine crashed, so the model has no colour texture. "
+    "The shape is not affected.": (
+        "Doku yok: doku motoru çöktüğü için modelin renk dokusu yok. Şekil etkilenmedi."
+    ),
     "Build revision": "Derleme revizyonu",
     "Local update manifest": "Yerel güncelleme bildirimi",
     "PackScan schema": "PackScan şeması",
