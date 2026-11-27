@@ -1784,8 +1784,50 @@ final class PackLabCaptureTests: XCTestCase {
         try SessionFinalizer().finalize(FinalizationInput(manifest: manifest, payloads: ["metadata/photos.json": metadata, "images/p.heic": image], destination: destination, sessionRoot: root))
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent("finalization.json").path))
-        XCTAssertThrowsError(try SessionFinalizer().finalize(FinalizationInput(manifest: manifest, payloads: ["metadata/photos.json": metadata, "images/p.heic": image], destination: destination, sessionRoot: root))) { XCTAssertEqual($0 as? FinalizationError, .packagingFailed) }
+        // Finalizing the intact exported session again is a no-op, not an error.
+        XCTAssertEqual(try SessionFinalizer().finalize(FinalizationInput(manifest: manifest, payloads: ["metadata/photos.json": metadata, "images/p.heic": image], destination: destination, sessionRoot: root)), .alreadyFinalized)
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    func testRefinalizeKeepsIntactPackageRebuildsCorruptOneAndExplainsOutOfSpace() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let image = Data([1, 2, 3])
+        let unavailable = PackScanNumericMeasurement(status: .unavailable)
+        let wire = PackScanPhotoMetadataWire(photoID: "p", imagePath: "images/p.heic", sequence: 0, originalFilename: "p.heic", pixelDimensions: CaptureDimensions(width: 1, height: 1), orientation: PackScanOrientation(value: .unknown, source: .unknown), focalLengthMM: unavailable, exposure: unavailable, iso: PackScanISOMeasurement(status: .unavailable), whiteBalanceKelvin: unavailable)
+        let metadata = try JSONEncoder().encode(PackScanPhotoMetadataDocument(photos: [wire]))
+        let manifest = try JSONSerialization.data(withJSONObject: ["schema_version": "1.0.0", "capture_id": "session", "checksums": ["algorithm": "sha256", "canonicalization": PackScanWriter.checksumCanonicalization], "payloads": [["path": "metadata/photos.json", "kind": "photo_metadata", "required": true, "authority": "source", "size_bytes": metadata.count, "sha256": SourceIntegrity.digest(metadata)], ["path": "images/p.heic", "kind": "image", "required": true, "authority": "source", "size_bytes": image.count, "sha256": SourceIntegrity.digest(image)]]] as [String: Any])
+        let destination = root.appendingPathComponent("out.packscan")
+        let input = FinalizationInput(manifest: manifest, payloads: ["metadata/photos.json": metadata, "images/p.heic": image], destination: destination, sessionRoot: root)
+        XCTAssertEqual(try SessionFinalizer().finalize(input), .committed)
+        let committed = try Data(contentsOf: destination)
+        // Double finalize: success, package untouched.
+        XCTAssertEqual(try SessionFinalizer().finalize(input), .alreadyFinalized)
+        XCTAssertEqual(try Data(contentsOf: destination), committed)
+        // Corrupted committed package: rebuilt and the record matches it again.
+        try Data([0, 0]).write(to: destination)
+        XCTAssertNil(SessionFinalizer.intactExport(sessionRoot: root, destination: destination))
+        XCTAssertEqual(try SessionFinalizer().finalize(input), .committed)
+        XCTAssertEqual(try Data(contentsOf: destination), committed)
+        XCTAssertNotNil(SessionFinalizer.intactExport(sessionRoot: root, destination: destination))
+        // Missing committed package: rebuilt as well.
+        try FileManager.default.removeItem(at: destination)
+        XCTAssertEqual(try SessionFinalizer().finalize(input), .committed)
+        XCTAssertEqual(try Data(contentsOf: destination), committed)
+        // Not enough free space: fails early with a readable message, prior record kept.
+        try FileManager.default.removeItem(at: destination)
+        let record = try Data(contentsOf: root.appendingPathComponent("finalization.json"))
+        XCTAssertThrowsError(try SessionFinalizer(availableBytes: { _ in 1 }).finalize(input)) { error in
+            guard case .packagingFailed(let detail)? = error as? FinalizationError else { return XCTFail("expected packagingFailed, got \(error)") }
+            XCTAssertTrue(detail.hasPrefix("Not enough free space on the iPhone (needs about 1 MB"), detail)
+            XCTAssertTrue(error.localizedDescription.contains("Not enough free space on the iPhone"), error.localizedDescription)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("finalization.json")), record)
+        // A real disk-full error from the file system maps to the same plain message.
+        let diskFull = NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteOutOfSpace.rawValue)
+        XCTAssertEqual(SessionFinalizer.plainDetail(diskFull, neededBytes: 30 * 1_048_576), "Not enough free space on the iPhone (needs about 30 MB). Free up space and finalize again.")
     }
 
     func testDeletionRejectsNonAuthoritativeAndReportsInjectedPartialFailure() async throws {
@@ -2208,7 +2250,9 @@ final class PackLabCaptureTests: XCTestCase {
         try await store.storeAcceptedCapture(source: Data([1, 2, 3]), record: record, metadata: recordData, state: try JSONEncoder().encode(PersistedSessionState(sessionID: "active", nextSequence: 1, epoch: 0, acceptedIDs: ["p"])))
         try FileManager.default.createDirectory(at: layout.photoMetadata.deletingLastPathComponent(), withIntermediateDirectories: true); try photoMetadata().write(to: layout.photoMetadata); try Data([1]).write(to: layout.previews.appendingPathComponent("p-thumbnail.jpg"))
         let destination = root.appendingPathComponent("exports/active.packscan"); let finalization = try await ProductionScanFinalizeAction(root: root).finalize(sessionID: "active", destination: destination)
-        XCTAssertEqual(finalization.state, .exported); XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path)); let exportedHistory = await LocalScanHistoryStore(root: root).load(); XCTAssertEqual(exportedHistory.first?.exportState, "exported"); XCTAssertNoThrow(try PackScanShareCoordinator().eligiblePackage(at: destination, finalization: finalization))
+        XCTAssertEqual(finalization.state, .exported); XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        let again = try await ProductionScanFinalizeAction(root: root).finalizeReportingOutcome(sessionID: "active", destination: destination); XCTAssertEqual(again.outcome, .alreadyFinalized); XCTAssertEqual(again.record, finalization)
+        let exportedHistory = await LocalScanHistoryStore(root: root).load(); XCTAssertEqual(exportedHistory.first?.exportState, "exported"); XCTAssertNoThrow(try PackScanShareCoordinator().eligiblePackage(at: destination, finalization: finalization))
 
         let missingRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? FileManager.default.removeItem(at: missingRoot) }; let missingLayout = SessionStorageLayout(root: missingRoot, sessionID: "missing"); let missingStore = ScanSessionStore(layout: missingLayout); try await missingStore.create(NewScanDraft(sessionID: "missing", packageName: "Bottle", packageType: .bottle, captureMode: .freehand)); try await missingStore.storeAcceptedCapture(source: Data([1]), record: record, metadata: recordData, state: try JSONEncoder().encode(PersistedSessionState(sessionID: "missing", nextSequence: 1, epoch: 0, acceptedIDs: ["p"]))); try Data([1]).write(to: missingLayout.previews.appendingPathComponent("p-thumbnail.jpg")); let missingDestination = missingRoot.appendingPathComponent("exports/missing.packscan"); do { _ = try await ProductionScanFinalizeAction(root: missingRoot).finalize(sessionID: "missing", destination: missingDestination); XCTFail("missing photo metadata must not export") } catch { }; XCTAssertFalse(FileManager.default.fileExists(atPath: missingDestination.path)); let missingHistory = await LocalScanHistoryStore(root: missingRoot).load(); XCTAssertEqual(missingHistory.first?.exportState, "in_progress")
     }
