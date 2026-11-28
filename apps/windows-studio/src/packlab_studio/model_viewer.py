@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QPoint, QSize, Qt
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QMouseEvent, QPixmap, QResizeEvent, QWheelEvent
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -21,11 +23,13 @@ from PySide6.QtWidgets import (
 )
 
 from .viewport import (
+    Geometry,
     PointCloudGeometry,
     SceneObjectKind,
     ViewportCamera,
     ViewportLoadError,
     ViewportService,
+    load_geometry,
 )
 from .viewport_lod import LODPolicy, display_geometry, geometry_count
 
@@ -36,6 +40,37 @@ POINT_DISPLAY_BUDGET = 400_000
 MESH_DISPLAY_BUDGET = 20_000
 # Camera distance per model radius: the model spans about 80 % of the shorter side.
 FIT_DISTANCE_PER_RADIUS = 2.0
+
+
+@lru_cache(maxsize=4)
+def _display(path: str, _mtime_ns: int, _size: int) -> tuple[Geometry, str]:
+    """Read and decimate one model file; cached per file version so re-showing is instant.
+
+    ponytail: 4 recent files (~50 MB each at the 400k display budget); widen if owners
+    flip between more models.
+    """
+    geometry = load_geometry(path)
+    is_cloud = isinstance(geometry, PointCloudGeometry)
+    budget = POINT_DISPLAY_BUDGET if is_cloud else MESH_DISPLAY_BUDGET
+    shown, plan = display_geometry(geometry, LODPolicy(display_budget=budget))
+    colored = " colored" if is_cloud and geometry.colors else ""  # type: ignore[union-attr]
+    kind = "points" if is_cloud else "triangles"
+    shown_note = "" if plan.stride == 1 else f", showing {plan.display_count:,}"
+    return shown, f"{Path(path).name}: {geometry_count(geometry):,}{colored} {kind}{shown_note}"
+
+
+def _read(paths: tuple[Path, ...]) -> list[tuple[Geometry, str]] | str:
+    """Display geometry per path, or the owner-facing error of the first unreadable one."""
+    shown = []
+    for item in paths:
+        try:
+            stat = item.stat()
+            shown.append(_display(str(item), stat.st_mtime_ns, stat.st_size))
+        except ViewportLoadError as error:
+            return f"Cannot open {item.name}: {error} ({error.code.value})"
+        except OSError as error:
+            return f"Cannot open {item.name}: {error}"
+    return shown
 
 
 class ViewportCanvas(QLabel):
@@ -75,6 +110,8 @@ class ViewportCanvas(QLabel):
 
 
 class ModelViewerView(QWidget):
+    _read_done = Signal(object, object, object, float)  # token, paths, shown | error, started
+
     def __init__(self, *, file_chooser: Callable[[QWidget], str] | None = None) -> None:
         super().__init__()
         self.setObjectName("packlab.view.model-viewer")
@@ -84,12 +121,20 @@ class ModelViewerView(QWidget):
         )
         self.open_button = QPushButton("Open model…", self)
         self.fit_button = QPushButton("Fit", self)
+        # Shows the last model(s) again (cached: no re-read unless the file changed).
+        self.reload_button = QPushButton("Reload last model", self)
+        self.reload_button.setObjectName("packlab.viewer.reload")
+        self.reload_button.setEnabled(False)
+        self.last_paths: tuple[Path, ...] = ()
+        self._pending: object | None = None
+        self._read_done.connect(self._finish_read)
         self.status = QLabel("No model loaded. Drag to orbit, right-drag to pan, wheel to zoom.")
         self.status.setWordWrap(True)
         self.canvas = ViewportCanvas(self)
         buttons = QHBoxLayout()
         buttons.addWidget(self.open_button)
         buttons.addWidget(self.fit_button)
+        buttons.addWidget(self.reload_button)
         buttons.addStretch(1)
         layout = QVBoxLayout(self)
         layout.addLayout(buttons)
@@ -97,38 +142,61 @@ class ModelViewerView(QWidget):
         layout.addWidget(self.canvas, 1)
         self.open_button.clicked.connect(self.open_model)
         self.fit_button.clicked.connect(self.fit)
+        self.reload_button.clicked.connect(lambda: self.reload())
 
     def open_model(self) -> None:
         chosen = self._choose_file(self)
         if chosen:
             self.load(Path(chosen))
 
-    def load(self, path: Path, *more: Path) -> bool:
-        """Show one model, or several side by side (project parts, PL-0485)."""
+    def load(self, path: Path, *more: Path, background: bool = False) -> bool:
+        """Show one model, or several side by side (project parts, PL-0485).
+
+        ``background`` reads the files on a worker thread (large part clouds froze the UI
+        for up to a minute); the current view stays until the new one is ready.
+        """
+        paths = tuple(Path(item) for item in (path, *more))
         started = time.perf_counter()
-        service = ViewportService(self.service.adapter)
-        notes = []
-        for index, item in enumerate((path, *more)):
+        token = object()
+        self._pending = token
+        if not background:
+            return self._finish_read(token, paths, _read(paths), started)
+        self.status.setText(f"Loading {', '.join(item.name for item in paths)}…")
+
+        def work() -> None:
             try:
-                geometry = self.service.adapter.load(item)
-            except ViewportLoadError as error:
-                self.status.setText(f"Cannot open {item.name}: {error} ({error.code.value})")
-                return False
-            is_cloud = isinstance(geometry, PointCloudGeometry)
-            budget = POINT_DISPLAY_BUDGET if is_cloud else MESH_DISPLAY_BUDGET
-            shown, plan = display_geometry(geometry, LODPolicy(display_budget=budget))
+                result: object = _read(paths)
+            except Exception as error:  # never lose a failure on the worker thread
+                result = f"Cannot open: {error}"
+            try:
+                self._read_done.emit(token, paths, result, started)
+            except RuntimeError:
+                pass  # the view was destroyed while reading
+
+        threading.Thread(target=work, name="packlab-viewer-load", daemon=True).start()
+        return True
+
+    def reload(self, background: bool = True) -> bool:
+        return bool(self.last_paths) and self.load(*self.last_paths, background=background)
+
+    def _finish_read(self, token: object, paths: tuple[Path, ...], result, started) -> bool:
+        if token is not self._pending:
+            return False  # a newer load superseded this one
+        self._pending = None
+        if isinstance(result, str):
+            self.status.setText(result)
+            return False
+        service = ViewportService(self.service.adapter)
+        for index, (shown, _note) in enumerate(result):
             service.add_geometry(
                 "model" if index == 0 else f"model-{index}", SceneObjectKind.SCAN_MESH, shown
             )
-            colored = (
-                " colored" if isinstance(geometry, PointCloudGeometry) and geometry.colors else ""
-            )
-            kind = "points" if is_cloud else "triangles"
-            shown_note = "" if plan.stride == 1 else f", showing {plan.display_count:,}"
-            notes.append(f"{item.name}: {geometry_count(geometry):,}{colored} {kind}{shown_note}")
         self.service = service
+        self.last_paths = paths
+        self.reload_button.setEnabled(True)
+        notes = "; ".join(note for _shown, note in result)
         self.status.setText(
-            f"{'; '.join(notes)} (loaded in {time.perf_counter() - started:.1f} s). "
+            f"{notes} (loaded in {time.perf_counter() - started:.1f} s). "
             "Units as stored in the file."
         )
         self.fit()

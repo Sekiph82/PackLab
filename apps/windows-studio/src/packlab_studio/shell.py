@@ -697,13 +697,14 @@ class StudioMainWindow(QMainWindow):
             mask.route_requested.connect(self.navigation.navigate)
         measure = self.route_stack.views[Route.MEASURE_DESIGN]
         if isinstance(measure, MeasureDesignView):
-            # Next-step buttons hand the just-built model to Measure & Design.
+            # Next-step buttons hand the just-built model to Measure & Design, but never
+            # replace a model the owner already has open there (it vanished on return).
             builds.route_requested.connect(
                 lambda value: (
                     measure.use_latest_build(
                         None if builds.result is None else builds.result.model_path
                     )
-                    if value == Route.MEASURE_DESIGN.value
+                    if value == Route.MEASURE_DESIGN.value and measure.model is None
                     else None
                 )
             )
@@ -750,7 +751,7 @@ class StudioMainWindow(QMainWindow):
             labels.placement_provider = lambda: self.scene_panel.placement
             labels.show_part(None if part is None else str(part))
         if isinstance(viewer, ModelViewerView) and paths:
-            viewer.load(*paths)
+            viewer.load(*paths, background=True)  # 2 x 2.5M-point clouds froze the UI
 
     def refresh_builds(self) -> None:
         """Scan list on the Build 3D Model page: inbox scans + this project's builds."""

@@ -87,6 +87,7 @@ class PackageFamiliesView(QWidget):
 
         self.viewer = ModelViewerView()
         self.viewer.open_button.hide()
+        self.viewer.reload_button.hide()
         self.closure_controller = ClosureWorkflowController(self.viewer.service)
 
         def button(text: str, name: str, slot: Callable[[], object]) -> QPushButton:

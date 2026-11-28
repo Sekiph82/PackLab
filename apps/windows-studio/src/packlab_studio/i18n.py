@@ -343,6 +343,8 @@ TURKISH: dict[str, str] = {
     "Undo": "Geri al",
     "Undo closure replacement": "Kapak değişimini geri al",
     "Use latest project build": "Projedeki son modeli kullan",
+    "Reload last model": "Son modeli yeniden yükle",
+    "No model loaded yet in this project.": "Bu projede henüz model açılmadı.",
     "Use manual reference": "Elle referansı kullan",
     "Use project Design Model": "Projenin Tasarım Modelini kullan",
     # Combo items (display only; item data stays the logic key)
