@@ -89,6 +89,84 @@ The likely capture cause is that in the upside-down pose the closure stands on t
 
 These are recommendations, not verified.
 
+## 3b. Pipeline or photos? Stage-by-stage trace (read-only)
+
+### A. Closure smaller in the flipped scans
+
+Caliper (min x max, mm, 2-98 % over 36 directions) at a distance d from the closure top, in each scan's own mat frame:
+
+| stage | upF d4-d8 | dnH d4-d8 | dnF d4-d8 |
+|---|---|---|---|
+| OpenMVS fused `scene_dense.ply` (mat frame) | 30.3-31.5 x 42.0-43.6 | 28.6-29.2 x 40.0-40.8 | 24.5-25.1 x 38.7-39.6 |
+| object cluster / minus glare halo | same | same | same |
+| 1 mm voxel band / minus strays | 30.5-31.4 x 42.3-44.4 | 28.2-29.1 x 40.0-41.4 | 24.3-25.1 x 38.2-40.2 |
+| shell | 30.6-31.5 x 42.1-44.7 | 28.5-29.1 x 40.2-40.6 | 20.6-24.4 x 37.0-38.3 |
+| OpenMVS `scene_dense_mesh` | 29.8-30.6 x 41.8-42.2 | 28.5-28.6 x 37.1-38.8 | 22.8-24.4 x 37.2-38.3 |
+| OpenMVS `scene_refined` | | 28.0-28.5 x 36.8-38.8 | |
+
+What this shows:
+- **Already in OpenMVS's output.** The shrink is in the raw fused cloud and in both OpenMVS meshes. No PackLab stage changes it by more than about 0.5 mm, and the meshes are smaller still, so using the mesh instead of the dense cloud does not help.
+- **Uniform along the closure (d3-d14).** It is not a contact fillet or glare erosion near the mat.
+- **Larger at the Fast densify resolution.** Shrink in min / max caliper: about 2 / 3 mm for dnH, about 6 / 4 mm for dnF. Note that upF is also Fast (750 px) and is not shrunk, so resolution alone does not explain it.
+- **Depth-map resolution is a pipeline setting.** The dense depth maps are 1000x750 px (High: COLMAP undistort max 2000 px, `--resolution-level 1`) and 750x562 px (Fast: `--max-resolution 750`). The photos are 4032x3024 px.
+
+The photo silhouette test was inconclusive. Projected closure widths against the dark silhouette width (mid-grey threshold) in each scan's own undistorted photos, 56-65 views each:
+
+| photos | flipped recon / photo | upF recon / photo |
+|---|---|---|
+| dnH | 1.065 | 1.112 |
+| dnF | 1.017 | 1.054 |
+| upF | 1.254 (dnH recon) | 1.285 |
+
+The threshold bias changes with the background (1.0-1.3), so the photos cannot tell which closure size is true. Two decisive checks remain, both owner actions:
+- A caliper on the closure: about 30.5 x 43.5 mm (upright) vs 28.6 x 40.5 mm (dnH), a 2-3 mm difference.
+- A High+ rebuild of a flipped scan at full depth-map resolution (`--resolution-level 0`, undistort max 4032). This writes new files to the owner workspace, so it was not run here.
+
+### B. Shoulder curtain
+
+The curtain is already in the raw fused cloud and in OpenMVS's meshes:
+
+| source | width at d22 (mm) | upF at the same height (mm) |
+|---|---|---|
+| dnH raw | 63.5 | 39.5 |
+| dnH mesh | 56.9 | |
+| dnH refined mesh | 55.8 | |
+
+The shoulder appears 4-6 mm closer to the closure than in upF. `_dense` trims only its sparse fringe (dnH d18 raw 51.5 -> 45.8).
+
+Free-space test with the OpenMVS per-view depth maps, read in place (dnH 81 maps, dnF 78). A point counts as seen through when at least 2 views measured a surface more than 2 mm behind it along the same ray, and more views see through it than support it:
+
+| points (own z 12-36) | dnH removed | dnF removed |
+|---|---|---|
+| more than 3 mm off the upright surface (the curtain) | 73 % | 81 % |
+| within 1 mm of the upright surface (real) | 4 % | 9 % |
+
+The real points lost are mostly at the neck, z 12-24: 7-30 % removed. So the curtain is MVS fill that the cameras saw through. A camera-pose free-space filter removes most of it, but it would need the Studio to pass each build's depth maps. It is not shipped: it does not touch the closure (A), which alone keeps the pair refused.
+
+### C. Scale +1.06 % (upF vs dnH)
+
+| | mm/unit | u (rel.) | marker views | height (mm) |
+|---|---|---|---|---|
+| upF | 128.371 | 0.78 % | 257 of 258 | 173.19 |
+| dnH | 126.306 | 0.69 % | 262 of 264 | 173.25 |
+| dnF | 126.045 | 0.70 % | 258 of 259 | |
+| upH | 125.461 | 0.77 % | 255 of 256 | |
+
+COLMAP intrinsics agree across builds: fx 3114.6-3115.6 px, 0.03 %.
+
+The marker scales agree. Heights differ by only 0.03 %, while the "scale" reading is +1.06 %. That reading comes from wall offsets that change with height, not from scale.
+
+Body-only band ratio (z 30-140): 1.004 for dnH, 0.992 for dnF. The radial offset (flipped minus upright) runs from about +0.5 mm near the upright's mat (z 10-50), through 0, to -0.5 mm near the flipped scan's mat (z 105-135). It then reaches -1.35 at the closure, after +2.6 at the shoulder curtain.
+
+Both flipped builds show the same trend: each scan reconstructs walls near its own mat slightly smaller. That is consistent with the closure finding (A) and is present in the raw OpenMVS clouds.
+
+### Verdict
+
+- **Not a PackLab stage.** No stage from the fused cloud to the shell creates the closure shrink, the curtain or the scale reading.
+- **Reconstruction side, not proven from the photos.** All three are already in OpenMVS's dense output, from photos taken at 4032 px but densified at 750-1000 px.
+- **Actionable:** caliper the closure, and rebuild one flipped scan at full depth resolution to see whether A disappears.
+- **Gates unchanged.** No gate was loosened and no code changed in this step.
+
 ## 4. Results V03 (final code)
 
 | pair | result | reasons (all printed in the refusal) |
