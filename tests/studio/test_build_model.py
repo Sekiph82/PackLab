@@ -39,7 +39,7 @@ from packlab_studio.engine_config import (
     EngineDiscoveryReport,
     EnginePathDiagnostic,
 )
-from packlab_studio.jobs import JobState
+from packlab_studio.jobs import TERMINAL_STATES, JobState
 from packlab_studio.model_viewer import ModelViewerView
 from packlab_studio.navigation import Route, SettingsView
 from packlab_studio.receiver_session import ReceiverSession
@@ -476,11 +476,14 @@ def test_builds_run_up_to_the_limit_in_order_and_duplicates_are_ignored(
             app,
             lambda: (
                 not window.build_model._running
-                and all(
-                    window.job_manager.get(job_id).state is JobState.SUCCEEDED for job_id in jobs
-                )
+                and all(window.job_manager.get(job_id).state in TERMINAL_STATES for job_id in jobs)
             ),
         )
+        outcomes = {
+            job_id: (window.job_manager.get(job_id).state, window.job_manager.get(job_id).error)
+            for job_id in jobs
+        }
+        assert all(state is JobState.SUCCEEDED for state, _ in outcomes.values()), outcomes
     finally:
         window.close()
         app.processEvents()
