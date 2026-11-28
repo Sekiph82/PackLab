@@ -8,6 +8,7 @@ import math
 import os
 import re
 import tempfile
+import time
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -103,6 +104,22 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _replace(source: str, target: Path) -> None:
+    """os.replace that rides out a brief reader on Windows.
+
+    Windows refuses to replace a file another thread or process has open
+    (WinError 5 / 32), e.g. the UI reading a workspace manifest while a build
+    thread rewrites it. Retry for up to ~1.6 s before giving up.
+    """
+    for delay in (0.01, 0.02, 0.05, 0.1, 0.2, 0.4, 0.8):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            time.sleep(delay)
+    os.replace(source, target)
+
+
 def _atomic_json(target: Path, value: object) -> None:
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{target.name}-", suffix=".tmp", dir=target.parent
@@ -113,7 +130,7 @@ def _atomic_json(target: Path, value: object) -> None:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary_name, target)
+        _replace(temporary_name, target)
     finally:
         Path(temporary_name).unlink(missing_ok=True)
 
@@ -127,7 +144,7 @@ def _atomic_bytes(target: Path, value: bytes) -> None:
             handle.write(value)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary_name, target)
+        _replace(temporary_name, target)
     finally:
         Path(temporary_name).unlink(missing_ok=True)
 

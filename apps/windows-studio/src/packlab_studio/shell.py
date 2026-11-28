@@ -531,7 +531,10 @@ class StudioMainWindow(QMainWindow):
         return self._history_step(self.project_manager.redo, "Redo")
 
     def _history_step(self, step: Callable[[], Operation | None], label: str) -> Operation | None:
+        panel = getattr(self, "scene_panel", None)
         try:
+            if panel is not None:
+                panel.owner_action = True  # undo/redo of a part selection is the owner's
             operation = step()
         except Exception as error:
             self._menu_status(f"{label} failed: {error}")
@@ -545,6 +548,9 @@ class StudioMainWindow(QMainWindow):
                 target = parameters.get("before" if undone else "after")
                 what = _POINTER_LABELS.get(str(parameters.get("pointer")), "selection")
                 self._menu_status(f"{label}: current {what} is now {target or 'none'}")
+        finally:
+            if panel is not None:
+                panel.owner_action = False
         self._refresh_project_menu()
         return operation
 
@@ -677,9 +683,18 @@ class StudioMainWindow(QMainWindow):
         )
         settings.concurrent_builds.valueChanged.connect(self.build_model.set_max_concurrent)
         inbox.build_requested.connect(self.start_build)
+        # Auto-build after an import: the page only follows when the owner is on the
+        # import/build pages; a phone transfer must not pull them off Measure & Design.
         inbox.scan_imported.connect(
             lambda capture_id, digest: (
-                self.start_build(capture_id, digest) if settings.auto_build.isChecked() else None
+                self.start_build(
+                    capture_id,
+                    digest,
+                    navigate=self.navigation.current_route
+                    in (Route.CAPTURE_INBOX, Route.RECONSTRUCTION),
+                )
+                if settings.auto_build.isChecked()
+                else None
             )
         )
         self.build_model.build_started.connect(builds.track)
@@ -697,16 +712,18 @@ class StudioMainWindow(QMainWindow):
             mask.route_requested.connect(self.navigation.navigate)
         measure = self.route_stack.views[Route.MEASURE_DESIGN]
         if isinstance(measure, MeasureDesignView):
-            # Next-step buttons hand the just-built model to Measure & Design.
-            builds.route_requested.connect(
-                lambda value: (
-                    measure.use_latest_build(
-                        None if builds.result is None else builds.result.model_path
-                    )
-                    if value == Route.MEASURE_DESIGN.value
-                    else None
-                )
-            )
+            # Next-step buttons hand the just-built model to Measure & Design. A model the
+            # owner already has open there is kept; the newer build is offered instead.
+            def to_measure(value: str) -> None:
+                if value != Route.MEASURE_DESIGN.value:
+                    return
+                path = None if builds.result is None else builds.result.model_path
+                if measure.model is None:
+                    measure.use_latest_build(path)
+                else:
+                    measure.offer_build(path)
+
+            builds.route_requested.connect(to_measure)
 
     def _wire_scene_panel(self) -> None:
         """PL-0485: Scene / Objects lists the project's parts; selection drives the pages."""
@@ -749,8 +766,15 @@ class StudioMainWindow(QMainWindow):
         if isinstance(labels, LabelsView):
             labels.placement_provider = lambda: self.scene_panel.placement
             labels.show_part(None if part is None else str(part))
-        if isinstance(viewer, ModelViewerView) and paths:
-            viewer.load(*paths)
+        if not isinstance(viewer, ModelViewerView):
+            return
+        if viewer.pinned and not self.scene_panel.owner_action:
+            return  # a model the owner opened stays until they pick a part again
+        viewer.pinned = False
+        if paths:
+            viewer.load(*paths, background=True)  # 2 x 2.5M-point clouds froze the UI
+        else:
+            viewer.cancel_load()  # a late read of the previous part must not repaint
 
     def refresh_builds(self) -> None:
         """Scan list on the Build 3D Model page: inbox scans + this project's builds."""
@@ -805,7 +829,9 @@ class StudioMainWindow(QMainWindow):
             current = inbox.status_label.text()
             inbox.status_label.setText(f"{current}\n{text}" if current else text)
 
-    def start_build(self, capture_id: str, package_sha256: str) -> str | None:
+    def start_build(
+        self, capture_id: str, package_sha256: str, *, navigate: bool = True
+    ) -> str | None:
         inbox = self.route_stack.views[Route.CAPTURE_INBOX]
         assert isinstance(inbox, CaptureInboxView)
         session = inbox.session
@@ -819,19 +845,27 @@ class StudioMainWindow(QMainWindow):
         except Exception as error:
             self._inbox_note(f"Build model could not start: {error}")
             return None
-        self.navigation.navigate(Route.RECONSTRUCTION)
+        if navigate:
+            self.navigation.navigate(Route.RECONSTRUCTION)
         return job_id
 
     def _on_build_finished(self, result: BuildResult) -> None:
         builds = self.route_stack.views[Route.RECONSTRUCTION]
         if isinstance(builds, BuildModelView):
             builds.show_result(result)
-        if result.status == "succeeded" and result.model_path is not None:
+        # Only an owner watching the Build page is taken to the result; elsewhere the
+        # Model Viewer keeps what it shows (Open model in viewer is on the Build page).
+        if (
+            result.status == "succeeded"
+            and result.model_path is not None
+            and self.navigation.current_route is Route.RECONSTRUCTION
+        ):
             self._open_in_viewer(result.model_path, note=result.message)
 
     def _open_in_viewer(self, path: Path, note: str = "") -> None:
         viewer = self.route_stack.views[Route.MODEL_VIEWER]
         if isinstance(viewer, ModelViewerView) and viewer.load(Path(path)):
+            viewer.pinned = True  # later Scene refreshes do not replace it
             if note:
                 viewer.status.setText(f"{note} {viewer.status.text()}")
             self.navigation.navigate(Route.MODEL_VIEWER)
