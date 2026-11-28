@@ -475,3 +475,112 @@ def test_late_cancel_discards_result_and_files(app, project) -> None:
     assert project.job_manager.get(job["id"]).state is JobState.CANCELLED
     assert "body" not in project.part_merges()
     assert not list((root / "derived" / "parts").glob("*.ply"))  # written files removed
+
+
+def _revision_build(root: Path, digest: str, revision: str, points, preset: str, when: float):
+    """Another successful build (workspace ``revision``) of the scan ``digest``."""
+    workspace = root / "working" / "reconstruction" / revision
+    (workspace / "outputs" / "mvs").mkdir(parents=True)
+    cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points))
+    o3d.io.write_point_cloud(str(workspace / "outputs/mvs/scene_dense.ply"), cloud)
+    note = "[packlab] mesh-refinement skipped (Fast preset)\n" if preset == "fast" else ""
+    stages = [{"stage_id": "mesh-refinement", "stdout": note}]
+    manifest = workspace / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {"source_digest": digest, "state": "succeeded", "parameters": {"stage_results": stages}}
+        )
+    )
+    import os
+
+    os.utime(manifest, (when, when))
+    return workspace / "outputs/mvs/scene_dense.ply"
+
+
+def test_owner_chooses_which_build_feeds_a_part_persisted_and_undoable(app, project) -> None:
+    rng = np.random.default_rng(6)
+    root = project.layout.root
+    up = hashlib.sha256(b"body-up-scan").hexdigest()
+    old = _revision_build(root, up, "r-" + "a" * 32, _jar(rng, False), "high", 1_700_000_000)
+    new = _revision_build(root, up, "r-" + "b" * 32, _jar(rng, False), "fast", 1_700_000_100)
+    flip = _build(root, "body-flip", _jar(rng, True))
+    failed = root / "working/reconstruction" / ("r-" + "c" * 32)
+    failed.mkdir()
+    (failed / "manifest.json").write_text(json.dumps({"source_digest": up, "state": "failed"}))
+    entries = [_entry(up, "body"), _entry(flip, "body_flipped")]
+    panel = _panel(project, entries)
+    panel.tree.setCurrentItem(panel.items["body"])
+    assert panel.states["body"].upright.model == new  # default: the latest successful build
+    box = panel.build_boxes["upright"]
+    assert box.count() == 2 and box.isEnabled()  # the failed build is not offered
+    assert box.itemText(0).startswith("latest: Fast") and box.itemText(1).startswith("High")
+    assert not panel.build_boxes["flipped"].isEnabled()  # one build only
+
+    box.activated.emit(1)  # owner picks the older High build
+    assert project.scan_builds() == {up: "r-" + "a" * 32}
+    assert panel.states["body"].upright.model == old and box.currentIndex() == 1
+    reopened = ProjectManager(job_manager=JobManager())
+    reopened.open_project(root)
+    assert reopened.scan_builds() == {up: "r-" + "a" * 32}  # persisted
+
+    assert project.undo() is not None  # back to following the latest build
+    panel.refresh()
+    assert project.scan_builds() == {} and panel.states["body"].upright.model == new
+    assert project.redo() is not None
+    panel.refresh()
+    assert panel.states["body"].upright.model == old
+    box.activated.emit(0)  # choosing the latest again follows future builds
+    assert project.scan_builds() == {}
+    with pytest.raises(Exception, match="revision"):
+        project.set_scan_build(up, "../escape")
+
+    # A chosen build that disappears: said so, the stale choice is cleared, latest is used.
+    box.activated.emit(1)
+    assert project.scan_builds() == {up: "r-" + "a" * 32}
+    import shutil
+
+    shutil.rmtree(old.parents[2])
+    panel.refresh()
+    assert project.scan_builds() == {} and panel.states["body"].upright.model == new
+    assert "is missing; using the latest build" in panel.details.text()
+
+
+def test_newest_successful_build_is_used_when_the_latest_build_failed(app, project) -> None:
+    rng = np.random.default_rng(8)
+    root = project.layout.root
+    up = hashlib.sha256(b"body-up-scan-2").hexdigest()
+    good = _revision_build(root, up, "r-" + "d" * 32, _jar(rng, False), "fast", 1_700_000_000)
+    failed = root / "working/reconstruction" / ("r-" + "e" * 32)
+    failed.mkdir()
+    manifest = failed / "manifest.json"
+    manifest.write_text(json.dumps({"source_digest": up, "state": "failed"}))
+    import os
+
+    os.utime(manifest, (1_700_000_500, 1_700_000_500))  # newer than the good build
+    panel = _panel(project, [_entry(up, "body")])
+    assert panel.states["body"].status == "single" and panel.states["body"].cloud == good
+
+
+def test_combine_records_scan_heights_and_shows_them_per_build(app, project) -> None:
+    rng = np.random.default_rng(7)
+    root = project.layout.root
+    entries = [
+        _entry(_build(root, "body-up", _jar(rng, False)), "body"),
+        _entry(_build(root, "body-flip", _jar(rng, True)), "body_flipped"),
+    ]
+
+    def refuse(*scans):
+        error = MultiScanAlignmentError("height mismatch 72.0 vs 80.0 mm")
+        error.heights_mm = {scans[0].scan_id: 80.0, scans[1].scan_id: 72.0}
+        raise error
+
+    panel = _panel(project, entries, aligner=refuse)
+    panel.tree.setCurrentItem(panel.items["body"])
+    outcomes = []
+    panel.combine_finished.connect(lambda part, outcome: outcomes.append(outcome))
+    panel.combine("body")
+    _pump(app, lambda: outcomes)
+    sources = project.part_merges()["body"]["sources"]
+    assert [s["height_mm"] for s in sources] == [80.0, 72.0]
+    assert panel.build_boxes["upright"].itemText(0).endswith("80.0 mm")
+    assert panel.build_boxes["flipped"].itemText(0).endswith("72.0 mm")

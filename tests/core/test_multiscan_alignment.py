@@ -6,6 +6,8 @@ placed on the mat at a random yaw/offset and seen through a random similarity (c
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -588,4 +590,181 @@ def test_scan_missing_its_top_is_refused_with_the_reason():
     with pytest.raises(
         MultiScanAlignmentError, match=r"upright-1 most likely misses the top 1[56] mm"
     ):
+        align_part_pair(up, fl)
+
+
+def bottle(rng, h=80.0, blob=0.0, open_top=False):
+    """Bottle proxy: r 40 body with a side boss, r 37 foot 0-10 mm, shoulder at 65 mm, r 30 neck
+    and cap to ``h``. ``blob``: an MVS blob that tall fused on the cap (sparse, 8 mm wide)."""
+    _, faces = body(rng, r=40.0, h=65.0)
+    faces["side"] = np.r_[_cyl(rng, 37, 0, 10), _cyl(rng, 40, 10, 65), _cyl(rng, 30, 65, h)]
+    # ponytail: shoulder and foot steps are seen by both scans (as main's gate fixtures);
+    # with each step seen only from its own side the gate's side-wall coverage drops
+    # below 0.9 even for complete pairs (pre-existing, not the missing-end logic).
+    faces["shoulder"] = np.r_[_disc(rng, 30, 40, 65), _disc(rng, 37, 40, 10)]
+    faces["top"] = np.zeros((0, 3)) if open_top else _disc(rng, 0, 30, h)
+    faces["bottom"] = _disc(rng, 0, 37, 0)
+    if blob:
+        n = int(rng.density * 200 * blob)
+        a, r = rng.uniform(0, 2 * np.pi, n), rng.uniform(0, 8, n)
+        faces["blob"] = np.c_[r * np.cos(a) + 10, r * np.sin(a), h + rng.uniform(0, blob, n)]
+    return h, faces
+
+
+def open_jar(rng, h=80.0):
+    """Open jar body proxy: 4 mm rim, inner wall seen 15 mm down through the mouth (upright).
+    (A 2 mm wall's inner face is within the shell's 2.5 mm outward test: pre-existing.)"""
+    height, faces = body(rng, h=h)
+    faces["top"] = np.r_[_disc(rng, 36, 40, h), _cyl(rng, 36, h - 15, h)]
+    return height, faces
+
+
+def necked(rng, nr=12.0, nh=8.0):
+    """r 40 x 70 mm body with a short coaxial r ``nr`` x ``nh`` mm neck and its cap."""
+    height, faces = body(rng, r=40.0, h=70.0)
+    faces["side"] = np.r_[_cyl(rng, 40, 0, 70), _cyl(rng, nr, 70, 70 + nh)]
+    faces["shoulder"] = _disc(rng, nr, 40, 70)
+    faces["top"] = _disc(rng, 0, nr, 70 + nh)
+    return 70 + nh, faces
+
+
+def test_upside_down_scan_missing_its_base_is_completed_from_the_upright_scan():
+    """Real Fast flipped build: 165 of 173 mm, its base end lost. Open end, walls agree."""
+    (up, t_up), (fl, t_fl) = scan(bottle, False, 1), scan(bottle, True, 2, cut_top=8.0)
+    result = align_part_pair(up, fl)
+    _assert_recovered(result, (t_up, t_fl))
+    pair = result.alignments[1]
+    assert len(pair.limitations) == 1, pair.limitations
+    assert (
+        f"end completed from scan {up.scan_id}: scan {fl.scan_id} misses its free"
+        in pair.limitations[0]
+    )
+    assert pair.free_space_conflict < 0.02  # the unseen end is not "seen empty" space
+    heights = sorted(a.height_mm for a in result.alignments)
+    assert abs(heights[0] - 72) < 1.0 and abs(heights[1] - 80) < 0.5, heights
+    z = result.points[:, 2]
+    assert z.max() > 78 and z.min() < 2.0  # walls to both ends (a mat side is never seen)
+
+
+def test_upright_scan_missing_its_top_is_refused():
+    """Its top is seen by no other scan: a lost cap and a different, taller part look alike."""
+    up, fl = scan(bottle, False, 1, cut_top=8.0)[0], scan(bottle, True, 2)[0]
+    with pytest.raises(MultiScanAlignmentError, match="not an upside-down scan"):
+        align_part_pair(up, fl)
+
+
+def test_closed_shorter_top_or_scale_error_is_still_refused_with_heights():
+    with pytest.raises(MultiScanAlignmentError, match="saw a face closing its top") as error:
+        align_part_pair(scan(body, False, 1)[0], scan(body, True, 2, h=88.0)[0])
+    assert sorted(round(h) for h in error.value.heights_mm.values()) == [80, 88]
+    with pytest.raises(MultiScanAlignmentError, match="section mismatch"):
+        align_part_pair(
+            scan(body, False, 1)[0], scan(body, True, 2, cut_top=8, scale_error=1.05)[0]
+        )
+
+
+@pytest.mark.parametrize("which", ["upright", "flipped"])
+@pytest.mark.parametrize("error", [0.98, 1.02])
+def test_two_percent_scale_with_an_open_end_is_refused(which, error):
+    up = scan(bottle, False, 1, scale_error=error if which == "upright" else 1.0)[0]
+    fl = scan(bottle, True, 2, cut_top=8, scale_error=error if which == "flipped" else 1.0)[0]
+    with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
+        align_part_pair(up, fl)
+
+
+def test_top_blob_does_not_move_the_mat_contact():
+    """A 3 mm MVS blob on the cap + an 8 mm missing end: the blob is not the part's top."""
+    (up, t_up) = scan(bottle, False, 1, blob=3.0)
+    (fl, t_fl) = scan(bottle, True, 2, cut_top=8)
+    result = align_part_pair(up, fl)
+    angle, shift = _pose_error(result, (t_up, t_fl))
+    assert angle < 1.0 and shift < 0.5, (angle, shift)
+    assert abs(result.alignments[0].height_mm - 80) < 0.5
+
+
+def tube(rng, h=80.0):
+    """Open part whose inside the scan does not see (no top face, nothing inside)."""
+    height, faces = body(rng, h=h)
+    faces.pop("top")
+    return height, faces
+
+
+@pytest.mark.parametrize("taller", [88.0, 91.0])
+@pytest.mark.parametrize(
+    "shape", [open_jar, tube, lambda rng, h=80.0: bottle(rng, h, open_top=True)]
+)
+def test_taller_open_part_with_the_same_walls_is_refused(taller, shape):
+    shape.__name__ = getattr(shape, "__name__", "open")
+    up = scan(shape, False, 1)[0]
+    fl = scan(bottle if shape.__name__ == "<lambda>" else shape, True, 2, h=taller)[0]
+    with pytest.raises(MultiScanAlignmentError, match="not an upside-down scan"):
+        align_part_pair(up, fl)
+
+
+def test_straight_walled_lost_base_is_completed():
+    """Owner's real case: flipped scan lost its base end, plain straight wall there."""
+    (up, t_up), (fl, t_fl) = scan(body, False, 1), scan(body, True, 2, cut_top=8)
+    result = align_part_pair(up, fl)
+    _assert_recovered(result, (t_up, t_fl))
+    assert "misses its free end" in result.alignments[1].limitations[0]
+
+
+@pytest.mark.parametrize(("radius", "neck"), [(12, 4), (12, 8), (14, 6), (20, 8)])
+def test_short_narrow_neck_counts_as_the_top(radius, neck):
+    shape = lambda rng: necked(rng, radius, neck)  # noqa: E731
+    shape.__name__ = "necked"
+    (up, t_up), (fl, t_fl) = scan(shape, False, 1), scan(shape, True, 2)
+    assert (
+        abs(prepare_scan(replace(up, flipped=False), AlignmentThresholds()).height - 70 - neck)
+        < 0.5
+    )
+    _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
+
+
+def test_scale_bound_follows_the_scans_scale_uncertainty():
+    up = scan(body, False, 1)[0]
+    fl = scan(body, True, 2, scale_error=1.012)[0]
+    with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
+        align_part_pair(up, fl)  # no uncertainty given: 1 % bound
+    loose = [replace(s, scale_uncertainty=0.01) for s in (up, fl)]  # combined 1.4 %
+    assert align_part_pair(*loose).alignments[1].limitations == ()
+    with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
+        tight = [
+            replace(s, scale_uncertainty=0.007)
+            for s in (up, scan(body, True, 2, scale_error=1.02)[0])
+        ]
+        align_part_pair(*tight)
+
+
+@pytest.mark.parametrize("error", [0.98, 1.02])
+def test_two_percent_scale_within_the_height_tolerance_is_refused(error):
+    """Open jar, no cut: the 1.6 mm height gap hides in the tolerance; the walls show it."""
+    up, fl = scan(open_jar, False, 1)[0], scan(open_jar, True, 2, scale_error=error)[0]
+    with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
+        align_part_pair(up, fl)
+
+
+def spout(rng, h=80.0, offset=20.0):
+    """r 40 x 70 mm body with an off-axis r 12 spout to ``h`` (its own cap)."""
+    height, faces = body(rng, r=40.0, h=70.0)
+    faces["spout"] = np.r_[_cyl(rng, 12, 70, h), _disc(rng, 0, 12, h)] + [offset, 0, 0]
+    return h, faces
+
+
+@pytest.mark.parametrize("tall", [76.0, 78.0, 80.0, 85.0])
+def test_off_axis_spout_counts_as_the_top(tall):
+    shape = lambda rng: spout(rng, tall)  # noqa: E731
+    shape.__name__ = "spout"
+    (up, t_up), (fl, t_fl) = scan(shape, False, 1), scan(shape, True, 2)
+    height = prepare_scan(replace(up, flipped=False), AlignmentThresholds()).height
+    assert abs(height - tall) < 0.5, height
+    if tall <= 78:  # taller spouts: main's wall gate refuses this proxy pair too
+        _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
+
+
+@pytest.mark.parametrize("error", [0.985, 1.015, 1.02])
+def test_large_claimed_scale_uncertainty_is_capped(error):
+    up = replace(scan(bottle, False, 1)[0], scale_uncertainty=0.015)
+    fl = replace(scan(bottle, True, 2, cut_top=8, scale_error=error)[0], scale_uncertainty=0.015)
+    with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
         align_part_pair(up, fl)

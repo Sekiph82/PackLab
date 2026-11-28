@@ -32,6 +32,8 @@ from typing import Any, cast
 import numpy as np
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -41,8 +43,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .build_model import MainThreadInvoker, _MainThreadJobs, latest_builds
-from .capture_inbox import counted_role
+from .build_model import MainThreadInvoker, _MainThreadJobs, successful_builds
+from .capture_inbox import counted_role, local_time
 from .i18n import tr
 from .jobs import TERMINAL_STATES, JobManager, JobState
 from .project import PROJECT_PARTS, ProjectManager
@@ -68,6 +70,7 @@ class PartScan:
     package_sha256: str
     model: Path
     time: float
+    revision: str = ""  # reconstruction revision (build) the model comes from
 
 
 @dataclass(frozen=True)
@@ -83,22 +86,33 @@ class PartState:
 
 
 def part_scans(
-    entries: list[Any], overrides: dict[str, str], project_root: Path | None
+    entries: list[Any],
+    overrides: dict[str, str],
+    project_root: Path | None,
+    choices: dict[str, str] | None = None,
 ) -> dict[str, dict[str, PartScan]]:
-    """Newest successful build per part view (upright / flipped) in this project."""
-    builds = latest_builds(project_root)
+    """Build per part view (upright / flipped / interior): the owner's chosen successful build
+    of the scan (``choices``: digest -> revision), else its newest successful one; newest scan
+    per view wins."""
+    builds = successful_builds(project_root)
     found: dict[str, dict[str, PartScan]] = {part: {} for part in PROJECT_PARTS}
+    newest: dict[tuple[str, str], float] = {}  # (part, view) -> newest build time of its scan
     for entry in entries:
         role = counted_role(entry, overrides, set(builds))
-        build = builds.get(entry.package_sha256)
-        if role is None or build is None or build["state"] != "succeeded" or not build["model"]:
+        options = builds.get(entry.package_sha256)
+        if role is None or not options:
             continue
         part, _, view = role.partition("_")
         if part not in found or view not in ("", "flipped", "interior"):
             continue
         view = view or "upright"
-        scan = PartScan(entry.package_sha256, Path(build["model"]), float(build["time"]))
-        if view not in found[part] or found[part][view].time < scan.time:
+        chosen = (choices or {}).get(entry.package_sha256)
+        build = next((b for b in options if b["revision"] == chosen), options[0])
+        scan = PartScan(
+            entry.package_sha256, Path(build["model"]), float(build["time"]), build["revision"]
+        )
+        if newest.get((part, view), -1.0) < options[0]["time"]:
+            newest[part, view] = options[0]["time"]
             found[part][view] = scan
     return found
 
@@ -153,7 +167,7 @@ def part_states(
 ) -> dict[str, PartState]:
     layout = manager.layout
     root = None if layout is None else layout.root
-    scans = part_scans(entries, overrides, root)
+    scans = part_scans(entries, overrides, root, manager.scan_builds())
     merges = manager.part_merges() if root is not None else {}
     states: dict[str, PartState] = {}
     for part in PROJECT_PARTS:
@@ -364,6 +378,14 @@ def write_mesh(folder: Path, part: str, points: np.ndarray) -> Path:
     vertices = np.asarray(mesh.vertices)
     low, high = points.min(axis=0) - 2.0, points.max(axis=0) + 2.0
     mesh.remove_vertices_by_mask(((vertices < low) | (vertices > high)).any(axis=1).tolist())
+    # Poisson can emit zero-area slivers (coincident vertices), which the Scan Master geometry
+    # statistics reject: merge duplicates and drop zero-area triangles.
+    mesh.remove_duplicated_vertices()
+    mesh.remove_degenerate_triangles()
+    v, t = np.asarray(mesh.vertices), np.asarray(mesh.triangles)
+    area = np.linalg.norm(np.cross(v[t[:, 1]] - v[t[:, 0]], v[t[:, 2]] - v[t[:, 0]]), axis=1)
+    mesh.remove_triangles_by_mask((area <= 1e-9).tolist())
+    mesh.remove_unreferenced_vertices()
     if len(mesh.triangles) < 20:
         raise OSError("merged part surface could not be meshed")
     return _write_atomic(
@@ -427,6 +449,17 @@ class ScenePanel(QWidget):
         self.interior_button = QPushButton(tr("Merge interior"))
         self.interior_button.setObjectName("packlab.scene.interior")
         self.interior_button.clicked.connect(self.merge_interior)
+        # Which successful build of each scan feeds the part (default: the latest).
+        self.build_boxes: dict[str, QComboBox] = {}
+        builds_form = QFormLayout()
+        for view, label in (("upright", "Upright build"), ("flipped", "Upside-down build")):
+            box = QComboBox()
+            box.setObjectName(f"packlab.scene.build.{view}")
+            box.activated.connect(lambda index, view=view: self._choose_build(view, index))
+            builds_form.addRow(tr(label), box)
+            self.build_boxes[view] = box
+        self.builds: dict[str, list[dict[str, Any]]] = {}
+        self.build_notice = ""
         buttons = QHBoxLayout()
         buttons.addWidget(self.combine_button)
         buttons.addWidget(self.place_button)
@@ -434,6 +467,7 @@ class ScenePanel(QWidget):
         buttons.addWidget(self.cancel_button)
         layout = QVBoxLayout(self)
         layout.addWidget(self.tree, 1)
+        layout.addLayout(builds_form)
         layout.addLayout(buttons)
         layout.addWidget(self.details)
         self.items: dict[str, QTreeWidgetItem] = {}
@@ -452,12 +486,15 @@ class ScenePanel(QWidget):
             entries = self.entries_provider() if self.projects.layout is not None else []
             overrides = self.projects.scan_part_roles()
             self.states = part_states(self.projects, entries, overrides)
+            layout = self.projects.layout
+            self.builds = successful_builds(None if layout is None else layout.root)
+            self._repair_build_choices()
             self.view = self.projects.part_view()
             self.placement = placement_state(self.projects, self.states)
             self.interior = interior_state(self.projects, self.states)
         except Exception as error:  # unreadable inbox/project: panel stays usable
             self.details.setText(tr("Parts unavailable: {error}").format(error=error))
-            self.states, self.view = {}, {"part": None, "hidden": []}
+            self.states, self.view, self.builds = {}, {"part": None, "hidden": []}, {}
             self.placement = ("none", None, ())
             self.interior = ("none", None, None)
         self.tree.blockSignals(True)
@@ -551,10 +588,13 @@ class ScenePanel(QWidget):
         self.cancel_button.setEnabled(
             running or (part == "assembled" and placing) or (part == "body" and merging)
         )
+        self._update_builds(state, running)
         if state is None:
             self.details.setText(tr("Select a part to show it in Model Viewer."))
             return
         lines = [f"{tr(PART_LABELS[state.part])}: {tr(STATUS_TEXT[state.status])}"]
+        if self.build_notice:
+            lines.append(self.build_notice)
         if state.reason:
             lines.append(state.reason)
         record = state.record
@@ -565,12 +605,70 @@ class ScenePanel(QWidget):
                     coverage=pair["coverage"], rmse=pair["rmse_mm"], points=record["point_count"]
                 )
             )
+            lines.extend(pair.get("limitations") or [])
             lines.append(tr("Units: mm in the mat frame, METRIC_UNVERIFIED."))
         if part == "assembled":
             lines.extend(self._placement_lines(placing))
         if part == "body" and state.interior is not None:
             lines.extend(self._interior_lines(merging))
         self.details.setText("\n".join(lines))
+
+    def _heights(self) -> dict[str, float]:
+        """Own mat-frame height per model path, as measured by stored combines."""
+        return {
+            str(source["model_path"]): float(source["height_mm"])
+            for record in self.projects.part_merges().values()
+            for source in record.get("sources", [])
+            if isinstance(source, dict) and isinstance(source.get("height_mm"), (int, float))
+        }
+
+    def _update_builds(self, state: PartState | None, running: bool) -> None:
+        root = None if self.projects.layout is None else self.projects.layout.root
+        heights = self._heights() if root is not None else {}
+        for view, box in self.build_boxes.items():
+            scan = None if state is None else getattr(state, view)
+            options = [] if scan is None else self.builds.get(scan.package_sha256, [])
+            box.clear()
+            for index, build in enumerate(options):
+                preset = {"fast": tr("Fast"), "high": tr("High quality")}.get(
+                    build["preset"], tr("build")
+                )
+                text = f"{preset} · {local_time(build['time'])}"
+                height = heights.get(_rel(root, build["model"])) if root is not None else None
+                if height is not None:
+                    text += f" · {height:.1f} mm"
+                if index == 0:
+                    text = tr("latest: {build}").format(build=text)
+                box.addItem(text, build["revision"])
+            if scan is not None:
+                box.setCurrentIndex(max(0, box.findData(scan.revision)))
+            box.setEnabled(len(options) > 1 and not running)
+
+    def _repair_build_choices(self) -> None:
+        """A chosen build that no longer exists (deleted / failed rebuild): say so, clear it."""
+        for digest, revision in self.projects.scan_builds().items():
+            if revision not in {build["revision"] for build in self.builds.get(digest, [])}:
+                self.build_notice = tr(
+                    "Selected build {revision} is missing; using the latest build."
+                ).format(revision=revision[:10])
+                try:
+                    self.projects.set_scan_build(digest, None)
+                except Exception as error:
+                    self.build_notice = tr("Build choice not saved: {error}").format(error=error)
+
+    def _choose_build(self, view: str, index: int) -> None:
+        state = self.states.get(self.view["part"] or "")
+        scan = None if state is None else getattr(state, view)
+        if scan is None or self.projects.layout is None:
+            return
+        revision = self.build_boxes[view].itemData(index)
+        latest = index == 0  # the newest build: follow future builds too
+        self.build_notice = ""
+        try:
+            self.projects.set_scan_build(scan.package_sha256, None if latest else revision)
+        except Exception as error:
+            self.details.setText(tr("Build choice not saved: {error}").format(error=error))
+        self.refresh()
 
     def _interior_lines(self, merging: bool) -> list[str]:
         status, record, _path = self.interior
@@ -776,6 +874,12 @@ class ScenePanel(QWidget):
                         model.points,
                         model.colors,
                         mm_per_unit=float(source["mm_per_unit"]),
+                        # standard uncertainty mm/unit -> relative (bounds the scale check)
+                        scale_uncertainty=(
+                            None
+                            if source["scale_uncertainty"] is None
+                            else min(0.099, source["scale_uncertainty"] / source["mm_per_unit"])
+                        ),
                     )
                 )
             if cancelled():
@@ -793,7 +897,15 @@ class ScenePanel(QWidget):
                 result = aligner(inputs[0], inputs[1])
             except MultiScanAlignmentError as error:
                 record.update(status="refused", reason=str(error))
+                heights = getattr(error, "heights_mm", None) or {}
+                for source, item in zip(sources, inputs, strict=True):
+                    if item.scan_id in heights:
+                        source["height_mm"] = float(heights[item.scan_id])
             else:
+                for source, item in zip(sources, result.alignments, strict=False):
+                    height = getattr(item, "height_mm", float("nan"))
+                    if np.isfinite(height):
+                        source["height_mm"] = float(height)
                 if cancelled():
                     return finish("cancelled")
                 jobs.update_progress(job_id, 0.9, tr("Writing the merged part cloud"))

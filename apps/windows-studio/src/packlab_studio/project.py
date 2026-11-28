@@ -39,11 +39,14 @@ _SELECTION_EVENTS = {
     "scan_part_roles": "scan_part_role_events",
     # PL-0485: Scene panel view {"part": closure|body|assembled|None, "hidden": [parts]}.
     "selected_part": "part_selection_events",
+    # Which successful build feeds parts, {package_sha256: reconstruction revision}; unset = latest.
+    "scan_builds": "scan_build_events",
 }
 PROJECT_PARTS = ("closure", "body", "assembled")
 LABEL_PARTS = ("closure", "body")  # parts with their own Design Model + labels (PL-0487)
 _LABEL_ARTWORK = re.compile(r"derived/labels/[0-9a-f]{64}\.(png|svg)")
 _PACKAGE_DIGEST = re.compile(r"[0-9a-f]{64}")
+_BUILD_REVISION = re.compile(r"r-[0-9a-f]{32}")
 _PART_ROLE_EVENT_LIMIT = 200
 
 
@@ -891,6 +894,45 @@ class ProjectManager:
         committed = self.commit_edit(next_state, expected_revision=self.metadata.revision)
         self._record_selection("scan_part_roles", before, after)
         return committed
+
+    # ------------------------------------------------------------ build per scan
+
+    def scan_builds(self) -> dict[str, str]:
+        """Owner build choices {package_sha256: reconstruction revision}; malformed ignored."""
+        if self.layout is None:
+            return {}
+        _, state = self._read_authority(self.layout)
+        value = state.get("scan_builds")
+        if not isinstance(value, dict):
+            return {}
+        return {
+            digest: revision
+            for digest, revision in value.items()
+            if isinstance(digest, str)
+            and _PACKAGE_DIGEST.fullmatch(digest)
+            and isinstance(revision, str)
+            and _BUILD_REVISION.fullmatch(revision)
+        }
+
+    def set_scan_build(self, package_sha256: str, revision: str | None) -> None:
+        """Choose the build that feeds parts for a scan; None = the latest (undoable)."""
+        if self.layout is None or self.metadata is None:
+            raise ProjectError("no project is open")
+        if not isinstance(package_sha256, str) or not _PACKAGE_DIGEST.fullmatch(package_sha256):
+            raise ProjectError("package digest is invalid")
+        if revision is not None and not _BUILD_REVISION.fullmatch(str(revision)):
+            raise ProjectError("build revision is invalid")
+        _, state = self._read_authority(self.layout)
+        before = state.get("scan_builds")
+        after = {k: v for k, v in self.scan_builds().items() if k != package_sha256}
+        if revision is not None:
+            after[package_sha256] = revision
+        if before == after or (before is None and not after):
+            return
+        next_state = dict(state)
+        next_state["scan_builds"] = after
+        self.commit_edit(next_state, expected_revision=self.metadata.revision)
+        self._record_selection("scan_builds", before, after)
 
     # ------------------------------------------------------------ project parts (PL-0485)
 

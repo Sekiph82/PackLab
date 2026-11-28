@@ -1537,6 +1537,54 @@ def latest_builds(project_root: Path | None) -> dict[str, dict[str, Any]]:
     return latest
 
 
+def _preset(manifest: dict[str, Any]) -> str | None:
+    """Preset "fast" / "high" from the recorded mesh-refinement stage (Fast skips it)."""
+    parameters = manifest.get("parameters")
+    results = parameters.get("stage_results") if isinstance(parameters, dict) else None
+    for result in results if isinstance(results, list) else []:
+        if isinstance(result, dict) and result.get("stage_id") == "mesh-refinement":
+            return "fast" if "(Fast preset)" in str(result.get("stdout", "")) else "high"
+    return None
+
+
+def successful_builds(project_root: Path | None) -> dict[str, list[dict[str, Any]]]:
+    """Every succeeded build with a model per source package digest, newest first."""
+    found: dict[str, list[dict[str, Any]]] = {}
+    root = None if project_root is None else project_root / "working" / "reconstruction"
+    if root is None or not root.is_dir():
+        return found
+    for manifest_path in root.glob("*/manifest.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            when = manifest_path.stat().st_mtime
+        except (OSError, ValueError):
+            continue
+        if not isinstance(manifest, dict) or manifest.get("state") != "succeeded":
+            continue
+        digest = manifest.get("source_digest")
+        model = next(
+            (
+                manifest_path.parent / name
+                for name in _MODEL_CANDIDATES
+                if (manifest_path.parent / name).is_file()
+            ),
+            None,
+        )
+        if not isinstance(digest, str) or model is None:
+            continue
+        found.setdefault(digest, []).append(
+            {
+                "revision": manifest_path.parent.name,
+                "time": when,
+                "model": model,
+                "preset": _preset(manifest),
+            }
+        )
+    for builds in found.values():
+        builds.sort(key=lambda build: build["time"], reverse=True)
+    return found
+
+
 def project_scan_digests(project_root: Path | None) -> set[str]:
     """Package digests imported into this project: a raw copy (queued/built) or a build."""
     digests = set(latest_builds(project_root))
