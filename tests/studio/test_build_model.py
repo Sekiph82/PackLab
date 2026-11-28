@@ -476,9 +476,7 @@ def test_builds_run_up_to_the_limit_in_order_and_duplicates_are_ignored(
             app,
             lambda: (
                 not window.build_model._running
-                and all(
-                    window.job_manager.get(job_id).state in TERMINAL_STATES for job_id in jobs
-                )
+                and all(window.job_manager.get(job_id).state in TERMINAL_STATES for job_id in jobs)
             ),
         )
         outcomes = {
