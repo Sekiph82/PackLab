@@ -41,56 +41,93 @@ The data therefore describe the same object at the same scale.
 
 - **Local point noise is small.** The residual to a local plane has a robust sigma of 0.30-0.35 mm per scan (synthetic tests: 0.10-0.13 mm). Smoothing the points with an MLS projection did not raise coverage.
 - **Defect 1 (`_shell`).** `_shell` keeps the outermost point of each patch of the unrolled wall. Sparse MVS strays outside the wall were therefore taken as the wall: glare fans beside the upright foot, spikes at the oval's tips, and a curtain under the flipped scan's downward-facing shoulder (70 mm wide at the shoulder against a 63 mm body). The real wall under them was dropped. Every check (ICP, coverage, sections, scale, yaw) then compared artifacts.
-- **Defect 2 (contact zones).** The parts of each scan nearest its own mat are seen only by the lowest cameras, at grazing angles and next to mat glare. These are the upright foot, and the flipped scan's shoulder and closure. The two scans disagree there by 1-4 mm, measured as per-cell median radius p90 on both the dense clouds and the OpenMVS meshes. The other scan sees the same surfaces from above, as its free end.
-- **Gate calibration.** The 0.9 worst-slice gate was set on synthetic walls with 0.15 mm noise. The best real control is two independent upright builds, with no flip. It scored worst 0.83 on main.
-- **Defect 3 (pre-existing).** Section bands ended at `min(heights)`. A flipped scan that loses its free end lacks the reference's bottom, not its top. The top band was therefore never checked, and only coverage had been catching such cases. This was found by rerunning the reviewer probe "bottle vs plain body flipped cut8" with the new gate.
-- **Defect 4.** Free-space conflict counted each scan's own mat glare (own z below 6 mm). That glare made up 97 % of a false 0.054 conflict on dnF.
+- **Defect 2 (gate statistic vs real MVS walls).** The fixed 2 mm / worst-slice-0.9 coverage was set on synthetic walls (local noise sigma 0.09-0.13 mm). The owner's real walls have sigma ~0.35 mm, and 0.8-1.0 mm at the oval tips and under the flipped shoulder. The two real builds disagree there by 2.4-3.3 mm. Misses sit where the surface is noisy: combined sigma at misses 0.83-1.0 mm, against 0.63 mm at hits. Two upright builds (no flip) scored worst slice 0.83 on main.
+- **Defect 3 (pose search on the worst slice).** A few badly seen slices (flipped shoulder curtain, 0.5-0.6 at any yaw) flattened the yaw / contact optimum: yaw plateau 9 deg, "walls fit 3 mm off the contact". When this happened the label texture was never consulted, because the half-turn twin lost 0.06 coverage while still fitting the wall profile.
+- **Defect 4 (pre-existing).** Section bands ended at `min(heights)`. A flipped scan that loses its free end lacks the reference's bottom, not its top, so the top band was never checked. A reviewer probe found this: bottle vs plain body, flipped, cut 8 mm.
+- **Defect 5.** Free-space conflict counted each scan's own mat glare (own z below 6 mm). That glare made up 97 % of a false 0.054 conflict on dnF.
 
-## 4. Fix (`core/src/packlab_core/multiscan_alignment.py`)
+V01 tried blanket contact zones (lowest 20 % / 30 mm) and a 0.85 gate. Review V01 rejected this: zone features (lugs, grooves, steps, flared foot) went unchecked, and a one-scan 20x25x4 mm boss reached 0.88-0.90 coverage, the same as the real pairs. Both were removed in V02.
 
-- `_dense`: before the outer-wall selection, drop points that have fewer than 25 % of the wall's median neighbour count within max(2.5 mm, 3 spacings). This is in the shared `_shell`, so placement and interior merge get it too.
-- `_contact_zone`: the lowest 20 % of each scan's own height, at most 30 mm. It is left out of the ICP, coverage, scale and yaw shell. Sections still check it (`_Part.wall`) at a 2.0 mm radial tolerance. In the merge, each scan's zone is replaced wherever another scan's compared wall covers that height.
-- Section bands now span the real z-overlap of both walls.
-- Free-space conflict skips points below `GLARE_HEIGHT_MM`.
-- `min_slice_coverage` changed from 0.9 to 0.85. After the fix, five real same-object pairs give worst slices of 0.873-0.953.
-- The method string is now `_v3`.
+## 4. Fix V02 (`core/src/packlab_core/multiscan_alignment.py`)
 
-The 30 mm cap was chosen from where the real disagreement ends (own z 0-28). A cap of 0.2 h without the 30 mm limit gave 0.891 / 0.900. This choice is a ponytail heuristic: a per-point visibility test using the build's camera poses would replace it.
+- `_dense` (shared `_shell`): before the outer-wall selection, drop points that have fewer than 25 % of the wall's median neighbour count within max(2.5 mm, 3 spacings).
+- `_surface_noise`: for each shell point, the rms residual to the local plane (radius max(3 mm, 2.5 spacings)), then the median over its 64 nearest points. Feature edges are thin lines and do not raise it; noisy patches do. Synthetic proxies: 0.09-0.13 mm. Real scans: 0.32-0.35 mm.
+- Acceptance coverage (gate only): a point counts as covered within max(2 mm, 5 x (own + other's noise)).
+  - Clean walls therefore keep exactly main's 2 mm and main's 0.9 gate.
+  - The real pairs get 3.4-3.5 mm, and this is recorded in `limitations` as "smaller one-scan features are not detected".
+  - Sections add 1 x the band's noise (synthetic +0.2-0.3 mm, real +0.7 mm).
+- `_miss_patch` (new gate, the discriminator review V01 asked for):
+  - A miss is a point whose other-scan neighbour is within 3x the distance but beyond the noise-aware tolerance. If the largest connected patch of misses exceeds max(30 mm^2, 8 spacing^2), the pair is refused.
+  - Misses do not count where either surface faces the mat (outward normal z < -0.3) in the capture of the scan that supplied the point, because that scan saw the surface from below at grazing angles. This covers the real shoulder curtain. A lug's outer face is vertical, so it still counts.
+  - Measured patch sizes:
 
-## 5. Results (unpatched worktree code, studio-equivalent inputs)
+| case | largest patch (mm^2) |
+|---|---|
+| synthetic genuine, d >= 0.2 | <= 11 |
+| synthetic genuine, d 0.1 | <= 20 |
+| owner real pairs | 15-27 (accepted pairs 18 / 20) |
+| 4 mm base or top lug, d 0.5 | 90-117 |
+| 4 mm base or top lug, d 0.2 | 31-70 |
 
-| pair | result | coverage | RMSE | heights | notes |
-|---|---|---|---|---|---|
-| upF + dnH | COMBINED | 0.895 | 0.615 mm | 173.2 / 173.2 | yaw determined (plateau 3 deg), free space 0.001 |
-| upF + dnF | COMBINED | 0.899 | 0.618 mm | 173.2 / 165.3 | end completed from upF (8 mm), scale 0.997 |
-| upF + upH (control) | worst 0.953 | | | | refused by design: an upright scan cannot have a missing end |
-| upH + dnH | worst 0.912 | | | | refused by design: upH lost its top |
+- Pose search ranks poses by the 20th-percentile slice. The gate still uses the worst slice.
+- Label twins also include the turns the wall profile cannot separate (`_yaw_rivals`, the same test as `_yaw_unique`).
+- Section bands span the real overlap. Free-space conflict skips own glare under `GLARE_HEIGHT_MM`.
+- Merge: every surface stays except points outside the other scan's xy footprint (3 mm cells, grown by one cell), which that scan saw as empty mat. One-scan surfaces such as a neck-ring underside are kept (72/96 and 78/124 flipped points).
 
-Merged part (upF + dnH): 50,664 points, top at z p99.9 173.9 mm. Section calipers (min x max, mm) by height:
+## 5. Results V02 (worktree code, studio-equivalent inputs, gate 0.9)
+
+| pair | result | coverage | RMSE | heights | yaw | patch | notes |
+|---|---|---|---|---|---|---|---|
+| upF + dnH | COMBINED | 0.934 | 0.697 mm | 173.2 / 173.2 | determined (+-4.5 deg) | 18 mm^2 | free space 0.001 |
+| upF + dnF | COMBINED | 0.939 | 0.644 mm | 173.2 / 165.3 | determined (+-3 deg) | 20 mm^2 | end completed from upF (8 mm) |
+| upH + dnH | REFUSED | | | | | | by design (PR #45): the upright scan lost its top 20 mm and no other scan can show the part is not taller. Also scale +1.29 % and shoulder section +1.9 mm |
+| upH + dnF | REFUSED | | | | | 94 mm^2 | same design refusal, plus the 94 mm^2 patch |
+| upF + upH (control) | REFUSED | worst 0.901 | | | | | design refusal only |
+
+Merged upF + dnH: 57,691 points, top at z p99.9 173.8 mm. Calipers (min x max, mm) by height:
 
 | z | caliper (mm) |
 |---|---|
-| 10 | 34.1 x 52.6 |
-| 40 | 34.6 x 61.0 |
-| 80 | 33.6 x 63.2 |
-| 120 | 34.7 x 67.0 |
-| 145 | 32.6 x 61.8 (no 70 mm curtain) |
-| 155 | 27.9 x 39.3 |
-| 165 | 31.8 x 42.9 |
+| 10 | 34.0 x 56.4 |
+| 40 | 34.7 x 60.8 |
+| 80 | 33.5 x 63.5 |
+| 120 | 34.7 x 66.8 |
+| 145 | 32.7 x 67.2 |
+| 155 | 30.7 x 55.6 |
+| 165 | 31.6 x 44.5 |
 
-Surface coverage is 1.0 for side, top and bottom. All values remain METRIC_UNVERIFIED (no caliper evidence).
+The shoulder curtain at z 155 now stays in the merge: it lies inside the upright scan's footprint. Measure & Design's robust wall percentiles carry it, as they do on main.
+
+All values remain METRIC_UNVERIFIED (no caliper evidence).
 
 ## 6. Refusal guarantees
 
-- The reviewer suites (cpr-me v3, rv-missingend: 14 scripts, about 650 cases) were rerun against this worktree, with the imports asserted. They produced 0 new wrong accepts.
-- The only WRONG flags are the 9 known false flags from `align_part_pair` overriding the role; those poses are correct (0.0-0.3 deg). Main shows the same set.
-- An intermediate wrong accept was fixed by the band-overlap change and now has a regression test.
-- Genuine-pair availability against main moved in both directions. There are 7 new refusals, all fail-safe and mostly "yaw undetermined", because the zoned shell is shorter: 4 sparse (d0.1) bodies, 1 labelled oval at the default 5 deg, and 2 blob/missing-end bottles at d0.2. There are 8 new accepts: 2 spout pairs, and 6 blob/sweep pairs. The sweep also flips some closures at d0.1 and d0.2 in both directions.
-- Tests: `tests/core/test_multiscan_alignment.py`, `test_part_placement.py` and `test_interior_merge.py` all pass. Three new tests were added. Two of them fail on main: sparse-fan shell, and lumps in the flipped contact zone.
+Each suite was run against this worktree with the imports asserted. WRONG counts (wrong accepts):
+
+| probe set | main | V01 head | V02 |
+|---|---|---|---|
+| review probes, contact zones (128 wrong parts) | 0 wrong | 48 wrong | 0 wrong (128/128 refused) |
+| review probes, extra boss (gate) | 3 | 6 | 0 |
+| review probes, thin features | 24 | 25 | 16 |
+| review probes, placement | 3 | 3 | 3 |
+
+- Neck-ring underside in the merge (review probe): 72/96 and 78/124 flipped points kept. V01 kept 0.
+- Old suites (cpr-me v4, rv-missingend, rv-combine adv2; about 650 cases): no new wrong accepts. The cpr v01 and missing suites still show only the known role-override false flags, with correct poses: 7 and 2, against 8 and 2 on main.
+- Availability: 18 genuine pairs that main accepts are now refused, every one with "yaw undetermined" (fail-safe). They are mostly sparse or tall synthetic pairs whose yaw plateau widened under the quantile pose objective; 4 of them are the review's tall genuine pairs at d0.2. The other direction is +1.
+- Tests: `test_multiscan_alignment.py`, `test_part_placement.py` and `test_interior_merge.py` give 130 passed. They include new tests for:
+  - lugs near either end
+  - a groove near the end
+  - a 2 mm top step
+  - a one-scan boss
+  - a one-scan underside kept in the merge
+  - a noisy wall patch still combining
+  - the sparse-fan shell
+  - a flipped short scan of a different top
 
 ## 7. Residual risks
 
-- A different part that differs only within a contact zone, by less than 2 mm in radius and with no section band landing there, is not refused.
-- The 0.85 gate and the 30 mm / 20 % zone are calibrated on one physical bottle (5 pairs). They need more real parts.
-- The real coverage margin is small: 0.895 and 0.899 against 0.85.
+- On the real scans, a one-scan feature under about 3.5 mm in relief and under about 30 mm^2 is not detected. This is stated in `limitations` for every such combine; the scans' measured noise allows no better.
+- A difference confined to surfaces facing the mat in one scan's capture (a flipped shoulder) only counts through coverage and sections, not the patch gate.
+- Real-data calibration comes from one physical bottle: 5 pairs, 2 accepted. Before tightening the 30 mm^2 patch / 5x noise rule, check them on more real parts.
+- The merge keeps the flipped shoulder curtain.
 - Physical accuracy is unverified until there is caliper evidence.

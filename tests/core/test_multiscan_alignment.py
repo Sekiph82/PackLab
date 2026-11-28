@@ -792,8 +792,8 @@ def test_sparse_outward_artifacts_do_not_replace_the_wall():
 
 
 def lumpy_top(rng):
-    """Body whose top 12 mm of wall carries 1.2 mm radial lumps: what a flipped scan makes of
-    the surfaces in its contact zone (grazing views, mat glare) on the owner's real pairs."""
+    """Body whose top 12 mm of wall carries 1.2 mm radial lumps: what MVS makes of a surface
+    seen only at grazing angles (the owner's real flipped shoulder), a noisy patch."""
     height, faces = body(rng)
     side = faces["side"]
     top = side[:, 2] > height - 12
@@ -801,9 +801,99 @@ def lumpy_top(rng):
     return height, faces
 
 
-def test_lumps_in_the_flipped_contact_zone_still_combine():
+def test_noisy_wall_patch_still_combines():
     (up, t_up), (fl, t_fl) = scan(body, False, 1), scan(lumpy_top, True, 2)
-    _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
+    result = align_part_pair(up, fl)
+    _assert_recovered(result, (t_up, t_fl))
+
+
+def modified(**change):
+    """Jar body proxy changed near an end (only one scan of a pair gets it): ``lug`` (z0, z1)
+    a 4 mm x 18 mm lug opposite the boss, ``groove`` (dr, z0, z1), ``top`` (dr, depth)."""
+
+    def shape(rng):
+        height, faces = body(rng)
+        side = faces["side"]
+        cuts = []
+        if "groove" in change:
+            cuts.append(change["groove"])
+        if "top" in change:
+            dr, depth = change["top"]
+            cuts.append((dr, height - depth, height))
+        for dr, z0, z1 in cuts:
+            inside = (side[:, 2] >= z0) & (side[:, 2] < z1)
+            side = np.r_[side[~inside], _cyl(rng, 40 - dr, z0, z1), _disc(rng, 40 - dr, 40, z0)]
+            if z1 < height:
+                side = np.r_[side, _disc(rng, 40 - dr, 40, z1)]
+        faces["side"] = side
+        if "lug" in change:
+            z0, z1 = change["lug"]
+            faces["lug"] = np.r_[
+                _rect(rng, 44, -9, 9, z0, z1),
+                _wall(rng, -9, 38.7, 44, z0, z1),
+                _wall(rng, 9, 38.7, 44, z0, z1),
+                _cap(rng, 39, 44, -9, 9, z1),
+            ] * [-1, 1, 1]
+        return height, faces
+
+    shape.__name__ = "modified"
+    return shape
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"lug": (4.0, 13.0)},  # near the flipped scan's free end (the part's base)
+        {"lug": (68.0, 77.0)},  # near the flipped scan's mat contact
+        {"groove": (3.0, 6.0, 12.0)},
+        {"top": (2.0, 10.0)},  # a 2 mm step over the top 10 mm
+    ],
+)
+def test_one_scan_feature_near_an_end_is_refused(change):
+    up = scan(body, False, 1)[0]
+    fl = scan(modified(**change), True, 2)[0]
+    with pytest.raises(MultiScanAlignmentError):
+        align_part_pair(up, fl)
+
+
+def test_extra_boss_in_one_scan_only_is_refused():
+    def two_bosses(rng):
+        height, faces = body(rng)
+        faces["boss2"] = np.r_[
+            _rect(rng, 44, -11, 11, 30, 54),
+            _wall(rng, -11, 38.7, 44, 30, 54),
+            _wall(rng, 11, 38.7, 44, 30, 54),
+            _cap(rng, 39, 44, -11, 11, 30),
+            _cap(rng, 39, 44, -11, 11, 54),
+        ] * [-1, 1, 1]
+        return height, faces
+
+    with pytest.raises(MultiScanAlignmentError, match="coverage"):
+        align_part_pair(scan(two_bosses, False, 1)[0], scan(body, True, 2)[0])
+
+
+def test_surface_only_one_scan_saw_survives_the_merge():
+    """A neck-ring underside (r 40-44 facing the mat at z 70) is seen by the flipped scan only;
+    the merge keeps it."""
+
+    def ringed(under):
+        def shape(rng):
+            height, faces = body(rng)
+            faces["ring"] = np.r_[_cyl(rng, 44, 70, 72), _disc(rng, 40, 44, 72)]
+            if under:
+                faces["under"] = _disc(rng, 40, 44, 70)
+            return height, faces
+
+        shape.__name__ = "ringed"
+        return shape
+
+    up, fl = scan(ringed(False), False, 1)[0], scan(ringed(True), True, 2)[0]
+    result = align_part_pair(up, fl)
+    p = result.points
+    centre = np.median(p[(p[:, 2] > 20) & (p[:, 2] < 60), :2], axis=0)
+    radius = np.linalg.norm(p[:, :2] - centre, axis=1)
+    under = (np.abs(p[:, 2] - 70) < 0.6) & (radius > 40.8) & (radius < 43.5)
+    assert (under & (result.source_index == 1)).sum() > 50
 
 
 def test_flipped_short_scan_of_a_different_top_is_refused():
