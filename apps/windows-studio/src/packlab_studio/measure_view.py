@@ -115,6 +115,12 @@ class MeasureDesignView(QWidget):
         )
         # Brings the last loaded model back (also after a restart): per project in QSettings.
         self.reload_button = button("Reload last model", "reload", lambda: self.reload_last())
+        # A newer build offered by the Build page while a model is open here.
+        self.offered_build: Path | None = None
+        self.newer_button = button(
+            tr("A newer build is available — Load it"), "newer", lambda: self.load_offered()
+        )
+        self.newer_button.hide()
         self.isolate_button = button("1. Isolate object", "isolate", self.isolate)
         self.bar_mm = QDoubleSpinBox()
         self.bar_mm.setRange(80.0, 120.0)
@@ -189,6 +195,7 @@ class MeasureDesignView(QWidget):
             self.open_button,
             self.latest_button,
             self.reload_button,
+            self.newer_button,
             self.isolate_button,
             scale_box,
             self.measure_button,
@@ -326,6 +333,30 @@ class MeasureDesignView(QWidget):
         value = self.settings.value(self._last_model_key())
         return Path(str(value)) if value and Path(str(value)).is_file() else None
 
+    def offer_build(self, path: Path | None = None) -> bool:
+        """Offer ``path`` (or the project's newest build) without replacing the open model."""
+        layout = getattr(self.project_manager, "layout", None)
+        if path is None and layout is not None:
+            path = md.latest_built_model(layout.root)
+        if path is None or (self.model is not None and self.model.path == Path(path)):
+            return False
+        self.offered_build = Path(path)
+        self.newer_button.setToolTip(str(path))
+        self.newer_button.show()
+        self.status.setText(
+            tr("A newer build is available: {name}. Your open model is kept.").format(
+                name=Path(path).name
+            )
+        )
+        return True
+
+    def load_offered(self) -> bool:
+        path = self.offered_build
+        if path is None or not self.load(path):
+            return False
+        self.loaded_part = None  # a raw build, not the Scene part
+        return True
+
     def reload_last(self) -> bool:
         """Load the last model again (resets isolate/scale/fit like a fresh open)."""
         path = self.last_model()
@@ -460,6 +491,8 @@ class MeasureDesignView(QWidget):
                 "Units: reconstruction units until scale is set."
             )
             self.settings.setValue(self._last_model_key(), str(path))
+            self.offered_build = None
+            self.newer_button.hide()
             return "loaded"
 
         return self._run("Open", action)

@@ -662,7 +662,7 @@ class QtRasterViewportAdapter:
     backend_version = "PySide6/Qt QImage-QPainter"
 
     def __init__(self) -> None:
-        # Last splatted cloud's numpy arrays (cloud kept alive so id() stays valid).
+        # Recently splatted clouds' numpy arrays (cloud kept alive so id() stays valid).
         self._arrays: dict[int, tuple[PointCloudGeometry, np.ndarray, np.ndarray]] = {}
 
     def load(self, path: str | Path) -> Geometry:
@@ -827,7 +827,11 @@ class QtRasterViewportAdapter:
                 packed = 0xFF000000 | (rgb[:, 0] << 16) | (rgb[:, 1] << 8) | rgb[:, 2]
             else:
                 packed = np.full(len(points), color.rgba(), dtype=np.uint32)
-            self._arrays = {id(cloud): (cloud, points, packed.astype(np.uint32))}
+            # One entry per cloud, so multi-cloud scenes (Assembled) redraw without
+            # re-converting every cloud each frame; old entries drop past 8.
+            self._arrays[id(cloud)] = (cloud, points, packed.astype(np.uint32))
+            while len(self._arrays) > 8:
+                self._arrays.pop(next(iter(self._arrays)))
             cached = self._arrays[id(cloud)]
         _, points, packed = cached
         camera = state.camera
