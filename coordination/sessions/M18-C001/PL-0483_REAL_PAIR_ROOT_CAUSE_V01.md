@@ -371,6 +371,84 @@ The ordering holds at excess thresholds of 2.0, 2.25, 2.5 and 3.0 mm (real 57/53
 
 So a size-based bound cannot both offer this pair and refuse a 10x12x3 mm lug. Offering it would need a bound fitted to this pair (for example mid-body 35-65 % or a patch limit of about 60 mm^2). That is an owner/product decision and is not taken here.
 
+## 3e. Tiered offer (product decision: the owner is the authority on "same part")
+
+The tool cannot separate the real pair from the 10x12x3 lug probes, so it grades the differences instead of fitting a bound to the pair.
+
+**Hard blocks (no offer):**
+- yaw undetermined;
+- wrong or unknown roles;
+- missing or completed end;
+- height mismatch;
+- overlap;
+- free-space conflict;
+- RMSE;
+- scale over 2 %;
+- a section radius difference over 4 mm (2 x `OVERRIDE_MAX_DEVIATION_MM`; a neck or closure family change);
+- no blend band: three adjacent slices inside 30-70 % whose sections agree within 2 mm (patches do not block the band).
+
+**Tier A, small differences:** every disagreement is within the V04 physics bounds. A normal confirmation is enough.
+
+**Tier B, large local differences (possibly different parts):** any section offset of 2-4 mm, or any wall patch standing out more than 2 mm beyond the automatic patch limit, in the mid-body or in the scan the merge keeps outside the band. Each such patch is added as a `deep_patch` disagreement (height range in mm, mm^2, depth in mm).
+
+**In Studio:**
+- The tier B dialog shows a red warning and the "I have checked the physical part; these differences are scan errors" checkbox. The confirm button is enabled only once it is ticked.
+- The record stores `verification` OWNER_CONFIRMED_UNVERIFIED, `verification_tier`, and the full disagreement list.
+- The badge reads "combined - owner-confirmed (tier B), UNVERIFIED".
+- The Scan Master limitation names the tier, and the tier is in the configuration digest.
+
+### Real upF + dnH: tier B
+
+The differences listed in the dialog:
+- section at 166 mm: the upside-down wall lies 1.6 mm inside;
+- walls differ by more than 2 mm at 6-36, 46-51 and 142-167 mm (worst 51 %);
+- a 429 mm^2 uncovered patch at 110-167 mm;
+- a 63 mm^2 area at 53-65 mm standing 3.6 mm proud (mid-body);
+- a 150 mm^2 area at 6-24 mm standing 2.3 mm proud (kept by the merge from one scan).
+
+**Merge after confirmation:**
+- Upright above 71 mm, upside-down below 86 mm.
+- 41,753 points (20,571 from upF, 21,182 from dnH).
+- Heights 173.2 / 173.2 mm; top at z p99.9 174.1 mm.
+- RMSE 0.697 mm; yaw +-2.5 deg (label half turn).
+
+Calipers of the merged part (mm):
+
+| z | caliper |
+|---|---|
+| 10 | 34.0 x 52.5 |
+| 40 | 34.5 x 57.5 |
+| 80 | 33.6 x 64.2 |
+| 120 | 34.8 x 63.6 |
+| 145 | 32.4 x 62.0 |
+| 150 | 29.1 x 42.0 |
+| 155 (neck) | 28.0 x 39.0 |
+| 160 | 29.8 x 42.7 |
+| 165 (closure) | 31.7 x 42.8 |
+| 169 | 30.7 x 43.8 |
+
+### V03 review probes under the tiers (seeds 1 and 3, d 0.5/0.2, noise 0/0.35)
+
+| probe set | count | no offer | tier A | tier B | automatic accept (as main / V03) |
+|---|---|---|---|---|---|
+| wrong part | 88 | 55 | 0 | 18 | 15 |
+| special | 48 | 32 | 0 | 0 | 16 |
+| genuine | 48 | 31 | 9 | 0 | 8 |
+
+- **Wrong-part tier B:**
+  - 3 mm label panel: 6
+  - lug 10x12x3: 5
+  - lug 20x20x5: 5
+  - neck r30 vs r33: 1 (section 3.0 mm)
+  - shoulder 65 vs 60: 1
+- **Wrong-part with no offer:**
+  - neck r30 vs r26 (4 mm): yaw or section
+  - neck to 84: height
+  - r41 / r42.5: size or yaw
+  - the rest: yaw
+- **Special, all no offer:** missing end, height, RMSE, yaw.
+- **Genuine tier A:** the real-like "top 1.5 mm in" pairs.
+
 ## 4. Results V03 (final code)
 
 | pair | result | reasons (all printed in the refusal) |

@@ -74,6 +74,7 @@ class MultiScanAlignmentError(ValueError):
     heights_mm: dict[str, float] | None = None
     override_disagreements: tuple[dict[str, Any], ...] | None = None
     override_refusal: str | None = None  # why an agreement refusal offers no override
+    override_tier: str | None = None  # "A" small differences, "B" large local differences
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,7 @@ class MultiScanAlignment:
     metric_status: str = METRIC_STATUS
     verification: str = GATE_PASSED  # or OWNER_CONFIRMED_UNVERIFIED (see align_part_pair)
     disagreements: tuple[dict[str, Any], ...] = ()  # measured, for an owner-confirmed merge
+    override_tier: str = ""  # owner-confirmed merge: "A" small, "B" large local differences
 
 
 @dataclass(frozen=True)
@@ -747,7 +749,7 @@ def _miss_patch(
     lo = max(np.percentile(moved[:, 2], 1), np.percentile(tgt[:, 2], 1)) + 1.0
     hi = min(np.percentile(moved[:, 2], 99), np.percentile(tgt[:, 2], 99)) - 1.0
     step = max(limits.spacing_mm, limits.voxel_mm)
-    largest, at = 0.0, [float("nan"), float("nan")]
+    largest, at, depth = 0.0, [float("nan"), float("nan")], 0.0
     centre = _centre(tgt)
     for points, distance, other_points, is_source in (
         (moved, dist_ab, tgt, True),
@@ -774,8 +776,14 @@ def _miss_patch(
         sums = np.bincount(labels, weights=area)
         if sums.max() > largest:
             largest = float(sums.max())
-            z = points[miss][labels == int(np.argmax(sums)), 2]
+            members = labels == int(np.argmax(sums))
+            z = points[miss][members, 2]
             at = [float(z.min()), float(z.max())]
+            if standing:
+                excess = _outward_excess(points[miss][members], other_points, centre)
+                depth = float(np.median(excess))
+    if where and standing:
+        return largest, at, depth
     return (largest, at) if where else largest
 
 
@@ -1723,12 +1731,16 @@ def align_part_pair(
         if isinstance(offer, str):
             error.override_refusal = offer
             raise
-        pose, details, band = offer
+        pose, details, band, tier = offer
         if not owner_confirmed:
             error.override_disagreements = tuple(details)
+            error.override_tier = tier
             raise
         reference, other, _, query, adapted = context
-        return _owner_confirmed_merge(reference, other, pose, query, adapted, tuple(details), band)
+        merged = _owner_confirmed_merge(
+            reference, other, pose, query, adapted, tuple(details), band, tier
+        )
+        return replace(merged, override_tier=tier)
 
 
 def disagreement_text(item: dict[str, Any]) -> str:
@@ -1760,6 +1772,13 @@ def disagreement_text(item: dict[str, Any]) -> str:
         return (
             f"a {item['area_mm2']:.0f} mm^2 patch of wall at {z[0]:.0f}-{z[1]:.0f} mm height has "
             "no counterpart in the other scan"
+        )
+    if kind == "deep_patch":
+        z = item.get("z_mm") or [float("nan")] * 2
+        return (
+            f"a {item['area_mm2']:.0f} mm^2 wall area at {z[0]:.0f}-{z[1]:.0f} mm height stands "
+            f"{item['depth_mm']:.1f} mm proud of the other scan's wall ({item['region']}): "
+            "larger than scan errors explain - possibly a different part"
         )
     if kind == "scale":
         return (
@@ -1826,20 +1845,23 @@ def _label_pose(
 
 
 def _mid_band(
-    profile: list[tuple[float, float, float]], height: float
+    profile: list[tuple[float, float, float]],
+    height: float,
+    valid: Callable[[float, float], bool] = lambda lo, hi: True,
 ) -> tuple[float, float, float] | None:
     """(z low, z high, coverage) of the three adjacent slices inside ``OVERRIDE_MID_BODY`` of
-    ``height`` with the highest mean coverage (ties: nearest the middle); None when fewer than
-    three slices lie there."""
+    ``height``, each ``valid``, with the highest mean coverage (ties: nearest the middle); None
+    when no such three slices lie there."""
 
     lo, hi = OVERRIDE_MID_BODY[0] * height, OVERRIDE_MID_BODY[1] * height
     inside = [item for item in profile if item[0] >= lo and item[1] <= hi]
-    if len(inside) < 3:
-        return None
     windows = [
         (inside[i][0], inside[i + 2][1], float(np.mean([c for _, _, c in inside[i : i + 3]])))
         for i in range(len(inside) - 2)
+        if all(valid(a, b) for a, b, _ in inside[i : i + 3])
     ]
+    if not windows:
+        return None
     best = max(c for _, _, c in windows)
     middle = (lo + hi) / 2
     return min(
@@ -1871,21 +1893,23 @@ def _outward_excess(
 
 def _override_offer(
     reference: _Part, other: _Part, pose: _Pose, query: Query, limits: AlignmentThresholds
-) -> tuple[_Pose, list[dict[str, Any]], tuple[float, float]] | str:
-    """(pose, measured disagreements, blend band) when the owner may override the refusal, else
-    the reason in plain words. Offered only when the disagreement is the size reconstruction
-    artefacts at a scan's mat contact explain (PL-0483 real pair), never a different part:
+) -> tuple[_Pose, list[dict[str, Any]], tuple[float, float], str] | str:
+    """(pose, measured disagreements, blend band, tier) when the owner may override the refusal,
+    else the reason in plain words. The owner is the authority on "same part"; the tool only
+    blocks gross mismatches and grades the rest.
 
-    - every failed gate is an agreement gate (``OVERRIDABLE``; scale within
-      ``OVERRIDE_MAX_SCALE``) and no end was completed (a missing end is never overridden);
-    - the pose is determined (RMSE; yaw by the wall or the label, ``_label_pose``);
-    - every measured section differs by at most ``OVERRIDE_MAX_DEVIATION_MM`` in radius;
-    - the mid-body (``OVERRIDE_MID_BODY``), kept from both scans, agrees: no wall patch there
-      standing out over ``OVERRIDE_MAX_DEVIATION_MM`` beyond the automatic patch limit, and
-      a three-slice band with gate coverage exists in it;
-    - outside the band, the scan kept there shows no patch standing out over
-      ``OVERRIDE_MAX_DEVIATION_MM`` from the other scan's wall (a feature the merge would keep
-      unconfirmed).
+    Hard blocks (no offer): any failed gate that is not an agreement gate (height / missing or
+    completed end, overlap, free-space conflict, RMSE, yaw neither the wall nor the label pins),
+    a size difference over ``OVERRIDE_MAX_SCALE``, a section radius difference over twice
+    ``OVERRIDE_MAX_DEVIATION_MM`` (a neck / closure family change), and no blend band: three
+    adjacent slices inside ``OVERRIDE_MID_BODY`` whose sections each agree within
+    ``OVERRIDE_MAX_DEVIATION_MM`` (the best-covered such window is the band).
+
+    Tier "A" (small differences): every disagreement within the physics bounds - sections
+    within ``OVERRIDE_MAX_DEVIATION_MM``, no wall patch standing out more than that beyond the
+    automatic patch limit in the mid-body or in the scan the merge keeps outside the band.
+    Tier "B" (large local differences, possibly different parts): otherwise; each such patch is
+    added as a ``deep_patch`` disagreement (where, mm^2, depth).
     """
 
     details: list[dict[str, Any]] = []
@@ -1904,35 +1928,52 @@ def _override_offer(
         return "no measured disagreement"
     if not kinds <= OVERRIDABLE:
         return "the refusal includes " + ", ".join(sorted(kinds - OVERRIDABLE))
+    gross = 2 * OVERRIDE_MAX_DEVIATION_MM
+    tier = "A"
     for item in details:
         if item["kind"] == "scale" and abs(item["ratio"] - 1) > OVERRIDE_MAX_SCALE:
             return f"the sizes differ by {100 * (item['ratio'] - 1):+.1f} %"
-        if item["kind"] == "section" and abs(item["offset_mm"]) > OVERRIDE_MAX_DEVIATION_MM:
+        if item["kind"] == "section" and abs(item["offset_mm"]) > gross:
             return (
                 f"a section differs by {abs(item['offset_mm']):.1f} mm in radius at "
-                f"{item['z_mm']:.0f} mm, more than reconstruction errors explain "
-                f"({OVERRIDE_MAX_DEVIATION_MM:.1f} mm)"
+                f"{item['z_mm']:.0f} mm (over {gross:.0f} mm: a different neck or closure)"
             )
+        if item["kind"] == "section" and abs(item["offset_mm"]) > OVERRIDE_MAX_DEVIATION_MM:
+            tier = "B"
+    moved = _apply(pose.matrix, other.shell)
+
+    def sections_agree(lo: float, hi: float) -> bool:
+        mine = reference.shell[(reference.shell[:, 2] >= lo) & (reference.shell[:, 2] < hi)]
+        theirs = moved[(moved[:, 2] >= lo) & (moved[:, 2] < hi)]
+        if len(mine) < 15 or len(theirs) < 15:
+            return False
+        offset, _ = _radial_offset(mine, theirs)
+        return bool(np.isfinite(offset) and abs(offset) <= OVERRIDE_MAX_DEVIATION_MM)
+
     profile = _slice_profile(other, pose.matrix, reference, query, limits)
-    band = _mid_band(profile, reference.height)
-    if band is None or band[2] < limits.min_slice_coverage:
-        return "no mid-body band where both scans' walls agree"
+    band = _mid_band(profile, reference.height, sections_agree)
+    if band is None:
+        return "no mid-body band where both scans' sections agree"
     step = max(limits.spacing_mm, limits.voxel_mm)
     limit = max(MISS_PATCH_MM2, 40 * step * step)
     lo, hi = OVERRIDE_MID_BODY[0] * reference.height, OVERRIDE_MID_BODY[1] * reference.height
-    mid = _miss_patch(other, pose.matrix, reference, query, limits, zone=(lo, hi), deep=True)
-    if mid > limit:
-        return (
-            f"a {mid:.0f} mm^2 wall patch in the mid-body stands out more than "
-            f"{OVERRIDE_MAX_DEVIATION_MM:.1f} mm between the scans"
-        )
-    kept = _miss_patch(other, pose.matrix, reference, query, limits, kept_below=band[1])
-    if kept > limit:
-        return (
-            f"a {kept:.0f} mm^2 wall feature stands out more than {OVERRIDE_MAX_DEVIATION_MM:.1f} mm "
-            "in the scan whose data the merge would keep there"
-        )
-    return pose, details, (band[0], band[1])
+    for region, kwargs in (
+        ("mid-body, kept from both scans", {"zone": (lo, hi), "deep": True}),
+        ("kept by the merge from one scan", {"kept_below": band[1]}),
+    ):
+        area, z, depth = _miss_patch(other, pose.matrix, reference, query, limits, True, **kwargs)
+        if area > limit:
+            tier = "B"
+            details.append(
+                {
+                    "kind": "deep_patch",
+                    "area_mm2": area,
+                    "z_mm": z,
+                    "depth_mm": depth,
+                    "region": region,
+                }
+            )
+    return pose, details, (band[0], band[1]), tier
 
 
 def _owner_confirmed_merge(
@@ -1943,6 +1984,7 @@ def _owner_confirmed_merge(
     limits: AlignmentThresholds,
     details: tuple[dict[str, Any], ...],
     band: tuple[float, float],
+    tier: str = "A",
 ) -> MultiScanAlignment:
     """Merge for an owner-confirmed pair: each scan only away from its own mat contact. The
     upright ``reference`` gives everything above the mid-body ``band`` (``_override_offer``),
@@ -1999,7 +2041,9 @@ def _owner_confirmed_merge(
     ]
     agree = float(np.mean(profile)) if profile else float("nan")
     limitations = (
-        f"{OWNER_CONFIRMED_UNVERIFIED}: the owner confirmed both scans are the same part; "
+        f"{OWNER_CONFIRMED_UNVERIFIED} (tier {tier}: "
+        + ("large local differences" if tier == "B" else "small differences")
+        + "): the owner confirmed both scans are the same part; "
         "the scans disagree (" + "; ".join(disagreement_text(d) for d in details) + ")",
         f"above {z0:.0f} mm from upright scan {reference.scan_id}, below {z1:.0f} mm from "
         f"upside-down scan {other.scan_id} (blended where the walls agree best, "

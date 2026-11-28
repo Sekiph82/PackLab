@@ -602,8 +602,8 @@ def test_owner_can_combine_anyway_only_when_offered_and_it_stays_unverified(app,
     ]
     asked: list[str] = []
 
-    def confirm(_parent, text):
-        asked.append(text)
+    def confirm(_parent, text, tier):
+        asked.append(f"{tier}|{text}")
         return True
 
     def plain_refusal(*_scans, **_kwargs):
@@ -619,30 +619,33 @@ def test_owner_can_combine_anyway_only_when_offered_and_it_stays_unverified(app,
     assert "Combine anyway is not offered" not in panel.details.text()  # no reason recorded
     assert panel.combine_anyway("body") is None and not asked  # not offered: no override
 
-    # The real core decides offers (tests/core); here the panel's wiring: a mid-body lug is
-    # no plausible same part, so the core records why no override is offered ...
+    # The real core decides offers (tests/core): a one-scan mid-body lug is offered as tier B
+    # (large local differences, possibly a different part) ...
     panel.aligner = align_part_pair
     panel.combine("body")
     _pump(app, lambda: len(outcomes) == 2, timeout=180)
     record = project.part_merges()["body"]
-    assert outcomes[-1] == "refused" and not record.get("override") and record["override_refused"]
-    assert "Combine anyway is not offered: " in panel.details.text()
-    assert not panel.anyway_button.isVisibleTo(panel)
+    assert outcomes[-1] == "refused" and record.get("override") and record["override_tier"] == "B"
+    assert any(item["kind"] == "deep_patch" for item in record["override"])
+    assert panel.anyway_button.isVisibleTo(panel) and "Tier B" in panel.details.text()
 
-    # ... and an offered refusal (stand-in for the core's offer on the same scans) shows the
-    # button; confirming merges through the core's owner-confirmed path result fields.
+    # ... and a stand-in for the core's offer (fast) drives the confirm and persistence path.
     disagreement = {"kind": "patch", "area_mm2": 120.0, "z_mm": [70.0, 78.0]}
 
     def offering(*scans, owner_confirmed=False):
         if not owner_confirmed:
             error = MultiScanAlignmentError("a 120 mm^2 patch of side wall has no counterpart")
             error.override_disagreements = (disagreement,)
+            error.override_tier = "B"
             raise error
         from dataclasses import replace
 
         result = _genuine_result()
         return replace(
-            result, verification="OWNER_CONFIRMED_UNVERIFIED", disagreements=(disagreement,)
+            result,
+            verification="OWNER_CONFIRMED_UNVERIFIED",
+            disagreements=(disagreement,),
+            override_tier="B",
         )
 
     def _genuine_result():
@@ -657,16 +660,20 @@ def test_owner_can_combine_anyway_only_when_offered_and_it_stays_unverified(app,
     _pump(app, lambda: len(outcomes) == 3, timeout=180)
     record = project.part_merges()["body"]
     assert outcomes[-1] == "refused" and record["override"], record
+    assert record["override_tier"] == "B"
     assert panel.anyway_button.isVisibleTo(panel)
     assert "The two scans disagree" in panel.details.text()
+    assert "Tier B" in panel.details.text()
 
     panel.combine_anyway("body")
     _pump(app, lambda: len(outcomes) == 4, timeout=180)
     assert outcomes[-1] == "combined" and asked and "patch" in asked[0]
+    assert asked[0].startswith("B|Tier B")  # the dialog is the tier-B one
     record = project.part_merges()["body"]
     assert owner_confirmed(record) and record["disagreements"] and record["owner_confirmed_at"]
     assert record["metric_status"] == "METRIC_UNVERIFIED"
-    assert "owner-confirmed, UNVERIFIED" in panel.items["body"].text(1)
+    assert record["verification_tier"] == "B"
+    assert "owner-confirmed (tier B), UNVERIFIED" in panel.items["body"].text(1)
     assert "OWNER_CONFIRMED_UNVERIFIED" in panel.details.text()
     model = md.load_model(root / record["artifact_path"])
     scale = md.part_combine_scale(model, record)
@@ -739,3 +746,23 @@ def test_owner_confirmed_parts_carry_the_badge_into_placement_and_interior(app, 
     panel.states = {"body": state}
     panel.interior = ("none", None, None)
     assert "OWNER_CONFIRMED_UNVERIFIED Body" in panel._interior_lines(False)[0]
+
+
+def test_tier_b_confirmation_needs_the_physical_check(app) -> None:
+    from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton
+
+    from packlab_studio.project_parts import confirm_dialog
+
+    dialog = confirm_dialog(None, "differences", "B")
+    accept = dialog.findChild(QPushButton, "packlab.scene.confirm_accept")
+    check = dialog.findChild(QCheckBox, "packlab.scene.confirm_checked")
+    warning = dialog.findChild(QLabel, "packlab.scene.confirm_warning")
+    assert warning is not None and "#b00020" in warning.styleSheet()
+    assert check is not None and not accept.isEnabled()
+    check.setChecked(True)
+    assert accept.isEnabled()
+    check.setChecked(False)
+    assert not accept.isEnabled()
+    plain = confirm_dialog(None, "differences", "A")
+    assert plain.findChild(QCheckBox, "packlab.scene.confirm_checked") is None
+    assert plain.findChild(QPushButton, "packlab.scene.confirm_accept").isEnabled()

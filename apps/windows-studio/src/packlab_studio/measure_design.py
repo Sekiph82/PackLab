@@ -1243,6 +1243,7 @@ def promotion_request(
                     "combine_method": part_record.get("method"),
                     "sources": [s.get("model_sha256") for s in part_record.get("sources", [])],
                     "verification": part_record.get("verification", "GATE_PASSED"),
+                    "verification_tier": part_record.get("verification_tier"),
                 }
             ),
             source_input_digest=model.sha256,
@@ -1263,8 +1264,10 @@ def promotion_request(
                 "source digest is the merged part cloud, not the raw PackScans",
                 *(
                     (
-                        "OWNER_CONFIRMED_UNVERIFIED: the combine gates refused these scans; the "
-                        "owner confirmed they show the same part. Not verified.",
+                        "OWNER_CONFIRMED_UNVERIFIED (tier "
+                        f"{part_record.get('verification_tier') or 'A'}): the combine gates "
+                        "refused these scans; the owner confirmed they show the same part. "
+                        "Not verified.",
                     )
                     if part_record.get("verification") == "OWNER_CONFIRMED_UNVERIFIED"
                     else ()

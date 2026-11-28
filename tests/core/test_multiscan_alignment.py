@@ -996,29 +996,59 @@ def _no_offer_reason(up, fl):
     return caught.value.override_refusal or ""
 
 
-def test_override_is_never_offered_for_a_different_or_incomplete_part():
-    """Offered only when the disagreement is the size mat-contact reconstruction errors explain:
-    a mid-body lug, a missing end, a wrong height, a 3 mm larger neck or a 3 % size difference
-    each refuse with the reason."""
+def _offer_error(up, fl):
+    with pytest.raises(MultiScanAlignmentError) as caught:
+        align_part_pair(up, fl)
+    return caught.value
 
-    def two_bosses(rng):
-        height, faces = body(rng)
-        faces["boss2"] = _lug(rng, 22, 24, 4.0, 30.0)
-        return height, faces
 
-    reason = _no_offer_reason(scan(two_bosses, False, 1)[0], scan(body, True, 2)[0])
-    assert "mid-body" in reason
+def test_override_hard_blocks_gross_mismatches():
+    """No offer for a wrong height, a missing end, an unpinned yaw or a 3 % size difference;
+    each refusal says why."""
     assert "height" in _no_offer_reason(scan(body, False, 1)[0], scan(body, True, 2, h=70.0)[0])
     assert _no_offer_reason(scan(oval, False, 1)[0], scan(oval, True, 2)[0])  # yaw
-    assert _no_offer_reason(
-        scan(body, False, 1)[0], scan(body, True, 2, scale_error=1.03)[0]
-    )  # 3 %: never offered
+    assert _no_offer_reason(scan(body, False, 1)[0], scan(body, True, 2, scale_error=1.03)[0])
     up = scan(oval, False, 1, paint=label)[0]
     missing = scan(curtained, True, 2, paint=label, cut_top=8)[0]  # its base lost as well
     reason = _no_offer_reason(up, missing)
     assert "missing an end" in reason or "height" in reason
-    wide = scan(curtained, True, 2, paint=label, neck=3.0)[0]  # top 3 mm larger in radius
-    assert _no_offer_reason(up, wide)  # section beyond 2 mm, or the misfit it causes (RMSE)
+    wide = scan(curtained, True, 2, paint=label, neck=4.5)[0]  # top 4.5 mm larger in radius
+    assert _no_offer_reason(up, wide)  # section over 4 mm, or the misfit it causes (RMSE)
+
+
+def lug_curtained(rng):
+    """``curtained`` plus a 12 x 15 x 3 mm lug on the flat side at 40-55 mm (mid-body): a
+    feature only the upside-down scan has, deeper than scan errors explain."""
+    height, faces = curtained(rng)
+    x0, w = 16.0, 6.0
+    box = np.r_[
+        _rect(rng, 20.0, -w, w, 40, 55),
+        _wall(rng, -w, x0, 20.0, 40, 55),
+        _wall(rng, w, x0, 20.0, 40, 55),
+        _cap(rng, x0, 20.0, -w, w, 40),
+        _cap(rng, x0, 20.0, -w, w, 55),
+    ]
+    faces["lug"] = box[:, [1, 0, 2]]  # the face at y = +20 (flat side)
+    return height, faces
+
+
+def test_override_tiers_small_and_large_differences():
+    """Tier A: differences within the physics bounds (real-like shrunken top + curtain). Tier B:
+    a local feature over 2 mm deep in kept data - offered, described, never silently."""
+    up = scan(oval, False, 1, paint=label)[0]
+    small = _offer_error(up, scan(curtained, True, 2, paint=label)[0])
+    assert small.override_disagreements and small.override_tier == "A"
+    assert all(item["kind"] != "deep_patch" for item in small.override_disagreements)
+    large = _offer_error(up, scan(lug_curtained, True, 2, paint=label)[0])
+    assert large.override_disagreements and large.override_tier == "B"
+    deep = [item for item in large.override_disagreements if item["kind"] == "deep_patch"]
+    assert deep and all(item["depth_mm"] > 2.0 and item["area_mm2"] > 40 for item in deep)
+    from packlab_core.multiscan_alignment import disagreement_text
+
+    assert "possibly a different part" in disagreement_text(deep[0])
+    merged = align_part_pair(up, scan(lug_curtained, True, 2, paint=label)[0], owner_confirmed=True)
+    assert merged.override_tier == "B" and merged.verification == "OWNER_CONFIRMED_UNVERIFIED"
+    assert "tier B" in merged.alignments[1].limitations[0]
 
 
 def curtained(rng, neck=-1.5):

@@ -32,11 +32,13 @@ from typing import Any, cast
 import numpy as np
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QMessageBox,
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -227,15 +229,44 @@ def disagreement_lines(record: dict[str, Any] | None) -> list[str]:
     return [f"- {disagreement_text(item)}" for item in items if isinstance(item, dict)]
 
 
-def _default_confirm(parent: QWidget, text: str) -> bool:
-    answer = QMessageBox.question(
-        parent,
-        tr("Combine anyway?"),
-        text,
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.No,
-    )
-    return answer == QMessageBox.StandardButton.Yes
+TIER_B_CHECK = "I have checked the physical part; these differences are scan errors"
+
+
+def confirm_dialog(parent: QWidget | None, text: str, tier: str) -> QDialog:
+    """Combine-anyway confirmation. Tier "B" (large local differences): a red warning and the
+    confirm button enabled only after the owner ticks that the physical part was checked."""
+    dialog = QDialog(parent)
+    dialog.setObjectName("packlab.scene.confirm_dialog")
+    dialog.setWindowTitle(tr("Combine anyway?"))
+    layout = QVBoxLayout(dialog)
+    if tier == "B":
+        warning = QLabel(
+            tr("Large local differences: these may be different parts. Check the physical part.")
+        )
+        warning.setObjectName("packlab.scene.confirm_warning")
+        warning.setWordWrap(True)
+        warning.setStyleSheet("color: #b00020; font-weight: bold;")
+        layout.addWidget(warning)
+    body = QLabel(text)
+    body.setWordWrap(True)
+    layout.addWidget(body)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+    accept = buttons.addButton(tr("Combine anyway"), QDialogButtonBox.ButtonRole.AcceptRole)
+    accept.setObjectName("packlab.scene.confirm_accept")
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    if tier == "B":
+        check = QCheckBox(tr(TIER_B_CHECK))
+        check.setObjectName("packlab.scene.confirm_checked")
+        accept.setEnabled(False)
+        check.toggled.connect(accept.setEnabled)
+        layout.addWidget(check)
+    layout.addWidget(buttons)
+    return dialog
+
+
+def _default_confirm(parent: QWidget, text: str, tier: str = "A") -> bool:
+    return bool(confirm_dialog(parent, text, tier).exec() == QDialog.DialogCode.Accepted)
 
 
 def _scale_key(state: PartState) -> list[Any] | None:
@@ -439,7 +470,7 @@ class ScenePanel(QWidget):
         aligner: Callable[..., Any] | None = None,
         placer: Callable[..., Any] | None = None,
         interior_merger: Callable[..., Any] | None = None,
-        confirm: Callable[[QWidget, str], bool] = _default_confirm,
+        confirm: Callable[[QWidget, str, str], bool] = _default_confirm,
     ) -> None:
         super().__init__()
         self.confirm = confirm
@@ -544,7 +575,9 @@ class ScenePanel(QWidget):
                 )
                 text = tr(STATUS_TEXT[status])
                 if status == "combined" and state is not None and owner_confirmed(state.record):
-                    text = tr("combined - owner-confirmed, UNVERIFIED")
+                    text = tr("combined - owner-confirmed (tier {tier}), UNVERIFIED").format(
+                        tier=(state.record or {}).get("verification_tier") or "A"
+                    )
                 if state is not None and state.reason and status in ("single", "refused"):
                     text = f"{text}: {state.reason}"
                 item.setText(1, text)
@@ -644,15 +677,20 @@ class ScenePanel(QWidget):
                 )
             )
         if record and state.status == "refused" and record.get("override"):
+            if record.get("override_tier") == "B":
+                lines.append(tr("Tier B - large local differences: these may be different parts."))
             lines.append(tr("The two scans disagree, measured:"))
             lines.extend(disagreement_lines(record))
             lines.append(tr("Only if both scans are certainly the same part: use Combine anyway."))
         if record and state.status == "combined" and owner_confirmed(record):
             lines.append(
                 tr(
-                    "OWNER_CONFIRMED_UNVERIFIED: combined on the owner's confirmation "
-                    "({time}); the scans disagree:"
-                ).format(time=record.get("owner_confirmed_at", ""))
+                    "OWNER_CONFIRMED_UNVERIFIED (tier {tier}): combined on the owner's "
+                    "confirmation ({time}); the scans disagree:"
+                ).format(
+                    tier=record.get("verification_tier") or "A",
+                    time=record.get("owner_confirmed_at", ""),
+                )
             )
             lines.extend(disagreement_lines(record))
         if record and state.status == "combined":
@@ -867,8 +905,15 @@ class ScenePanel(QWidget):
         state = self.states.get(part or "")
         if state is None or state.status != "refused" or not (state.record or {}).get("override"):
             return None
+        tier = str((state.record or {}).get("override_tier") or "A")
+        heading = (
+            tr("Tier B - large local differences: these may be different parts.")
+            if tier == "B"
+            else tr("Tier A - small differences, within what scan errors explain.")
+        )
         text = "\n".join(
             [
+                heading,
                 tr("The automatic check refused this pair. The two scans disagree, measured:"),
                 *disagreement_lines(state.record),
                 "",
@@ -882,7 +927,7 @@ class ScenePanel(QWidget):
                 tr("Confirm that both scans show the same part?"),
             ]
         )
-        if not self.confirm(self, text):
+        if not self.confirm(self, text, tier):
             return None
         return self.combine(part, confirm=True)
 
@@ -1023,6 +1068,7 @@ class ScenePanel(QWidget):
                     record["override"] = [
                         {key: _jsonable(value) for key, value in item.items()} for item in offer
                     ]
+                    record["override_tier"] = str(getattr(error, "override_tier", None) or "A")
                 heights = getattr(error, "heights_mm", None) or {}
                 for source, item in zip(sources, inputs, strict=True):
                     if item.scan_id in heights:
@@ -1046,6 +1092,7 @@ class ScenePanel(QWidget):
                 record["verification"] = verification
                 if verification == OWNER_CONFIRMED:
                     record.update(
+                        verification_tier=str(getattr(result, "override_tier", "") or "A"),
                         owner_confirmed_at=confirmed_at,
                         confirmation="owner confirmed both scans are the same part",
                         disagreements=[
@@ -1503,6 +1550,7 @@ __all__ = [
     "ScenePanel",
     "depth_ranges",
     "interior_state",
+    "confirm_dialog",
     "disagreement_lines",
     "marker_scale",
     "owner_confirmed",
