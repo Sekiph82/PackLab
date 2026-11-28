@@ -160,11 +160,72 @@ Body-only band ratio (z 30-140): 1.004 for dnH, 0.992 for dnF. The radial offset
 
 Both flipped builds show the same trend: each scan reconstructs walls near its own mat slightly smaller. That is consistent with the closure finding (A) and is present in the raw OpenMVS clouds.
 
+### D. dnH densified at 2x resolution (private `.local-data`, inputs deleted afterwards)
+
+Setup:
+- DensifyPointCloud with the same OpenMVS v2.4.0 as Studio (OwnerDev engines), with no window.
+- Input: dnH's `scene.mvs` and its undistorted 2000x1499 images, `--resolution-level 0`, 14 threads.
+- Depth maps are now 2000x1499. The original was 1000x750 (`--resolution-level 1`, 8 threads).
+- Time: 51 min 59 s here, against 54 min 13 s for the original High build.
+- Output: 10.06 M points (original 2.44 M), spacing 0.61 mm (original 0.69).
+
+Caliper (mm) by distance d from the closure top:
+
+| | d4-d8 raw | d4-d8 shell | d22 raw (curtain) | d22 shell | d26 raw |
+|---|---|---|---|---|---|
+| dnH 1000 px | 28.6-29.2 x 40.0-40.8 | 28.5-29.1 x 40.2-40.6 | 30.2 x 63.5 | 30.4 x 62.5 | 31.3 x 66.4 |
+| dnH 2000 px | 29.2-29.5 x 39.2-40.8 | 29.0-30.2 x 41.6-42.0 | 31.0 x 53.6 | 31.0 x 54.6 | 31.8 x 60.3 |
+| upF (750 px) | 30.3-31.5 x 42.0-43.6 | 30.6-31.5 x 42.1-44.7 | 27.9 x 39.5 (neck) | | 30.5 x 45.5 |
+
+Combining upF with each dnH:
+
+| dnH | result | closure section | worst slice | patch | scale |
+|---|---|---|---|---|---|
+| 1000 px | REFUSED | -1.4 mm | 0.592 | 380 mm^2 | +1.06 % |
+| 2000 px | REFUSED | -1.6 mm | 0.571 | 792 mm^2 | +1.06 % |
+
+Doubling the depth-map resolution:
+- narrows the curtain by about 10 mm (d22 63.5 -> 53.6);
+- widens the closure by only 0.3-1.2 mm in places;
+- leaves the pair disagreeing.
+
+Level 0 is already the full resolution of the undistorted images. A 4032 px densify would need a new COLMAP undistortion, and was not run because 2000 px did not clearly help.
+
+### E. Visibility confidence from the depth maps (read in place)
+
+Per band, from 3000 sampled points:
+- **Support views:** views whose depth agrees within 2 mm.
+- **Incidence:** median angle between the surface normal and the ray of each supporting view.
+
+Camera elevations above the mat: p10 22 deg, median 35-39 deg, p90 52-56 deg. No views are lower than about 20 deg.
+
+| scan / band | support views p10/50/90 | median incidence | views < 60 deg (median) | share with >= 3 such views |
+|---|---|---|---|---|
+| upF closure | 13/24/31 | 41 deg | 20 | 1.00 |
+| dnH closure | 12/27/36 | 51 deg | 18 | 0.99 |
+| dnF closure | 11/52/70 | 49 deg | 39 | 0.99 |
+| upF neck | 7/13/23 | 39 deg | 10 | 0.99 |
+| dnH neck | 5/13/23 | 59 deg | 7 | 0.90 |
+| dnF neck | 4/12/20 | 58 deg | 6 | 0.85 |
+| upF shoulder | 14/25/32 | 40 deg | 20 | 1.00 |
+| dnH shoulder | 14/29/35 | 56 deg | 17 | 0.99 |
+| dnF shoulder | 13/26/32 | 55 deg | 16 | 0.98 |
+| body (all three) | 16-18 / 28-30 / 33-35 | 49-52 deg | 20-21 | 0.99-1.00 |
+
+The hypothesis is not supported for the closure. In both flipped scans it is seen by as many views as in the upright scan (median 27 and 52 against 24). Those views are somewhat more grazing (49-51 against 41 deg), but 99 % of points have 3 or more views under 60 deg.
+
+Only the flipped neck is weaker: 6-7 good views, 85-90 % of points with 3 or more, incidence 58-59 deg.
+
+The smaller flipped closure is therefore consistent across about 27 depth maps. It is not a few grazing views.
+
+**Assessment.** A confidence-weighted comparison would have to exclude a well-observed surface to accept this pair. A threshold strict enough to drop the flipped closure, for example under 25 supporting views or incidence over 45 deg, would also drop ordinary body walls in other scans. That reopens the one-scan closure and step probes. So such a comparison does not accept the pair without reopening the reviewer's probes. Not recommended.
+
 ### Verdict
 
 - **Not a PackLab stage.** No stage from the fused cloud to the shell creates the closure shrink, the curtain or the scale reading.
 - **Reconstruction side, not proven from the photos.** All three are already in OpenMVS's dense output, from photos taken at 4032 px but densified at 750-1000 px.
-- **Actionable:** caliper the closure, and rebuild one flipped scan at full depth resolution to see whether A disappears.
+- **The full-resolution rebuild (D) was run and did not remove A.** A 2x-resolution densify only narrowed the curtain.
+- **Actionable:** caliper the closure. Which closure size is true is a physical question, owner gate.
 - **Gates unchanged.** No gate was loosened and no code changed in this step.
 
 ## 4. Results V03 (final code)
