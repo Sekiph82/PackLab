@@ -534,6 +534,32 @@ def test_owner_chooses_which_build_feeds_a_part_persisted_and_undoable(app, proj
     with pytest.raises(Exception, match="revision"):
         project.set_scan_build(up, "../escape")
 
+    # A chosen build that disappears: said so, the stale choice is cleared, latest is used.
+    box.activated.emit(1)
+    assert project.scan_builds() == {up: "r-" + "a" * 32}
+    import shutil
+
+    shutil.rmtree(old.parents[2])
+    panel.refresh()
+    assert project.scan_builds() == {} and panel.states["body"].upright.model == new
+    assert "is missing; using the latest build" in panel.details.text()
+
+
+def test_newest_successful_build_is_used_when_the_latest_build_failed(app, project) -> None:
+    rng = np.random.default_rng(8)
+    root = project.layout.root
+    up = hashlib.sha256(b"body-up-scan-2").hexdigest()
+    good = _revision_build(root, up, "r-" + "d" * 32, _jar(rng, False), "fast", 1_700_000_000)
+    failed = root / "working/reconstruction" / ("r-" + "e" * 32)
+    failed.mkdir()
+    manifest = failed / "manifest.json"
+    manifest.write_text(json.dumps({"source_digest": up, "state": "failed"}))
+    import os
+
+    os.utime(manifest, (1_700_000_500, 1_700_000_500))  # newer than the good build
+    panel = _panel(project, [_entry(up, "body")])
+    assert panel.states["body"].status == "single" and panel.states["body"].cloud == good
+
 
 def test_combine_records_scan_heights_and_shows_them_per_build(app, project) -> None:
     rng = np.random.default_rng(7)

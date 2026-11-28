@@ -537,6 +537,7 @@ TURKISH: dict[str, str] = {
     "build": "model",
     "latest: {build}": "en yeni: {build}",
     "Build choice not saved: {error}": "Model seçimi kaydedilmedi: {error}",
+    "Selected build {revision} is missing; using the latest build.": "Seçilen model {revision} bulunamadı; en yeni model kullanılıyor.",
     "Cancel combine": "Birleştirmeyi iptal et",
     "Combine {part}": "{part} birleştir",
     "Loading {view} scan": "{view} tarama yükleniyor",

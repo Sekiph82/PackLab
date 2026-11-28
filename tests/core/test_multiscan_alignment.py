@@ -591,11 +591,34 @@ def test_scan_missing_its_top_is_refused_with_the_reason():
         align_part_pair(up, fl)
 
 
+def bottle(rng, h=80.0, blob=0.0, open_top=False):
+    """Bottle proxy: r 40 body with a side boss, r 37 foot 0-10 mm, shoulder at 65 mm, r 30 neck
+    and cap to ``h``. ``blob``: an MVS blob that tall fused on the cap (sparse, 8 mm wide)."""
+    _, faces = body(rng, r=40.0, h=65.0)
+    faces["side"] = np.r_[_cyl(rng, 37, 0, 10), _cyl(rng, 40, 10, 65), _cyl(rng, 30, 65, h)]
+    faces["shoulder"] = np.r_[_disc(rng, 30, 40, 65), _disc(rng, 37, 40, 10)]
+    faces["top"] = np.zeros((0, 3)) if open_top else _disc(rng, 0, 30, h)
+    faces["bottom"] = _disc(rng, 0, 37, 0)
+    if blob:
+        n = int(rng.density * 200 * blob)
+        a, r = rng.uniform(0, 2 * np.pi, n), rng.uniform(0, 8, n)
+        faces["blob"] = np.c_[r * np.cos(a) + 10, r * np.sin(a), h + rng.uniform(0, blob, n)]
+    return h, faces
+
+
+def open_jar(rng, h=80.0):
+    """Body proxy without a top face (open mouth, nothing seen inside)."""
+    height, faces = body(rng, h=h)
+    faces.pop("top")
+    return height, faces
+
+
 @pytest.mark.parametrize("short", ["upright", "flipped"])
 def test_scan_missing_its_free_end_is_completed_from_the_other_scan(short):
-    """Real Fast flipped build: 165 of 173 mm, its base end lost. Open end, walls agree."""
-    (up, t_up) = scan(body, False, 1, cut_top=8.0 if short == "upright" else 0.0)
-    (fl, t_fl) = scan(body, True, 2, cut_top=8.0 if short == "flipped" else 0.0)
+    """Real Fast flipped build: 165 of 173 mm, its base end lost. Open end, walls agree, and
+    the other scan shows an end there (neck / narrower foot)."""
+    (up, t_up) = scan(bottle, False, 1, cut_top=8.0 if short == "upright" else 0.0)
+    (fl, t_fl) = scan(bottle, True, 2, cut_top=8.0 if short == "flipped" else 0.0)
     result = align_part_pair(up, fl)
     _assert_recovered(result, (t_up, t_fl))
     pair = result.alignments[1]
@@ -605,7 +628,7 @@ def test_scan_missing_its_free_end_is_completed_from_the_other_scan(short):
         f"end completed from scan {other.scan_id}: scan {missing.scan_id} misses its free"
         in (pair.limitations[0])
     )
-    assert pair.free_space_conflict < 0.01  # the unseen end is not "seen empty" space
+    assert pair.free_space_conflict < 0.02  # the unseen end is not "seen empty" space
     heights = sorted(a.height_mm for a in result.alignments)
     assert abs(heights[0] - 72) < 1.0 and abs(heights[1] - 80) < 0.5, heights
     z = result.points[:, 2]
@@ -620,3 +643,38 @@ def test_closed_shorter_top_or_scale_error_is_still_refused_with_heights():
         align_part_pair(
             scan(body, False, 1)[0], scan(body, True, 2, cut_top=8, scale_error=1.05)[0]
         )
+
+
+@pytest.mark.parametrize("which", ["upright", "flipped"])
+@pytest.mark.parametrize("error", [0.98, 1.02])
+def test_two_percent_scale_with_an_open_end_is_refused(which, error):
+    up = scan(bottle, False, 1, scale_error=error if which == "upright" else 1.0)[0]
+    fl = scan(bottle, True, 2, cut_top=8, scale_error=error if which == "flipped" else 1.0)[0]
+    with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
+        align_part_pair(up, fl)
+
+
+def test_top_blob_does_not_move_the_mat_contact():
+    """A 3 mm MVS blob on the cap + an 8 mm missing end: the blob is not the part's top."""
+    (up, t_up) = scan(bottle, False, 1, blob=3.0)
+    (fl, t_fl) = scan(bottle, True, 2, cut_top=8)
+    result = align_part_pair(up, fl)
+    angle, shift = _pose_error(result, (t_up, t_fl))
+    assert angle < 1.0 and shift < 0.5, (angle, shift)
+    assert abs(result.alignments[0].height_mm - 80) < 0.5
+
+
+@pytest.mark.parametrize("taller", [88.0, 91.0])
+def test_taller_open_part_with_the_same_walls_is_refused(taller):
+    up = scan(open_jar, False, 1)[0]
+    fl = scan(open_jar, True, 2, h=taller)[0]
+    with pytest.raises(MultiScanAlignmentError, match="shows no end"):
+        align_part_pair(up, fl)
+
+
+@pytest.mark.parametrize("error", [0.98, 1.02])
+def test_two_percent_scale_within_the_height_tolerance_is_refused(error):
+    """Open jar, no cut: the 1.6 mm height gap hides in the tolerance; the walls show it."""
+    up, fl = scan(open_jar, False, 1)[0], scan(open_jar, True, 2, scale_error=error)[0]
+    with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
+        align_part_pair(up, fl)

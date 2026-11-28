@@ -378,6 +378,14 @@ def write_mesh(folder: Path, part: str, points: np.ndarray) -> Path:
     vertices = np.asarray(mesh.vertices)
     low, high = points.min(axis=0) - 2.0, points.max(axis=0) + 2.0
     mesh.remove_vertices_by_mask(((vertices < low) | (vertices > high)).any(axis=1).tolist())
+    # Poisson can emit zero-area slivers (coincident vertices), which the Scan Master geometry
+    # statistics reject: merge duplicates and drop zero-area triangles.
+    mesh.remove_duplicated_vertices()
+    mesh.remove_degenerate_triangles()
+    v, t = np.asarray(mesh.vertices), np.asarray(mesh.triangles)
+    area = np.linalg.norm(np.cross(v[t[:, 1]] - v[t[:, 0]], v[t[:, 2]] - v[t[:, 0]]), axis=1)
+    mesh.remove_triangles_by_mask((area <= 1e-9).tolist())
+    mesh.remove_unreferenced_vertices()
     if len(mesh.triangles) < 20:
         raise OSError("merged part surface could not be meshed")
     return _write_atomic(
@@ -451,6 +459,7 @@ class ScenePanel(QWidget):
             builds_form.addRow(tr(label), box)
             self.build_boxes[view] = box
         self.builds: dict[str, list[dict[str, Any]]] = {}
+        self.build_notice = ""
         buttons = QHBoxLayout()
         buttons.addWidget(self.combine_button)
         buttons.addWidget(self.place_button)
@@ -479,6 +488,7 @@ class ScenePanel(QWidget):
             self.states = part_states(self.projects, entries, overrides)
             layout = self.projects.layout
             self.builds = successful_builds(None if layout is None else layout.root)
+            self._repair_build_choices()
             self.view = self.projects.part_view()
             self.placement = placement_state(self.projects, self.states)
             self.interior = interior_state(self.projects, self.states)
@@ -583,6 +593,8 @@ class ScenePanel(QWidget):
             self.details.setText(tr("Select a part to show it in Model Viewer."))
             return
         lines = [f"{tr(PART_LABELS[state.part])}: {tr(STATUS_TEXT[state.status])}"]
+        if self.build_notice:
+            lines.append(self.build_notice)
         if state.reason:
             lines.append(state.reason)
         record = state.record
@@ -632,6 +644,18 @@ class ScenePanel(QWidget):
                 box.setCurrentIndex(max(0, box.findData(scan.revision)))
             box.setEnabled(len(options) > 1 and not running)
 
+    def _repair_build_choices(self) -> None:
+        """A chosen build that no longer exists (deleted / failed rebuild): say so, clear it."""
+        for digest, revision in self.projects.scan_builds().items():
+            if revision not in {build["revision"] for build in self.builds.get(digest, [])}:
+                self.build_notice = tr(
+                    "Selected build {revision} is missing; using the latest build."
+                ).format(revision=revision[:10])
+                try:
+                    self.projects.set_scan_build(digest, None)
+                except Exception as error:
+                    self.build_notice = tr("Build choice not saved: {error}").format(error=error)
+
     def _choose_build(self, view: str, index: int) -> None:
         state = self.states.get(self.view["part"] or "")
         scan = None if state is None else getattr(state, view)
@@ -639,6 +663,7 @@ class ScenePanel(QWidget):
             return
         revision = self.build_boxes[view].itemData(index)
         latest = index == 0  # the newest build: follow future builds too
+        self.build_notice = ""
         try:
             self.projects.set_scan_build(scan.package_sha256, None if latest else revision)
         except Exception as error:
