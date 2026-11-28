@@ -32,7 +32,10 @@ from typing import Any, cast
 import numpy as np
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -61,6 +64,8 @@ STATUS_TEXT = {
     "merged": "merged",
 }
 _ROLE = Qt.ItemDataRole.UserRole
+OWNER_CONFIRMED = "OWNER_CONFIRMED_UNVERIFIED"  # combine the owner forced on disagreeing scans
+ANYWAY = "Combine anyway - I confirm both scans are the same part"
 PLACEMENT = "placement"  # job key of the closure-on-body placement
 INTERIOR = "interior"  # job key of the body-interior merge
 
@@ -208,6 +213,60 @@ def part_states(
         if "interior" in scans_of_part:
             states[part] = replace(states[part], interior=scans_of_part["interior"])
     return states
+
+
+def owner_confirmed(record: dict[str, Any] | None) -> bool:
+    """Is this Combine record an owner-confirmed (unverified) merge of disagreeing scans?"""
+    return bool(record) and record.get("verification") == OWNER_CONFIRMED  # type: ignore[union-attr]
+
+
+def disagreement_lines(record: dict[str, Any] | None) -> list[str]:
+    """The measured disagreements of a refusal the owner may override, or of an owner-confirmed
+    merge, in plain words."""
+    from packlab_core.multiscan_alignment import disagreement_text
+
+    items = (record or {}).get("disagreements") or (record or {}).get("override") or []
+    return [f"- {disagreement_text(item)}" for item in items if isinstance(item, dict)]
+
+
+TIER_B_CHECK = "I have checked the physical part; these differences are scan errors"
+
+
+def confirm_dialog(parent: QWidget | None, text: str, tier: str) -> QDialog:
+    """Combine-anyway confirmation. Tier "B" (large local differences): a red warning and the
+    confirm button enabled only after the owner ticks that the physical part was checked."""
+    dialog = QDialog(parent)
+    dialog.setObjectName("packlab.scene.confirm_dialog")
+    dialog.setWindowTitle(tr("Combine anyway?"))
+    layout = QVBoxLayout(dialog)
+    if tier == "B":
+        warning = QLabel(
+            tr("Large local differences: these may be different parts. Check the physical part.")
+        )
+        warning.setObjectName("packlab.scene.confirm_warning")
+        warning.setWordWrap(True)
+        warning.setStyleSheet("color: #b00020; font-weight: bold;")
+        layout.addWidget(warning)
+    body = QLabel(text)
+    body.setWordWrap(True)
+    layout.addWidget(body)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+    accept = buttons.addButton(tr("Combine anyway"), QDialogButtonBox.ButtonRole.AcceptRole)
+    accept.setObjectName("packlab.scene.confirm_accept")
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    if tier == "B":
+        check = QCheckBox(tr(TIER_B_CHECK))
+        check.setObjectName("packlab.scene.confirm_checked")
+        accept.setEnabled(False)
+        check.toggled.connect(accept.setEnabled)
+        layout.addWidget(check)
+    layout.addWidget(buttons)
+    return dialog
+
+
+def _default_confirm(parent: QWidget, text: str, tier: str = "A") -> bool:
+    return bool(confirm_dialog(parent, text, tier).exec() == QDialog.DialogCode.Accepted)
 
 
 def _scale_key(state: PartState) -> list[Any] | None:
@@ -411,8 +470,10 @@ class ScenePanel(QWidget):
         aligner: Callable[..., Any] | None = None,
         placer: Callable[..., Any] | None = None,
         interior_merger: Callable[..., Any] | None = None,
+        confirm: Callable[[QWidget, str, str], bool] = _default_confirm,
     ) -> None:
         super().__init__()
+        self.confirm = confirm
         self.setObjectName("packlab.scene.panel")
         self.projects, self.jobs = project_manager, job_manager
         self.entries_provider = entries_provider
@@ -443,6 +504,9 @@ class ScenePanel(QWidget):
         self.combine_button = QPushButton(tr("Combine part"))
         self.combine_button.setObjectName("packlab.scene.combine")
         self.combine_button.clicked.connect(lambda: self.combine(self.view["part"]))
+        self.anyway_button = QPushButton(tr(ANYWAY))
+        self.anyway_button.setObjectName("packlab.scene.combine_anyway")
+        self.anyway_button.clicked.connect(lambda: self.combine_anyway(self.view["part"]))
         self.cancel_button = QPushButton(tr("Cancel combine"))
         self.cancel_button.setObjectName("packlab.scene.cancel")
         self.cancel_button.clicked.connect(lambda: self.cancel(self.view["part"]))
@@ -472,6 +536,7 @@ class ScenePanel(QWidget):
         layout.addWidget(self.tree, 1)
         layout.addLayout(builds_form)
         layout.addLayout(buttons)
+        layout.addWidget(self.anyway_button)
         layout.addWidget(self.details)
         self.items: dict[str, QTreeWidgetItem] = {}
         for part in PROJECT_PARTS:
@@ -512,6 +577,10 @@ class ScenePanel(QWidget):
                     else (state.status if state else "missing")
                 )
                 text = tr(STATUS_TEXT[status])
+                if status == "combined" and state is not None and owner_confirmed(state.record):
+                    text = tr("combined - owner-confirmed (tier {tier}), UNVERIFIED").format(
+                        tier=(state.record or {}).get("verification_tier") or "A"
+                    )
                 if state is not None and state.reason and status in ("single", "refused"):
                     text = f"{text}: {state.reason}"
                 item.setText(1, text)
@@ -581,6 +650,9 @@ class ScenePanel(QWidget):
         self.combine_button.setEnabled(
             bool(state and state.upright and state.flipped) and not running
         )
+        offer = bool(state and state.status == "refused" and (state.record or {}).get("override"))
+        self.anyway_button.setVisible(offer)
+        self.anyway_button.setEnabled(offer and not running)
         ready = [self.states.get(p) for p in ("assembled", "body", "closure")]
         self.place_button.setEnabled(
             part == "assembled" and not placing and all(s and s.cloud for s in ready)
@@ -601,6 +673,29 @@ class ScenePanel(QWidget):
         if state.reason:
             lines.append(state.reason)
         record = state.record
+        if record and state.status == "refused" and record.get("override_refused"):
+            lines.append(
+                tr("Combine anyway is not offered: {reason}.").format(
+                    reason=record["override_refused"]
+                )
+            )
+        if record and state.status == "refused" and record.get("override"):
+            if record.get("override_tier") == "B":
+                lines.append(tr("Tier B - large local differences: these may be different parts."))
+            lines.append(tr("The two scans disagree, measured:"))
+            lines.extend(disagreement_lines(record))
+            lines.append(tr("Only if both scans are certainly the same part: use Combine anyway."))
+        if record and state.status == "combined" and owner_confirmed(record):
+            lines.append(
+                tr(
+                    "OWNER_CONFIRMED_UNVERIFIED (tier {tier}): combined on the owner's "
+                    "confirmation ({time}); the scans disagree:"
+                ).format(
+                    tier=record.get("verification_tier") or "A",
+                    time=record.get("owner_confirmed_at", ""),
+                )
+            )
+            lines.extend(disagreement_lines(record))
         if record and state.status == "combined":
             pair = record["alignments"][-1]
             lines.append(
@@ -684,6 +779,15 @@ class ScenePanel(QWidget):
         status, record, _path = self.interior
         if merging:
             return [tr("Merging the body interior…")]
+        body = self.states.get("body")
+        if body is not None and owner_confirmed(body.record):
+            badge = [
+                tr("OWNER_CONFIRMED_UNVERIFIED Body: the interior sits on an unverified Body.")
+            ]
+            return badge + self._interior_lines_inner(status, record)
+        return self._interior_lines_inner(status, record)
+
+    def _interior_lines_inner(self, status: str, record: dict[str, Any] | None) -> list[str]:
         if status == "merged" and record is not None:
             lines = [
                 tr("Interior merged (rim alignment, overlap {overlap:.0%}).").format(
@@ -721,6 +825,23 @@ class ScenePanel(QWidget):
         status, record, _placed = self.placement
         if placing:
             return [tr("Placing the closure on the body…")]
+        unverified = [
+            tr(PART_LABELS[part])
+            for part, source in ((record or {}).get("sources") or {}).items()
+            if isinstance(source, dict) and source.get("verification") == OWNER_CONFIRMED
+        ]
+        if status == "placed" and record is not None and unverified:
+            lines = [
+                tr("OWNER_CONFIRMED_UNVERIFIED parts in this placement: {parts}").format(
+                    parts=", ".join(unverified)
+                )
+            ]
+            return lines + self._placement_lines_inner(status, record, placing)
+        return self._placement_lines_inner(status, record, placing)
+
+    def _placement_lines_inner(
+        self, status: str, record: dict[str, Any] | None, placing: bool
+    ) -> list[str]:
         if status == "placed" and record is not None:
             graph = record["graph"]
             body, closure = (item["residuals"] for item in graph["components"])
@@ -791,7 +912,39 @@ class ScenePanel(QWidget):
                 self.jobs.request_cancel(job_id)
         self.refresh()
 
-    def combine(self, part: str | None) -> str | None:
+    def combine_anyway(self, part: str | None) -> str | None:
+        """Ask the owner to confirm both scans are the same part, then combine overriding the
+        agreement gates (offered only for such refusals)."""
+        state = self.states.get(part or "")
+        if state is None or state.status != "refused" or not (state.record or {}).get("override"):
+            return None
+        tier = str((state.record or {}).get("override_tier") or "A")
+        heading = (
+            tr("Tier B - large local differences: these may be different parts.")
+            if tier == "B"
+            else tr("Tier A - small differences, within what scan errors explain.")
+        )
+        text = "\n".join(
+            [
+                heading,
+                tr("The automatic check refused this pair. The two scans disagree, measured:"),
+                *disagreement_lines(state.record),
+                "",
+                tr(
+                    "Combine anyway takes the upper part from the upright scan and the base from "
+                    "the upside-down scan, blended where their walls agree best. The result is "
+                    "marked OWNER_CONFIRMED_UNVERIFIED and METRIC_UNVERIFIED; it is never treated "
+                    "as verified."
+                ),
+                "",
+                tr("Confirm that both scans show the same part?"),
+            ]
+        )
+        if not self.confirm(self, text, tier):
+            return None
+        return self.combine(part, confirm=True)
+
+    def combine(self, part: str | None, confirm: bool = False) -> str | None:
         """Start the Combine-part background job for ``part``; returns the job id."""
         state = self.states.get(part or "")
         layout, metadata = self.projects.layout, self.projects.metadata
@@ -813,7 +966,7 @@ class ScenePanel(QWidget):
         self.jobs.register_cancel_hook(job.job_id, hook)
         thread = threading.Thread(
             target=self._work,
-            args=(job.job_id, state, layout, metadata.project_id, token),
+            args=(job.job_id, state, layout, metadata.project_id, token, confirm),
             name=f"packlab-part-{state.part}",
             daemon=True,
         )
@@ -825,7 +978,13 @@ class ScenePanel(QWidget):
         return job.job_id
 
     def _work(
-        self, job_id: str, state: PartState, layout: Any, project_id: str, token: threading.Event
+        self,
+        job_id: str,
+        state: PartState,
+        layout: Any,
+        project_id: str,
+        token: threading.Event,
+        confirm: bool = False,
     ) -> None:
         from packlab_core.multiscan_alignment import (
             METHOD,
@@ -907,9 +1066,22 @@ class ScenePanel(QWidget):
                 "artifact_path": None,
             }
             try:
-                result = aligner(inputs[0], inputs[1])
+                if confirm:
+                    confirmed_at = datetime.now(UTC).isoformat()
+                    result = aligner(inputs[0], inputs[1], owner_confirmed=True)
+                else:
+                    result = aligner(inputs[0], inputs[1])
             except MultiScanAlignmentError as error:
                 record.update(status="refused", reason=str(error))
+                offer = getattr(error, "override_disagreements", None)
+                refusal = getattr(error, "override_refusal", None)
+                if refusal:
+                    record["override_refused"] = str(refusal)
+                if offer:
+                    record["override"] = [
+                        {key: _jsonable(value) for key, value in item.items()} for item in offer
+                    ]
+                    record["override_tier"] = str(getattr(error, "override_tier", None) or "A")
                 heights = getattr(error, "heights_mm", None) or {}
                 for source, item in zip(sources, inputs, strict=True):
                     if item.scan_id in heights:
@@ -929,6 +1101,18 @@ class ScenePanel(QWidget):
                     return finish("cancelled")
                 mesh = write_mesh(folder, part, result.points)
                 written.append(mesh)
+                verification = str(getattr(result, "verification", "GATE_PASSED"))
+                record["verification"] = verification
+                if verification == OWNER_CONFIRMED:
+                    record.update(
+                        verification_tier=str(getattr(result, "override_tier", "") or "A"),
+                        owner_confirmed_at=confirmed_at,
+                        confirmation="owner confirmed both scans are the same part",
+                        disagreements=[
+                            {key: _jsonable(value) for key, value in item.items()}
+                            for item in result.disagreements
+                        ],
+                    )
                 record.update(
                     status="combined",
                     reason=None,
@@ -1126,6 +1310,8 @@ class ScenePanel(QWidget):
         source["cloud_sha256"] = model.sha256
         if state.status == "combined":  # already object points in its mat frame, mm
             source.update(frame="part_combine_mat_frame_mm", scale_source="part_combine")
+            if owner_confirmed(state.record):
+                source["verification"] = OWNER_CONFIRMED
             return PartInput(f"{part}-{model.sha256[:12]}", model.points, model.colors)
         if upright_only and (state.upright is None or state.cloud != state.upright.model):
             raise PartPlacementError(
@@ -1202,6 +1388,7 @@ class ScenePanel(QWidget):
                 "status": body.status,
                 "cloud_path": _rel(root, body.cloud),
                 "scale_key": _scale_key(body),
+                **({"verification": OWNER_CONFIRMED} if owner_confirmed(body.record) else {}),
             },
             "interior": {
                 "role": "body_interior",
@@ -1376,7 +1563,10 @@ __all__ = [
     "ScenePanel",
     "depth_ranges",
     "interior_state",
+    "confirm_dialog",
+    "disagreement_lines",
     "marker_scale",
+    "owner_confirmed",
     "part_scans",
     "part_states",
     "placement_state",

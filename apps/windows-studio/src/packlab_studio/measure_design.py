@@ -817,6 +817,8 @@ def part_combine_scale(model: LoadedModel, record: dict[str, Any]) -> ScaleResul
             )
         relative.append(float(uncertainty) / float(factor))
     uncertainty = max(relative)  # mm per mm: the worse source scale bounds the merge
+    # An owner-confirmed merge of disagreeing scans (PL-0483) is never evidence of agreement.
+    forced = record.get("verification") == "OWNER_CONFIRMED_UNVERIFIED"
     references = tuple(
         {
             "reference_id": f"part-combine-{source.get('view')}",
@@ -825,7 +827,9 @@ def part_combine_scale(model: LoadedModel, record: dict[str, Any]) -> ScaleResul
             "mm_per_unit": source.get("mm_per_unit"),
             "scale_source": source.get("scale_source"),
             "uncertainty_mm_per_unit": source.get("scale_uncertainty"),
-            "evidence_class": "source_build_scale_unverified",
+            "evidence_class": (
+                "owner_confirmed_unverified_combine" if forced else "source_build_scale_unverified"
+            ),
         }
         for source in sources
     )
@@ -876,7 +880,12 @@ def part_combine_scale(model: LoadedModel, record: dict[str, Any]) -> ScaleResul
         uncertainty,
         "part_combine",
         provenance,
-        "combined part in mat-frame mm; scale from "
+        (
+            "OWNER_CONFIRMED_UNVERIFIED (scans disagree; owner confirmed same part): "
+            if forced
+            else ""
+        )
+        + "combined part in mat-frame mm; scale from "
         + ", ".join(f"{s.get('view')} {s.get('scale_source')}" for s in sources),
     )
 
@@ -1233,6 +1242,8 @@ def promotion_request(
                     "mesh_method": mesh_method,
                     "combine_method": part_record.get("method"),
                     "sources": [s.get("model_sha256") for s in part_record.get("sources", [])],
+                    "verification": part_record.get("verification", "GATE_PASSED"),
+                    "verification_tier": part_record.get("verification_tier"),
                 }
             ),
             source_input_digest=model.sha256,
@@ -1243,9 +1254,24 @@ def promotion_request(
             },
             point_count=len(model.points),
             triangle_count=0 if mesh_model.triangles is None else len(mesh_model.triangles),
+            verification=(
+                "OWNER_CONFIRMED_UNVERIFIED"
+                if part_record.get("verification") == "OWNER_CONFIRMED_UNVERIFIED"
+                else "GATE_PASSED"
+            ),
             limitations=(
                 surface_note,
                 "source digest is the merged part cloud, not the raw PackScans",
+                *(
+                    (
+                        "OWNER_CONFIRMED_UNVERIFIED (tier "
+                        f"{part_record.get('verification_tier') or 'A'}): the combine gates "
+                        "refused these scans; the owner confirmed they show the same part. "
+                        "Not verified.",
+                    )
+                    if part_record.get("verification") == "OWNER_CONFIRMED_UNVERIFIED"
+                    else ()
+                ),
             ),
         )
     else:

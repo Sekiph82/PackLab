@@ -451,8 +451,13 @@ class ReconstructionOutputManifest:
     limitations: tuple[str, ...] = ()
     stage_results: tuple[ReconstructionStageResult, ...] = ()
     authority_class: str = "RECONSTRUCTION_OBSERVATION"
+    # GATE_PASSED, or OWNER_CONFIRMED_UNVERIFIED for a part combined on the owner's confirmation
+    # although its scans disagree (PL-0483); never evidence of agreement.
+    verification: str = "GATE_PASSED"
 
     def __post_init__(self) -> None:
+        if self.verification not in ("GATE_PASSED", "OWNER_CONFIRMED_UNVERIFIED"):
+            raise ValueError("manifest verification is unknown")
         if self.scale_state is ScaleState.METRIC_VERIFIED:
             raise ValueError("M07 cannot produce METRIC_VERIFIED; M09 owns metric promotion")
         if not re.fullmatch(r"[0-9a-f]{64}", self.source_input_digest):
@@ -485,6 +490,8 @@ class ReconstructionOutputManifest:
             "limitations": list(self.limitations),
             "stage_results": [stage.as_dict() for stage in self.stage_results],
             "authority_class": self.authority_class,
+            # only when set, so manifests of verified sources keep their digests
+            **({"verification": self.verification} if self.verification != "GATE_PASSED" else {}),
         }
 
 

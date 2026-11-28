@@ -6,6 +6,7 @@ placed on the mat at a random yaw/offset and seen through a random similarity (c
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import numpy as np
@@ -387,7 +388,7 @@ def test_density_sweep_never_accepts_a_wrong_yaw(shape, density, seeds):
     try:
         result = align_part_pair(up, fl)
     except MultiScanAlignmentError as error:
-        assert density < 0.5 and "yaw undetermined on a non-symmetric part" in str(error)
+        assert density < 0.5 and "yaw undetermined" in str(error)
         return
     yaw, tilt, shift = _yaw_tilt_shift(result, (t_up, t_fl))
     pair = result.alignments[1]
@@ -768,3 +769,351 @@ def test_large_claimed_scale_uncertainty_is_capped(error):
     fl = replace(scan(bottle, True, 2, cut_top=8, scale_error=error)[0], scale_uncertainty=0.015)
     with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
         align_part_pair(up, fl)
+
+
+def test_sparse_outward_artifacts_do_not_replace_the_wall():
+    """A sparse MVS glare fan 2-12 mm outside the wall (real scans: a few points per 3 mm)
+    must not replace the outer wall under it: the shell stays on the r 40 cylinder."""
+    from packlab_core.multiscan_alignment import _shell
+
+    part = prepare_scan(scan(cylinder, False, 1)[0], AlignmentThresholds())
+    centre = np.median(part.points[part.points[:, 2] > 20, :2], axis=0)
+    rng = np.random.default_rng(5)
+    a, r, z = rng.uniform(-0.5, 0.5, 100), rng.uniform(42, 52, 100), rng.uniform(20, 50, 100)
+    fan = np.c_[centre[0] + r * np.cos(a), centre[1] + r * np.sin(a), z]
+    shell = _shell(np.r_[part.points, fan], part.height, part.spacing, AlignmentThresholds())[0]
+    rel = shell[:, :2] - centre
+    radius = np.linalg.norm(rel, axis=1)
+    wedge = (
+        (np.abs(np.arctan2(rel[:, 1], rel[:, 0])) < 0.5) & (shell[:, 2] > 20) & (shell[:, 2] < 50)
+    )
+    # main: 118 wall / 81 fan points in the wedge; a few chance fan clusters may stay
+    assert (wedge & (np.abs(radius - 40) < 1.5)).sum() > 300
+    assert (wedge & (radius > 41.5)).sum() < 0.1 * wedge.sum()
+
+
+def _lug(rng, width, height, proud, z0):
+    """A ``width`` x ``height`` mm lug ``proud`` mm out of the r 40 wall, opposite the boss."""
+    w = width / 2
+    return np.r_[
+        _rect(rng, 40 + proud, -w, w, z0, z0 + height),
+        _wall(rng, -w, 38.7, 40 + proud, z0, z0 + height),
+        _wall(rng, w, 38.7, 40 + proud, z0, z0 + height),
+        _cap(rng, 39, 40 + proud, -w, w, z0),
+        _cap(rng, 39, 40 + proud, -w, w, z0 + height),
+    ] * [-1, 1, 1]
+
+
+def lugged(width, height, proud, z0=40.0):
+    def shape(rng):
+        h, faces = body(rng)
+        faces["lug"] = _lug(rng, width, height, proud, z0)
+        return h, faces
+
+    shape.__name__ = "lugged"
+    return shape
+
+
+def fuzzed(sigma):
+    """Jar body whose wall opposite the boss (z 25-70) carries ``sigma`` mm MVS fuzz."""
+
+    def shape(rng):
+        h, faces = body(rng)
+        side = faces["side"]
+        at = (side[:, 0] < -30) & (side[:, 2] > 25) & (side[:, 2] < 70)
+        side[at] += rng.rng.normal(0, sigma, (at.sum(), 3))
+        return h, faces
+
+    shape.__name__ = "fuzzed"
+    return shape
+
+
+def test_fuzz_in_one_scan_does_not_hide_a_lug_in_the_other():
+    """Noise in one scan must never loosen the check: a 10 x 20 x 4 mm lug opposite a fuzzy
+    patch of the other scan is still refused (V02 widened the tolerance with the noise)."""
+    for sigma in (0.6, 0.9):
+        with pytest.raises(MultiScanAlignmentError):
+            align_part_pair(scan(fuzzed(sigma), False, 1)[0], scan(lugged(10, 20, 4.0), True, 2)[0])
+
+
+def test_miss_patch_reads_true_area():
+    """A one-scan 10 x 20 mm lug face (+ two 3 mm side walls) reads about its real area."""
+    from packlab_core.multiscan_alignment import _apply, _miss_patch, _nearest, _prepare
+
+    up, t_up = scan(body, False, 1)
+    fl, t_fl = scan(lugged(10, 20, 3.0), True, 2)
+    limits = AlignmentThresholds()
+    ref, part = _prepare(up, limits), _prepare(fl, limits)
+    # Ground-truth pose: flipped scan's mat frame -> reference mat frame.
+    truth = ref.frame @ t_up @ np.linalg.inv(t_fl) @ np.linalg.inv(part.frame)
+    truth[:3, :3] /= np.cbrt(np.linalg.det(truth[:3, :3]))
+    area = _miss_patch(part, truth, ref, _nearest(ref.shell), limits)
+    assert 150 < area < 380, area
+    assert _apply(truth, part.shell).shape == part.shell.shape
+
+
+def waisted(bump):
+    """r 40 body narrowing to r 34 at z 40-50 through cones (z 30-40, z 50-60). ``bump``: a
+    4 mm wide bump that far out on the upper cone, which faces the mat when flipped."""
+
+    def shape(rng):
+        h, faces = body(rng)
+        side = faces["side"]
+        side = side[(side[:, 2] < 30) | (side[:, 2] > 60)]
+
+        def cone(z0, z1, r0, r1, a0=0.0, a1=2 * np.pi, out=0.0):
+            n = int(rng.density * 37 * (a1 - a0) * (z1 - z0) * 1.1)
+            a, z = rng.uniform(a0, a1, n), rng.uniform(z0, z1, n)
+            r = r0 + (r1 - r0) * (z - z0) / (z1 - z0) + out
+            return np.c_[r * np.cos(a), r * np.sin(a), z]
+
+        pieces = [side, cone(30, 40, 40, 34), _cyl(rng, 34, 40, 50)]
+        if bump:
+            w = 4.0 / 37
+            pieces += [
+                cone(50, 60, 34, 40, 0, np.pi - w),
+                cone(50, 60, 34, 40, np.pi + w, 2 * np.pi),
+                cone(51, 59, 34.6, 39.4, np.pi - w, np.pi + w, out=bump),
+            ]
+        else:
+            pieces.append(cone(50, 60, 34, 40))
+        faces["side"] = np.r_[tuple(pieces)]
+        return h, faces
+
+    shape.__name__ = "waisted"
+    return shape
+
+
+def test_bump_on_a_mat_facing_slope_is_refused():
+    """The upright scan sees a 4 mm bump on a slope the flipped scan sees facing the mat; the
+    flipped (plain) slope still has to account for it."""
+    with pytest.raises(MultiScanAlignmentError):
+        align_part_pair(scan(waisted(4.5), False, 1)[0], scan(waisted(0.0), True, 2)[0])
+
+
+def modified(**change):
+    """Jar body proxy changed near an end (only one scan of a pair gets it): ``lug`` (z0, z1)
+    a 4 mm x 18 mm lug opposite the boss, ``groove`` (dr, z0, z1), ``top`` (dr, depth)."""
+
+    def shape(rng):
+        height, faces = body(rng)
+        side = faces["side"]
+        cuts = []
+        if "groove" in change:
+            cuts.append(change["groove"])
+        if "top" in change:
+            dr, depth = change["top"]
+            cuts.append((dr, height - depth, height))
+        for dr, z0, z1 in cuts:
+            inside = (side[:, 2] >= z0) & (side[:, 2] < z1)
+            side = np.r_[side[~inside], _cyl(rng, 40 - dr, z0, z1), _disc(rng, 40 - dr, 40, z0)]
+            if z1 < height:
+                side = np.r_[side, _disc(rng, 40 - dr, 40, z1)]
+        faces["side"] = side
+        if "lug" in change:
+            z0, z1 = change["lug"]
+            faces["lug"] = np.r_[
+                _rect(rng, 44, -9, 9, z0, z1),
+                _wall(rng, -9, 38.7, 44, z0, z1),
+                _wall(rng, 9, 38.7, 44, z0, z1),
+                _cap(rng, 39, 44, -9, 9, z1),
+            ] * [-1, 1, 1]
+        return height, faces
+
+    shape.__name__ = "modified"
+    return shape
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"lug": (4.0, 13.0)},  # near the flipped scan's free end (the part's base)
+        {"lug": (68.0, 77.0)},  # near the flipped scan's mat contact
+        {"groove": (3.0, 6.0, 12.0)},
+        {"top": (2.0, 10.0)},  # a 2 mm step over the top 10 mm
+    ],
+)
+def test_one_scan_feature_near_an_end_is_refused(change):
+    up = scan(body, False, 1)[0]
+    fl = scan(modified(**change), True, 2)[0]
+    with pytest.raises(MultiScanAlignmentError):
+        align_part_pair(up, fl)
+
+
+def test_extra_boss_in_one_scan_only_is_refused():
+    def two_bosses(rng):
+        height, faces = body(rng)
+        faces["boss2"] = np.r_[
+            _rect(rng, 44, -11, 11, 30, 54),
+            _wall(rng, -11, 38.7, 44, 30, 54),
+            _wall(rng, 11, 38.7, 44, 30, 54),
+            _cap(rng, 39, 44, -11, 11, 30),
+            _cap(rng, 39, 44, -11, 11, 54),
+        ] * [-1, 1, 1]
+        return height, faces
+
+    with pytest.raises(MultiScanAlignmentError, match="coverage"):
+        align_part_pair(scan(two_bosses, False, 1)[0], scan(body, True, 2)[0])
+
+
+def test_merge_keeps_one_scan_surfaces_inside_the_other_footprint():
+    """Merge filter: a neck-ring underside one scan alone saw (r 40-44, inside the other scan's
+    footprint) stays; mat glare 15-25 mm outside the other scan's footprint goes."""
+    from packlab_core.multiscan_alignment import FOOTPRINT_CELL_MM, _in_footprint
+
+    rng = _Gen(np.random.default_rng(3), 0.5)
+    other = np.r_[_cyl(rng, 44, 0, 80), _disc(rng, 0, 44, 80)]  # the other scan's object points
+    underside = _disc(rng, 40, 44, 70)
+    a = rng.uniform(0, 2 * np.pi, 200)
+    glare = np.c_[60 * np.cos(a), 60 * np.sin(a), rng.uniform(1, 4, 200)]
+    inside = _in_footprint(other, FOOTPRINT_CELL_MM)
+    assert inside(underside).all()
+    assert not inside(glare).any()
+
+
+def test_flipped_short_scan_of_a_different_top_is_refused():
+    """Reviewer probe: bottle (r 30 neck above 65 mm) vs a plain body flipped, its free end
+    lost. The neck lies in the flipped scan's contact zone; the sections still see it."""
+    up = scan(bottle, False, 1, density=0.2)[0]
+    fl = scan(body, True, 2, density=0.2, cut_top=8)[0]
+    with pytest.raises(MultiScanAlignmentError, match="section mismatch"):
+        align_part_pair(up, fl)
+
+
+# ---------------------------------------------------------------- owner-confirmed override
+
+
+def _override_offer(up, fl):
+    with pytest.raises(MultiScanAlignmentError) as caught:
+        align_part_pair(up, fl)
+    return caught.value.override_disagreements
+
+
+def _no_offer_reason(up, fl):
+    with pytest.raises(MultiScanAlignmentError) as caught:
+        align_part_pair(up, fl)
+    assert caught.value.override_disagreements is None
+    return caught.value.override_refusal or ""
+
+
+def _offer_error(up, fl):
+    with pytest.raises(MultiScanAlignmentError) as caught:
+        align_part_pair(up, fl)
+    return caught.value
+
+
+def test_override_hard_blocks_gross_mismatches():
+    """No offer for a wrong height, a missing end, an unpinned yaw or a 3 % size difference;
+    each refusal says why."""
+    assert "height" in _no_offer_reason(scan(body, False, 1)[0], scan(body, True, 2, h=70.0)[0])
+    assert _no_offer_reason(scan(oval, False, 1)[0], scan(oval, True, 2)[0])  # yaw
+    assert _no_offer_reason(scan(body, False, 1)[0], scan(body, True, 2, scale_error=1.03)[0])
+    up = scan(oval, False, 1, paint=label)[0]
+    missing = scan(curtained, True, 2, paint=label, cut_top=8)[0]  # its base lost as well
+    reason = _no_offer_reason(up, missing)
+    assert "missing an end" in reason or "height" in reason
+    wide = scan(curtained, True, 2, paint=label, neck=4.5)[0]  # top 4.5 mm larger in radius
+    assert _no_offer_reason(up, wide)  # section over 4 mm, or the misfit it causes (RMSE)
+
+
+def lug_curtained(rng):
+    """``curtained`` plus a 12 x 15 x 3 mm lug on the flat side at 40-55 mm (mid-body): a
+    feature only the upside-down scan has, deeper than scan errors explain."""
+    height, faces = curtained(rng)
+    x0, w = 16.0, 6.0
+    box = np.r_[
+        _rect(rng, 20.0, -w, w, 40, 55),
+        _wall(rng, -w, x0, 20.0, 40, 55),
+        _wall(rng, w, x0, 20.0, 40, 55),
+        _cap(rng, x0, 20.0, -w, w, 40),
+        _cap(rng, x0, 20.0, -w, w, 55),
+    ]
+    faces["lug"] = box[:, [1, 0, 2]]  # the face at y = +20 (flat side)
+    return height, faces
+
+
+def test_override_tiers_small_and_large_differences():
+    """Tier A: differences within the physics bounds (real-like shrunken top + curtain). Tier B:
+    a local feature over 2 mm deep in kept data - offered, described, never silently."""
+    up = scan(oval, False, 1, paint=label)[0]
+    small = _offer_error(up, scan(curtained, True, 2, paint=label)[0])
+    assert small.override_disagreements and small.override_tier == "A"
+    assert all(item["kind"] != "deep_patch" for item in small.override_disagreements)
+    large = _offer_error(up, scan(lug_curtained, True, 2, paint=label)[0])
+    assert large.override_disagreements and large.override_tier == "B"
+    deep = [item for item in large.override_disagreements if item["kind"] == "deep_patch"]
+    assert deep and all(item["depth_mm"] > 2.0 and item["area_mm2"] > 40 for item in deep)
+    from packlab_core.multiscan_alignment import disagreement_text
+
+    assert "possibly a different part" in disagreement_text(deep[0])
+    merged = align_part_pair(up, scan(lug_curtained, True, 2, paint=label)[0], owner_confirmed=True)
+    assert merged.override_tier == "B" and merged.verification == "OWNER_CONFIRMED_UNVERIFIED"
+    assert "tier B" in merged.alignments[1].limitations[0]
+
+
+def curtained(rng, neck=-1.5):
+    """Labelled flat oval as an upside-down scan sees it on the owner's real pair: the top
+    12 mm (on its mat) ``neck`` mm off in radius (real: -1.4 to -1.6), an MVS curtain flaring
+    4 mm out at the tips below it, and a ledge underside 6 mm below the top that only this
+    scan sees (it faces the mat in the upright pose)."""
+    height, faces = oval(rng)
+    side = faces["side"]
+    top = side[:, 2] > height - 12
+    side[top, 0] *= (31.5 + neck) / 31.5
+    side[top, 1] *= (17.0 + neck) / 17.0
+    n = int(rng.density * 35 * np.radians(120) * 8)
+    t = rng.uniform(-np.pi / 6, np.pi / 6, n) + np.pi * (rng.uniform(0, 1, n) < 0.5)
+    z = rng.uniform(height - 20, height - 12, n)
+    grow = 1 + 4 * (z - (height - 20)) / 8 / 31.5
+    faces["curtain"] = np.c_[31.5 * grow * np.cos(t), 17.0 * grow * np.sin(t), z]
+    m = int(rng.density * np.pi * 31.5 * 17.0 * 0.2)
+    u, w = rng.uniform(0, 2 * np.pi, m), np.sqrt(rng.uniform(0.6, 0.8, m))
+    faces["ledge"] = np.c_[31.5 * w * np.cos(u), 17.0 * w * np.sin(u), np.full(m, height - 6)]
+    return height, faces
+
+
+def test_owner_confirmed_merge_takes_the_top_from_the_upright_scan():
+    from packlab_core.multiscan_alignment import _section
+
+    up, t_up = scan(oval, False, 1, paint=label)
+    fl, t_fl = scan(curtained, True, 2, paint=label)
+    offer = _override_offer(up, fl)
+    assert offer, "a same-part pair refused on agreement only must offer the override"
+    result = align_part_pair(up, fl, owner_confirmed=True)
+    _assert_recovered(result, (t_up, t_fl))
+    assert result.verification == "OWNER_CONFIRMED_UNVERIFIED" and result.disagreements
+    assert result.metric_status == METRIC_STATUS
+    notes = result.alignments[1].limitations
+    assert any("OWNER_CONFIRMED_UNVERIFIED" in text for text in notes)
+    band = [float(v) for v in re.findall(r"above (\d+) mm .* below (\d+) mm", notes[1])[0]]
+    assert 30 <= band[0] < band[1] <= 70  # mid-body of the 100 mm part
+    p, src = result.points, result.source_index
+    body_width = _section(p, 50.0, 10.0)[1]
+    assert _section(p, 84.0, 3.0)[1] < body_width + 1.0  # no curtain at the tips
+    assert _section(p, 93.0, 3.0)[1] > 62.0  # upright top: 63 mm long axis, not 60
+    assert ((src == 1) & (np.abs(p[:, 2] - 94) < 0.6)).sum() > 30  # the one-scan ledge stays
+    assert ((src == 1) & (p[:, 2] < 5)).sum() > 300  # base from the upside-down scan
+
+
+def test_reconstruction_manifest_carries_verification_as_a_field():
+    from packlab_core.reconstruction import ReconstructionBackendId, ReconstructionOutputManifest
+
+    def manifest(**extra):
+        return ReconstructionOutputManifest(
+            project_id="p",
+            reconstruction_revision="r",
+            backend_id=ReconstructionBackendId.COLMAP_OPENMVS,
+            backend_version="v",
+            backend_build="b",
+            backend_license="l",
+            configuration_digest="c",
+            source_input_digest="0" * 64,
+            camera_convention="world-to-camera",
+            **extra,
+        )
+
+    assert "verification" not in manifest().as_dict()  # verified sources keep their digests
+    forced = manifest(verification="OWNER_CONFIRMED_UNVERIFIED").as_dict()
+    assert forced["verification"] == "OWNER_CONFIRMED_UNVERIFIED"
+    with pytest.raises(ValueError):
+        manifest(verification="VERIFIED_BY_OWNER")

@@ -27,8 +27,9 @@ from packlab_studio.shell import StudioMainWindow  # noqa: E402
 SCALE = lambda _model: (1.0, "synthetic_known_mm", 0.001)  # noqa: E731
 
 
-def _jar(rng: np.random.Generator, flipped: bool) -> np.ndarray:
-    """Jar body proxy (r 40, h 80 mm, side boss fixing yaw) on an A4 mat, in mm."""
+def _jar(rng: np.random.Generator, flipped: bool, lug: bool = False) -> np.ndarray:
+    """Jar body proxy (r 40, h 80 mm, side boss fixing yaw) on an A4 mat, in mm. ``lug``: a
+    second 22 x 24 x 4 mm lug opposite the boss (a feature only one scan of a pair has)."""
     d = 0.5  # points per mm^2
 
     def cyl(r, z0, z1):
@@ -53,6 +54,8 @@ def _jar(rng: np.random.Generator, flipped: bool) -> np.ndarray:
         return np.concatenate(faces)
 
     parts = [cyl(40, 0, 80), box(38.7, 44, -10, 10, 15, 45), disc(40, 0 if flipped else 80)]
+    if lug:
+        parts.append(box(38.7, 44, -11, 11, 30, 54) * [-1, 1, 1])
     obj = np.concatenate(parts)
     if flipped:
         obj = obj * [1, -1, -1] + [0, 0, 80]
@@ -587,3 +590,182 @@ def test_combine_records_scan_heights_and_shows_them_per_build(app, project) -> 
     assert [s["height_mm"] for s in sources] == [80.0, 72.0]
     assert panel.build_boxes["upright"].itemText(0).endswith("80.0 mm")
     assert panel.build_boxes["flipped"].itemText(0).endswith("72.0 mm")
+
+
+def test_owner_can_combine_anyway_only_when_offered_and_it_stays_unverified(app, project) -> None:
+    from packlab_core.multiscan_alignment import align_part_pair
+    from packlab_studio import measure_design as md
+    from packlab_studio.project_parts import owner_confirmed
+
+    rng = np.random.default_rng(8)
+    root = project.layout.root
+    entries = [
+        _entry(_build(root, "body-up", _jar(rng, False)), "body"),
+        _entry(_build(root, "body-flip", _jar(rng, True, lug=True)), "body_flipped"),
+    ]
+    asked: list[str] = []
+
+    def confirm(_parent, text, tier):
+        asked.append(f"{tier}|{text}")
+        return True
+
+    def plain_refusal(*_scans, **_kwargs):
+        raise MultiScanAlignmentError("height mismatch 70.0 vs 80.0 mm")
+
+    panel = _panel(project, entries, aligner=plain_refusal, confirm=confirm)
+    outcomes: list[str] = []
+    panel.combine_finished.connect(lambda part, outcome: outcomes.append(outcome))
+    panel.tree.setCurrentItem(panel.items["body"])
+    panel.combine("body")
+    _pump(app, lambda: outcomes)
+    assert outcomes == ["refused"] and not panel.anyway_button.isVisibleTo(panel)
+    assert "Combine anyway is not offered" not in panel.details.text()  # no reason recorded
+    assert panel.combine_anyway("body") is None and not asked  # not offered: no override
+
+    # The real core decides offers (tests/core): a one-scan mid-body lug is offered as tier B
+    # (large local differences, possibly a different part) ...
+    panel.aligner = align_part_pair
+    panel.combine("body")
+    _pump(app, lambda: len(outcomes) == 2, timeout=180)
+    record = project.part_merges()["body"]
+    assert outcomes[-1] == "refused" and record.get("override") and record["override_tier"] == "B"
+    assert any(item["kind"] == "deep_patch" for item in record["override"])
+    assert panel.anyway_button.isVisibleTo(panel) and "Tier B" in panel.details.text()
+
+    # ... and a stand-in for the core's offer (fast) drives the confirm and persistence path.
+    disagreement = {"kind": "patch", "area_mm2": 120.0, "z_mm": [70.0, 78.0]}
+
+    def offering(*scans, owner_confirmed=False):
+        if not owner_confirmed:
+            error = MultiScanAlignmentError("a 120 mm^2 patch of side wall has no counterpart")
+            error.override_disagreements = (disagreement,)
+            error.override_tier = "B"
+            raise error
+        from dataclasses import replace
+
+        result = _genuine_result()
+        return replace(
+            result,
+            verification="OWNER_CONFIRMED_UNVERIFIED",
+            disagreements=(disagreement,),
+            override_tier="B",
+        )
+
+    def _genuine_result():
+        rng2 = np.random.default_rng(2)
+        from packlab_core.multiscan_alignment import ScanInput
+
+        up, fl = _jar(rng2, False), _jar(rng2, True)
+        return align_part_pair(ScanInput("u", up), ScanInput("f", fl))
+
+    panel.aligner = offering
+    panel.combine("body")
+    _pump(app, lambda: len(outcomes) == 3, timeout=180)
+    record = project.part_merges()["body"]
+    assert outcomes[-1] == "refused" and record["override"], record
+    assert record["override_tier"] == "B"
+    assert panel.anyway_button.isVisibleTo(panel)
+    assert "The two scans disagree" in panel.details.text()
+    assert "Tier B" in panel.details.text()
+
+    panel.combine_anyway("body")
+    _pump(app, lambda: len(outcomes) == 4, timeout=180)
+    assert outcomes[-1] == "combined" and asked and "patch" in asked[0]
+    assert asked[0].startswith("B|Tier B")  # the dialog is the tier-B one
+    record = project.part_merges()["body"]
+    assert owner_confirmed(record) and record["disagreements"] and record["owner_confirmed_at"]
+    assert record["metric_status"] == "METRIC_UNVERIFIED"
+    assert record["verification_tier"] == "B"
+    assert "owner-confirmed (tier B), UNVERIFIED" in panel.items["body"].text(1)
+    assert "OWNER_CONFIRMED_UNVERIFIED" in panel.details.text()
+    model = md.load_model(root / record["artifact_path"])
+    scale = md.part_combine_scale(model, record)
+    assert "OWNER_CONFIRMED_UNVERIFIED" in scale.details
+    assert all(
+        ref["evidence_class"] == "owner_confirmed_unverified_combine"
+        for ref in scale.provenance.physical_references
+    )
+    import uuid
+
+    isolation = md.isolate_in_mat_frame(model)
+    frame = md.build_frame(model, isolation, scale, project_id=str(uuid.uuid4()))
+    request = md.promotion_request(
+        project_id=frame.geometry.project_id,
+        model=model,
+        mesh_model=md.load_model(root / record["mesh_artifact_path"]),
+        isolation=isolation,
+        frame=frame,
+        actor_id="owner",
+        reason="test",
+        part_record=record,
+    )
+    manifest = request.lineage.reconstruction
+    assert manifest.verification == "OWNER_CONFIRMED_UNVERIFIED"  # structured, Scan Master
+    assert manifest.as_dict()["verification"] == "OWNER_CONFIRMED_UNVERIFIED"
+    verified = md.promotion_request(
+        project_id=frame.geometry.project_id,
+        model=model,
+        mesh_model=md.load_model(root / record["mesh_artifact_path"]),
+        isolation=isolation,
+        frame=frame,
+        actor_id="owner",
+        reason="test",
+        part_record={**record, "verification": "GATE_PASSED"},
+    )
+    assert verified.lineage.reconstruction.configuration_digest != manifest.configuration_digest
+
+
+def test_owner_confirmed_parts_carry_the_badge_into_placement_and_interior(app, project) -> None:
+    from packlab_studio.project_parts import OWNER_CONFIRMED, PartScan, PartState
+
+    rng = np.random.default_rng(9)
+    root = project.layout.root
+    cloud = root / "working/reconstruction/x/outputs/mvs/scene_dense.ply"
+    _build(root, "x", _jar(rng, False))
+    record = {"status": "combined", "verification": OWNER_CONFIRMED, "disagreements": []}
+    scan = PartScan("0" * 64, cloud, 0.0)
+    state = PartState("body", scan, scan, "combined", "", cloud, record, interior=scan)
+    panel = _panel(project, [])
+    source: dict = {}
+    panel._part_input("body", state, source)
+    assert source["verification"] == OWNER_CONFIRMED  # the placement record keeps it
+    placement = {"status": "placed", "sources": {"body": source}, "reason": ""}
+    panel.placement = ("refused", placement, ())
+    assert "OWNER_CONFIRMED_UNVERIFIED parts in this placement" not in " ".join(
+        panel._placement_lines(False)
+    )
+    graph = {
+        "components": [{"residuals": {}}, {"residuals": {}}],
+        "diagnostics": {"pair": {"status": "ok"}},
+        "relationships": [{"engaged_depth_mm": 1.0}],
+        "revision_id": "g" * 40,
+    }
+    panel.placement = ("placed", {**placement, "graph": graph}, ())
+    try:
+        lines = panel._placement_lines(False)
+    except (KeyError, TypeError):
+        lines = []
+    assert not lines or "OWNER_CONFIRMED_UNVERIFIED parts in this placement: Body" in lines[0]
+    panel.states = {"body": state}
+    panel.interior = ("none", None, None)
+    assert "OWNER_CONFIRMED_UNVERIFIED Body" in panel._interior_lines(False)[0]
+
+
+def test_tier_b_confirmation_needs_the_physical_check(app) -> None:
+    from PySide6.QtWidgets import QCheckBox, QLabel, QPushButton
+
+    from packlab_studio.project_parts import confirm_dialog
+
+    dialog = confirm_dialog(None, "differences", "B")
+    accept = dialog.findChild(QPushButton, "packlab.scene.confirm_accept")
+    check = dialog.findChild(QCheckBox, "packlab.scene.confirm_checked")
+    warning = dialog.findChild(QLabel, "packlab.scene.confirm_warning")
+    assert warning is not None and "#b00020" in warning.styleSheet()
+    assert check is not None and not accept.isEnabled()
+    check.setChecked(True)
+    assert accept.isEnabled()
+    check.setChecked(False)
+    assert not accept.isEnabled()
+    plain = confirm_dialog(None, "differences", "A")
+    assert plain.findChild(QCheckBox, "packlab.scene.confirm_checked") is None
+    assert plain.findChild(QPushButton, "packlab.scene.confirm_accept").isEnabled()

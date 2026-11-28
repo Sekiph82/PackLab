@@ -7,7 +7,11 @@ Object = the DBSCAN cluster standing on the mat footprint plus clusters above it
 and off-mat clutter; refuses when nothing stands on the mat), minus a flat white glare halo
 on the mat around its foot. Outer shell =
 near-vertical points at the outer radius of their 5 degree x 5 mm cell (caps and interior surfaces
-such as a closure recess are seen by one scan only and are never compared).
+such as a closure recess are seen by one scan only and are never compared), after sparse MVS
+strays (glare fans, tip spikes, curtains: ``_dense``) are dropped. A connected wall patch
+without counterpart (``_miss_patch``, true area) is refused however small its slice share; the
+merge leaves out points outside the other scan's footprint (PL-0483, see
+coordination/sessions/M18-C001/PL-0483_REAL_PAIR_ROOT_CAUSE_V01.md).
 
 Registration to the reference (first) scan: 180 degree flip about a horizontal axis from the
 PL-0482 role (both poses when unknown), height fixed by mat contact (flipped: mat side ->
@@ -34,11 +38,25 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from typing import Any
 
 import numpy as np
 
-METHOD = "mat_frame_flip_yaw_sweep_bounded_tilt_point_to_plane_icp_v2"
+METHOD = "mat_frame_flip_yaw_sweep_bounded_tilt_point_to_plane_icp_v3"
 METRIC_STATUS = "METRIC_UNVERIFIED"
+GATE_PASSED = "GATE_PASSED"
+OWNER_CONFIRMED_UNVERIFIED = "OWNER_CONFIRMED_UNVERIFIED"
+# Refusal kinds an owner may override (same part, scans disagree), and the most scale
+# difference such an override may carry.
+OVERRIDABLE = frozenset({"coverage", "patch", "section", "scale"})
+OVERRIDE_MAX_SCALE = 0.02
+# The override blends the scans inside the mid-body, this share range of the reference height:
+# away from both scans' mat contact, where only low cameras see the wall.
+OVERRIDE_MID_BODY = (0.3, 0.7)
+# Largest wall deviation (mm, radial) an override attributes to reconstruction error: the
+# owner's real flipped closure reads 1.4-1.6 mm small; a fixed physical bound, not the
+# spacing-adapted coverage distance (a sparse scan must not widen it).
+OVERRIDE_MAX_DEVIATION_MM = 2.0
 PLANE_SEED = 7
 PLANE_ITERATIONS = 1000
 PROFILE_BANDS = 6
@@ -48,9 +66,15 @@ Query = Callable[..., tuple[np.ndarray, np.ndarray]]  # (points, k=1) -> (indice
 class MultiScanAlignmentError(ValueError):
     """Raised when scans cannot be aligned reliably; the message names the failed check.
 
-    ``heights_mm``: each prepared scan's own mat-frame height, when known (diagnostics)."""
+    ``heights_mm``: each prepared scan's own mat-frame height, when known (diagnostics).
+    ``override_disagreements``: set by ``align_part_pair`` only when the refusal is one the
+    owner may override (agreement gates on a determined pose, see ``_override_offer``): the
+    measured disagreements, each a dict with a ``kind`` (``disagreement_text`` words it)."""
 
     heights_mm: dict[str, float] | None = None
+    override_disagreements: tuple[dict[str, Any], ...] | None = None
+    override_refusal: str | None = None  # why an agreement refusal offers no override
+    override_tier: str | None = None  # "A" small differences, "B" large local differences
 
 
 @dataclass(frozen=True)
@@ -122,6 +146,9 @@ class MultiScanAlignment:
     surface_coverage: dict[str, float]  # occupied share of side / top / bottom grid cells
     method: str = METHOD
     metric_status: str = METRIC_STATUS
+    verification: str = GATE_PASSED  # or OWNER_CONFIRMED_UNVERIFIED (see align_part_pair)
+    disagreements: tuple[dict[str, Any], ...] = ()  # measured, for an owner-confirmed merge
+    override_tier: str = ""  # owner-confirmed merge: "A" small, "B" large local differences
 
 
 @dataclass(frozen=True)
@@ -487,16 +514,40 @@ def _part_top(points: np.ndarray) -> float:
     return _top(z)
 
 
+SPARSE_SHARE = 0.25  # of the wall's median neighbour count; less is an MVS stray
+# Largest wall patch (true area, mm^2) one scan may have without counterpart (and at least
+# 40 spacings^2): synthetic genuine pairs read <= 14 (dense), <= 53 (d 0.2, spacing 1.2).
+MISS_PATCH_MM2 = 40.0
+
+
+def _dense(points: np.ndarray, spacing: float, voxel: float) -> np.ndarray:
+    """Mask of points on a surface: within r = max(2.5 mm, 3 spacings) at least
+    ``SPARSE_SHARE`` of the median neighbour count there (relative, so sparse scans and short
+    bands keep their walls). The owner's real scans carry glare fans, tip spikes and curtains
+    at a few points per 3 mm; their walls hold ~28."""
+
+    radius = max(2.5, 3.0 * max(spacing, voxel))
+    distance = _nearest(points)(points, min(48, len(points)))[1]
+    count = (distance < radius).sum(axis=1)
+    if np.median(count) < 12:  # too few neighbours to tell a stray from sampling noise
+        return np.ones(len(points), dtype=bool)
+    return np.asarray(count >= SPARSE_SHARE * np.median(count))
+
+
 def _shell(
     points: np.ndarray, height: float, spacing: float, limits: AlignmentThresholds
 ) -> tuple[np.ndarray, np.ndarray]:
     """Outer side wall: band points with no other surface further out at the same place on the
     unrolled wall (arc x height window of 2.5 point spacings; removes recesses, inner walls and
     cap remnants). No angular grid, so the set does not depend on the mat frame's x axis.
+
+    Sparse points are dropped first (``_dense``): "outermost" otherwise lets MVS glare fans,
+    tip spikes and curtains outside the part replace its real wall.
     """
 
     band = points[(points[:, 2] > limits.mat_margin_mm + 2) & (points[:, 2] < height - 2)]
     band = band[_voxel_first(band, limits.voxel_mm)]
+    band = band[_dense(band, spacing, limits.voxel_mm)] if len(band) >= 30 else band
     if len(band) < 30:
         raise MultiScanAlignmentError("too little side wall above the mat")
     rel = band[:, :2] - _centre(band)
@@ -658,6 +709,110 @@ def _slices(
     r_ba = np.einsum("ij,ij->i", moved_normals[near_a], tgt[hit_b] - moved[near_a])
     rmse = float(max(np.sqrt(np.mean(r_ab**2)), np.sqrt(np.mean(r_ba**2))))
     return slices[~np.isnan(slices)], rmse, min(counts)
+
+
+def _point_area(points: np.ndarray, spacing: float) -> np.ndarray:
+    """Surface area each point stands for (mm^2): pi r^2 over its neighbour count within r =
+    max(3 mm, 2.5 spacings), from the local density (a 200 mm^2 face sums to ~200)."""
+
+    radius = max(3.0, 2.5 * spacing)
+    distance = _nearest(points)(points, min(64, len(points)))[1]
+    return np.asarray(np.pi * radius**2 / np.maximum((distance < radius).sum(axis=1), 1))
+
+
+def _miss_patch(
+    source: _Part,
+    matrix: np.ndarray,
+    target: _Part,
+    query: Query,
+    limits: AlignmentThresholds,
+    where: bool = False,
+    zone: tuple[float, float] | None = None,
+    kept_below: float | None = None,
+    deep: bool = False,
+) -> Any:
+    """Largest connected patch (true area, mm^2) of either scan's wall that has the other
+    scan's wall nearby (3 x the coverage distance) but not within the coverage distance. Noise
+    misses scatter; a feature one scan lacks (lug, rim, bump) misses as a patch, which the slice
+    share hides when it fills under 10 % of every slice.
+
+    Owner-confirmed offer only: ``zone`` (z low, z high) counts misses there only;
+    ``deep`` counts instead the points standing out beyond the other scan's wall by more than
+    ``OVERRIDE_MAX_DEVIATION_MM``; ``kept_below`` (the blend band top) also keeps only the scan an override
+    merge keeps there (``source`` below, ``target`` above)."""
+
+    import open3d as o3d
+
+    moved, tgt = _apply(matrix, source.shell), target.shell
+    _, dist_ab = query(moved, 3)
+    _, dist_ba = _nearest(moved)(tgt, 3)
+    lo = max(np.percentile(moved[:, 2], 1), np.percentile(tgt[:, 2], 1)) + 1.0
+    hi = min(np.percentile(moved[:, 2], 99), np.percentile(tgt[:, 2], 99)) - 1.0
+    step = max(limits.spacing_mm, limits.voxel_mm)
+    largest, at, depth = 0.0, [float("nan"), float("nan")], 0.0
+    centre = _centre(tgt)
+    for points, distance, other_points, is_source in (
+        (moved, dist_ab, tgt, True),
+        (tgt, dist_ba, moved, False),
+    ):
+        standing = deep or kept_below is not None
+        miss = (
+            (distance[:, 2] < 3 * limits.max_distance_mm)
+            & ((distance[:, 0] >= limits.max_distance_mm) | standing)
+            & (points[:, 2] >= lo)
+            & (points[:, 2] <= hi)
+        )
+        if zone is not None:
+            miss &= (points[:, 2] >= zone[0]) & (points[:, 2] <= zone[1])
+        if kept_below is not None:
+            miss &= points[:, 2] <= kept_below if is_source else points[:, 2] >= kept_below
+        if standing:
+            miss &= _outward_excess(points, other_points, centre) > OVERRIDE_MAX_DEVIATION_MM
+        if miss.sum() < 2:
+            continue
+        area = _point_area(points, step)[miss]
+        cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points[miss]))
+        labels = np.asarray(cloud.cluster_dbscan(eps=max(3.0, 2.5 * step), min_points=1))
+        sums = np.bincount(labels, weights=area)
+        if sums.max() > largest:
+            largest = float(sums.max())
+            members = labels == int(np.argmax(sums))
+            z = points[miss][members, 2]
+            at = [float(z.min()), float(z.max())]
+            if standing:
+                excess = _outward_excess(points[miss][members], other_points, centre)
+                depth = float(np.median(excess))
+    if where and standing:
+        return largest, at, depth
+    return (largest, at) if where else largest
+
+
+def _slice_profile(
+    source: _Part, matrix: np.ndarray, target: _Part, query: Query, limits: AlignmentThresholds
+) -> list[tuple[float, float, float]]:
+    """(z low, z high, coverage) per wall slice, as ``_slices`` measures it (min of both
+    directions, only where the other scan has data nearby)."""
+
+    moved, tgt = _apply(matrix, source.shell), target.shell
+    lo = max(np.percentile(moved[:, 2], 1), np.percentile(tgt[:, 2], 1)) + 1.0
+    hi = min(np.percentile(moved[:, 2], 99), np.percentile(tgt[:, 2], 99)) - 1.0
+    if hi - lo < 1.0:
+        return []
+    edges = np.linspace(lo, hi, max(1, round((hi - lo) / limits.slice_mm)) + 1)
+    d_ab = query(moved, 3)[1]
+    d_ba = _nearest(moved)(tgt, 3)[1]
+    seen = 3 * limits.max_distance_mm
+    out = []
+    for start, stop in zip(edges[:-1], edges[1:], strict=True):
+        in_a = (moved[:, 2] >= start) & (moved[:, 2] < stop) & (d_ab[:, 2] < seen)
+        in_b = (tgt[:, 2] >= start) & (tgt[:, 2] < stop) & (d_ba[:, 2] < seen)
+        if in_a.sum() >= 15 and in_b.sum() >= 15:
+            coverage = min(
+                float((d_ab[in_a, 0] < limits.max_distance_mm).mean()),
+                float((d_ba[in_b, 0] < limits.max_distance_mm).mean()),
+            )
+            out.append((float(start), float(stop), coverage))
+    return out
 
 
 def _pose_for_flip(
@@ -848,12 +1003,20 @@ def _colour_yaw(
 
 
 def _yaw_sweep_fine(
-    source: _Part, target: _Part, query: Query, pose: _Pose, limits: AlignmentThresholds
+    source: _Part,
+    target: _Part,
+    query: Query,
+    pose: _Pose,
+    limits: AlignmentThresholds,
+    mean: bool = False,
 ) -> _Pose:
     """+-10 degree, 1 degree yaw scan on wall coverage. Turns within the coverage noise of the
     best (2 binomial sigma of the sparsest slice, at least 0.01) form a plateau; its centre is
     the yaw (ICP can settle off-centre on sparse walls) and its half width (+0.5 degree) the yaw
-    uncertainty, so sparse data cannot claim a precision its noise does not support."""
+    uncertainty, so sparse data cannot claim a precision its noise does not support.
+    ``mean`` (owner-confirmed path only): score each turn by the mean slice coverage (noise over
+    all slices) instead of the worst slice, so slices the scans disagree on at every yaw (a
+    curtain, a shrunken closure) do not flatten the plateau."""
 
     centre = np.r_[_centre(target.shell), 0.0]
     turns = np.arange(-10, 11)
@@ -863,8 +1026,10 @@ def _yaw_sweep_fine(
         slices, rmse, count = _slices(
             source, _yaw(np.radians(float(t)), centre) @ pose.matrix, target, query, limits
         )
-        scores.append(((float(slices.min()) if len(slices) else 0.0), rmse))
-        fewest = max(fewest, count) if t == 0 else fewest
+        worst = 0.0 if not len(slices) else float(slices.mean() if mean else slices.min())
+        scores.append((worst, rmse))
+        if t == 0:
+            fewest = max(fewest, count * (len(slices) if mean else 1))
     coverage = np.array([c for c, _ in scores])
     best = float(coverage.max())
     noise = 2 * np.sqrt(max(best * (1 - best), 0.01 * 0.99) / fewest)
@@ -1010,22 +1175,27 @@ def _dimension_failures(
     matrix: np.ndarray,
     limits: AlignmentThresholds,
     limitations: list[str] | None = None,
+    details: list[dict[str, Any]] | None = None,
 ) -> list[str]:
     """Height (each scan's own mat frame) and section size after alignment. The rigid pose
     cannot absorb a scale error or a different part: their walls sit consistently in or out.
 
     A height difference passes (noted in ``limitations``) only as a missing end: the shorter
     scan's top is open (no closing face seen), every section both scans have agrees, and the
-    gap is at most ``max_missing_end_ratio`` of the taller scan."""
+    gap is at most ``max_missing_end_ratio`` of the taller scan. ``details`` receives one
+    structured entry per failure (kind, measured values) for the owner-confirmed path."""
 
     failures = []
+    notes: list[dict[str, Any]] = [] if details is None else details
     ratio = limits.dimension_tolerance_ratio
     tolerance = max(limits.height_tolerance_mm, ratio * reference.height)
     moved = _apply(matrix, other.shell)
     valid = seen_mine = seen_theirs = 0
     half = max(2.0, limits.slice_mm / 2.5)
-    lower = limits.mat_margin_mm + 2 + half
-    upper = min(reference.height, other.height) - 2 - half
+    # Bands span both walls' real overlap: a flipped scan that lost its free end lacks the
+    # reference's bottom, not its top (min height would leave its top band unchecked).
+    lower = max(np.percentile(reference.shell[:, 2], 1), np.percentile(moved[:, 2], 1)) + half
+    upper = min(np.percentile(reference.shell[:, 2], 99), np.percentile(moved[:, 2], 99)) - half
     heights = np.linspace(lower, upper, PROFILE_BANDS) if upper > lower else np.full(1, upper)
     sections: list[tuple[float, str]] = []
     for z in heights:
@@ -1043,6 +1213,16 @@ def _dimension_failures(
         allowed = max(limits.width_tolerance_mm, ratio * 2 * radius) / 2 + 0.5 * limits.spacing_mm
         if abs(offset) > allowed:
             a, b = _section(mine, z, half), _section(theirs, z, half)
+            notes.append(
+                {
+                    "kind": "section",
+                    "z_mm": float(z),
+                    "offset_mm": float(offset),
+                    "tolerance_mm": float(allowed),
+                    "reference_caliper_mm": [float(a[0]), float(a[1])],
+                    "other_caliper_mm": [float(b[0]), float(b[1])],
+                }
+            )
             sections.append(
                 (
                     float(z),
@@ -1087,6 +1267,9 @@ def _dimension_failures(
                 )
         if message:
             failures.append(message)
+            notes.append(
+                {"kind": "height", "reference_mm": reference.height, "other_mm": other.height}
+            )
     failures += [message for _, message in sections]
     scale = _scale_ratio(reference, other, matrix, limits)
     # Bound: the two builds' combined mat-marker scale uncertainty, at least max_scale_error.
@@ -1100,6 +1283,7 @@ def _dimension_failures(
         ),
     )
     if abs(scale - 1) > bound:  # NaN compares False
+        notes.append({"kind": "scale", "ratio": float(scale), "limit": float(bound)})
         failures.append(
             f"the shared walls differ in scale by {100 * (scale - 1):+.2f} % "
             f"(limit {100 * bound:.2f} %, the scans' scale uncertainty): check both mat-marker "
@@ -1108,6 +1292,7 @@ def _dimension_failures(
     # Real MVS walls can be patchy: demand overlap in a share of the bands either scan has.
     needed = max(1, int(np.ceil(limits.min_profile_share * max(seen_mine, seen_theirs))))
     if valid < needed:
+        notes.append({"kind": "overlap", "bands": valid, "needed": needed})
         failures.append(
             f"too little overlapping side wall ({valid} of {len(heights)} section bands, "
             f"need {needed})"
@@ -1123,6 +1308,8 @@ def _free_space_conflict(first: _Part, second: _Part, matrix: np.ndarray, cell: 
     where a wall ends (most of its points well below: a missing end, an open rim) proves
     nothing about the space above and never conflicts. ponytail: ignores oblique views; a
     column the scan saw only partly can raise false conflicts, hence the tolerance share.
+    ``first`` points under ``GLARE_HEIGHT_MM`` (its own mat glare and foot halo) are not
+    tested: on the owner's real pair they were 97 % of a 0.054 false conflict.
     """
 
     own = np.floor(second.points[:, :2] / cell).astype(np.int64)
@@ -1133,7 +1320,7 @@ def _free_space_conflict(first: _Part, second: _Part, matrix: np.ndarray, cell: 
     # Seen from above: at least half the column's points lie within 1.5 mm of its top.
     near_top = np.bincount(inverse, weights=(second.points[:, 2] > top[inverse] - 1.5) * 1.0)
     top[near_top < 0.5 * np.bincount(inverse)] = np.inf
-    moved = _apply(matrix, first.points)
+    moved = _apply(matrix, first.points[first.points[:, 2] >= GLARE_HEIGHT_MM])
     cells = np.floor(moved[:, :2] / cell).astype(np.int64)
     flat_keys = keys[:, 0] * 2_000_003 + keys[:, 1]
     flat = cells[:, 0] * 2_000_003 + cells[:, 1]
@@ -1206,7 +1393,19 @@ def _yaw_unique(
     limits: AlignmentThresholds,
     colour_resolved: bool = False,
 ) -> bool:
-    """Is the chosen yaw the only one that fits the radial wall profile?
+    """Is the chosen yaw the only one that fits the radial wall profile?"""
+
+    return not _yaw_rivals(reference, other, matrix, limits, colour_resolved)
+
+
+def _yaw_rivals(
+    reference: _Part,
+    other: _Part,
+    matrix: np.ndarray,
+    limits: AlignmentThresholds,
+    colour_resolved: bool = False,
+) -> list[float]:
+    """Turns (degrees, 20-340) the radial wall profile cannot tell from ``matrix``'s yaw.
 
     Mismatch = summed |radius difference| over signature cells both scans observe (clipped at 3
     tolerances). Every yaw at least 20 degrees away must cost more than both two full-tolerance
@@ -1229,15 +1428,19 @@ def _yaw_unique(
 
     at_pose = difference(0.0)
     if not len(at_pose):
-        return False
+        return [float("nan")]
     noise = float(np.median(at_pose)) * np.sqrt(len(at_pose))
     steps = [
         step
         for step in range(2, SIGNATURE_BINS - 1)
         if not (colour_resolved and abs(step * 10 - 180) <= 20)
     ]
-    others = min(float(difference(step * 10.0).sum()) for step in steps)
-    return others - float(at_pose.sum()) >= max(2 * tolerance, 4 * noise)
+    margin = max(2 * tolerance, 4 * noise)
+    return [
+        step * 10.0
+        for step in steps
+        if float(difference(step * 10.0).sum()) - float(at_pose.sum()) < margin
+    ]
 
 
 def _gate(
@@ -1247,25 +1450,82 @@ def _gate(
     query: Query,
     limits: AlignmentThresholds,
     limitations: list[str] | None = None,
+    details: list[dict[str, Any]] | None = None,
 ) -> tuple[list[str], bool]:
-    failures = _dimension_failures(reference, other, pose.matrix, limits, limitations)
+    notes: list[dict[str, Any]] = [] if details is None else details
+    failures = _dimension_failures(reference, other, pose.matrix, limits, limitations, notes)
     conflict = _conflict(reference, other, pose, limits)
     if conflict > limits.max_free_space_conflict:
+        notes.append({"kind": "conflict", "share": conflict})
         failures.append(
             f"free-space conflict {conflict:.3g} > {limits.max_free_space_conflict} "
             "(surfaces where the other scan saw empty space: wrong role or different part)"
         )
     if pose.coverage < limits.min_slice_coverage:
+        notes.append(
+            {
+                "kind": "coverage",
+                "worst": pose.coverage,
+                "limit": limits.min_slice_coverage,
+                "slices": [
+                    [float(lo), float(hi), float(c)]
+                    for lo, hi, c in _slice_profile(other, pose.matrix, reference, query, limits)
+                    if c < limits.min_slice_coverage
+                ],
+            }
+        )
         failures.append(f"side-wall coverage {pose.coverage:.3g} < {limits.min_slice_coverage}")
     if pose.rmse > limits.max_rmse_mm:
+        notes.append({"kind": "rmse", "rmse_mm": pose.rmse})
         failures.append(f"rmse_mm {pose.rmse:.3g} > {limits.max_rmse_mm}")
+    step = max(limits.spacing_mm, limits.voxel_mm)
+    patch, patch_z = _miss_patch(other, pose.matrix, reference, query, limits, where=True)
+    if patch > max(MISS_PATCH_MM2, 40 * step * step):
+        notes.append({"kind": "patch", "area_mm2": patch, "z_mm": patch_z})
+        failures.append(
+            f"a {patch:.0f} mm^2 patch of side wall has no counterpart within "
+            f"{limits.max_distance_mm:.1f} mm in the other scan (a local feature differs)"
+        )
     # Yaw: accept only a yaw the wall profile pins, or a part shown to be round (any yaw fits).
     determined = pose.yaw_uncertainty <= limits.yaw_probe_deg and _yaw_unique(
         reference, other, pose.matrix, limits, pose.colour_resolved
     )
     if not determined and not (_is_round(reference, limits) and _is_round(other, limits)):
-        failures.append("yaw undetermined on a non-symmetric part - need more side detail")
+        rivals = _yaw_rivals(reference, other, pose.matrix, limits, pose.colour_resolved)
+        turns = ", ".join(f"{t:.0f}" for t in rivals[:4] if np.isfinite(t))
+        why = (
+            f"the side wall fits turns of {turns} deg about as well"
+            if turns
+            else f"the wall fits within +-{pose.yaw_uncertainty:.1f} deg of yaw "
+            f"(limit {limits.yaw_probe_deg:g})"
+        )
+        notes.append({"kind": "yaw", "rivals_deg": [t for t in rivals if np.isfinite(t)]})
+        failures.append(
+            f"yaw undetermined: {why} and the label print did not decide - rescan with the "
+            "printed label or an asymmetric feature fully in view in both scans"
+        )
     return failures, determined
+
+
+FOOTPRINT_CELL_MM = 3.0
+
+
+def _in_footprint(points: np.ndarray, cell: float) -> Callable[[np.ndarray], np.ndarray]:
+    """Inside-test for the mat-frame xy footprint of ``points`` (``cell`` mm grid, grown by one
+    cell). Cameras above the mat see the whole column outside a part's footprint as empty."""
+
+    occupied = np.unique(np.floor(points[:, :2] / cell).astype(np.int64), axis=0)
+    shifts = np.array([[dx, dy] for dx in (-1, 0, 1) for dy in (-1, 0, 1)])
+    grown = np.unique((occupied[:, None, :] + shifts).reshape(-1, 2), axis=0)
+    keys = np.sort(grown[:, 0] * 2_000_003 + grown[:, 1])
+
+    def inside(query: np.ndarray) -> np.ndarray:
+        cells = np.floor(query[:, :2] / cell).astype(np.int64)
+        flat = cells[:, 0] * 2_000_003 + cells[:, 1]
+        slot = np.clip(np.searchsorted(keys, flat), 0, len(keys) - 1)
+        return np.asarray(keys[slot] == flat)
+
+    return inside
 
 
 def _surface_coverage(points: np.ndarray, reference: _Part) -> dict[str, float]:
@@ -1318,6 +1578,7 @@ def _checked(
             f"scan {other.scan_id} does not align to {reference.scan_id}: " + "; ".join(failures)
         )
         error.heights_mm = {reference.scan_id: reference.height, other.scan_id: other.height}
+        error._context = (reference, other, pose, query, limits)  # type: ignore[attr-defined]
         raise error
     return ScanAlignment(
         other.scan_id,
@@ -1411,15 +1672,25 @@ def align_scans(
                 )
         alignments.append(_checked(reference, parts[index], poses[0], margin, query, limits))
     # Merge: first point per voxel wins (deterministic), keeping colour, scan and input row.
-    merged = np.concatenate(
-        [_apply(a.relative, part.points) for a, part in zip(alignments, parts, strict=True)]
-    )
-    source = np.concatenate([np.full(len(part.index), i) for i, part in enumerate(parts)])
-    rows = np.concatenate([part.index for part in parts])
+    # Left out: points outside another scan's footprint, where that scan saw only the mat (glare
+    # blobs, fans). Surfaces one scan alone saw inside the footprint stay.
+    moved = [_apply(a.relative, part.points) for a, part in zip(alignments, parts, strict=True)]
+    keep = [np.ones(len(points), dtype=bool) for points in moved]
+    for j, (a, part) in enumerate(zip(alignments, parts, strict=True)):
+        inside = _in_footprint(part.points, FOOTPRINT_CELL_MM)
+        for i, points in enumerate(moved):
+            if i != j:
+                keep[i] &= inside(_apply(np.linalg.inv(a.relative), points))
+    merged = np.concatenate([points[k] for points, k in zip(moved, keep, strict=True)])
+    source = np.concatenate([np.full(int(k.sum()), i) for i, k in enumerate(keep)])
+    rows = np.concatenate([part.index[k] for part, k in zip(parts, keep, strict=True)])
     colors = None
     if all(scan.colors is not None for scan in scans):
         colors = np.concatenate(
-            [np.asarray(s.colors)[part.index] for s, part in zip(scans, parts, strict=True)]
+            [
+                np.asarray(s.colors)[part.index[k]]
+                for s, part, k in zip(scans, parts, keep, strict=True)
+            ]
         )
     first = _voxel_first(merged, limits.voxel_mm)
     return MultiScanAlignment(
@@ -1437,7 +1708,383 @@ def align_part_pair(
     upright: ScanInput,
     flipped: ScanInput,
     limits: AlignmentThresholds = AlignmentThresholds(),
+    *,
+    owner_confirmed: bool = False,
 ) -> MultiScanAlignment:
-    """One part (body, closure or assembled): upright + upside-down scan -> one merged outside."""
+    """One part (body, closure or assembled): upright + upside-down scan -> one merged outside.
 
-    return align_scans((replace(upright, flipped=False), replace(flipped, flipped=True)), limits)
+    A refusal on agreement gates only, bounded so the pair is plausibly the same part
+    (``_override_offer``), carries ``override_disagreements``; any other refusal carries
+    ``override_refusal`` (why no override). With ``owner_confirmed`` an offered pair is merged
+    anyway (``_owner_confirmed_merge``) and marked ``OWNER_CONFIRMED_UNVERIFIED`` with the
+    disagreements. Any other refusal stays a refusal.
+    """
+
+    scans = (replace(upright, flipped=False), replace(flipped, flipped=True))
+    try:
+        return align_scans(scans, limits)
+    except MultiScanAlignmentError as error:
+        context = getattr(error, "_context", None)
+        if context is None:
+            raise
+        offer = _override_offer(*context)
+        if isinstance(offer, str):
+            error.override_refusal = offer
+            raise
+        pose, details, band, tier = offer
+        if not owner_confirmed:
+            error.override_disagreements = tuple(details)
+            error.override_tier = tier
+            raise
+        reference, other, _, query, adapted = context
+        merged = _owner_confirmed_merge(
+            reference, other, pose, query, adapted, tuple(details), band, tier
+        )
+        return replace(merged, override_tier=tier)
+
+
+def disagreement_text(item: dict[str, Any]) -> str:
+    """One measured disagreement in plain words (mm, mm^2)."""
+
+    kind = item.get("kind")
+    if kind == "section":
+        a, b = item["reference_caliper_mm"], item["other_caliper_mm"]
+        side = "inside" if item["offset_mm"] < 0 else "outside"
+        return (
+            f"section at {item['z_mm']:.0f} mm height: the upside-down scan's wall lies "
+            f"{abs(item['offset_mm']):.1f} mm {side} the upright scan's ({b[0]:.1f} x {b[1]:.1f} "
+            f"vs {a[0]:.1f} x {a[1]:.1f} mm; tolerance {item['tolerance_mm']:.1f} mm)"
+        )
+    if kind == "coverage":
+        runs: list[list[float]] = []
+        for lo, hi, _ in item.get("slices", []):
+            if runs and lo - runs[-1][1] < 0.5:
+                runs[-1][1] = hi
+            else:
+                runs.append([lo, hi])
+        spans = ", ".join(f"{lo:.0f}-{hi:.0f} mm" for lo, hi in runs)
+        return (
+            f"the walls differ by more than 2 mm on a share of the wall at heights {spans} "
+            f"(worst {100 * item['worst']:.0f} % within 2 mm, {100 * item['limit']:.0f} % needed)"
+        )
+    if kind == "patch":
+        z = item.get("z_mm") or [float("nan")] * 2
+        return (
+            f"a {item['area_mm2']:.0f} mm^2 patch of wall at {z[0]:.0f}-{z[1]:.0f} mm height has "
+            "no counterpart in the other scan"
+        )
+    if kind == "deep_patch":
+        z = item.get("z_mm") or [float("nan")] * 2
+        return (
+            f"a {item['area_mm2']:.0f} mm^2 wall area at {z[0]:.0f}-{z[1]:.0f} mm height stands "
+            f"{item['depth_mm']:.1f} mm proud of the other scan's wall ({item['region']}): "
+            "larger than scan errors explain - possibly a different part"
+        )
+    if kind == "scale":
+        return (
+            f"the shared walls differ in size by {100 * (item['ratio'] - 1):+.2f} % "
+            f"(limit {100 * item['limit']:.2f} %)"
+        )
+    return str(kind)
+
+
+def _label_pose(
+    reference: _Part, other: _Part, pose: _Pose, query: Query, limits: AlignmentThresholds
+) -> _Pose | None:
+    """Owner-confirmed path only. With wall-profile rivals: the yaw the printed label picks
+    among them (same significance rules as ``_colour_yaw``), refined; None when the label does
+    not decide. Without rivals: the pose with its yaw plateau re-measured on the mean slice
+    coverage, so slices the scans disagree on at every yaw do not flatten it."""
+
+    rivals = _yaw_rivals(reference, other, pose.matrix, limits)
+    if not all(np.isfinite(rivals)):
+        return None
+    if not rivals:  # the wall profile pins the turn; only the coverage plateau was too wide
+        swept = _yaw_sweep_fine(other, reference, query, pose, limits, mean=True)
+        coverage, rmse = _score(other, swept.matrix, reference, query, limits)
+        return replace(swept, coverage=coverage, rmse=rmse)
+    curve = _texture_curve(other, pose.matrix, reference, limits)
+    if curve is None:
+        return None
+    step = 360 / TEXTURE_AZIMUTH_BINS
+    turns = [0.0, *rivals]
+    index = np.arange(TEXTURE_AZIMUTH_BINS)
+    near = np.zeros(TEXTURE_AZIMUTH_BINS, dtype=bool)
+    scores = []
+    for turn in turns:
+        shift = round(turn / step) % TEXTURE_AZIMUTH_BINS
+        gap = np.minimum(abs(index - shift), TEXTURE_AZIMUTH_BINS - abs(index - shift))
+        near |= gap <= 10 / step
+        window = curve[gap <= 1]
+        scores.append(float(np.nanmax(window)) if np.isfinite(window).any() else -1.0)
+    side = curve[~near & np.isfinite(curve)]
+    if len(side) < 20:
+        return None
+    sigma, mean = float(side.std()), float(side.mean())
+    pick = int(np.argmax(scores))
+    others = [
+        score
+        for turn, score in zip(turns, scores, strict=True)
+        if min(abs(turn - turns[pick]) % 360, 360 - abs(turn - turns[pick]) % 360) > 20
+    ]
+    margin = max(TEXTURE_MIN_MARGIN, TEXTURE_MARGIN_SIGMA * sigma)
+    if scores[pick] < mean + TEXTURE_PEAK_SIGMA * sigma or (
+        others and scores[pick] - max(others) < margin
+    ):
+        return None
+    centre = np.r_[_centre(reference.shell), 0.0]
+    matrix = _yaw(np.radians(turns[pick]), centre) @ pose.matrix
+    matrix = _icp(
+        other.shell, reference, query, matrix, [2, 3, 4], limits, limits.max_distance_mm, 1e-9
+    )
+    coverage, rmse = _score(other, matrix, reference, query, limits)
+    picked = _Pose(matrix, pose.flipped, coverage, rmse, colour_resolved=True)
+    swept = _yaw_sweep_fine(other, reference, query, picked, limits, mean=True)
+    coverage, rmse = _score(other, swept.matrix, reference, query, limits)
+    return replace(swept, coverage=coverage, rmse=rmse, colour_resolved=True)
+
+
+def _mid_band(
+    profile: list[tuple[float, float, float]],
+    height: float,
+    valid: Callable[[float, float], bool] = lambda lo, hi: True,
+) -> tuple[float, float, float] | None:
+    """(z low, z high, coverage) of the three adjacent slices inside ``OVERRIDE_MID_BODY`` of
+    ``height``, each ``valid``, with the highest mean coverage (ties: nearest the middle); None
+    when no such three slices lie there."""
+
+    lo, hi = OVERRIDE_MID_BODY[0] * height, OVERRIDE_MID_BODY[1] * height
+    inside = [item for item in profile if item[0] >= lo and item[1] <= hi]
+    windows = [
+        (inside[i][0], inside[i + 2][1], float(np.mean([c for _, _, c in inside[i : i + 3]])))
+        for i in range(len(inside) - 2)
+        if all(valid(a, b) for a, b, _ in inside[i : i + 3])
+    ]
+    if not windows:
+        return None
+    best = max(c for _, _, c in windows)
+    middle = (lo + hi) / 2
+    return min(
+        (w for w in windows if w[2] >= best - 1e-9), key=lambda w: abs((w[0] + w[1]) / 2 - middle)
+    )
+
+
+def _outward_excess(
+    points: np.ndarray, kept: np.ndarray, centre: np.ndarray, cell_deg: float = 10.0
+) -> np.ndarray:
+    """Radial distance (mm) of ``points`` beyond ``kept``'s outer wall (p90 radius of its
+    points in the same 10 degree x 4 mm cell); 0 where ``kept`` has no points there."""
+
+    def cells(p: np.ndarray) -> np.ndarray:
+        rel = p[:, :2] - centre
+        a = ((np.degrees(np.arctan2(rel[:, 1], rel[:, 0])) % 360) // cell_deg).astype(np.int64)
+        return np.asarray(a * 100_000 + np.floor(p[:, 2] / 4.0).astype(np.int64))
+
+    kept_cell, kept_r = cells(kept), np.linalg.norm(kept[:, :2] - centre, axis=1)
+    order = np.argsort(kept_cell)
+    keys, starts = np.unique(kept_cell[order], return_index=True)
+    outer = np.array([np.percentile(r, 90) for r in np.split(kept_r[order], starts[1:])])
+    mine = cells(points)
+    slot = np.clip(np.searchsorted(keys, mine), 0, len(keys) - 1)
+    has = keys[slot] == mine
+    radius = np.linalg.norm(points[:, :2] - centre, axis=1)
+    return np.asarray(np.where(has, radius - outer[slot], 0.0))
+
+
+def _override_offer(
+    reference: _Part, other: _Part, pose: _Pose, query: Query, limits: AlignmentThresholds
+) -> tuple[_Pose, list[dict[str, Any]], tuple[float, float], str] | str:
+    """(pose, measured disagreements, blend band, tier) when the owner may override the refusal,
+    else the reason in plain words. The owner is the authority on "same part"; the tool only
+    blocks gross mismatches and grades the rest.
+
+    Hard blocks (no offer): any failed gate that is not an agreement gate (height / missing or
+    completed end, overlap, free-space conflict, RMSE, yaw neither the wall nor the label pins),
+    a size difference over ``OVERRIDE_MAX_SCALE``, a section radius difference over twice
+    ``OVERRIDE_MAX_DEVIATION_MM`` (a neck / closure family change), and no blend band: three
+    adjacent slices inside ``OVERRIDE_MID_BODY`` whose sections each agree within
+    ``OVERRIDE_MAX_DEVIATION_MM`` (the best-covered such window is the band).
+
+    Tier "A" (small differences): every disagreement within the physics bounds - sections
+    within ``OVERRIDE_MAX_DEVIATION_MM``, no wall patch standing out more than that beyond the
+    automatic patch limit in the mid-body or in the scan the merge keeps outside the band.
+    Tier "B" (large local differences, possibly different parts): otherwise; each such patch is
+    added as a ``deep_patch`` disagreement (where, mm^2, depth).
+    """
+
+    details: list[dict[str, Any]] = []
+    notes: list[str] = []
+    _gate(reference, other, pose, query, limits, notes, details)
+    if any(item["kind"] == "yaw" for item in details):
+        picked = _label_pose(reference, other, pose, query, limits)
+        if picked is None:
+            return "the yaw is not determined (neither the wall nor the label pins it)"
+        pose, details, notes = picked, [], []
+        _gate(reference, other, pose, query, limits, notes, details)
+    kinds = {item["kind"] for item in details}
+    if any(note.startswith("end completed") for note in notes):
+        return "one scan misses an end; a missing end is never combined on confirmation"
+    if not kinds:
+        return "no measured disagreement"
+    if not kinds <= OVERRIDABLE:
+        return "the refusal includes " + ", ".join(sorted(kinds - OVERRIDABLE))
+    gross = 2 * OVERRIDE_MAX_DEVIATION_MM
+    tier = "A"
+    for item in details:
+        if item["kind"] == "scale" and abs(item["ratio"] - 1) > OVERRIDE_MAX_SCALE:
+            return f"the sizes differ by {100 * (item['ratio'] - 1):+.1f} %"
+        if item["kind"] == "section" and abs(item["offset_mm"]) > gross:
+            return (
+                f"a section differs by {abs(item['offset_mm']):.1f} mm in radius at "
+                f"{item['z_mm']:.0f} mm (over {gross:.0f} mm: a different neck or closure)"
+            )
+        if item["kind"] == "section" and abs(item["offset_mm"]) > OVERRIDE_MAX_DEVIATION_MM:
+            tier = "B"
+    moved = _apply(pose.matrix, other.shell)
+
+    def sections_agree(lo: float, hi: float) -> bool:
+        mine = reference.shell[(reference.shell[:, 2] >= lo) & (reference.shell[:, 2] < hi)]
+        theirs = moved[(moved[:, 2] >= lo) & (moved[:, 2] < hi)]
+        if len(mine) < 15 or len(theirs) < 15:
+            return False
+        offset, _ = _radial_offset(mine, theirs)
+        return bool(np.isfinite(offset) and abs(offset) <= OVERRIDE_MAX_DEVIATION_MM)
+
+    profile = _slice_profile(other, pose.matrix, reference, query, limits)
+    band = _mid_band(profile, reference.height, sections_agree)
+    if band is None:
+        return "no mid-body band where both scans' sections agree"
+    step = max(limits.spacing_mm, limits.voxel_mm)
+    limit = max(MISS_PATCH_MM2, 40 * step * step)
+    lo, hi = OVERRIDE_MID_BODY[0] * reference.height, OVERRIDE_MID_BODY[1] * reference.height
+    for region, kwargs in (
+        ("mid-body, kept from both scans", {"zone": (lo, hi), "deep": True}),
+        ("kept by the merge from one scan", {"kept_below": band[1]}),
+    ):
+        area, z, depth = _miss_patch(other, pose.matrix, reference, query, limits, True, **kwargs)
+        if area > limit:
+            tier = "B"
+            details.append(
+                {
+                    "kind": "deep_patch",
+                    "area_mm2": area,
+                    "z_mm": z,
+                    "depth_mm": depth,
+                    "region": region,
+                }
+            )
+    return pose, details, (band[0], band[1]), tier
+
+
+def _owner_confirmed_merge(
+    reference: _Part,
+    other: _Part,
+    pose: _Pose,
+    query: Query,
+    limits: AlignmentThresholds,
+    details: tuple[dict[str, Any], ...],
+    band: tuple[float, float],
+    tier: str = "A",
+) -> MultiScanAlignment:
+    """Merge for an owner-confirmed pair: each scan only away from its own mat contact. The
+    upright ``reference`` gives everything above the mid-body ``band`` (``_override_offer``),
+    the upside-down ``other`` everything below it; both overlap in the band. Beyond the band a
+    scan's points stay when they are surfaces only it saw (no point of the other scan within
+    the coverage distance and not outside the other scan's wall: e.g. a neck-ring underside);
+    its points with a counterpart there, or standing outside the other scan's wall (an MVS
+    curtain), give way. The footprint rule of ``align_scans`` applies too."""
+
+    z0, z1 = band
+    moved = _apply(pose.matrix, other.points)
+    centre = _centre(reference.shell)
+
+    def one_scan(points: np.ndarray, kept: np.ndarray) -> np.ndarray:
+        """Alone: no kept point of the same surface class (near-horizontal / steep normal)
+        within the coverage distance; near-horizontal ones weigh height twice, so the two faces
+        of a thin ledge (a few mm apart) are not each other's counterpart."""
+        alone = np.ones(len(points), dtype=bool)
+        if not len(points) or len(kept) < 10:
+            return alone
+        flat_p = np.abs(_normals(points)[:, 2]) > 0.7 if len(points) >= 10 else np.zeros(0, bool)
+        flat_k = np.abs(_normals(kept)[:, 2]) > 0.7
+        for flat in (True, False):
+            mine, theirs = flat_p == flat, kept[flat_k == flat]
+            if not mine.any() or len(theirs) == 0:
+                continue
+            weight = np.array([1.0, 1.0, 2.0 if flat else 1.0])
+            near = _nearest(theirs * weight)(points[mine] * weight, 1)[1][:, 0]
+            alone[mine] = near >= limits.max_distance_mm
+        return np.asarray(alone & (_outward_excess(points, kept, centre) <= 0.0))
+
+    low_ref, high_other = reference.points[:, 2] < z0, moved[:, 2] > z1
+    keep_ref = ~low_ref
+    keep_ref[low_ref] = one_scan(reference.points[low_ref], moved[moved[:, 2] < z0])
+    keep_other = ~high_other
+    keep_other[high_other] = one_scan(
+        moved[high_other], reference.points[reference.points[:, 2] > z1]
+    )
+    inside_ref = _in_footprint(reference.points, FOOTPRINT_CELL_MM)
+    inside_other = _in_footprint(other.points, FOOTPRINT_CELL_MM)
+    keep_ref &= inside_other(_apply(np.linalg.inv(pose.matrix), reference.points))
+    keep_other &= inside_ref(moved)
+    merged = np.concatenate([reference.points[keep_ref], moved[keep_other]])
+    source = np.r_[np.zeros(int(keep_ref.sum()), int), np.ones(int(keep_other.sum()), int)]
+    rows = np.r_[reference.index[keep_ref], other.index[keep_other]]
+    colors = None
+    if reference.colors is not None and other.colors is not None:
+        colors = np.concatenate([reference.colors[keep_ref], other.colors[keep_other]])
+    first = _voxel_first(merged, limits.voxel_mm)
+    profile = [
+        c
+        for lo, hi, c in _slice_profile(other, pose.matrix, reference, query, limits)
+        if lo >= z0 and hi <= z1
+    ]
+    agree = float(np.mean(profile)) if profile else float("nan")
+    limitations = (
+        f"{OWNER_CONFIRMED_UNVERIFIED} (tier {tier}: "
+        + ("large local differences" if tier == "B" else "small differences")
+        + "): the owner confirmed both scans are the same part; "
+        "the scans disagree (" + "; ".join(disagreement_text(d) for d in details) + ")",
+        f"above {z0:.0f} mm from upright scan {reference.scan_id}, below {z1:.0f} mm from "
+        f"upside-down scan {other.scan_id} (blended where the walls agree best, "
+        f"{100 * agree:.0f} % within {limits.max_distance_mm:.1f} mm); surfaces only one scan "
+        "saw are kept",
+    )
+    alignments = (
+        ScanAlignment(
+            reference.scan_id,
+            reference.frame,
+            np.eye(4),
+            False,
+            1.0,
+            0.0,
+            float("nan"),
+            True,
+            height_mm=reference.height,
+        ),
+        ScanAlignment(
+            other.scan_id,
+            pose.matrix @ other.frame,
+            pose.matrix,
+            pose.flipped,
+            pose.coverage,
+            pose.rmse,
+            float("nan"),
+            True,
+            _conflict(reference, other, pose, limits),
+            pose.yaw_uncertainty,
+            other.height,
+            limitations,
+        ),
+    )
+    return MultiScanAlignment(
+        reference.scan_id,
+        alignments,
+        merged[first],
+        None if colors is None else colors[first],
+        source[first],
+        rows[first],
+        _surface_coverage(merged[first], reference),
+        verification=OWNER_CONFIRMED_UNVERIFIED,
+        disagreements=details,
+    )
