@@ -742,3 +742,29 @@ def test_two_percent_scale_within_the_height_tolerance_is_refused(error):
     up, fl = scan(open_jar, False, 1)[0], scan(open_jar, True, 2, scale_error=error)[0]
     with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
         align_part_pair(up, fl)
+
+
+def spout(rng, h=80.0, offset=20.0):
+    """r 40 x 70 mm body with an off-axis r 12 spout to ``h`` (its own cap)."""
+    height, faces = body(rng, r=40.0, h=70.0)
+    faces["spout"] = np.r_[_cyl(rng, 12, 70, h), _disc(rng, 0, 12, h)] + [offset, 0, 0]
+    return h, faces
+
+
+@pytest.mark.parametrize("tall", [76.0, 78.0, 80.0, 85.0])
+def test_off_axis_spout_counts_as_the_top(tall):
+    shape = lambda rng: spout(rng, tall)  # noqa: E731
+    shape.__name__ = "spout"
+    (up, t_up), (fl, t_fl) = scan(shape, False, 1), scan(shape, True, 2)
+    height = prepare_scan(replace(up, flipped=False), AlignmentThresholds()).height
+    assert abs(height - tall) < 0.5, height
+    if tall <= 78:  # taller spouts: main's wall gate refuses this proxy pair too
+        _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
+
+
+@pytest.mark.parametrize("error", [0.985, 1.015, 1.02])
+def test_large_claimed_scale_uncertainty_is_capped(error):
+    up = replace(scan(bottle, False, 1)[0], scale_uncertainty=0.015)
+    fl = replace(scan(bottle, True, 2, cut_top=8, scale_error=error)[0], scale_uncertainty=0.015)
+    with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
+        align_part_pair(up, fl)

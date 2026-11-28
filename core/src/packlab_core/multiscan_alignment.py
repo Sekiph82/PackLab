@@ -81,6 +81,7 @@ class AlignmentThresholds:
     max_missing_end_ratio: float = 0.15  # longest open end completed from the other scan
     closed_top_share: float = 0.08  # top band points inside half its radius: a seen top face
     max_scale_error: float = 0.01  # least shared-wall scale difference refused (see _gate)
+    max_scale_cap: float = 0.012  # most the scale uncertainty may widen that bound to
     yaw_probe_deg: float = 5.0  # max yaw uncertainty for yaw_determined
     max_refine_deg: float = 5.0
     max_refine_mm: float = 5.0
@@ -451,32 +452,37 @@ def _top(z: np.ndarray) -> float:
 def _part_top(points: np.ndarray) -> float:
     """Robust height of the highest face (cluster-cleaned input, ``points`` N x 3 mm).
 
-    Blob-resistant: in the upper 20 mm (1 mm levels) the top is the highest level that is
-    either at least half as wide as the typical level there, or a coaxial ring (a neck or cap:
-    centred on the part axis and reaching round it, 10 of 12 azimuth sectors). A blob fused
-    on a cap is narrow and off-axis or one-sided, and is skipped. ponytail: a blob centred on
-    the axis is not told apart from a tiny neck."""
+    Blob-resistant: in the upper 20 mm (1 mm levels) the top is the highest kept level. Kept:
+    a level at least half as wide as the typical level there; a ring (a neck or spout wall,
+    on or off the part axis: points reach round the level's own centre, 10 of 12 sectors, and
+    sit at its rim, median radius >= 0.85 of the 95th percentile); and the level just above a
+    ring with about its width and centre (the neck's cap). A blob fused on a cap is a filled,
+    narrow lump, no ring, and is skipped. ponytail: a blob on a neck cap, as wide as the neck,
+    is not told apart."""
 
     z = points[:, 2]
-    axis = _centre(points)
     edges = np.arange(z.max() - 20.0, z.max() + 1.0, 1.0)
     level = np.searchsorted(edges, z) - 1
-    widths = np.zeros(len(edges) - 1)
-    ring = np.zeros(len(edges) - 1, dtype=bool)
+    count = len(edges) - 1
+    widths, centres = np.zeros(count), np.zeros((count, 2))
+    ring = np.zeros(count, dtype=bool)
     for k in np.unique(level[level >= 0]):
         xy = points[level == k, :2]
         if len(xy) >= 10:
             low, high = np.percentile(xy, [5, 95], axis=0)
-            widths[k] = float((high - low).max())
-            rel = xy - axis
+            widths[k], centres[k] = float((high - low).max()), (low + high) / 2
+            rel = xy - centres[k]
+            radius = np.linalg.norm(rel, axis=1)
             sectors = np.unique(
                 ((np.arctan2(rel[:, 1], rel[:, 0]) + np.pi) / (np.pi / 6)).astype(int)
             )
-            ring[k] = (
-                np.linalg.norm((low + high) / 2 - axis) < 0.25 * widths[k] and len(sectors) >= 10
-            )
+            ring[k] = len(sectors) >= 10 and np.median(radius) >= 0.85 * np.percentile(radius, 95)
     if (widths > 0).sum() >= 3:
         kept = (widths >= 0.5 * np.median(widths[widths > 0])) | ring
+        for k in range(1, count):  # the cap closing a ring (one level, not chained)
+            if ring[k - 1] and widths[k] > 0:
+                near = np.linalg.norm(centres[k] - centres[k - 1]) < 0.25 * widths[k - 1]
+                kept[k] |= near and 0.5 * widths[k - 1] <= widths[k] <= 1.2 * widths[k - 1]
         z = z[z < edges[np.nonzero(kept)[0][-1] + 1]] if kept.any() else z
     return _top(z)
 
@@ -1084,9 +1090,14 @@ def _dimension_failures(
     failures += [message for _, message in sections]
     scale = _scale_ratio(reference, other, matrix, limits)
     # Bound: the two builds' combined mat-marker scale uncertainty, at least max_scale_error.
-    bound = max(
-        limits.max_scale_error,
-        float(np.hypot(reference.scale_uncertainty, other.scale_uncertainty)),
+    # Capped at max_scale_cap: the owner's real builds give u = 0.007-0.008 each (combined
+    # 1.04 %), so an uncertainty claim far above that must not let 1.5-2 % scale errors pass.
+    bound = min(
+        limits.max_scale_cap,
+        max(
+            limits.max_scale_error,
+            float(np.hypot(reference.scale_uncertainty, other.scale_uncertainty)),
+        ),
     )
     if abs(scale - 1) > bound:  # NaN compares False
         failures.append(
