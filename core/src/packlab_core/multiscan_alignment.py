@@ -63,6 +63,8 @@ class ScanInput:
     # Captured upside-down (PL-0482 scan role). None = unknown: both poses are tried and the
     # alignment is refused as "role ambiguous" unless one pose is clearly better.
     flipped: bool | None = None
+    # Relative standard uncertainty of mm_per_unit (mat markers of this build), e.g. 0.007.
+    scale_uncertainty: float | None = None
 
 
 @dataclass(frozen=True)
@@ -78,7 +80,7 @@ class AlignmentThresholds:
     max_free_space_conflict: float = 0.05  # share of points above the other scan's seen top
     max_missing_end_ratio: float = 0.15  # longest open end completed from the other scan
     closed_top_share: float = 0.08  # top band points inside half its radius: a seen top face
-    max_scale_error: float = 0.01  # shared-wall radius ratio (scale error) allowed
+    max_scale_error: float = 0.01  # least shared-wall scale difference refused (see _gate)
     yaw_probe_deg: float = 5.0  # max yaw uncertainty for yaw_determined
     max_refine_deg: float = 5.0
     max_refine_mm: float = 5.0
@@ -132,6 +134,8 @@ class _Part:
     normals: np.ndarray  # shell normals
     spacing: float  # median nearest-neighbour distance on the working voxel grid, mm
     colors: np.ndarray | None = None  # per ``points`` row, [0, 1]
+    scale_uncertainty: float = 0.0  # relative, from ScanInput
+    upside_down: bool | None = None  # ScanInput.flipped (capture role)
 
 
 @dataclass(frozen=True)
@@ -237,6 +241,9 @@ def _validate(scan: ScanInput) -> np.ndarray:
             )
     elif not (np.isfinite(scan.mm_per_unit) and scan.mm_per_unit > 0):
         raise MultiScanAlignmentError(f"scan {scan.scan_id}: mm_per_unit must be positive")
+    u = scan.scale_uncertainty
+    if u is not None and not (np.isfinite(u) and 0 <= u < 0.1):
+        raise MultiScanAlignmentError(f"scan {scan.scan_id}: scale_uncertainty must be in [0, 0.1)")
     return points
 
 
@@ -444,22 +451,33 @@ def _top(z: np.ndarray) -> float:
 def _part_top(points: np.ndarray) -> float:
     """Robust height of the highest face (cluster-cleaned input, ``points`` N x 3 mm).
 
-    Blob-resistant: in the upper 20 mm (1 mm levels) the top is the highest level at least
-    half as wide as the typical level there, so a narrow MVS blob fused on a cap is skipped
-    while a cap, a neck or a wall end (as wide as the levels below) is kept. ponytail: a blob as
-    wide as the neck it sits on is not told apart."""
+    Blob-resistant: in the upper 20 mm (1 mm levels) the top is the highest level that is
+    either at least half as wide as the typical level there, or a coaxial ring (a neck or cap:
+    centred on the part axis and reaching round it, 10 of 12 azimuth sectors). A blob fused
+    on a cap is narrow and off-axis or one-sided, and is skipped. ponytail: a blob centred on
+    the axis is not told apart from a tiny neck."""
 
     z = points[:, 2]
+    axis = _centre(points)
     edges = np.arange(z.max() - 20.0, z.max() + 1.0, 1.0)
     level = np.searchsorted(edges, z) - 1
     widths = np.zeros(len(edges) - 1)
+    ring = np.zeros(len(edges) - 1, dtype=bool)
     for k in np.unique(level[level >= 0]):
         xy = points[level == k, :2]
         if len(xy) >= 10:
-            widths[k] = float(np.ptp(np.percentile(xy, [5, 95], axis=0), axis=0).max())
+            low, high = np.percentile(xy, [5, 95], axis=0)
+            widths[k] = float((high - low).max())
+            rel = xy - axis
+            sectors = np.unique(
+                ((np.arctan2(rel[:, 1], rel[:, 0]) + np.pi) / (np.pi / 6)).astype(int)
+            )
+            ring[k] = (
+                np.linalg.norm((low + high) / 2 - axis) < 0.25 * widths[k] and len(sectors) >= 10
+            )
     if (widths > 0).sum() >= 3:
-        wide = np.nonzero(widths >= 0.5 * np.median(widths[widths > 0]))[0][-1]
-        z = z[z < edges[wide + 1]]
+        kept = (widths >= 0.5 * np.median(widths[widths > 0])) | ring
+        z = z[z < edges[np.nonzero(kept)[0][-1] + 1]] if kept.any() else z
     return _top(z)
 
 
@@ -523,7 +541,19 @@ def _prepare(scan: ScanInput, limits: AlignmentThresholds) -> _Part:
     except MultiScanAlignmentError as error:
         raise MultiScanAlignmentError(f"scan {scan.scan_id}: {error}") from None
     colors = None if scan.colors is None else np.asarray(scan.colors, dtype=float)[index]
-    return _Part(scan.scan_id, frame, points, index, height, shell, normals, spacing, colors)
+    return _Part(
+        scan.scan_id,
+        frame,
+        points,
+        index,
+        height,
+        shell,
+        normals,
+        spacing,
+        colors,
+        float(scan.scale_uncertainty or 0.0),
+        scan.flipped,
+    )
 
 
 # ---------------------------------------------------------------- pose search and scoring
@@ -892,21 +922,14 @@ def _radial_offset(mine: np.ndarray, theirs: np.ndarray) -> tuple[float, float]:
 def _closed_top(part: _Part, limits: AlignmentThresholds) -> bool:
     """Did the scan see a face closing its top (cap, base, lid)? Share of the top 3 mm band
     inside half the band's radius: a disc puts ~20 % there, a wall that just ends (MVS lost the
-    rest) ~0. ponytail: an open-mouthed part (body rim) reads open too, so a different, taller
-    open body with the same walls passes as a missing end; the recorded limitation names it."""
+    rest) ~0. An open-mouthed part (body rim) reads open too; ``_missing_end_problems`` only
+    completes upside-down scans for that reason."""
 
     band = part.points[part.points[:, 2] > part.height - 3]
     if len(band) < 15:
         return False
     radius = np.linalg.norm(band[:, :2] - _centre(band), axis=1)
     return bool((radius < 0.5 * np.percentile(radius, 95)).mean() >= limits.closed_top_share)
-
-
-def _radius_at(shell: np.ndarray, z0: float, z1: float, centre: np.ndarray) -> float:
-    band = shell[(shell[:, 2] >= z0) & (shell[:, 2] < z1)]
-    return (
-        float(np.median(np.linalg.norm(band[:, :2] - centre, axis=1))) if len(band) >= 15 else 0.0
-    )
 
 
 def _scale_ratio(
@@ -940,8 +963,13 @@ def _missing_end_problems(
     """Why the height gap cannot be a missing end of ``short`` (empty list: it can be).
 
     - scale: enough shared wall to measure it (``_scale_ratio``, gated for every pair).
-    - end: the part the other scan completes must look like an end there, a shoulder or neck
-      (the wall narrows) or a seen closing face, not more straight wall (a taller open part).
+    - role: only an upside-down scan's free end (the part's base: closed on packaging parts)
+      is completed. An upright scan's free end is the part's top, which could be a real open
+      mouth or rim; the upside-down scan stands on it and never sees it, so it is refused.
+      (A visible-inside test was tried: on the owner's real clouds the base push-up dome and
+      tapering caps read as "inside" too, so it would refuse the genuine case.) ponytail: an
+      upside-down part with a genuinely open free end (a closure's recess) and the same walls
+      but up to 15 % taller passes as a lost end; the limitation names it.
     - contact: the flipped scan's mat contact (the taller top) must be where the walls put it,
       a z shift of 2-3 mm may not fit the shared walls clearly better.
     """
@@ -949,19 +977,12 @@ def _missing_end_problems(
     problems: list[str] = []
     if not np.isfinite(_scale_ratio(reference, other, matrix, limits)):
         problems.append("too few shared wall bands to check the scales")
-    missing = long.height - short.height
     flipped = bool(matrix[2, 2] < 0)
-    if flipped:  # completed from the other scan's mat side: own z 0..missing
-        centre = _centre(long.shell)
-        end = _radius_at(long.shell, limits.mat_margin_mm + 2, max(missing, 6.0), centre)
-        wall = _radius_at(long.shell, missing + 2, missing + 12, centre)
-        shoulder = end > 0 and wall > 0 and end <= wall - max(1.0, 0.03 * wall)
-    else:  # both upright: the taller scan's own top must be a seen closing face
-        shoulder = _closed_top(long, limits)
-    if not shoulder:
+    if short.upside_down is not True:
         problems.append(
-            f"scan {long.scan_id} shows no end (shoulder, neck or closing face) in the "
-            f"{missing:.0f} mm it would complete, only more wall: a different, taller part?"
+            f"scan {short.scan_id} is not an upside-down scan: its free end is the part's top, "
+            "which no other scan sees (the upside-down scan stands on it), so a lost top cannot "
+            "be told from a different, taller part"
         )
     if flipped:
         query = _nearest(reference.shell)
@@ -1062,10 +1083,16 @@ def _dimension_failures(
             failures.append(message)
     failures += [message for _, message in sections]
     scale = _scale_ratio(reference, other, matrix, limits)
-    if abs(scale - 1) > limits.max_scale_error:  # NaN compares False
+    # Bound: the two builds' combined mat-marker scale uncertainty, at least max_scale_error.
+    bound = max(
+        limits.max_scale_error,
+        float(np.hypot(reference.scale_uncertainty, other.scale_uncertainty)),
+    )
+    if abs(scale - 1) > bound:  # NaN compares False
         failures.append(
-            f"the shared walls differ in scale by {100 * (scale - 1):+.1f} % "
-            f"(limit {100 * limits.max_scale_error:.0f} %): check both mat-marker scales"
+            f"the shared walls differ in scale by {100 * (scale - 1):+.2f} % "
+            f"(limit {100 * bound:.2f} %, the scans' scale uncertainty): check both mat-marker "
+            "scales"
         )
     # Real MVS walls can be patchy: demand overlap in a share of the bands either scan has.
     needed = max(1, int(np.ceil(limits.min_profile_share * max(seen_mine, seen_theirs))))

@@ -874,6 +874,12 @@ class ScenePanel(QWidget):
                         model.points,
                         model.colors,
                         mm_per_unit=float(source["mm_per_unit"]),
+                        # standard uncertainty mm/unit -> relative (bounds the scale check)
+                        scale_uncertainty=(
+                            None
+                            if source["scale_uncertainty"] is None
+                            else min(0.099, source["scale_uncertainty"] / source["mm_per_unit"])
+                        ),
                     )
                 )
             if cancelled():
