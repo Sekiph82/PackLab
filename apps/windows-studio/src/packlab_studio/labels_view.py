@@ -268,6 +268,7 @@ class LabelsView(QWidget):
         self.assembled_viewer = ModelViewerView()
         self.assembled_viewer.setObjectName("packlab.labels.assembled-viewer")
         self.assembled_viewer.open_button.hide()
+        self.assembled_viewer.reload_button.hide()
         self.assembled_viewer.setMinimumSize(QSize(320, 320))
         self.assembled_viewer.hide()
         right = QVBoxLayout()

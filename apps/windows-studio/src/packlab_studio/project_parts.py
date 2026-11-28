@@ -428,6 +428,9 @@ class ScenePanel(QWidget):
         self._cancel: dict[str, threading.Event] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._shown: tuple[object, tuple[Path, ...]] | None = None
+        # True while the owner's own click (selection, visibility, build choice, undo) is
+        # being applied; refreshes after jobs/project changes leave it False.
+        self.owner_action = False
         self._invoker = MainThreadInvoker()
         self.tree = QTreeWidget()
         self.tree.setObjectName("packlab.scene.tree")
@@ -668,7 +671,14 @@ class ScenePanel(QWidget):
             self.projects.set_scan_build(scan.package_sha256, None if latest else revision)
         except Exception as error:
             self.details.setText(tr("Build choice not saved: {error}").format(error=error))
-        self.refresh()
+        self._owner_refresh()
+
+    def _owner_refresh(self) -> None:
+        self.owner_action = True
+        try:
+            self.refresh()
+        finally:
+            self.owner_action = False
 
     def _interior_lines(self, merging: bool) -> list[str]:
         status, record, _path = self.interior
@@ -764,11 +774,14 @@ class ScenePanel(QWidget):
     def _save_view(self, part: str | None, hidden: list[str]) -> None:
         if self.projects.layout is None:
             return
+        self.owner_action = True
         try:
-            self.projects.set_part_view(part, hidden)
+            self.projects.set_part_view(part, hidden)  # notifies listeners -> refresh
         except Exception as error:
             self.details.setText(tr("Part selection not saved: {error}").format(error=error))
-        self.refresh()  # set_part_view notifies only on a new revision
+        finally:
+            self.owner_action = False
+        self._owner_refresh()  # set_part_view notifies only on a new revision
 
     def cancel(self, part: str | None) -> None:
         extra = {"assembled": PLACEMENT, "body": INTERIOR}.get(part or "", "")

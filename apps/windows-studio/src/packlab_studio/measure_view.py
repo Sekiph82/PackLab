@@ -101,6 +101,7 @@ class MeasureDesignView(QWidget):
 
         self.viewer = ModelViewerView()
         self.viewer.open_button.hide()
+        self.viewer.reload_button.hide()
 
         def button(text: str, name: str, slot: Callable[[], object]) -> QPushButton:
             widget = QPushButton(text)
@@ -112,6 +113,14 @@ class MeasureDesignView(QWidget):
         self.latest_button = button(
             "Use latest project build", "latest", lambda: self.use_latest_build()
         )
+        # Brings the last loaded model back (also after a restart): per project in QSettings.
+        self.reload_button = button("Reload last model", "reload", lambda: self.reload_last())
+        # A newer build offered by the Build page while a model is open here.
+        self.offered_build: Path | None = None
+        self.newer_button = button(
+            tr("A newer build is available — Load it"), "newer", lambda: self.load_offered()
+        )
+        self.newer_button.hide()
         self.isolate_button = button("1. Isolate object", "isolate", self.isolate)
         self.bar_mm = QDoubleSpinBox()
         self.bar_mm.setRange(80.0, 120.0)
@@ -185,6 +194,8 @@ class MeasureDesignView(QWidget):
         for widget in (
             self.open_button,
             self.latest_button,
+            self.reload_button,
+            self.newer_button,
             self.isolate_button,
             scale_box,
             self.measure_button,
@@ -315,7 +326,52 @@ class MeasureDesignView(QWidget):
 
         return self._run("Recover draft", action)
 
+    def _last_model_key(self) -> str:
+        return f"measure/last_model/{self._project_id()}"
+
+    def last_model(self) -> Path | None:
+        value = self.settings.value(self._last_model_key())
+        return Path(str(value)) if value and Path(str(value)).is_file() else None
+
+    def offer_build(self, path: Path | None = None) -> bool:
+        """Offer ``path`` (or the project's newest build) without replacing the open model."""
+        layout = getattr(self.project_manager, "layout", None)
+        if path is None and layout is not None:
+            path = md.latest_built_model(layout.root)
+        if path is None or (self.model is not None and self.model.path == Path(path)):
+            return False
+        self.offered_build = Path(path)
+        self.newer_button.setToolTip(str(path))
+        self.newer_button.show()
+        self.status.setText(
+            tr("A newer build is available: {name}. Your open model is kept.").format(
+                name=Path(path).name
+            )
+        )
+        return True
+
+    def load_offered(self) -> bool:
+        path = self.offered_build
+        if path is None or not self.load(path):
+            return False
+        self.loaded_part = None  # a raw build, not the Scene part
+        return True
+
+    def reload_last(self) -> bool:
+        """Load the last model again (resets isolate/scale/fit like a fresh open)."""
+        path = self.last_model()
+        if path is None:
+            self.status.setText(tr("No model loaded yet in this project."))
+            return False
+        return self.load(path)
+
     def _sync_buttons(self) -> None:
+        last = self.last_model()
+        self.reload_button.setEnabled(last is not None)
+        self.reload_button.setText(
+            tr("Reload last model") if last is None else f"{tr('Reload last model')}: {last.name}"
+        )
+        self.reload_button.setToolTip("" if last is None else str(last))
         self.isolate_button.setEnabled(self.model is not None)
         scaled_ready = self.isolation is not None
         self.marker_button.setEnabled(
@@ -434,6 +490,9 @@ class MeasureDesignView(QWidget):
                 f"{path.name}: {len(self.model.points):,}-point {kind}, {cams}. "
                 "Units: reconstruction units until scale is set."
             )
+            self.settings.setValue(self._last_model_key(), str(path))
+            self.offered_build = None
+            self.newer_button.hide()
             return "loaded"
 
         return self._run("Open", action)

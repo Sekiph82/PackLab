@@ -245,6 +245,7 @@ def test_selection_drives_viewer_and_measure_and_undoes(app, tmp_path) -> None:
         measure = window.route_stack.views[Route.MEASURE_DESIGN]
         assert isinstance(viewer, ModelViewerView) and isinstance(measure, MeasureDesignView)
         panel.tree.setCurrentItem(panel.items["body"])
+        _pump(app, lambda: viewer.last_paths)  # parts load off the UI thread
         assert "scene_dense.ply" in viewer.status.text()
         assert "Body" in measure.latest_button.text()
         assert measure.use_latest_build()
@@ -255,6 +256,7 @@ def test_selection_drives_viewer_and_measure_and_undoes(app, tmp_path) -> None:
             manager.part_view(),
             viewer.status.text(),
         )
+        _pump(app, lambda: len(viewer.last_paths) == 3)
         assert len(viewer.service.scene.visible_objects()) == 3  # assembled + body + closure
         child = next(
             panel.items["assembled"].child(i)
@@ -265,6 +267,7 @@ def test_selection_drives_viewer_and_measure_and_undoes(app, tmp_path) -> None:
 
         child.setCheckState(0, Qt.CheckState.Unchecked)
         assert manager.part_view() == {"part": "assembled", "hidden": ["closure"]}
+        _pump(app, lambda: len(viewer.last_paths) == 2)
         assert len(viewer.service.scene.visible_objects()) == 2
 
         assert window.undo() is not None  # visibility back

@@ -133,6 +133,7 @@ def _window(monkeypatch, tmp_path: Path, backend: object, **kwargs: object):
     inbox = window.route_stack.views[Route.CAPTURE_INBOX]
     builds = window.route_stack.views[Route.RECONSTRUCTION]
     assert isinstance(inbox, CaptureInboxView) and isinstance(builds, BuildModelView)
+    window.navigation.navigate(Route.CAPTURE_INBOX)  # the owner imports from the inbox
     return app, window, inbox, builds
 
 
