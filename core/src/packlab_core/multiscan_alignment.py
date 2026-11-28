@@ -7,7 +7,12 @@ Object = the DBSCAN cluster standing on the mat footprint plus clusters above it
 and off-mat clutter; refuses when nothing stands on the mat), minus a flat white glare halo
 on the mat around its foot. Outer shell =
 near-vertical points at the outer radius of their 5 degree x 5 mm cell (caps and interior surfaces
-such as a closure recess are seen by one scan only and are never compared).
+such as a closure recess are seen by one scan only and are never compared), after sparse MVS
+strays (glare fans, spikes, curtains) are dropped. Each scan's contact zone (lowest 20 % of
+its height, at most 30 mm: seen only by low cameras at grazing angles) is left out of the
+wall fit and coverage, checked by sections at a looser tolerance, and in the merge replaced
+by the other scan's view from above (PL-0483 real-pair root cause, see
+coordination/sessions/M18-C001/PL-0483_REAL_PAIR_ROOT_CAUSE_V01.md).
 
 Registration to the reference (first) scan: 180 degree flip about a horizontal axis from the
 PL-0482 role (both poses when unknown), height fixed by mat contact (flipped: mat side ->
@@ -37,7 +42,7 @@ from dataclasses import dataclass, replace
 
 import numpy as np
 
-METHOD = "mat_frame_flip_yaw_sweep_bounded_tilt_point_to_plane_icp_v2"
+METHOD = "mat_frame_flip_yaw_sweep_bounded_tilt_point_to_plane_icp_v3"
 METRIC_STATUS = "METRIC_UNVERIFIED"
 PLANE_SEED = 7
 PLANE_ITERATIONS = 1000
@@ -70,7 +75,9 @@ class ScanInput:
 @dataclass(frozen=True)
 class AlignmentThresholds:
     max_distance_mm: float = 2.0  # correspondence / coverage distance
-    min_slice_coverage: float = 0.9  # worst side-wall slice, both directions
+    # Worst 5 mm side-wall slice, both directions. Five real same-object pairs (owner bottle,
+    # Fast/High, upright/flipped) give 0.873-0.953 after the artifact and contact-zone fixes.
+    min_slice_coverage: float = 0.85
     max_rmse_mm: float = 1.0  # point-to-plane, worse direction
     height_tolerance_mm: float = 1.0
     width_tolerance_mm: float = 1.0
@@ -137,6 +144,8 @@ class _Part:
     colors: np.ndarray | None = None  # per ``points`` row, [0, 1]
     scale_uncertainty: float = 0.0  # relative, from ScanInput
     upside_down: bool | None = None  # ScanInput.flipped (capture role)
+    wall: np.ndarray | None = None  # outer wall incl. the contact zone (sections); None: shell
+    zone: float = 0.0  # contact zone height, mm (see _contact_zone)
 
 
 @dataclass(frozen=True)
@@ -487,16 +496,49 @@ def _part_top(points: np.ndarray) -> float:
     return _top(z)
 
 
+SPARSE_SHARE = 0.25  # of the wall's median neighbour count; less is an MVS stray
+CONTACT_ZONE_MM = 30.0  # see _contact_zone
+CONTACT_ZONE_SHARE = 0.2  # of the scan's height
+CONTACT_ZONE_TOLERANCE_MM = 2.0  # radial section tolerance inside a contact zone
+
+
+def _dense(points: np.ndarray, spacing: float, voxel: float) -> np.ndarray:
+    """Mask of points on a surface: within r = max(2.5 mm, 3 spacings) at least
+    ``SPARSE_SHARE`` of the median neighbour count there (relative, so sparse scans and short
+    bands keep their walls). The owner's real scans carry glare fans, tip spikes and curtains
+    under a downward-facing shoulder at a few points per 3 mm; their walls hold ~28."""
+
+    radius = max(2.5, 3.0 * max(spacing, voxel))
+    distance = _nearest(points)(points, min(48, len(points)))[1]
+    count = (distance < radius).sum(axis=1)
+    return np.asarray(count >= SPARSE_SHARE * np.median(count))
+
+
+def _contact_zone(height: float) -> float:
+    """Height above its own mat where a scan's walls are not compared (mm): the lowest
+    ``CONTACT_ZONE_SHARE`` of the part, at most ``CONTACT_ZONE_MM``. Only the lowest cameras see
+    it, at grazing angles, beside mat glare: on the owner's real pairs it is where the two
+    scans disagree (upright foot, flipped shoulder curtain and closure: 1-4 mm, own z 0-28),
+    while the other scan sees the same surface from above as its free end. ponytail: fixed
+    numbers; a per-point visibility test from the build's camera poses replaces them."""
+
+    return min(CONTACT_ZONE_MM, CONTACT_ZONE_SHARE * height)
+
+
 def _shell(
     points: np.ndarray, height: float, spacing: float, limits: AlignmentThresholds
 ) -> tuple[np.ndarray, np.ndarray]:
     """Outer side wall: band points with no other surface further out at the same place on the
     unrolled wall (arc x height window of 2.5 point spacings; removes recesses, inner walls and
     cap remnants). No angular grid, so the set does not depend on the mat frame's x axis.
+
+    Sparse points are dropped first (``_dense``): "outermost" otherwise lets MVS glare fans,
+    tip spikes and overhang curtains outside the part replace its real wall.
     """
 
     band = points[(points[:, 2] > limits.mat_margin_mm + 2) & (points[:, 2] < height - 2)]
     band = band[_voxel_first(band, limits.voxel_mm)]
+    band = band[_dense(band, spacing, limits.voxel_mm)] if len(band) >= 30 else band
     if len(band) < 30:
         raise MultiScanAlignmentError("too little side wall above the mat")
     rel = band[:, :2] - _centre(band)
@@ -543,9 +585,16 @@ def _prepare(scan: ScanInput, limits: AlignmentThresholds) -> _Part:
     spacing = _spacing(points, limits.voxel_mm)[0]  # of the part itself, not the clutter
     height = _part_top(points)
     try:
-        shell, normals = _shell(points, height, spacing, limits)
+        wall, wall_normals = _shell(points, height, spacing, limits)
     except MultiScanAlignmentError as error:
         raise MultiScanAlignmentError(f"scan {scan.scan_id}: {error}") from None
+    zone = _contact_zone(height)
+    above_zone = wall[:, 2] >= zone
+    if above_zone.sum() < 30:
+        raise MultiScanAlignmentError(
+            f"scan {scan.scan_id}: too little side wall above its {zone:.0f} mm contact zone"
+        )
+    shell, normals = wall[above_zone], wall_normals[above_zone]
     colors = None if scan.colors is None else np.asarray(scan.colors, dtype=float)[index]
     return _Part(
         scan.scan_id,
@@ -559,6 +608,8 @@ def _prepare(scan: ScanInput, limits: AlignmentThresholds) -> _Part:
         colors,
         float(scan.scale_uncertainty or 0.0),
         scan.flipped,
+        wall,
+        zone,
     )
 
 
@@ -1021,16 +1072,22 @@ def _dimension_failures(
     failures = []
     ratio = limits.dimension_tolerance_ratio
     tolerance = max(limits.height_tolerance_mm, ratio * reference.height)
-    moved = _apply(matrix, other.shell)
+    # Sections include the contact zones (wall), there at CONTACT_ZONE_TOLERANCE_MM.
+    mine_wall = reference.shell if reference.wall is None else reference.wall
+    their_wall = other.shell if other.wall is None else other.wall
+    moved = _apply(matrix, their_wall)
     valid = seen_mine = seen_theirs = 0
     half = max(2.0, limits.slice_mm / 2.5)
-    lower = limits.mat_margin_mm + 2 + half
-    upper = min(reference.height, other.height) - 2 - half
+    # Bands span both walls' real overlap: a flipped scan that lost its free end lacks the
+    # reference's bottom, not its top (min height would leave its top band unchecked).
+    lower = max(np.percentile(mine_wall[:, 2], 1), np.percentile(moved[:, 2], 1)) + half
+    upper = min(np.percentile(mine_wall[:, 2], 99), np.percentile(moved[:, 2], 99)) - half
     heights = np.linspace(lower, upper, PROFILE_BANDS) if upper > lower else np.full(1, upper)
     sections: list[tuple[float, str]] = []
     for z in heights:
-        mine = reference.shell[np.abs(reference.shell[:, 2] - z) < half]
-        theirs = moved[np.abs(moved[:, 2] - z) < half]
+        mine = mine_wall[np.abs(mine_wall[:, 2] - z) < half]
+        near = np.abs(moved[:, 2] - z) < half
+        theirs = moved[near]
         seen_mine += int(len(mine) >= 15)
         seen_theirs += int(len(theirs) >= 15)
         if len(mine) < 15 or len(theirs) < 15:
@@ -1041,6 +1098,8 @@ def _dimension_failures(
         valid += 1
         # radius tolerance: half the diameter one, + half a spacing for patchy sampled walls
         allowed = max(limits.width_tolerance_mm, ratio * 2 * radius) / 2 + 0.5 * limits.spacing_mm
+        if z < reference.zone or np.mean(their_wall[near, 2] < other.zone) > 0.5:
+            allowed = max(allowed, CONTACT_ZONE_TOLERANCE_MM)
         if abs(offset) > allowed:
             a, b = _section(mine, z, half), _section(theirs, z, half)
             sections.append(
@@ -1123,6 +1182,8 @@ def _free_space_conflict(first: _Part, second: _Part, matrix: np.ndarray, cell: 
     where a wall ends (most of its points well below: a missing end, an open rim) proves
     nothing about the space above and never conflicts. ponytail: ignores oblique views; a
     column the scan saw only partly can raise false conflicts, hence the tolerance share.
+    ``first`` points under ``GLARE_HEIGHT_MM`` (its own mat glare and foot halo) are not
+    tested: on the owner's real pair they were 97 % of a 0.054 false conflict.
     """
 
     own = np.floor(second.points[:, :2] / cell).astype(np.int64)
@@ -1133,7 +1194,7 @@ def _free_space_conflict(first: _Part, second: _Part, matrix: np.ndarray, cell: 
     # Seen from above: at least half the column's points lie within 1.5 mm of its top.
     near_top = np.bincount(inverse, weights=(second.points[:, 2] > top[inverse] - 1.5) * 1.0)
     top[near_top < 0.5 * np.bincount(inverse)] = np.inf
-    moved = _apply(matrix, first.points)
+    moved = _apply(matrix, first.points[first.points[:, 2] >= GLARE_HEIGHT_MM])
     cells = np.floor(moved[:, :2] / cell).astype(np.int64)
     flat_keys = keys[:, 0] * 2_000_003 + keys[:, 1]
     flat = cells[:, 0] * 2_000_003 + cells[:, 1]
@@ -1411,15 +1472,30 @@ def align_scans(
                 )
         alignments.append(_checked(reference, parts[index], poses[0], margin, query, limits))
     # Merge: first point per voxel wins (deterministic), keeping colour, scan and input row.
-    merged = np.concatenate(
-        [_apply(a.relative, part.points) for a, part in zip(alignments, parts, strict=True)]
-    )
-    source = np.concatenate([np.full(len(part.index), i) for i, part in enumerate(parts)])
-    rows = np.concatenate([part.index for part in parts])
+    # A scan's contact zone is left out at heights another scan's compared wall covers: that
+    # scan saw the surface from above (no shoulder curtain / mat glare in the part).
+    moved = [_apply(a.relative, part.points) for a, part in zip(alignments, parts, strict=True)]
+    slice_of = []
+    for a, part in zip(alignments, parts, strict=True):
+        levels, counts = np.unique(
+            np.floor(_apply(a.relative, part.shell)[:, 2] / limits.slice_mm), return_counts=True
+        )
+        slice_of.append(set(levels[counts >= 15].tolist()))
+    keep = []
+    for i, (points, part) in enumerate(zip(moved, parts, strict=True)):
+        others = set().union(*(s for j, s in enumerate(slice_of) if j != i))
+        level = np.floor(points[:, 2] / limits.slice_mm)
+        keep.append(~((part.points[:, 2] < part.zone) & np.isin(level, list(others))))
+    merged = np.concatenate([points[k] for points, k in zip(moved, keep, strict=True)])
+    source = np.concatenate([np.full(int(k.sum()), i) for i, k in enumerate(keep)])
+    rows = np.concatenate([part.index[k] for part, k in zip(parts, keep, strict=True)])
     colors = None
     if all(scan.colors is not None for scan in scans):
         colors = np.concatenate(
-            [np.asarray(s.colors)[part.index] for s, part in zip(scans, parts, strict=True)]
+            [
+                np.asarray(s.colors)[part.index[k]]
+                for s, part, k in zip(scans, parts, keep, strict=True)
+            ]
         )
     first = _voxel_first(merged, limits.voxel_mm)
     return MultiScanAlignment(

@@ -768,3 +768,48 @@ def test_large_claimed_scale_uncertainty_is_capped(error):
     fl = replace(scan(bottle, True, 2, cut_top=8, scale_error=error)[0], scale_uncertainty=0.015)
     with pytest.raises(MultiScanAlignmentError, match="differ in scale"):
         align_part_pair(up, fl)
+
+
+def test_sparse_outward_artifacts_do_not_replace_the_wall():
+    """A sparse MVS glare fan 2-12 mm outside the wall (real scans: a few points per 3 mm)
+    must not replace the outer wall under it: the shell stays on the r 40 cylinder."""
+    from packlab_core.multiscan_alignment import _shell
+
+    part = prepare_scan(scan(cylinder, False, 1)[0], AlignmentThresholds())
+    centre = np.median(part.points[part.points[:, 2] > 20, :2], axis=0)
+    rng = np.random.default_rng(5)
+    a, r, z = rng.uniform(-0.5, 0.5, 100), rng.uniform(42, 52, 100), rng.uniform(20, 50, 100)
+    fan = np.c_[centre[0] + r * np.cos(a), centre[1] + r * np.sin(a), z]
+    shell = _shell(np.r_[part.points, fan], part.height, part.spacing, AlignmentThresholds())[0]
+    rel = shell[:, :2] - centre
+    radius = np.linalg.norm(rel, axis=1)
+    wedge = (
+        (np.abs(np.arctan2(rel[:, 1], rel[:, 0])) < 0.5) & (shell[:, 2] > 20) & (shell[:, 2] < 50)
+    )
+    # main: 118 wall / 81 fan points in the wedge; a few chance fan clusters may stay
+    assert (wedge & (np.abs(radius - 40) < 1.5)).sum() > 300
+    assert (wedge & (radius > 41.5)).sum() < 0.1 * wedge.sum()
+
+
+def lumpy_top(rng):
+    """Body whose top 12 mm of wall carries 1.2 mm radial lumps: what a flipped scan makes of
+    the surfaces in its contact zone (grazing views, mat glare) on the owner's real pairs."""
+    height, faces = body(rng)
+    side = faces["side"]
+    top = side[:, 2] > height - 12
+    side[top, :2] *= 1 + rng.rng.normal(0, 1.2, (top.sum(), 1)) / 40
+    return height, faces
+
+
+def test_lumps_in_the_flipped_contact_zone_still_combine():
+    (up, t_up), (fl, t_fl) = scan(body, False, 1), scan(lumpy_top, True, 2)
+    _assert_recovered(align_part_pair(up, fl), (t_up, t_fl))
+
+
+def test_flipped_short_scan_of_a_different_top_is_refused():
+    """Reviewer probe: bottle (r 30 neck above 65 mm) vs a plain body flipped, its free end
+    lost. The neck lies in the flipped scan's contact zone; the sections still see it."""
+    up = scan(bottle, False, 1, density=0.2)[0]
+    fl = scan(body, True, 2, density=0.2, cut_top=8)[0]
+    with pytest.raises(MultiScanAlignmentError, match="section mismatch"):
+        align_part_pair(up, fl)
