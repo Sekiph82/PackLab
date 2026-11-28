@@ -539,6 +539,8 @@ TURKISH: dict[str, str] = {
     "Build choice not saved: {error}": "Model seçimi kaydedilmedi: {error}",
     "Selected build {revision} is missing; using the latest build.": "Seçilen model {revision} bulunamadı; en yeni model kullanılıyor.",
     "Cancel combine": "Birleştirmeyi iptal et",
+    "Combine anyway is not offered: {reason}.": "Yine de birleştir sunulmuyor: {reason}.",
+    "OWNER_CONFIRMED_UNVERIFIED Body: the interior sits on an unverified Body.": "OWNER_CONFIRMED_UNVERIFIED Gövde: iç yüzey doğrulanmamış bir Gövde üzerinde.",
     "Combine anyway - I confirm both scans are the same part": "Yine de birleştir - iki taramanın aynı parça olduğunu onaylıyorum",
     "Combine anyway?": "Yine de birleştirilsin mi?",
     "combined - owner-confirmed, UNVERIFIED": "birleştirildi - sahip onaylı, UNVERIFIED (doğrulanmadı)",

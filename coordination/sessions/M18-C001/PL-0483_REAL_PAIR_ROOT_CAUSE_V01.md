@@ -304,6 +304,73 @@ upF + dnF is not offered: it has a height mismatch (missing end).
 
 **Automatic behaviour is unchanged.** 902 probe verdicts were compared with V03 (old suites, V02 fresh probes, V01 gate/thin probes) and 0 changed. The role, placement and zone outputs are identical as well.
 
+## 3d. Override V04: offered only for a plausibly-same part (review V03)
+
+The bounds come from the gate's own distances and from physics, not from the probes.
+
+**Never offered:**
+- when any non-agreement gate fails: height / missing end, overlap, free-space conflict, RMSE, or yaw that neither the wall nor the label pins;
+- when an end was completed: a missing end is never combined on confirmation.
+
+**Offered only when all of these hold:**
+- **Size:** scale within 2 %, and every measured section within `OVERRIDE_MAX_DEVIATION_MM` = 2 mm in radius (so at most 4 mm in diameter). This is a fixed physical bound: the real flipped closure reads 1.4-1.6 mm small. It is not the spacing-adapted coverage distance, which a sparse scan widens to 3 mm. That gap let a 3 mm panel through at d 0.2 before the fix.
+- **Mid-body:** inside 30-70 % of the height, the mid-body is kept from both scans. No wall patch there may stand out from the other scan's wall by more than the coverage distance beyond the automatic patch limit (true area). A three-slice band with gate coverage must exist there.
+- **Outside the band:** the scan kept there (upright above the band, upside-down below it) has no such standing-out patch. That would be a feature the merge keeps unconfirmed.
+
+**Merge:**
+- Blend band: the best-agreeing three slices inside 30-70 %.
+- Beyond the band, a scan's points stay when only that scan saw them: no point of the other scan's same surface class within the coverage distance, and not outside its wall. Surface classes are near-horizontal and steep; near-horizontal points weigh height twice, so a thin ledge's two faces are not counterparts. An example is a ledge underside.
+- In the review's ring probe, 5 of the 39 underside points are kept (V03: 0). The rest are within 2 mm of the upright ring faces or lose the voxel to an upright point.
+- Its points with a counterpart there, or standing outside the other scan's wall (curtain), give way.
+- The footprint rule is kept.
+
+**Badge:**
+- `ReconstructionOutputManifest.verification` is a structured field: GATE_PASSED or OWNER_CONFIRMED_UNVERIFIED. It goes into `as_dict` only when set, so existing digests are unchanged.
+- The Scan Master promotion sets it and includes it in the configuration digest.
+- The interior merge records the body's verification and shows the badge. Placement sources carry it (tested).
+- The UI states why an override is not offered.
+
+### V03 review probes (fresh, seeds 1 and 3, d 0.5/0.2, noise 0/0.35)
+
+No wrong part is offered: 0 of 88 wrong-part probes, and 0 of 48 special probes (seeds 1 and 3). Each probe's reason:
+
+| probe | reason |
+|---|---|
+| neck r30 vs r26 | yaw or section |
+| neck r30 vs r33 | section 3.0 mm in radius |
+| shoulder 65 vs 60 | yaw / coverage |
+| neck to 80 vs 84 | height |
+| 3 mm label panel | no agreeing mid-body band, or a 154 mm^2 mid-body patch |
+| lug 10x12x3 | 105-157 mm^2 mid-body patch, or yaw |
+| lug 20x20x5 | 630 mm^2 mid-body patch, or no band, or yaw |
+| r41 / r42.5 whole | size +2.5 %, or yaw |
+| flipped missing end 8 + lug | missing end |
+| upright missing top | height |
+| oval a29 b19 | RMSE |
+| oval vs body | yaw |
+
+Genuine pairs:
+- "flipped top 1.5 mm in (real-like)" is offered at all four densities and noise levels.
+- "Top 2.5 mm in" gets no offer (yaw), which review V03 accepts.
+- The ring-underside pair gets no offer (yaw; main refuses its yaw too).
+
+### Real upF + dnH under these bounds: NOT offered
+
+Reason: "a 57 mm^2 wall patch in the mid-body stands out more than 2.0 mm between the scans". It lies at z 52-65 mm, just above the 30 % line (52 mm), next to the upright foot zone where the scans disagree.
+
+The data put the real pair inside the range of the wrong-part probes:
+
+| | mid-body patch standing out more than 2 mm |
+|---|---|
+| real upF + dnH | 57-63 mm^2 (label pose; 58 at the geometric pose; final code 63) |
+| lug 10x12x3, noise 0.35, d 0.5 | 98 mm^2 |
+| lug 10x12x3, noise 0.35, d 0.2 | 45 mm^2 |
+| lug 10x12x3, clean | 144-157 mm^2 |
+
+The ordering holds at excess thresholds of 2.0, 2.25, 2.5 and 3.0 mm (real 57/53/43/39). The mid-body slices themselves agree at 0.94-0.98.
+
+So a size-based bound cannot both offer this pair and refuse a 10x12x3 mm lug. Offering it would need a bound fitted to this pair (for example mid-body 35-65 % or a patch limit of about 60 mm^2). That is an owner/product decision and is not taken here.
+
 ## 4. Results V03 (final code)
 
 | pair | result | reasons (all printed in the refusal) |

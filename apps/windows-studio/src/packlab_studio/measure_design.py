@@ -1242,6 +1242,7 @@ def promotion_request(
                     "mesh_method": mesh_method,
                     "combine_method": part_record.get("method"),
                     "sources": [s.get("model_sha256") for s in part_record.get("sources", [])],
+                    "verification": part_record.get("verification", "GATE_PASSED"),
                 }
             ),
             source_input_digest=model.sha256,
@@ -1252,6 +1253,11 @@ def promotion_request(
             },
             point_count=len(model.points),
             triangle_count=0 if mesh_model.triangles is None else len(mesh_model.triangles),
+            verification=(
+                "OWNER_CONFIRMED_UNVERIFIED"
+                if part_record.get("verification") == "OWNER_CONFIRMED_UNVERIFIED"
+                else "GATE_PASSED"
+            ),
             limitations=(
                 surface_note,
                 "source digest is the merged part cloud, not the raw PackScans",

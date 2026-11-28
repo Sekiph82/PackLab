@@ -637,6 +637,12 @@ class ScenePanel(QWidget):
         if state.reason:
             lines.append(state.reason)
         record = state.record
+        if record and state.status == "refused" and record.get("override_refused"):
+            lines.append(
+                tr("Combine anyway is not offered: {reason}.").format(
+                    reason=record["override_refused"]
+                )
+            )
         if record and state.status == "refused" and record.get("override"):
             lines.append(tr("The two scans disagree, measured:"))
             lines.extend(disagreement_lines(record))
@@ -725,6 +731,15 @@ class ScenePanel(QWidget):
         status, record, _path = self.interior
         if merging:
             return [tr("Merging the body interior…")]
+        body = self.states.get("body")
+        if body is not None and owner_confirmed(body.record):
+            badge = [
+                tr("OWNER_CONFIRMED_UNVERIFIED Body: the interior sits on an unverified Body.")
+            ]
+            return badge + self._interior_lines_inner(status, record)
+        return self._interior_lines_inner(status, record)
+
+    def _interior_lines_inner(self, status: str, record: dict[str, Any] | None) -> list[str]:
         if status == "merged" and record is not None:
             lines = [
                 tr("Interior merged (rim alignment, overlap {overlap:.0%}).").format(
@@ -1001,6 +1016,9 @@ class ScenePanel(QWidget):
             except MultiScanAlignmentError as error:
                 record.update(status="refused", reason=str(error))
                 offer = getattr(error, "override_disagreements", None)
+                refusal = getattr(error, "override_refusal", None)
+                if refusal:
+                    record["override_refused"] = str(refusal)
                 if offer:
                     record["override"] = [
                         {key: _jsonable(value) for key, value in item.items()} for item in offer
@@ -1310,6 +1328,7 @@ class ScenePanel(QWidget):
                 "status": body.status,
                 "cloud_path": _rel(root, body.cloud),
                 "scale_key": _scale_key(body),
+                **({"verification": OWNER_CONFIRMED} if owner_confirmed(body.record) else {}),
             },
             "interior": {
                 "role": "body_interior",

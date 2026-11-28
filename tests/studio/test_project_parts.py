@@ -616,18 +616,52 @@ def test_owner_can_combine_anyway_only_when_offered_and_it_stays_unverified(app,
     panel.combine("body")
     _pump(app, lambda: outcomes)
     assert outcomes == ["refused"] and not panel.anyway_button.isVisibleTo(panel)
+    assert "Combine anyway is not offered" not in panel.details.text()  # no reason recorded
     assert panel.combine_anyway("body") is None and not asked  # not offered: no override
 
+    # The real core decides offers (tests/core); here the panel's wiring: a mid-body lug is
+    # no plausible same part, so the core records why no override is offered ...
     panel.aligner = align_part_pair
     panel.combine("body")
     _pump(app, lambda: len(outcomes) == 2, timeout=180)
+    record = project.part_merges()["body"]
+    assert outcomes[-1] == "refused" and not record.get("override") and record["override_refused"]
+    assert "Combine anyway is not offered: " in panel.details.text()
+    assert not panel.anyway_button.isVisibleTo(panel)
+
+    # ... and an offered refusal (stand-in for the core's offer on the same scans) shows the
+    # button; confirming merges through the core's owner-confirmed path result fields.
+    disagreement = {"kind": "patch", "area_mm2": 120.0, "z_mm": [70.0, 78.0]}
+
+    def offering(*scans, owner_confirmed=False):
+        if not owner_confirmed:
+            error = MultiScanAlignmentError("a 120 mm^2 patch of side wall has no counterpart")
+            error.override_disagreements = (disagreement,)
+            raise error
+        from dataclasses import replace
+
+        result = _genuine_result()
+        return replace(
+            result, verification="OWNER_CONFIRMED_UNVERIFIED", disagreements=(disagreement,)
+        )
+
+    def _genuine_result():
+        rng2 = np.random.default_rng(2)
+        from packlab_core.multiscan_alignment import ScanInput
+
+        up, fl = _jar(rng2, False), _jar(rng2, True)
+        return align_part_pair(ScanInput("u", up), ScanInput("f", fl))
+
+    panel.aligner = offering
+    panel.combine("body")
+    _pump(app, lambda: len(outcomes) == 3, timeout=180)
     record = project.part_merges()["body"]
     assert outcomes[-1] == "refused" and record["override"], record
     assert panel.anyway_button.isVisibleTo(panel)
     assert "The two scans disagree" in panel.details.text()
 
     panel.combine_anyway("body")
-    _pump(app, lambda: len(outcomes) == 3, timeout=180)
+    _pump(app, lambda: len(outcomes) == 4, timeout=180)
     assert outcomes[-1] == "combined" and asked and "patch" in asked[0]
     record = project.part_merges()["body"]
     assert owner_confirmed(record) and record["disagreements"] and record["owner_confirmed_at"]
@@ -641,3 +675,67 @@ def test_owner_can_combine_anyway_only_when_offered_and_it_stays_unverified(app,
         ref["evidence_class"] == "owner_confirmed_unverified_combine"
         for ref in scale.provenance.physical_references
     )
+    import uuid
+
+    isolation = md.isolate_in_mat_frame(model)
+    frame = md.build_frame(model, isolation, scale, project_id=str(uuid.uuid4()))
+    request = md.promotion_request(
+        project_id=frame.geometry.project_id,
+        model=model,
+        mesh_model=md.load_model(root / record["mesh_artifact_path"]),
+        isolation=isolation,
+        frame=frame,
+        actor_id="owner",
+        reason="test",
+        part_record=record,
+    )
+    manifest = request.lineage.reconstruction
+    assert manifest.verification == "OWNER_CONFIRMED_UNVERIFIED"  # structured, Scan Master
+    assert manifest.as_dict()["verification"] == "OWNER_CONFIRMED_UNVERIFIED"
+    verified = md.promotion_request(
+        project_id=frame.geometry.project_id,
+        model=model,
+        mesh_model=md.load_model(root / record["mesh_artifact_path"]),
+        isolation=isolation,
+        frame=frame,
+        actor_id="owner",
+        reason="test",
+        part_record={**record, "verification": "GATE_PASSED"},
+    )
+    assert verified.lineage.reconstruction.configuration_digest != manifest.configuration_digest
+
+
+def test_owner_confirmed_parts_carry_the_badge_into_placement_and_interior(app, project) -> None:
+    from packlab_studio.project_parts import OWNER_CONFIRMED, PartScan, PartState
+
+    rng = np.random.default_rng(9)
+    root = project.layout.root
+    cloud = root / "working/reconstruction/x/outputs/mvs/scene_dense.ply"
+    _build(root, "x", _jar(rng, False))
+    record = {"status": "combined", "verification": OWNER_CONFIRMED, "disagreements": []}
+    scan = PartScan("0" * 64, cloud, 0.0)
+    state = PartState("body", scan, scan, "combined", "", cloud, record, interior=scan)
+    panel = _panel(project, [])
+    source: dict = {}
+    panel._part_input("body", state, source)
+    assert source["verification"] == OWNER_CONFIRMED  # the placement record keeps it
+    placement = {"status": "placed", "sources": {"body": source}, "reason": ""}
+    panel.placement = ("refused", placement, ())
+    assert "OWNER_CONFIRMED_UNVERIFIED parts in this placement" not in " ".join(
+        panel._placement_lines(False)
+    )
+    graph = {
+        "components": [{"residuals": {}}, {"residuals": {}}],
+        "diagnostics": {"pair": {"status": "ok"}},
+        "relationships": [{"engaged_depth_mm": 1.0}],
+        "revision_id": "g" * 40,
+    }
+    panel.placement = ("placed", {**placement, "graph": graph}, ())
+    try:
+        lines = panel._placement_lines(False)
+    except (KeyError, TypeError):
+        lines = []
+    assert not lines or "OWNER_CONFIRMED_UNVERIFIED parts in this placement: Body" in lines[0]
+    panel.states = {"body": state}
+    panel.interior = ("none", None, None)
+    assert "OWNER_CONFIRMED_UNVERIFIED Body" in panel._interior_lines(False)[0]

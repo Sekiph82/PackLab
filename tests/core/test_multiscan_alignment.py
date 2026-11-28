@@ -6,6 +6,7 @@ placed on the mat at a random yaw/offset and seen through a random similarity (c
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 import numpy as np
@@ -988,41 +989,62 @@ def _override_offer(up, fl):
     return caught.value.override_disagreements
 
 
-def test_override_is_offered_only_for_agreement_refusals():
-    """Agreement gates on a determined pose: offered. Height, yaw between turns and a scale
-    difference beyond OVERRIDE_MAX_SCALE: never."""
+def _no_offer_reason(up, fl):
+    with pytest.raises(MultiScanAlignmentError) as caught:
+        align_part_pair(up, fl)
+    assert caught.value.override_disagreements is None
+    return caught.value.override_refusal or ""
+
+
+def test_override_is_never_offered_for_a_different_or_incomplete_part():
+    """Offered only when the disagreement is the size mat-contact reconstruction errors explain:
+    a mid-body lug, a missing end, a wrong height, a 3 mm larger neck or a 3 % size difference
+    each refuse with the reason."""
 
     def two_bosses(rng):
         height, faces = body(rng)
         faces["boss2"] = _lug(rng, 22, 24, 4.0, 30.0)
         return height, faces
 
-    offer = _override_offer(scan(two_bosses, False, 1)[0], scan(body, True, 2)[0])
-    assert offer and {item["kind"] for item in offer} <= {"coverage", "patch", "section", "scale"}
-    assert _override_offer(scan(body, False, 1)[0], scan(body, True, 2, h=70.0)[0]) is None
-    assert _override_offer(scan(oval, False, 1)[0], scan(oval, True, 2)[0]) is None  # yaw
-    assert (
-        _override_offer(scan(body, False, 1)[0], scan(body, True, 2, scale_error=1.03)[0]) is None
-    )
+    reason = _no_offer_reason(scan(two_bosses, False, 1)[0], scan(body, True, 2)[0])
+    assert "mid-body" in reason
+    assert "height" in _no_offer_reason(scan(body, False, 1)[0], scan(body, True, 2, h=70.0)[0])
+    assert _no_offer_reason(scan(oval, False, 1)[0], scan(oval, True, 2)[0])  # yaw
+    assert _no_offer_reason(
+        scan(body, False, 1)[0], scan(body, True, 2, scale_error=1.03)[0]
+    )  # 3 %: never offered
+    up = scan(oval, False, 1, paint=label)[0]
+    missing = scan(curtained, True, 2, paint=label, cut_top=8)[0]  # its base lost as well
+    reason = _no_offer_reason(up, missing)
+    assert "missing an end" in reason or "height" in reason
+    wide = scan(curtained, True, 2, paint=label, neck=3.0)[0]  # top 3 mm larger in radius
+    assert _no_offer_reason(up, wide)  # section beyond 2 mm, or the misfit it causes (RMSE)
 
 
-def curtained(rng):
+def curtained(rng, neck=-1.5):
     """Labelled flat oval as an upside-down scan sees it on the owner's real pair: the top
-    12 mm (on its mat) 1.5 mm smaller and an MVS curtain flaring 4 mm out at the tips below."""
+    12 mm (on its mat) ``neck`` mm off in radius (real: -1.4 to -1.6), an MVS curtain flaring
+    4 mm out at the tips below it, and a ledge underside 6 mm below the top that only this
+    scan sees (it faces the mat in the upright pose)."""
     height, faces = oval(rng)
     side = faces["side"]
     top = side[:, 2] > height - 12
-    side[top, 0] *= 30.0 / 31.5
-    side[top, 1] *= 15.5 / 17.0
+    side[top, 0] *= (31.5 + neck) / 31.5
+    side[top, 1] *= (17.0 + neck) / 17.0
     n = int(rng.density * 35 * np.radians(120) * 8)
     t = rng.uniform(-np.pi / 6, np.pi / 6, n) + np.pi * (rng.uniform(0, 1, n) < 0.5)
     z = rng.uniform(height - 20, height - 12, n)
     grow = 1 + 4 * (z - (height - 20)) / 8 / 31.5
     faces["curtain"] = np.c_[31.5 * grow * np.cos(t), 17.0 * grow * np.sin(t), z]
+    m = int(rng.density * np.pi * 31.5 * 17.0 * 0.2)
+    u, w = rng.uniform(0, 2 * np.pi, m), np.sqrt(rng.uniform(0.6, 0.8, m))
+    faces["ledge"] = np.c_[31.5 * w * np.cos(u), 17.0 * w * np.sin(u), np.full(m, height - 6)]
     return height, faces
 
 
 def test_owner_confirmed_merge_takes_the_top_from_the_upright_scan():
+    from packlab_core.multiscan_alignment import _section
+
     up, t_up = scan(oval, False, 1, paint=label)
     fl, t_fl = scan(curtained, True, 2, paint=label)
     offer = _override_offer(up, fl)
@@ -1031,12 +1053,37 @@ def test_owner_confirmed_merge_takes_the_top_from_the_upright_scan():
     _assert_recovered(result, (t_up, t_fl))
     assert result.verification == "OWNER_CONFIRMED_UNVERIFIED" and result.disagreements
     assert result.metric_status == METRIC_STATUS
-    assert any("OWNER_CONFIRMED_UNVERIFIED" in text for text in result.alignments[1].limitations)
-    from packlab_core.multiscan_alignment import _section
-
+    notes = result.alignments[1].limitations
+    assert any("OWNER_CONFIRMED_UNVERIFIED" in text for text in notes)
+    band = [float(v) for v in re.findall(r"above (\d+) mm .* below (\d+) mm", notes[1])[0]]
+    assert 30 <= band[0] < band[1] <= 70  # mid-body of the 100 mm part
     p, src = result.points, result.source_index
-    assert (src[p[:, 2] > 75] == 0).all()  # the top (the upside-down scan's mat side): upright
     body_width = _section(p, 50.0, 10.0)[1]
     assert _section(p, 84.0, 3.0)[1] < body_width + 1.0  # no curtain at the tips
     assert _section(p, 93.0, 3.0)[1] > 62.0  # upright top: 63 mm long axis, not 60
+    assert ((src == 1) & (np.abs(p[:, 2] - 94) < 0.6)).sum() > 30  # the one-scan ledge stays
     assert ((src == 1) & (p[:, 2] < 5)).sum() > 300  # base from the upside-down scan
+
+
+def test_reconstruction_manifest_carries_verification_as_a_field():
+    from packlab_core.reconstruction import ReconstructionBackendId, ReconstructionOutputManifest
+
+    def manifest(**extra):
+        return ReconstructionOutputManifest(
+            project_id="p",
+            reconstruction_revision="r",
+            backend_id=ReconstructionBackendId.COLMAP_OPENMVS,
+            backend_version="v",
+            backend_build="b",
+            backend_license="l",
+            configuration_digest="c",
+            source_input_digest="0" * 64,
+            camera_convention="world-to-camera",
+            **extra,
+        )
+
+    assert "verification" not in manifest().as_dict()  # verified sources keep their digests
+    forced = manifest(verification="OWNER_CONFIRMED_UNVERIFIED").as_dict()
+    assert forced["verification"] == "OWNER_CONFIRMED_UNVERIFIED"
+    with pytest.raises(ValueError):
+        manifest(verification="VERIFIED_BY_OWNER")
