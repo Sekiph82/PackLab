@@ -499,7 +499,14 @@ class MeasureDesignView(QWidget):
             if record is not None:  # combined part: already mm, scale from its source builds
                 note = self.results.text()
                 self._set_scale(md.part_combine_scale(model, record))
-                self.results.setText(f"{note}\n{self.results.text()}")
+                badge = (
+                    "\nOWNER_CONFIRMED_UNVERIFIED: this part was combined on the owner's "
+                    "confirmation although its scans disagree; a Scan Master or Design Model "
+                    "built from it stays unverified."
+                    if record.get("verification") == "OWNER_CONFIRMED_UNVERIFIED"
+                    else ""
+                )
+                self.results.setText(f"{note}\n{self.results.text()}{badge}")
             return "isolated"
 
         self._run("Isolate", action)

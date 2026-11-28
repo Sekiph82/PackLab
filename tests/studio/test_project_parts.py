@@ -27,8 +27,9 @@ from packlab_studio.shell import StudioMainWindow  # noqa: E402
 SCALE = lambda _model: (1.0, "synthetic_known_mm", 0.001)  # noqa: E731
 
 
-def _jar(rng: np.random.Generator, flipped: bool) -> np.ndarray:
-    """Jar body proxy (r 40, h 80 mm, side boss fixing yaw) on an A4 mat, in mm."""
+def _jar(rng: np.random.Generator, flipped: bool, lug: bool = False) -> np.ndarray:
+    """Jar body proxy (r 40, h 80 mm, side boss fixing yaw) on an A4 mat, in mm. ``lug``: a
+    second 22 x 24 x 4 mm lug opposite the boss (a feature only one scan of a pair has)."""
     d = 0.5  # points per mm^2
 
     def cyl(r, z0, z1):
@@ -53,6 +54,8 @@ def _jar(rng: np.random.Generator, flipped: bool) -> np.ndarray:
         return np.concatenate(faces)
 
     parts = [cyl(40, 0, 80), box(38.7, 44, -10, 10, 15, 45), disc(40, 0 if flipped else 80)]
+    if lug:
+        parts.append(box(38.7, 44, -11, 11, 30, 54) * [-1, 1, 1])
     obj = np.concatenate(parts)
     if flipped:
         obj = obj * [1, -1, -1] + [0, 0, 80]
@@ -584,3 +587,57 @@ def test_combine_records_scan_heights_and_shows_them_per_build(app, project) -> 
     assert [s["height_mm"] for s in sources] == [80.0, 72.0]
     assert panel.build_boxes["upright"].itemText(0).endswith("80.0 mm")
     assert panel.build_boxes["flipped"].itemText(0).endswith("72.0 mm")
+
+
+def test_owner_can_combine_anyway_only_when_offered_and_it_stays_unverified(app, project) -> None:
+    from packlab_core.multiscan_alignment import align_part_pair
+    from packlab_studio import measure_design as md
+    from packlab_studio.project_parts import owner_confirmed
+
+    rng = np.random.default_rng(8)
+    root = project.layout.root
+    entries = [
+        _entry(_build(root, "body-up", _jar(rng, False)), "body"),
+        _entry(_build(root, "body-flip", _jar(rng, True, lug=True)), "body_flipped"),
+    ]
+    asked: list[str] = []
+
+    def confirm(_parent, text):
+        asked.append(text)
+        return True
+
+    def plain_refusal(*_scans, **_kwargs):
+        raise MultiScanAlignmentError("height mismatch 70.0 vs 80.0 mm")
+
+    panel = _panel(project, entries, aligner=plain_refusal, confirm=confirm)
+    outcomes: list[str] = []
+    panel.combine_finished.connect(lambda part, outcome: outcomes.append(outcome))
+    panel.tree.setCurrentItem(panel.items["body"])
+    panel.combine("body")
+    _pump(app, lambda: outcomes)
+    assert outcomes == ["refused"] and not panel.anyway_button.isVisibleTo(panel)
+    assert panel.combine_anyway("body") is None and not asked  # not offered: no override
+
+    panel.aligner = align_part_pair
+    panel.combine("body")
+    _pump(app, lambda: len(outcomes) == 2, timeout=180)
+    record = project.part_merges()["body"]
+    assert outcomes[-1] == "refused" and record["override"], record
+    assert panel.anyway_button.isVisibleTo(panel)
+    assert "The two scans disagree" in panel.details.text()
+
+    panel.combine_anyway("body")
+    _pump(app, lambda: len(outcomes) == 3, timeout=180)
+    assert outcomes[-1] == "combined" and asked and "patch" in asked[0]
+    record = project.part_merges()["body"]
+    assert owner_confirmed(record) and record["disagreements"] and record["owner_confirmed_at"]
+    assert record["metric_status"] == "METRIC_UNVERIFIED"
+    assert "owner-confirmed, UNVERIFIED" in panel.items["body"].text(1)
+    assert "OWNER_CONFIRMED_UNVERIFIED" in panel.details.text()
+    model = md.load_model(root / record["artifact_path"])
+    scale = md.part_combine_scale(model, record)
+    assert "OWNER_CONFIRMED_UNVERIFIED" in scale.details
+    assert all(
+        ref["evidence_class"] == "owner_confirmed_unverified_combine"
+        for ref in scale.provenance.physical_references
+    )

@@ -977,3 +977,66 @@ def test_flipped_short_scan_of_a_different_top_is_refused():
     fl = scan(body, True, 2, density=0.2, cut_top=8)[0]
     with pytest.raises(MultiScanAlignmentError, match="section mismatch"):
         align_part_pair(up, fl)
+
+
+# ---------------------------------------------------------------- owner-confirmed override
+
+
+def _override_offer(up, fl):
+    with pytest.raises(MultiScanAlignmentError) as caught:
+        align_part_pair(up, fl)
+    return caught.value.override_disagreements
+
+
+def test_override_is_offered_only_for_agreement_refusals():
+    """Agreement gates on a determined pose: offered. Height, yaw between turns and a scale
+    difference beyond OVERRIDE_MAX_SCALE: never."""
+
+    def two_bosses(rng):
+        height, faces = body(rng)
+        faces["boss2"] = _lug(rng, 22, 24, 4.0, 30.0)
+        return height, faces
+
+    offer = _override_offer(scan(two_bosses, False, 1)[0], scan(body, True, 2)[0])
+    assert offer and {item["kind"] for item in offer} <= {"coverage", "patch", "section", "scale"}
+    assert _override_offer(scan(body, False, 1)[0], scan(body, True, 2, h=70.0)[0]) is None
+    assert _override_offer(scan(oval, False, 1)[0], scan(oval, True, 2)[0]) is None  # yaw
+    assert (
+        _override_offer(scan(body, False, 1)[0], scan(body, True, 2, scale_error=1.03)[0]) is None
+    )
+
+
+def curtained(rng):
+    """Labelled flat oval as an upside-down scan sees it on the owner's real pair: the top
+    12 mm (on its mat) 1.5 mm smaller and an MVS curtain flaring 4 mm out at the tips below."""
+    height, faces = oval(rng)
+    side = faces["side"]
+    top = side[:, 2] > height - 12
+    side[top, 0] *= 30.0 / 31.5
+    side[top, 1] *= 15.5 / 17.0
+    n = int(rng.density * 35 * np.radians(120) * 8)
+    t = rng.uniform(-np.pi / 6, np.pi / 6, n) + np.pi * (rng.uniform(0, 1, n) < 0.5)
+    z = rng.uniform(height - 20, height - 12, n)
+    grow = 1 + 4 * (z - (height - 20)) / 8 / 31.5
+    faces["curtain"] = np.c_[31.5 * grow * np.cos(t), 17.0 * grow * np.sin(t), z]
+    return height, faces
+
+
+def test_owner_confirmed_merge_takes_the_top_from_the_upright_scan():
+    up, t_up = scan(oval, False, 1, paint=label)
+    fl, t_fl = scan(curtained, True, 2, paint=label)
+    offer = _override_offer(up, fl)
+    assert offer, "a same-part pair refused on agreement only must offer the override"
+    result = align_part_pair(up, fl, owner_confirmed=True)
+    _assert_recovered(result, (t_up, t_fl))
+    assert result.verification == "OWNER_CONFIRMED_UNVERIFIED" and result.disagreements
+    assert result.metric_status == METRIC_STATUS
+    assert any("OWNER_CONFIRMED_UNVERIFIED" in text for text in result.alignments[1].limitations)
+    from packlab_core.multiscan_alignment import _section
+
+    p, src = result.points, result.source_index
+    assert (src[p[:, 2] > 75] == 0).all()  # the top (the upside-down scan's mat side): upright
+    body_width = _section(p, 50.0, 10.0)[1]
+    assert _section(p, 84.0, 3.0)[1] < body_width + 1.0  # no curtain at the tips
+    assert _section(p, 93.0, 3.0)[1] > 62.0  # upright top: 63 mm long axis, not 60
+    assert ((src == 1) & (p[:, 2] < 5)).sum() > 300  # base from the upside-down scan

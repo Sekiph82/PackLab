@@ -228,6 +228,82 @@ The smaller flipped closure is therefore consistent across about 27 depth maps. 
 - **Actionable:** caliper the closure. Which closure size is true is a physical question, owner gate.
 - **Gates unchanged.** No gate was loosened and no code changed in this step.
 
+## 3c. Owner-confirmed override (product decision, PR #47)
+
+The automatic gate is unchanged. When `align_part_pair` refuses, it may offer an override.
+
+**When the override is offered.** All three conditions must hold:
+- Every failure is an agreement gate: coverage, uncovered patch, section, or scale. Scale must be within `OVERRIDE_MAX_SCALE` (2 %).
+- The pose is determined:
+  - RMSE is within its limit, and the wall profile pins the turn; or
+  - the wall profile has rivals and the printed label picks one under `_colour_yaw`'s significance rules (6 sigma peak; margin max(0.1, 4 sigma)).
+- With a label pick, or with the coverage plateau as the only yaw failure, the yaw plateau is re-measured on the mean slice coverage. Slices the scans disagree on at every yaw (curtain, shrunken closure) otherwise flatten the worst-slice plateau. The plateau must still be within `yaw_probe_deg`.
+
+**When it is never offered:**
+- yaw undetermined between turns;
+- height mismatch / missing end;
+- too little overlap;
+- free-space conflict (wrong role);
+- RMSE;
+- scale over 2 %;
+- unknown roles;
+- no mat.
+
+**What the caller gets.** `MultiScanAlignmentError.override_disagreements` holds the measured list: kind, heights in mm, offsets in mm, patch area in mm^2. `disagreement_text` puts each item in plain words.
+
+**The merge (`align_part_pair(..., owner_confirmed=True)`):**
+- Split band: the three 5 mm slices around the highest smoothed slice coverage, derived from the data.
+- The upright scan supplies everything above the band and the upside-down scan everything below; both overlap inside the band.
+- Points outside the other scan's footprint are dropped.
+- Result fields: `verification = OWNER_CONFIRMED_UNVERIFIED`, `disagreements`, and a limitation naming the split. `metric_status` stays METRIC_UNVERIFIED.
+
+**In Studio:**
+- A refused record keeps `override`. The panel lists the disagreements and shows "Combine anyway - I confirm both scans are the same part". A confirmation dialog repeats the disagreements and explains the result.
+- The stored record keeps `status: combined`, so existing staleness and geometry flows still work. It also stores `verification: OWNER_CONFIRMED_UNVERIFIED`, `disagreements`, `owner_confirmed_at` and `confirmation`.
+- The tree shows "combined - owner-confirmed, UNVERIFIED".
+- Measure & Design: the scale provenance uses evidence class `owner_confirmed_unverified_combine`, and the details are prefixed OWNER_CONFIRMED_UNVERIFIED. Isolate results show the badge.
+- Scan Master promotion: the reconstruction manifest lists the OWNER_CONFIRMED_UNVERIFIED limitation.
+- Placement: sources carry `verification`, and the placement panel names unverified parts.
+
+### Real pair upF + dnH through the override path (read in place)
+
+**Offered disagreements:**
+- section at 166 mm: the upside-down wall lies 1.6 mm inside (29.1 x 43.2 vs 31.8 x 44.4 mm; tolerance 0.9);
+- coverage under 2 mm at 6-36, 46-51 and 142-167 mm (worst 51 %);
+- a 429 mm^2 uncovered patch at 110-167 mm.
+
+**Pose:**
+- The label picks the half turn at 7.1 sigma (needs 6), with margin 0.175 (needs 0.10).
+- Yaw plateau on mean coverage: +-2.5 deg.
+- RMSE 0.697 mm.
+
+**Merge:**
+- Upright above 71 mm, upside-down below 86 mm. The band agrees at 97 % within 2 mm.
+- 40,321 points: 19,849 from upF and 20,472 from dnH.
+- Heights 173.2 / 173.2 mm; top at z p99.9 174.1 mm.
+- Surface coverage: side, top and bottom all 1.0.
+
+Calipers of the merged part (mm):
+
+| z | caliper |
+|---|---|
+| 10 | 34.0 x 52.5 |
+| 40 | 34.6 x 57.5 |
+| 80 | 33.6 x 64.2 |
+| 120 | 34.8 x 63.6 |
+| 145 | 32.4 x 62.0 |
+| 150 | 28.4 x 42.2 |
+| 155 (neck) | 27.9 x 39.1 (no curtain; was 55.6) |
+| 160 | 29.7 x 42.7 |
+| 165 (closure) | 31.8 x 42.9 |
+| 169 | 30.7 x 44.3 |
+
+The closure and shoulder come from upF.
+
+upF + dnF is not offered: it has a height mismatch (missing end).
+
+**Automatic behaviour is unchanged.** 902 probe verdicts were compared with V03 (old suites, V02 fresh probes, V01 gate/thin probes) and 0 changed. The role, placement and zone outputs are identical as well.
+
 ## 4. Results V03 (final code)
 
 | pair | result | reasons (all printed in the refusal) |
