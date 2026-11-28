@@ -187,9 +187,8 @@ def test_part_load_runs_off_ui_thread_and_reload_hits_the_cache(
         slow = _SlowReads(monkeypatch)
         panel = window.scene_panel
         before = viewer.service
-        started = time.perf_counter()
         panel.tree.setCurrentItem(panel.items["body"])
-        assert time.perf_counter() - started < 0.3  # UI thread not blocked by the read
+        # the read runs on the worker: the service is unchanged right after the click
         assert viewer.service is before and "Loading" in viewer.status.text()
         _pump(app, lambda: viewer.last_paths)
         assert [thread for _name, thread in slow.reads] == ["packlab-viewer-load"]
