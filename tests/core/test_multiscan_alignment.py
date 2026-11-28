@@ -387,7 +387,7 @@ def test_density_sweep_never_accepts_a_wrong_yaw(shape, density, seeds):
     try:
         result = align_part_pair(up, fl)
     except MultiScanAlignmentError as error:
-        assert density < 0.5 and "yaw undetermined on a non-symmetric part" in str(error)
+        assert density < 0.5 and "yaw undetermined" in str(error)
         return
     yaw, tilt, shift = _yaw_tilt_shift(result, (t_up, t_fl))
     pair = result.alignments[1]
@@ -791,20 +791,103 @@ def test_sparse_outward_artifacts_do_not_replace_the_wall():
     assert (wedge & (radius > 41.5)).sum() < 0.1 * wedge.sum()
 
 
-def lumpy_top(rng):
-    """Body whose top 12 mm of wall carries 1.2 mm radial lumps: what MVS makes of a surface
-    seen only at grazing angles (the owner's real flipped shoulder), a noisy patch."""
-    height, faces = body(rng)
-    side = faces["side"]
-    top = side[:, 2] > height - 12
-    side[top, :2] *= 1 + rng.rng.normal(0, 1.2, (top.sum(), 1)) / 40
-    return height, faces
+def _lug(rng, width, height, proud, z0):
+    """A ``width`` x ``height`` mm lug ``proud`` mm out of the r 40 wall, opposite the boss."""
+    w = width / 2
+    return np.r_[
+        _rect(rng, 40 + proud, -w, w, z0, z0 + height),
+        _wall(rng, -w, 38.7, 40 + proud, z0, z0 + height),
+        _wall(rng, w, 38.7, 40 + proud, z0, z0 + height),
+        _cap(rng, 39, 40 + proud, -w, w, z0),
+        _cap(rng, 39, 40 + proud, -w, w, z0 + height),
+    ] * [-1, 1, 1]
 
 
-def test_noisy_wall_patch_still_combines():
-    (up, t_up), (fl, t_fl) = scan(body, False, 1), scan(lumpy_top, True, 2)
-    result = align_part_pair(up, fl)
-    _assert_recovered(result, (t_up, t_fl))
+def lugged(width, height, proud, z0=40.0):
+    def shape(rng):
+        h, faces = body(rng)
+        faces["lug"] = _lug(rng, width, height, proud, z0)
+        return h, faces
+
+    shape.__name__ = "lugged"
+    return shape
+
+
+def fuzzed(sigma):
+    """Jar body whose wall opposite the boss (z 25-70) carries ``sigma`` mm MVS fuzz."""
+
+    def shape(rng):
+        h, faces = body(rng)
+        side = faces["side"]
+        at = (side[:, 0] < -30) & (side[:, 2] > 25) & (side[:, 2] < 70)
+        side[at] += rng.rng.normal(0, sigma, (at.sum(), 3))
+        return h, faces
+
+    shape.__name__ = "fuzzed"
+    return shape
+
+
+def test_fuzz_in_one_scan_does_not_hide_a_lug_in_the_other():
+    """Noise in one scan must never loosen the check: a 10 x 20 x 4 mm lug opposite a fuzzy
+    patch of the other scan is still refused (V02 widened the tolerance with the noise)."""
+    for sigma in (0.6, 0.9):
+        with pytest.raises(MultiScanAlignmentError):
+            align_part_pair(scan(fuzzed(sigma), False, 1)[0], scan(lugged(10, 20, 4.0), True, 2)[0])
+
+
+def test_miss_patch_reads_true_area():
+    """A one-scan 10 x 20 mm lug face (+ two 3 mm side walls) reads about its real area."""
+    from packlab_core.multiscan_alignment import _apply, _miss_patch, _nearest, _prepare
+
+    up, t_up = scan(body, False, 1)
+    fl, t_fl = scan(lugged(10, 20, 3.0), True, 2)
+    limits = AlignmentThresholds()
+    ref, part = _prepare(up, limits), _prepare(fl, limits)
+    # Ground-truth pose: flipped scan's mat frame -> reference mat frame.
+    truth = ref.frame @ t_up @ np.linalg.inv(t_fl) @ np.linalg.inv(part.frame)
+    truth[:3, :3] /= np.cbrt(np.linalg.det(truth[:3, :3]))
+    area = _miss_patch(part, truth, ref, _nearest(ref.shell), limits)
+    assert 150 < area < 380, area
+    assert _apply(truth, part.shell).shape == part.shell.shape
+
+
+def waisted(bump):
+    """r 40 body narrowing to r 34 at z 40-50 through cones (z 30-40, z 50-60). ``bump``: a
+    4 mm wide bump that far out on the upper cone, which faces the mat when flipped."""
+
+    def shape(rng):
+        h, faces = body(rng)
+        side = faces["side"]
+        side = side[(side[:, 2] < 30) | (side[:, 2] > 60)]
+
+        def cone(z0, z1, r0, r1, a0=0.0, a1=2 * np.pi, out=0.0):
+            n = int(rng.density * 37 * (a1 - a0) * (z1 - z0) * 1.1)
+            a, z = rng.uniform(a0, a1, n), rng.uniform(z0, z1, n)
+            r = r0 + (r1 - r0) * (z - z0) / (z1 - z0) + out
+            return np.c_[r * np.cos(a), r * np.sin(a), z]
+
+        pieces = [side, cone(30, 40, 40, 34), _cyl(rng, 34, 40, 50)]
+        if bump:
+            w = 4.0 / 37
+            pieces += [
+                cone(50, 60, 34, 40, 0, np.pi - w),
+                cone(50, 60, 34, 40, np.pi + w, 2 * np.pi),
+                cone(51, 59, 34.6, 39.4, np.pi - w, np.pi + w, out=bump),
+            ]
+        else:
+            pieces.append(cone(50, 60, 34, 40))
+        faces["side"] = np.r_[tuple(pieces)]
+        return h, faces
+
+    shape.__name__ = "waisted"
+    return shape
+
+
+def test_bump_on_a_mat_facing_slope_is_refused():
+    """The upright scan sees a 4 mm bump on a slope the flipped scan sees facing the mat; the
+    flipped (plain) slope still has to account for it."""
+    with pytest.raises(MultiScanAlignmentError):
+        align_part_pair(scan(waisted(4.5), False, 1)[0], scan(waisted(0.0), True, 2)[0])
 
 
 def modified(**change):
@@ -872,28 +955,19 @@ def test_extra_boss_in_one_scan_only_is_refused():
         align_part_pair(scan(two_bosses, False, 1)[0], scan(body, True, 2)[0])
 
 
-def test_surface_only_one_scan_saw_survives_the_merge():
-    """A neck-ring underside (r 40-44 facing the mat at z 70) is seen by the flipped scan only;
-    the merge keeps it."""
+def test_merge_keeps_one_scan_surfaces_inside_the_other_footprint():
+    """Merge filter: a neck-ring underside one scan alone saw (r 40-44, inside the other scan's
+    footprint) stays; mat glare 15-25 mm outside the other scan's footprint goes."""
+    from packlab_core.multiscan_alignment import FOOTPRINT_CELL_MM, _in_footprint
 
-    def ringed(under):
-        def shape(rng):
-            height, faces = body(rng)
-            faces["ring"] = np.r_[_cyl(rng, 44, 70, 72), _disc(rng, 40, 44, 72)]
-            if under:
-                faces["under"] = _disc(rng, 40, 44, 70)
-            return height, faces
-
-        shape.__name__ = "ringed"
-        return shape
-
-    up, fl = scan(ringed(False), False, 1)[0], scan(ringed(True), True, 2)[0]
-    result = align_part_pair(up, fl)
-    p = result.points
-    centre = np.median(p[(p[:, 2] > 20) & (p[:, 2] < 60), :2], axis=0)
-    radius = np.linalg.norm(p[:, :2] - centre, axis=1)
-    under = (np.abs(p[:, 2] - 70) < 0.6) & (radius > 40.8) & (radius < 43.5)
-    assert (under & (result.source_index == 1)).sum() > 50
+    rng = _Gen(np.random.default_rng(3), 0.5)
+    other = np.r_[_cyl(rng, 44, 0, 80), _disc(rng, 0, 44, 80)]  # the other scan's object points
+    underside = _disc(rng, 40, 44, 70)
+    a = rng.uniform(0, 2 * np.pi, 200)
+    glare = np.c_[60 * np.cos(a), 60 * np.sin(a), rng.uniform(1, 4, 200)]
+    inside = _in_footprint(other, FOOTPRINT_CELL_MM)
+    assert inside(underside).all()
+    assert not inside(glare).any()
 
 
 def test_flipped_short_scan_of_a_different_top_is_refused():

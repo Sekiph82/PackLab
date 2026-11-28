@@ -8,12 +8,9 @@ and off-mat clutter; refuses when nothing stands on the mat), minus a flat white
 on the mat around its foot. Outer shell =
 near-vertical points at the outer radius of their 5 degree x 5 mm cell (caps and interior surfaces
 such as a closure recess are seen by one scan only and are never compared), after sparse MVS
-strays (glare fans, spikes, curtains) are dropped. Acceptance coverage and sections tolerate
-each scan's own measured surface noise (``_surface_noise``): clean walls keep the fixed
-tolerances, noisy real MVS walls get proportionally wider ones; a connected patch of wall
-without counterpart (``_miss_patch``) is refused however small its slice share. Pose search
-ranks by a low slice quantile, not the worst slice; the merge leaves out points outside the
-other scan's footprint (PL-0483 real-pair root cause,
+strays (glare fans, tip spikes, curtains: ``_dense``) are dropped. A connected wall patch
+without counterpart (``_miss_patch``, true area) is refused however small its slice share; the
+merge leaves out points outside the other scan's footprint (PL-0483, see
 coordination/sessions/M18-C001/PL-0483_REAL_PAIR_ROOT_CAUSE_V01.md).
 
 Registration to the reference (first) scan: 180 degree flip about a horizontal axis from the
@@ -144,7 +141,6 @@ class _Part:
     colors: np.ndarray | None = None  # per ``points`` row, [0, 1]
     scale_uncertainty: float = 0.0  # relative, from ScanInput
     upside_down: bool | None = None  # ScanInput.flipped (capture role)
-    noise: np.ndarray | None = None  # per shell point surface noise, mm (_surface_noise)
 
 
 @dataclass(frozen=True)
@@ -496,47 +492,23 @@ def _part_top(points: np.ndarray) -> float:
 
 
 SPARSE_SHARE = 0.25  # of the wall's median neighbour count; less is an MVS stray
-NOISE_RADIUS_SPACINGS = 2.5  # local plane fit radius (at least 3 mm)
-NOISE_SMOOTH = 64  # neighbours whose median local noise is the point's noise
-NOISE_COVERAGE_K = 5.0  # coverage distance >= this x (own + other surface noise)
-NOISE_SECTION_K = 1.0  # section radius tolerance += this x (own + other surface noise)
-FACING_MAT = 0.3  # outward normal z below -this: a surface facing the mat (seen from below)
-# Largest wall patch (mm^2) one scan may have without counterpart: synthetic genuine pairs
-# <= 11 (d >= 0.2), the owner's real pairs 15-27; 4 mm lugs 31-117.
-MISS_PATCH_MM2 = 30.0
+# Largest wall patch (true area, mm^2) one scan may have without counterpart (and at least
+# 40 spacings^2): synthetic genuine pairs read <= 14 (dense), <= 53 (d 0.2, spacing 1.2).
+MISS_PATCH_MM2 = 40.0
 
 
 def _dense(points: np.ndarray, spacing: float, voxel: float) -> np.ndarray:
     """Mask of points on a surface: within r = max(2.5 mm, 3 spacings) at least
     ``SPARSE_SHARE`` of the median neighbour count there (relative, so sparse scans and short
     bands keep their walls). The owner's real scans carry glare fans, tip spikes and curtains
-    under a downward-facing shoulder at a few points per 3 mm; their walls hold ~28."""
+    at a few points per 3 mm; their walls hold ~28."""
 
     radius = max(2.5, 3.0 * max(spacing, voxel))
     distance = _nearest(points)(points, min(48, len(points)))[1]
     count = (distance < radius).sum(axis=1)
+    if np.median(count) < 12:  # too few neighbours to tell a stray from sampling noise
+        return np.ones(len(points), dtype=bool)
     return np.asarray(count >= SPARSE_SHARE * np.median(count))
-
-
-def _surface_noise(shell: np.ndarray, spacing: float) -> np.ndarray:
-    """Per shell point surface noise (mm): rms distance of its neighbours (within max(3 mm,
-    2.5 spacings)) from their least-squares plane, then the median over its ``NOISE_SMOOTH``
-    nearest points. The median keeps it a property of the surface patch: a feature's edge (a
-    thin line of high plane residual) does not raise it, a noisy patch (real MVS fuzz at oval
-    tips, a shoulder curtain) does. Synthetic proxies: 0.09-0.13; owner's real scans: ~0.35,
-    0.8-1.0 where the two real builds disagree."""
-
-    radius = max(3.0, NOISE_RADIUS_SPACINGS * spacing)
-    found, distance = _nearest(shell)(shell, min(32, len(shell)))
-    near = (distance < radius)[..., None]
-    count = np.maximum(near.sum(axis=1), 1)
-    centre = (shell[found] * near).sum(axis=1) / count
-    offset = (shell[found] - centre[:, None]) * near
-    smallest = np.linalg.eigvalsh(np.einsum("nki,nkj->nij", offset, offset))[:, 0]
-    sigma = np.sqrt(np.maximum(smallest, 0.0) / count[:, 0])
-    return np.asarray(
-        np.median(sigma[_nearest(shell)(shell, min(NOISE_SMOOTH, len(shell)))[0]], axis=1)
-    )
 
 
 def _shell(
@@ -547,7 +519,7 @@ def _shell(
     cap remnants). No angular grid, so the set does not depend on the mat frame's x axis.
 
     Sparse points are dropped first (``_dense``): "outermost" otherwise lets MVS glare fans,
-    tip spikes and overhang curtains outside the part replace its real wall.
+    tip spikes and curtains outside the part replace its real wall.
     """
 
     band = points[(points[:, 2] > limits.mat_margin_mm + 2) & (points[:, 2] < height - 2)]
@@ -615,7 +587,6 @@ def _prepare(scan: ScanInput, limits: AlignmentThresholds) -> _Part:
         colors,
         float(scan.scale_uncertainty or 0.0),
         scan.flipped,
-        _surface_noise(shell, spacing),
     )
 
 
@@ -658,45 +629,16 @@ def _icp(
 
 
 def _score(
-    source: _Part,
-    matrix: np.ndarray,
-    target: _Part,
-    query: Query,
-    limits: AlignmentThresholds,
-    noisy: bool = False,
+    source: _Part, matrix: np.ndarray, target: _Part, query: Query, limits: AlignmentThresholds
 ) -> tuple[float, float]:
-    """(worst slice coverage over both directions, worse point-to-plane RMSE) on outer shells.
-    ``noisy``: the acceptance coverage (see ``_slices``); pose search keeps the fixed distance,
-    whose sharper optimum pins yaw and contact height."""
+    """(worst slice coverage over both directions, worse point-to-plane RMSE) on outer shells."""
 
-    slices, rmse, _ = _slices(source, matrix, target, query, limits, noisy)
-    return _worst(slices, noisy), rmse
-
-
-POSE_QUANTILE = 20.0  # percent: pose search ranks by this slice quantile, the gate by the min
-
-
-def _worst(slices: np.ndarray, gate: bool) -> float:
-    """Gate: the worst slice. Pose search: the ``POSE_QUANTILE`` slice, so a few slices one scan
-    saw badly (a real flipped shoulder curtain at 0.5-0.6 for any yaw) cannot flatten the
-    yaw / contact optimum the other slices pin."""
-
-    if not len(slices):
-        return 0.0
-    return float(slices.min() if gate else np.percentile(slices, POSE_QUANTILE))
-
-
-def _noise(part: _Part) -> np.ndarray:
-    return np.zeros(len(part.shell)) if part.noise is None else part.noise
+    slices, rmse, _ = _slices(source, matrix, target, query, limits)
+    return (float(slices.min()) if len(slices) else 0.0), rmse
 
 
 def _slices(
-    source: _Part,
-    matrix: np.ndarray,
-    target: _Part,
-    query: Query,
-    limits: AlignmentThresholds,
-    noisy: bool = False,
+    source: _Part, matrix: np.ndarray, target: _Part, query: Query, limits: AlignmentThresholds
 ) -> tuple[np.ndarray, float, int]:
     """Per wall slice: min of both coverage directions; worse RMSE; fewest points in a slice."""
 
@@ -714,13 +656,6 @@ def _slices(
     found_ab, d_ab, found_ba, d_ba = found_ab[:, 0], dist_ab[:, 0], found_ba[:, 0], dist_ba[:, 0]
     # The other scan "has data here" when 3 of its points are near (one stray point is not).
     near_ab, near_ba = dist_ab[:, 2], dist_ba[:, 2]
-    # noisy: a point is covered within the fixed distance, or within NOISE_COVERAGE_K x the two
-    # scans' surface noise there when wider (real MVS walls; clean walls keep the fixed one).
-    noise_s, noise_t = (
-        (_noise(source), _noise(target)) if noisy else (source.shell[:, 0] * 0, tgt[:, 0] * 0)
-    )
-    tol_ab = np.maximum(limits.max_distance_mm, NOISE_COVERAGE_K * (noise_s + noise_t[found_ab]))
-    tol_ba = np.maximum(limits.max_distance_mm, NOISE_COVERAGE_K * (noise_t + noise_s[found_ba]))
     coverage: list[float] = []
     counts: list[int] = []
     for start, stop in zip(edges[:-1], edges[1:], strict=True):
@@ -735,8 +670,8 @@ def _slices(
         counts.append(int(min(in_a.sum(), in_b.sum())))
         coverage.append(
             min(
-                float((d_ab[in_a] < tol_ab[in_a]).mean()),
-                float((d_ba[in_b] < tol_ba[in_b]).mean()),
+                float((d_ab[in_a] < limits.max_distance_mm).mean()),
+                float((d_ba[in_b] < limits.max_distance_mm).mean()),
             )
         )
     slices = np.array(coverage)
@@ -753,74 +688,45 @@ def _slices(
     return slices[~np.isnan(slices)], rmse, min(counts)
 
 
-def _outward(points: np.ndarray, normals: np.ndarray) -> np.ndarray:
-    rel = points[:, :2] - _centre(points)
-    sign = np.where(np.einsum("ij,ij->i", normals[:, :2], rel) < 0, -1.0, 1.0)
-    return np.asarray(normals * sign[:, None])
+def _point_area(points: np.ndarray, spacing: float) -> np.ndarray:
+    """Surface area each point stands for (mm^2): pi r^2 over its neighbour count within r =
+    max(3 mm, 2.5 spacings), from the local density (a 200 mm^2 face sums to ~200)."""
+
+    radius = max(3.0, 2.5 * spacing)
+    distance = _nearest(points)(points, min(64, len(points)))[1]
+    return np.asarray(np.pi * radius**2 / np.maximum((distance < radius).sum(axis=1), 1))
 
 
 def _miss_patch(
     source: _Part, matrix: np.ndarray, target: _Part, query: Query, limits: AlignmentThresholds
 ) -> float:
-    """Largest connected patch (mm^2) of wall points, either scan, with the other scan's wall
-    nearby (within 3 x the distance) but not within the noise-aware tolerance of ``_slices``.
-    MVS noise misses scatter; a feature one scan lacks (lug, boss) misses as a patch, which the
-    slice share hides when it fills under 10 % of every slice. Not counted: points where either
-    surface faces the mat (outward normal below -``FACING_MAT``) in the capture of the scan the
-    point comes from, a surface it saw from below at grazing angles (the owner's flipped
-    shoulder curtain)."""
+    """Largest connected patch (true area, mm^2) of either scan's wall that has the other
+    scan's wall nearby (3 x the coverage distance) but not within the coverage distance. Noise
+    misses scatter; a feature one scan lacks (lug, rim, bump) misses as a patch, which the slice
+    share hides when it fills under 10 % of every slice."""
 
     import open3d as o3d
 
-    rotation = matrix[:3, :3]
     moved, tgt = _apply(matrix, source.shell), target.shell
-    n_source = _outward(source.shell, source.normals)  # source frame
-    n_target = _outward(tgt, target.normals)  # target frame
-    found_ab, dist_ab = query(moved, 3)
-    found_ba, dist_ba = _nearest(moved)(tgt, 3)
-    noise_s, noise_t = _noise(source), _noise(target)
+    _, dist_ab = query(moved, 3)
+    _, dist_ba = _nearest(moved)(tgt, 3)
     lo = max(np.percentile(moved[:, 2], 1), np.percentile(tgt[:, 2], 1)) + 1.0
     hi = min(np.percentile(moved[:, 2], 99), np.percentile(tgt[:, 2], 99)) - 1.0
     step = max(limits.spacing_mm, limits.voxel_mm)
     largest = 0.0
-    # (points in target frame, distances, own noise, other noise, NN, own n_z, NN's n_z), both
-    # normals' z taken in the capture frame of the scan the points come from
-    for points, distance, own, other, found, own_z, other_z in (
-        (
-            moved,
-            dist_ab,
-            noise_s,
-            noise_t,
-            found_ab,
-            n_source[:, 2],
-            (n_target @ rotation)[found_ab[:, 0], 2],
-        ),
-        (
-            tgt,
-            dist_ba,
-            noise_t,
-            noise_s,
-            found_ba,
-            n_target[:, 2],
-            (n_source @ rotation.T)[found_ba[:, 0], 2],
-        ),
-    ):
-        tolerance = np.maximum(
-            limits.max_distance_mm, NOISE_COVERAGE_K * (own + other[found[:, 0]])
-        )
+    for points, distance in ((moved, dist_ab), (tgt, dist_ba)):
         miss = (
             (distance[:, 2] < 3 * limits.max_distance_mm)
-            & (distance[:, 0] >= tolerance)
+            & (distance[:, 0] >= limits.max_distance_mm)
             & (points[:, 2] >= lo)
             & (points[:, 2] <= hi)
-            & (own_z >= -FACING_MAT)
-            & (other_z >= -FACING_MAT)
         )
         if miss.sum() < 2:
             continue
+        area = _point_area(points, step)[miss]
         cloud = o3d.geometry.PointCloud(o3d.utility.Vector3dVector(points[miss]))
         labels = np.asarray(cloud.cluster_dbscan(eps=max(3.0, 2.5 * step), min_points=1))
-        largest = max(largest, float(np.bincount(labels).max()) * step * step)
+        largest = max(largest, float(np.bincount(labels, weights=area).max()))
     return largest
 
 
@@ -971,20 +877,7 @@ def _colour_yaw(
     """
 
     best = max(coarse, key=lambda pose: (pose.coverage, -pose.rmse))
-    # Twins: coverage within 0.05, or a turn the wall profile cannot tell apart (real noisy
-    # ovals: the half turn lost 0.06 coverage yet fits the profile as well as the best).
-    rivals = _yaw_rivals(target, source, best.matrix, limits)
-
-    def turn_of(pose: _Pose) -> float:
-        rel = pose.matrix[:3, :3] @ best.matrix[:3, :3].T
-        return float(np.degrees(np.arctan2(rel[1, 0], rel[0, 0]))) % 360
-
-    twins = [
-        pose
-        for pose in coarse
-        if pose.coverage >= best.coverage - 0.05
-        or any(min(abs(turn_of(pose) - r), 360 - abs(turn_of(pose) - r)) <= 20 for r in rivals)
-    ]
+    twins = [pose for pose in coarse if pose.coverage >= best.coverage - 0.05]
     turns = [
         float(np.degrees(np.arctan2(*(pose.matrix[:3, :3] @ best.matrix[:3, :3].T)[[1, 0], 0])))
         for pose in twins
@@ -1040,7 +933,7 @@ def _yaw_sweep_fine(
         slices, rmse, count = _slices(
             source, _yaw(np.radians(float(t)), centre) @ pose.matrix, target, query, limits
         )
-        scores.append((_worst(slices, False), rmse))
+        scores.append(((float(slices.min()) if len(slices) else 0.0), rmse))
         fewest = max(fewest, count) if t == 0 else fewest
     coverage = np.array([c for c, _ in scores])
     best = float(coverage.max())
@@ -1198,22 +1091,18 @@ def _dimension_failures(
     failures = []
     ratio = limits.dimension_tolerance_ratio
     tolerance = max(limits.height_tolerance_mm, ratio * reference.height)
-    mine_wall, their_wall = reference.shell, other.shell
-    moved = _apply(matrix, their_wall)
-    mine_noise, their_noise = _noise(reference), _noise(other)
+    moved = _apply(matrix, other.shell)
     valid = seen_mine = seen_theirs = 0
     half = max(2.0, limits.slice_mm / 2.5)
     # Bands span both walls' real overlap: a flipped scan that lost its free end lacks the
     # reference's bottom, not its top (min height would leave its top band unchecked).
-    lower = max(np.percentile(mine_wall[:, 2], 1), np.percentile(moved[:, 2], 1)) + half
-    upper = min(np.percentile(mine_wall[:, 2], 99), np.percentile(moved[:, 2], 99)) - half
+    lower = max(np.percentile(reference.shell[:, 2], 1), np.percentile(moved[:, 2], 1)) + half
+    upper = min(np.percentile(reference.shell[:, 2], 99), np.percentile(moved[:, 2], 99)) - half
     heights = np.linspace(lower, upper, PROFILE_BANDS) if upper > lower else np.full(1, upper)
     sections: list[tuple[float, str]] = []
     for z in heights:
-        at = np.abs(mine_wall[:, 2] - z) < half
-        mine = mine_wall[at]
-        near = np.abs(moved[:, 2] - z) < half
-        theirs = moved[near]
+        mine = reference.shell[np.abs(reference.shell[:, 2] - z) < half]
+        theirs = moved[np.abs(moved[:, 2] - z) < half]
         seen_mine += int(len(mine) >= 15)
         seen_theirs += int(len(theirs) >= 15)
         if len(mine) < 15 or len(theirs) < 15:
@@ -1224,8 +1113,6 @@ def _dimension_failures(
         valid += 1
         # radius tolerance: half the diameter one, + half a spacing for patchy sampled walls
         allowed = max(limits.width_tolerance_mm, ratio * 2 * radius) / 2 + 0.5 * limits.spacing_mm
-        # + the band's surface noise: 0.1-0.3 mm on clean walls, ~0.7 on real MVS walls
-        allowed += NOISE_SECTION_K * float(np.median(mine_noise[at]) + np.median(their_noise[near]))
         if abs(offset) > allowed:
             a, b = _section(mine, z, half), _section(theirs, z, half)
             sections.append(
@@ -1464,17 +1351,28 @@ def _gate(
         failures.append(f"rmse_mm {pose.rmse:.3g} > {limits.max_rmse_mm}")
     step = max(limits.spacing_mm, limits.voxel_mm)
     patch = _miss_patch(other, pose.matrix, reference, query, limits)
-    if patch > max(MISS_PATCH_MM2, 8 * step * step):
+    if patch > max(MISS_PATCH_MM2, 40 * step * step):
         failures.append(
-            f"a {patch:.0f} mm^2 patch of side wall has no counterpart in the other scan "
-            "(a local feature differs: different part)"
+            f"a {patch:.0f} mm^2 patch of side wall has no counterpart within "
+            f"{limits.max_distance_mm:.1f} mm in the other scan (a local feature differs)"
         )
     # Yaw: accept only a yaw the wall profile pins, or a part shown to be round (any yaw fits).
     determined = pose.yaw_uncertainty <= limits.yaw_probe_deg and _yaw_unique(
         reference, other, pose.matrix, limits, pose.colour_resolved
     )
     if not determined and not (_is_round(reference, limits) and _is_round(other, limits)):
-        failures.append("yaw undetermined on a non-symmetric part - need more side detail")
+        rivals = _yaw_rivals(reference, other, pose.matrix, limits, pose.colour_resolved)
+        turns = ", ".join(f"{t:.0f}" for t in rivals[:4] if np.isfinite(t))
+        why = (
+            f"the side wall fits turns of {turns} deg about as well"
+            if turns
+            else f"the wall fits within +-{pose.yaw_uncertainty:.1f} deg of yaw "
+            f"(limit {limits.yaw_probe_deg:g})"
+        )
+        failures.append(
+            f"yaw undetermined: {why} and the label print did not decide - rescan with the "
+            "printed label or an asymmetric feature fully in view in both scans"
+        )
     return failures, determined
 
 
@@ -1486,12 +1384,8 @@ def _in_footprint(points: np.ndarray, cell: float) -> Callable[[np.ndarray], np.
     cell). Cameras above the mat see the whole column outside a part's footprint as empty."""
 
     occupied = np.unique(np.floor(points[:, :2] / cell).astype(np.int64), axis=0)
-    grown = np.unique(
-        (
-            occupied[:, None, :] + np.array([[dx, dy] for dx in (-1, 0, 1) for dy in (-1, 0, 1)])
-        ).reshape(-1, 2),
-        axis=0,
-    )
+    shifts = np.array([[dx, dy] for dx in (-1, 0, 1) for dy in (-1, 0, 1)])
+    grown = np.unique((occupied[:, None, :] + shifts).reshape(-1, 2), axis=0)
     keys = np.sort(grown[:, 0] * 2_000_003 + grown[:, 1])
 
     def inside(query: np.ndarray) -> np.ndarray:
@@ -1546,15 +1440,6 @@ def _checked(
     limits: AlignmentThresholds,
 ) -> ScanAlignment:
     limitations: list[str] = []
-    # Acceptance coverage tolerates each scan's measured surface noise (pose search did not).
-    pose = replace(pose, coverage=_score(other, pose.matrix, reference, query, limits, True)[0])
-    sigma = (float(np.median(_noise(reference))), float(np.median(_noise(other))))
-    if NOISE_COVERAGE_K * sum(sigma) > limits.max_distance_mm:
-        limitations.append(
-            f"walls compared within {NOISE_COVERAGE_K * sum(sigma):.1f} mm, not "
-            f"{limits.max_distance_mm:.1f}: surface noise {sigma[0]:.2f} / {sigma[1]:.2f} mm "
-            "(smaller one-scan features are not detected)"
-        )
     failures, yaw_ok = _gate(reference, other, pose, query, limits, limitations)
     conflict = _conflict(reference, other, pose, limits)
     if failures:
@@ -1655,8 +1540,8 @@ def align_scans(
                 )
         alignments.append(_checked(reference, parts[index], poses[0], margin, query, limits))
     # Merge: first point per voxel wins (deterministic), keeping colour, scan and input row.
-    # A point outside another scan's footprint lies where that scan saw only the mat (mat glare
-    # blobs, fans): left out. Surfaces one scan alone saw inside the footprint stay.
+    # Left out: points outside another scan's footprint, where that scan saw only the mat (glare
+    # blobs, fans). Surfaces one scan alone saw inside the footprint stay.
     moved = [_apply(a.relative, part.points) for a, part in zip(alignments, parts, strict=True)]
     keep = [np.ones(len(points), dtype=bool) for points in moved]
     for j, (a, part) in enumerate(zip(alignments, parts, strict=True)):
